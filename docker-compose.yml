@@ -1,0 +1,65 @@
+# PeopleNexa production stack.
+#
+#   - db   : PostgreSQL 17 (data in the `pgdata` volume)
+#   - app  : the standalone Next.js build; binds to 127.0.0.1 only, so the
+#            ONLY way in is the host-level nginx reverse proxy (deploy/nginx.conf)
+#
+# Usage:
+#   cp .env.production.example .env.production   # app secrets
+#   cp .env.example .env                          # POSTGRES_* (compose interpolation)
+#   docker compose up -d --build
+#
+# NOTE: docker-compose interpolates ${POSTGRES_*} from .env; the app's own
+# secrets (JWT_SECRET, etc.) come from .env.production via env_file.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-peoplenexa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-peoplenexa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-peoplenexa} -d ${POSTGRES_DB:-peoplenexa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      # Overrides env_file — built from .env so credentials live in one place.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-peoplenexa}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-peoplenexa}
+      NODE_ENV: production
+    ports:
+      # Host nginx proxies here; never expose this publicly.
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,278 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  /* Accent shades used directly in components — remapped per theme so the
+     same markup (e.g. text-indigo-300) reads correctly on light AND dark. */
+  --color-indigo-200: var(--indigo-200);
+  --color-indigo-300: var(--indigo-300);
+  --color-emerald-300: var(--emerald-300);
+  --color-emerald-400: var(--emerald-400);
+  --color-rose-300: var(--rose-300);
+  --color-rose-400: var(--rose-400);
+  --color-amber-300: var(--amber-300);
+  --color-amber-400: var(--amber-400);
+  --color-sky-300: var(--sky-300);
+  --color-sky-400: var(--sky-400);
+  --color-violet-200: var(--violet-200);
+  --color-violet-300: var(--violet-300);
+}
+
+/* ── Light theme (default) ─────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  --background: #f6f7fb;
+  --foreground: #141926;
+  --card: #ffffff;
+  --card-2: #fbfcfe;
+  --muted: #eef0f6;
+  --muted-foreground: #5b6373;
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --tint: rgba(15, 23, 42, 0.035);
+  --tint-strong: rgba(15, 23, 42, 0.06);
+  --input: rgba(15, 23, 42, 0.12);
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --ring: rgba(99, 102, 241, 0.4);
+  --sidebar: #fbfcfe;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #f43f5e;
+
+  --indigo-200: #4338ca;
+  --indigo-300: #4f46e5;
+  --emerald-300: #059669;
+  --emerald-400: #10b981;
+  --rose-300: #e11d48;
+  --rose-400: #f43f5e;
+  --amber-300: #d97706;
+  --amber-400: #f59e0b;
+  --sky-300: #0284c7;
+  --sky-400: #0ea5e9;
+  --violet-200: #6d28d9;
+  --violet-300: #7c3aed;
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+
+  --background: #090a0f;
+  --foreground: #f2f3f7;
+  --card: #10121b;
+  --card-2: #161927;
+  --muted: #1c2030;
+  --muted-foreground: #8a90a3;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --tint: rgba(255, 255, 255, 0.035);
+  --tint-strong: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.08);
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --ring: rgba(99, 102, 241, 0.5);
+  --sidebar: #0b0d14;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+
+  --indigo-200: #c7d2fe;
+  --indigo-300: #a5b4fc;
+  --emerald-300: #6ee7b7;
+  --emerald-400: #34d399;
+  --rose-300: #fda4af;
+  --rose-400: #fb7185;
+  --amber-300: #fcd34d;
+  --amber-400: #fbbf24;
+  --sky-300: #7dd3fc;
+  --sky-400: #38bdf8;
+  --violet-200: #ddd6fe;
+  --violet-300: #c4b5fd;
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+:root {
+  --scrollbar-thumb: rgba(15, 23, 42, 0.18);
+}
+.dark {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Theme-aware edge & tint utilities ─────────────────────────────────── */
+
+.border-edge {
+  border-color: var(--border);
+}
+.border-edge-strong {
+  border-color: var(--border-strong);
+}
+.bg-tint {
+  background-color: var(--tint);
+}
+.bg-tint-strong {
+  background-color: var(--tint-strong);
+}
+
+/* ── Custom utilities ───────────────────────────────────────────────────── */
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--gradient-soft-from) 0%, var(--gradient-soft-mid) 45%, var(--gradient-soft-to) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root {
+  --gradient-soft-from: #4f46e5;
+  --gradient-soft-mid: #6366f1;
+  --gradient-soft-to: #7c3aed;
+}
+.dark {
+  --gradient-soft-from: #a5b4fc;
+  --gradient-soft-mid: #818cf8;
+  --gradient-soft-to: #c084fc;
+}
+
+.bg-gradient-brand {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+:root {
+  --grid-line: rgba(15, 23, 42, 0.05);
+}
+.dark {
+  --grid-line: rgba(255, 255, 255, 0.025);
+}
+
+.glow-primary {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35), 0 8px 40px -8px rgba(99, 102, 241, 0.45);
+}
+
+.card-surface {
+  background: linear-gradient(180deg, var(--card-sheen), transparent), var(--card);
+  border: 1px solid var(--border);
+}
+:root {
+  --card-sheen: rgba(255, 255, 255, 0.6);
+}
+.dark {
+  --card-sheen: rgba(255, 255, 255, 0.03);
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.35s ease both;
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease both;
+}
+.animate-scale-in {
+  animation: scale-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}

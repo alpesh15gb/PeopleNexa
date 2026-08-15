@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+
+# next.js build output
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# prisma generated client (regenerate with `npx prisma generate`)
+generated/
+
+# env & secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# local runtime artifacts
+.freebuff/
+*.log
+npm-debug.log*
+
+# editor / tooling
+.claude/
+.windsurf/
+.vscode/
+.idea/
+
+# os
+.DS_Store
+Thumbs.db
+
+# deployment archive (use git instead)
+peoplenexa-deploy.tar.gz

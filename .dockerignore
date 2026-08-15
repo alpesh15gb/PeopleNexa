@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.gitignore
+.freebuff
+.claude
+*.log
+.env
+.env.*
+!.env.production.example
+Dockerfile
+docker-compose.yml
+DEPLOY.md
+deploy
+tsconfig.tsbuildinfo

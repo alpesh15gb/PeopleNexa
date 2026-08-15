@@ -1,0 +1,432 @@
+// PeopleNexa — multi-tenant HR platform schema (Postgres)
+// Each row is scoped by tenantId; tenant resolution happens via subdomain
+// (slug.peoplenexa.in) resolved in middleware, and via the session.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Tenant (one client / company) ─────────────────────────────────────────
+
+model Tenant {
+  id                String    @id @default(cuid())
+  name              String
+  code              String    @unique // corporate code, e.g. "CP26080012"
+  slug              String    @unique // subdomain: crk.peoplenexa.in
+  domain            String? // optional custom domain
+  email             String?
+  phone             String?
+  address           String?
+  status            String    @default("active") // active | suspended | trial
+  subscriptionExpiry DateTime?
+  config            Json?     @default("{}") // per-tenant settings (eBioserver profile, etc.)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  branches    Branch[]
+  departments Department[]
+  shifts      Shift[]
+  employees   Employee[]
+  leaveTypes  LeaveType[]
+  holidays    Holiday[]
+  attendance  Attendance[]
+  assets      Asset[]
+  devices     Device[]
+}
+
+// ─── Biometric devices (ESSL ADMS / iClock + eBioserver) ──────────────────
+
+model Device {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  serialNumber String   @unique // device serial, e.g. ESSL SN
+  ipAddress    String?
+  type         String   @default("biometric") // biometric | face | card
+  protocol     String   @default("attlog") // attlog (iClock) | json (AI devices)
+  status       String   @default("active") // active | inactive | offline
+  lastSeenAt   DateTime?
+  config       Json?    @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  logs     DeviceLog[]
+  commands DeviceCommand[]
+  punches  Punch[]
+
+  @@index([tenantId])
+}
+
+model DeviceCommand {
+  id        String   @id @default(cuid())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  command   String
+  status    String   @default("pending") // pending | sent | executed | failed
+  response  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([deviceId, status])
+}
+
+model DeviceLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  rawData   String?
+  userId    String? // employee code as enrolled on the device
+  punchTime DateTime?
+  processed Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, processed])
+  @@index([tenantId, punchTime])
+}
+
+// ─── Branches with GPS geofencing ──────────────────────────────────────────
+
+model Branch {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  code           String
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  geofenceRadius Int      @default(200) // meters
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  employees  Employee[]
+  attendance Attendance[]
+
+  @@unique([tenantId, code])
+}
+
+model Department {
+  id          String  @id @default(cuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees Employee[]
+
+  @@unique([tenantId, name])
+}
+
+model Shift {
+  id           String  @id @default(cuid())
+  tenantId     String
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  code         String?
+  startTime    String // "09:00"
+  endTime      String // "18:00"
+  graceMinutes Int     @default(15) // punch-in grace before late
+  isNightShift Boolean @default(false)
+  isDefault    Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  employees  Employee[]
+  attendance Attendance[]
+
+  @@unique([tenantId, name])
+}
+
+// ─── Employees ─────────────────────────────────────────────────────────────
+
+model Employee {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeNumber String // e.g. EMP-001
+  firstName      String
+  lastName       String
+  email          String
+  phone          String?
+  password       String // bcrypt hash
+  role           String    @default("employee") // admin | employee
+  status         String    @default("active") // active | inactive
+  position       String?
+  salary         Float?
+  joiningDate    DateTime?
+  profilePicture String?
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Bank details for bulk salary file generation.
+  bankName       String?
+  accountNumber  String?
+  ifscCode       String?
+
+  branchId       String?
+  branch         Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  shiftId        String?
+  shift          Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  attendance      Attendance[]
+  punches         Punch[]
+  leaveRequests   LeaveRequest[]
+  notifications   Notification[]
+  payslips        Payslip[]
+  loans           EmployeeLoan[]
+  assetAssignments AssetAssignment[]
+
+  @@unique([tenantId, employeeNumber])
+  @@unique([tenantId, email])
+}
+
+// ─── Punches (immutable source of truth) ───────────────────────────────────
+// Every raw punch — mobile, direct device (iClock) or eBioserver — lands here.
+// Attendance rows are DERIVED from these by the reconciliation engine
+// (lib/reconcile.ts); in/out times are never edited directly.
+
+model Punch {
+  id         String   @id @default(cuid())
+  tenantId   String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deviceId   String?
+  device     Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  source     String   @default("mobile") // mobile | device | ebioserver
+  punchTime  DateTime
+  inOutHint  String   @default("unknown") // in | out | unknown (device-reported; weak hint only)
+  lat        Float?
+  lng        Float?
+  selfie     String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, employeeId, punchTime])
+}
+
+// ─── Attendance ────────────────────────────────────────────────────────────
+
+model Attendance {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branchId       String?
+  branch         Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  shiftId        String?
+  shift          Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  date            DateTime
+  punchInTime     DateTime?
+  punchOutTime    DateTime?
+  punchInLat      Float?
+  punchInLng      Float?
+  punchOutLat     Float?
+  punchOutLng     Float?
+  punchInSelfie   String?
+  punchOutSelfie  String?
+  status          String // present | late | permission | absent | half_day
+  lateMinutes     Int      @default(0)
+  overtimeMinutes Int      @default(0)
+  note            String?
+
+  // Reconciliation layer (Phase 4): the punches snapshot this day was derived
+  // from, whether the window has closed (finalized), and any flag raised.
+  punches      Json?
+  finalized    Boolean  @default(false)
+  reviewStatus String? // needs_review | missed_punch | null
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([tenantId, date])
+  @@index([tenantId, status])
+}
+
+// ─── Leaves ────────────────────────────────────────────────────────────────
+
+model LeaveType {
+  id               String  @id @default(cuid())
+  tenantId         String
+  tenant           Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name             String
+  code             String
+  maxDays          Int
+  isCarryForward   Boolean @default(false)
+  requiresApproval Boolean @default(true)
+  color            String  @default("#3b82f6")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  requests LeaveRequest[]
+
+  @@unique([tenantId, code])
+}
+
+model LeaveRequest {
+  id          String    @id @default(cuid())
+  tenantId    String
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  fromDate    DateTime
+  toDate      DateTime
+  days        Float
+  reason      String?
+  status      String    @default("pending") // pending | approved | rejected
+  reviewNote  String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  appliedAt   DateTime  @default(now())
+}
+
+// ─── Holidays ──────────────────────────────────────────────────────────────
+
+model Holiday {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  date        DateTime
+  isRecurring Boolean  @default(false)
+}
+
+// ─── Payroll / Payslips ────────────────────────────────────────────────────
+
+model Payslip {
+  id         String   @id @default(cuid())
+  tenantId   String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  month      String // "2026-08"
+  baseSalary Float
+  allowances Float    @default(0)
+
+  // Earnings breakdown
+  overtimePay  Float @default(0)
+  grossEarnings Float @default(0)
+
+  // Deduction breakdown (all monthly)
+  pfEmployee     Float @default(0)
+  pfEmployer     Float @default(0)
+  esicEmployee   Float @default(0)
+  esicEmployer   Float @default(0)
+  professionalTax Float @default(0)
+  tds            Float @default(0)
+  lateFines      Float @default(0)
+  loanDeduction  Float @default(0)
+  deductions     Float // total deducted (incl. statutory + fines + loans)
+
+  // Attendance inputs that drove the calculation
+  presentDays    Int    @default(0)
+  lateDays       Int    @default(0)
+  halfDays       Int    @default(0)
+  absentDays     Int    @default(0)
+  overtimeHours  Float  @default(0)
+
+  netSalary Float
+  status    String   @default("draft") // draft | paid
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, month])
+  @@index([tenantId, month])
+}
+
+// ─── Loans & advances ──────────────────────────────────────────────────────
+// Employee advances/loans are deducted automatically from monthly payslips.
+// `emiAmount` of 0 means "deduct the whole outstanding balance at once"
+// (typical for small advances). `lastDeductedMonth` makes deduction
+// idempotent across payroll runs.
+
+model EmployeeLoan {
+  id               String   @id @default(cuid())
+  tenantId         String
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type             String   @default("advance") // advance | loan
+  amount           Float
+  outstanding      Float
+  emiCount         Int      @default(1)
+  emiAmount        Float    @default(0)
+  startMonth       String // "2026-08" — first month a deduction applies
+  lastDeductedMonth String?
+  status           String   @default("active") // active | closed
+  note             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, employeeId])
+}
+
+// ─── Asset tracking ────────────────────────────────────────────────────────
+
+model Asset {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  category     String   @default("other") // laptop | phone | id_card | vehicle | device | furniture | other
+  tag          String? // asset tag, e.g. AST-001
+  serialNumber String?
+  value        Float?
+  purchaseDate DateTime?
+  status       String   @default("available") // available | assigned | maintenance | retired | lost
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignments AssetAssignment[]
+
+  @@unique([tenantId, tag])
+  @@index([tenantId, status])
+}
+
+model AssetAssignment {
+  id         String    @id @default(cuid())
+  assetId    String
+  asset      Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedAt DateTime  @default(now())
+  returnedAt DateTime?
+  note       String?
+  assignedBy String? // admin employee id who issued the asset
+  createdAt  DateTime  @default(now())
+
+  @@index([assetId, returnedAt])
+  @@index([employeeId, returnedAt])
+}
+
+// ─── Notifications ─────────────────────────────────────────────────────────
+
+model Notification {
+  id         String   @id @default(cuid())
+  tenantId   String
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type       String // info | success | warning | danger
+  title      String
+  message    String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId, isRead])
+}
