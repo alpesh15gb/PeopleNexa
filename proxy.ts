@@ -1,10 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifyToken } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { moduleForPath } from "@/lib/modules";
+import { getTenantAccess } from "@/lib/modules-server";
 
 // Base domain for tenant subdomains, e.g. crk.peoplenexa.in. Overridable via
 // APP_BASE_DOMAIN so staging/alternate domains work without code changes.
 const BASE_DOMAIN = process.env.APP_BASE_DOMAIN ?? "peoplenexa.in";
+
+// Endpoints reachable without any session (health checks, cron, auth itself).
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/i18n", "/api/cron"];
 
 /**
  * Resolve the tenant slug from the request host:
@@ -45,16 +50,48 @@ function clearSessionCookie(res: NextResponse) {
   return res;
 }
 
+function json(message: string, status: number) {
+  return NextResponse.json({ error: message }, { status });
+}
+
 async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const slug = resolveSlug(request);
   const isApiRoute = pathname.startsWith("/api");
-
-  // API routes: just attach the tenant context; each handler does its own auth.
-  if (isApiRoute) return passWithTenant(request, slug);
+  const isPublicApi = PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p));
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const payload = token ? verifyToken(token) : null;
+
+  // ── Super admin area ─────────────────────────────────────────────────────
+  if (pathname.startsWith("/superadmin")) {
+    const isLogin = pathname === "/superadmin/login";
+    const isSuper = payload?.role === "superadmin";
+    if (isSuper && isLogin) {
+      return NextResponse.redirect(new URL("/superadmin", request.url));
+    }
+    if (!isSuper && !isLogin) {
+      return NextResponse.redirect(new URL("/superadmin/login", request.url));
+    }
+    return passWithTenant(request, slug);
+  }
+
+  // ── API routes: attach tenant context; each handler does its own auth. ───
+  if (isApiRoute) {
+    // License gate for authenticated tenant APIs (login/register/health/cron
+    // run before a session exists and are exempt).
+    if (payload && payload.role !== "superadmin" && payload.tenantId && !isPublicApi) {
+      const access = await getTenantAccess(payload.tenantId);
+      if (access.status !== "active" || isExpired(access)) {
+        return json("Your workspace license is inactive. Contact support.", 403);
+      }
+      const mod = moduleForPath(pathname);
+      if (mod && !access.modules.has(mod)) {
+        return json(`The ${mod} module is not enabled for your workspace.`, 403);
+      }
+    }
+    return passWithTenant(request, slug);
+  }
 
   const isAdminRoute = pathname.startsWith("/admin");
   const isEmployeeRoute = pathname.startsWith("/employee");
@@ -64,19 +101,30 @@ async function proxy(request: NextRequest) {
   // deleted/inactive employee) would otherwise bounce between /login and the
   // portal forever — proxy considers them authed, the layout can't find them.
   let role: string | null = null;
+  let tenantId: string | null = null;
   if (payload) {
     try {
-      const employee = await prisma.employee.findUnique({
-        where: { id: payload.sub },
-        select: { role: true, status: true },
-      });
-      if (employee && employee.status === "active") {
-        role = employee.role;
+      if (payload.role === "superadmin") {
+        const sa = await prisma.superAdmin.findUnique({ where: { id: payload.sub } });
+        if (sa) {
+          role = "superadmin";
+          return NextResponse.redirect(new URL("/superadmin", request.url));
+        }
+      } else {
+        const employee = await prisma.employee.findUnique({
+          where: { id: payload.sub },
+          select: { role: true, status: true, tenantId: true },
+        });
+        if (employee && employee.status === "active") {
+          role = employee.role;
+          tenantId = employee.tenantId;
+        }
       }
     } catch {
       // DB unavailable — fall back to the token claim so the app isn't
       // taken down by a transient database error.
-      role = payload.role;
+      role = payload.role === "superadmin" ? "superadmin" : payload.role;
+      tenantId = payload.tenantId ?? null;
     }
   }
 
@@ -104,7 +152,29 @@ async function proxy(request: NextRequest) {
   if (isAdminRoute && role !== "admin") {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
+
+  // ── License + module gating for portal pages ─────────────────────────────
+  if (role !== "superadmin" && tenantId) {
+    const access = await getTenantAccess(tenantId);
+    if (access.status !== "active" || isExpired(access)) {
+      const res = NextResponse.redirect(new URL("/login", request.url));
+      if (token) clearSessionCookie(res);
+      return res;
+    }
+    const mod = moduleForPath(pathname);
+    if (mod && !access.modules.has(mod)) {
+      const target = role === "admin" ? "/admin" : "/employee";
+      return NextResponse.redirect(
+        new URL(`${target}/module-unavailable?m=${encodeURIComponent(mod)}`, request.url)
+      );
+    }
+  }
+
   return passWithTenant(request, slug);
+}
+
+function isExpired(access: { subscriptionExpiry: Date | null }) {
+  return Boolean(access.subscriptionExpiry && access.subscriptionExpiry.getTime() < Date.now());
 }
 
 export const config = {
@@ -114,6 +184,7 @@ export const config = {
     "/notifications",
     "/login",
     "/register",
+    "/superadmin/:path*",
     "/api/:path*",
   ],
 };

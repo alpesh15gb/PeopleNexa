@@ -153,7 +153,13 @@ export async function reconcileEmployeeDay(
   istDay: Date,
   opts: { finalize?: boolean; mode?: PunchMode } = {}
 ): Promise<ReconcileResult> {
-  const shift = employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null;
+  // The day's shift: a roster assignment for this date wins over the
+  // employee's default shift (weekly rosters drive daily reconciliation).
+  const roster = await prisma.rosterAssignment.findUnique({
+    where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: istStartOfDay(istDay) } },
+    include: { shift: true },
+  });
+  const shift = roster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
   const { start: dayStart, end: dayEnd } = shiftWindow(istDay, shift);
 
   const punches = await prisma.punch.findMany({
@@ -176,6 +182,37 @@ export async function reconcileEmployeeDay(
   const outEntry = [...entries].reverse().find((e) => e.type === "out");
   const inAt = inEntry ? new Date(inEntry.time) : null;
   const outAt = outEntry ? new Date(outEntry.time) : null;
+
+  // Auto punch-out: when a day finalizes with an in punch but no out punch and
+  // the tenant has enabled it, close the day at the configured time instead of
+  // flagging a missed punch-out. Re-runs reconciliation so the auto punch is
+  // treated like any other ledger entry (guard: never insert twice).
+  const punchesCfg = (tenant.config ?? {}) as { punches?: { mode?: PunchMode; autoOut?: { enabled?: boolean; minutesAfterStart?: number } } };
+  const autoOut = punchesCfg.punches?.autoOut;
+  if (opts.finalize && !outAt && punches.length > 0 && autoOut?.enabled) {
+    const hasAuto = punches.some((p) => p.source === "auto");
+    if (!hasAuto) {
+      const startMinutes = shift?.startTime ? minutesOfDay(shift.startTime) : 9 * 60;
+      let outMinutes = startMinutes + (Number(autoOut.minutesAfterStart) || 540);
+      if (outMinutes >= 1440) outMinutes -= 1440; // wraps past midnight
+      const outAtDate = new Date(istStartOfDay(istDay).getTime() + outMinutes * 60000);
+      if (shift?.isNightShift && outMinutes < startMinutes) {
+        outAtDate.setTime(outAtDate.getTime() + 24 * 3600 * 1000); // next-day morning out
+      }
+      if (outAtDate.getTime() <= Date.now()) {
+        await prisma.punch.create({
+          data: {
+            tenantId: tenant.id,
+            employeeId: employee.id,
+            source: "auto",
+            punchTime: outAtDate,
+            inOutHint: "out",
+          },
+        });
+        return reconcileEmployeeDay(tenant, employee, istDay, opts);
+      }
+    }
+  }
 
   const span = spanHours(inAt, outAt);
   const finalize = opts.finalize ?? false;

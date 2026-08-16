@@ -34,10 +34,57 @@ export async function POST(req: NextRequest) {
         name: String(body.name).trim(),
         date,
         isRecurring: Boolean(body.isRecurring),
+        isHalfDay: Boolean(body.isHalfDay),
       },
     });
     return NextResponse.json({ holiday }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create holiday." }, { status: 500 });
+  }
+}
+
+/** Bulk import holidays: [{ name, date, isRecurring?, isHalfDay? }] */
+export async function PUT(req: NextRequest) {
+  const session = await getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  try {
+    const body = await req.json();
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    if (rows.length === 0 || rows.length > 200) {
+      return NextResponse.json({ error: "Provide 1–200 holiday rows." }, { status: 400 });
+    }
+
+    let created = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      const name = String(row.name ?? "").trim();
+      const date = row.date ? fromDateKey(String(row.date)) : null;
+      if (!name || !date || isNaN(date.getTime())) {
+        skipped++;
+        continue;
+      }
+      const exists = await prisma.holiday.findFirst({
+        where: { tenantId: session.tenantId, date },
+      });
+      if (exists) {
+        skipped++;
+        continue;
+      }
+      await prisma.holiday.create({
+        data: {
+          tenantId: session.tenantId,
+          name,
+          date,
+          isRecurring: Boolean(row.isRecurring),
+          isHalfDay: Boolean(row.isHalfDay),
+        },
+      });
+      created++;
+    }
+    return NextResponse.json({ created, skipped });
+  } catch {
+    return NextResponse.json({ error: "Failed to import holidays." }, { status: 500 });
   }
 }

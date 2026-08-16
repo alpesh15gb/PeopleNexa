@@ -38,7 +38,12 @@ export default async function AdminPayrollPage({
     }),
   ]);
 
-  const slipByEmp = new Map(payslips.map((p) => [p.employee.id, p]));
+  const slipByEmp = new Map(
+    payslips.map((p) => [
+      p.employee.id,
+      { ...p, adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null },
+    ])
+  );
   const rows = employees.map((emp) => ({
     employee: emp,
     payslip: slipByEmp.get(emp.id) ?? null,

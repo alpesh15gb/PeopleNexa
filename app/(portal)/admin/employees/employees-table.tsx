@@ -32,6 +32,10 @@ interface Emp {
   bankName: string | null;
   accountNumber: string | null;
   ifscCode: string | null;
+  pan: string | null;
+  uan: string | null;
+  payMode: string;
+  workBasisRate: number | null;
   branch: { id: string; name: string } | null;
   department: { id: string; name: string } | null;
   shift: { id: string; name: string; startTime: string; endTime: string } | null;
@@ -73,6 +77,10 @@ export function EmployeesTable({
       bankName: form.get("bankName") || null,
       accountNumber: form.get("accountNumber") || null,
       ifscCode: form.get("ifscCode") || null,
+      pan: form.get("pan") || null,
+      uan: form.get("uan") || null,
+      payMode: form.get("payMode") || "monthly",
+      workBasisRate: form.get("workBasisRate") || null,
     };
     if (!editing) payload.password = form.get("password");
     if (editing) payload.status = form.get("status");
@@ -224,6 +232,24 @@ export function EmployeesTable({
             </Field>
             <Field label="IFSC code">
               <Input name="ifscCode" defaultValue={editing?.ifscCode ?? ""} placeholder="e.g. HDFC0001234" />
+            </Field>
+            <Field label="PAN">
+              <Input name="pan" defaultValue={editing?.pan ?? ""} placeholder="e.g. ABCDE1234F" />
+            </Field>
+            <Field label="UAN (EPF)">
+              <Input name="uan" defaultValue={editing?.uan ?? ""} placeholder="12-digit UAN" />
+            </Field>
+            <Field label="Pay mode" hint="How this employee is paid">
+              <Select name="payMode" defaultValue={editing?.payMode ?? "monthly"}>
+                <option value="monthly">Monthly</option>
+                <option value="daily">Daily wage</option>
+                <option value="weekly">Weekly wage</option>
+                <option value="hourly">Hourly</option>
+                <option value="work_basis">Work-basis / piece</option>
+              </Select>
+            </Field>
+            <Field label="Work-basis rate (₹/day, optional)" hint="Piece rate for work-basis mode">
+              <Input name="workBasisRate" type="number" min={0} defaultValue={editing?.workBasisRate ?? ""} placeholder="e.g. 400" />
             </Field>
             <Field label="Department">
               <Select name="departmentId" defaultValue={editing?.department?.id ?? ""}>

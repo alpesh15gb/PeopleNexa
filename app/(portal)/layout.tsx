@@ -11,19 +11,26 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: session.sub },
-    include: { tenant: true },
-  });
+  const [employee, tenantModules] = await Promise.all([
+    prisma.employee.findUnique({
+      where: { id: session.sub },
+      include: { tenant: true },
+    }),
+    prisma.tenantModule.findMany({
+      where: { tenantId: session.tenantId, enabled: true },
+      select: { module: true },
+    }),
+  ]);
   if (!employee) redirect("/login");
 
   const name = `${employee.firstName} ${employee.lastName}`.trim() || "User";
   const lang = await getLang();
+  const enabledModules = tenantModules.map((m) => m.module);
 
   return (
     <ToastProvider>
       <PWARegister />
-      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang}>
+      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules}>
         {children}
       </Shell>
     </ToastProvider>

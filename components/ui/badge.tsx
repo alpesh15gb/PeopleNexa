@@ -1,5 +1,6 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
+import { t, type Lang } from "@/lib/i18n";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "violet";
 
@@ -53,28 +54,8 @@ const statusTones: Record<string, Tone> = {
   lost: "danger",
 };
 
-const statusLabels: Record<string, { en: string; hi: string }> = {
-  present: { en: "Present", hi: "उपस्थित" },
-  late: { en: "Late", hi: "विलंब" },
-  permission: { en: "Permission", hi: "अनुमति" },
-  absent: { en: "Absent", hi: "अनुपस्थित" },
-  half_day: { en: "Half day", hi: "आधा दिन" },
-  pending: { en: "Pending", hi: "लंबित" },
-  approved: { en: "Approved", hi: "स्वीकृत" },
-  rejected: { en: "Rejected", hi: "अस्वीकृत" },
-  active: { en: "Active", hi: "सक्रिय" },
-  inactive: { en: "Inactive", hi: "निष्क्रिय" },
-  paid: { en: "Paid", hi: "भुगतान" },
-  draft: { en: "Draft", hi: "ड्राफ्ट" },
-  available: { en: "Available", hi: "उपलब्ध" },
-  assigned: { en: "Assigned", hi: "आवंटित" },
-  maintenance: { en: "Maintenance", hi: "रखरखाव" },
-  retired: { en: "Retired", hi: "सेवानिवृत्त" },
-  lost: { en: "Lost", hi: "खोया" },
-};
-
-export function StatusPill({ status, lang = "en" }: { status: string; lang?: "en" | "hi" }) {
-  const label = statusLabels[status]?.[lang] ?? status.replace(/_/g, " ");
+export function StatusPill({ status, lang = "en" }: { status: string; lang?: Lang }) {
+  const label = t(lang, `status.${status}`) === `status.${status}` ? status.replace(/_/g, " ") : t(lang, `status.${status}`);
   return (
     <Badge tone={statusTones[status] ?? "neutral"} className="capitalize">
       {label}

@@ -14,7 +14,7 @@ export default async function EmployeePayslipsPage() {
     where: { id: session.sub },
     select: { firstName: true, lastName: true },
   });
-  const payslips = await prisma.payslip.findMany({
+  const raw = await prisma.payslip.findMany({
     where: { employeeId: session.sub },
     orderBy: { month: "desc" },
     select: {
@@ -27,6 +27,7 @@ export default async function EmployeePayslipsPage() {
       pfEmployee: true,
       esicEmployee: true,
       professionalTax: true,
+      lwf: true,
       tds: true,
       lateFines: true,
       loanDeduction: true,
@@ -37,8 +38,14 @@ export default async function EmployeePayslipsPage() {
       lateDays: true,
       absentDays: true,
       overtimeHours: true,
+      workedHours: true,
+      adjustments: true,
     },
   });
+  const payslips = raw.map((p) => ({
+    ...p,
+    adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null,
+  }));
 
   return (
     <div className="animate-fade-up space-y-6">

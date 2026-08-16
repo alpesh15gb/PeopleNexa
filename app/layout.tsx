@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Inter, Space_Grotesk } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 
 const inter = Inter({
@@ -45,9 +44,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}>
       <head>
-        <Script id="theme-init" strategy="beforeInteractive">
-          {themeInit}
-        </Script>
+        {/* Inline theme init: a plain <script> in <head> runs before first paint.
+            (next/script with beforeInteractive isn't executed on the client in
+            the App Router — that would throw a console error on every page.) */}
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
       <body className="min-h-full">{children}</body>
     </html>

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { LANG_COOKIE, type Lang } from "@/lib/i18n";
+import { LANG_COOKIE, isLang } from "@/lib/i18n";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const lang: Lang = body.lang;
-  if (lang !== "hi" && lang !== "en") {
+  const lang = String(body.lang ?? "");
+  if (!isLang(lang)) {
     return NextResponse.json({ error: "invalid language" }, { status: 400 });
   }
   const res = NextResponse.json({ ok: true });

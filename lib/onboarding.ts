@@ -1,5 +1,9 @@
 import { prisma } from "./prisma";
 import { hashPassword } from "./auth";
+import { MODULES, planFor } from "./modules";
+
+/** Days a new trial license runs. */
+const TRIAL_DAYS = 30;
 
 /** Generate a corporate-style code, e.g. CP26080012. */
 export function generateCompanyCode(): string {
@@ -49,10 +53,13 @@ export async function onboardTenant(input: {
   if (existing) throw new Error("An account with this email already exists.");
 
   const slug = normalizeSlug(input.slug);
-  if (!slug) throw new Error("Please choose a valid subdomain.");
+  if (!slug || slug.length < 2 || ["www", "api", "admin", "app"].includes(slug)) {
+    throw new Error("Please choose a valid subdomain.");
+  }
   const slugTaken = await prisma.tenant.findUnique({ where: { slug } });
   if (slugTaken) throw new Error("That subdomain is already taken. Try another one.");
 
+  const trial = planFor("trial");
   const tenant = await prisma.tenant.create({
     data: {
       name: input.companyName.trim(),
@@ -60,7 +67,24 @@ export async function onboardTenant(input: {
       slug,
       email,
       status: "active",
+      plan: "trial",
+      seats: trial.seats,
+      subscriptionExpiry: new Date(Date.now() + TRIAL_DAYS * 24 * 3600 * 1000),
       config: {},
+    },
+  });
+
+  // Enable every module for the trial, and record the initial license.
+  await prisma.tenantModule.createMany({
+    data: MODULES.map((m) => ({ tenantId: tenant.id, module: m.key, enabled: trial.modules.includes(m.key) })),
+  });
+  await prisma.license.create({
+    data: {
+      tenantId: tenant.id,
+      plan: "trial",
+      seats: trial.seats,
+      expiresAt: tenant.subscriptionExpiry,
+      note: "Self-serve signup (30-day trial)",
     },
   });
 

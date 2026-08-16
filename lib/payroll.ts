@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import type { Prisma } from "../generated/prisma/client";
 import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
@@ -14,6 +15,7 @@ export interface PayrollConfig {
   pf: { enabled: boolean; wageCeiling: number };
   esic: { enabled: boolean; grossCeiling: number };
   pt: { enabled: boolean; state: string };
+  lwf: { enabled: boolean }; // Labour Welfare Fund — uses the same statutory state as PT
   tds: { enabled: boolean; regime: "new" | "old" };
 }
 
@@ -26,6 +28,7 @@ export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
   pf: { enabled: true, wageCeiling: 15000 },
   esic: { enabled: true, grossCeiling: 21000 },
   pt: { enabled: true, state: "Gujarat" },
+  lwf: { enabled: false },
   tds: { enabled: true, regime: "new" },
 };
 
@@ -41,8 +44,18 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     pf: { ...DEFAULT_PAYROLL_CONFIG.pf, ...p.pf },
     esic: { ...DEFAULT_PAYROLL_CONFIG.esic, ...p.esic },
     pt: { ...DEFAULT_PAYROLL_CONFIG.pt, ...p.pt },
+    lwf: { ...DEFAULT_PAYROLL_CONFIG.lwf, ...p.lwf },
     tds: { ...DEFAULT_PAYROLL_CONFIG.tds, ...p.tds },
   };
+}
+
+// ─── Financial year helpers ────────────────────────────────────────────────
+
+/** Financial year for a month key, e.g. "2026-08" → "2026-27". */
+export function fyFromMonth(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  if (m >= 4) return `${y}-${String(y + 1).slice(2)}`;
+  return `${y - 1}-${String(y).slice(2)}`;
 }
 
 // ─── Month window (IST) ─────────────────────────────────────────────────────
@@ -66,6 +79,7 @@ export interface AttendanceSummary {
   onLeaveDays: number;
   overtimeHours: number;
   workingDays: number;
+  workedHours: number; // actual hours clocked (used for hourly pay)
 }
 
 export async function attendanceSummary(
@@ -99,6 +113,7 @@ export async function attendanceSummary(
     onLeaveDays: 0,
     overtimeHours: 0,
     workingDays: 0,
+    workedHours: 0,
   };
 
   const shiftSpanMin =
@@ -129,9 +144,12 @@ export async function attendanceSummary(
     else if (rec.status === "permission") summary.presentDays++;
     else summary.absentDays++;
 
-    if (includeOvertime && rec.punchInTime && rec.punchOutTime && shift) {
+    if (rec.punchInTime && rec.punchOutTime) {
       const spanMin = (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000;
-      if (spanMin > shiftSpanMin) summary.overtimeHours += (spanMin - shiftSpanMin) / 60;
+      summary.workedHours += spanMin / 60;
+      if (includeOvertime && shift && spanMin > shiftSpanMin) {
+        summary.overtimeHours += (spanMin - shiftSpanMin) / 60;
+      }
     }
   }
 
@@ -180,26 +198,44 @@ export function professionalTax(state: string, monthlyGross: number): number {
   return 200;
 }
 
-/** Monthly TDS from annualized gross under new/old regime (FY 2025-26). */
-export function calcTDS(monthlyGross: number, regime: "new" | "old"): number {
+/** Monthly LWF (Labour Welfare Fund) — employee share by state slab. */
+export function labourWelfareFund(state: string, monthlyGross: number): number {
+  const s = state.trim().toLowerCase();
+  if (s === "gujarat") {
+    if (monthlyGross <= 2999) return 10;
+    if (monthlyGross <= 5999) return 20;
+    if (monthlyGross <= 8999) return 30;
+    if (monthlyGross <= 11999) return 40;
+    return 50;
+  }
+  if (s === "maharashtra") return monthlyGross <= 10000 ? 12 : 0;
+  if (s === "karnataka") return 40;
+  if (s === "tamil nadu") return 10; // quarterly ₹30, pro-rated monthly
+  return 0; // states without LWF (e.g. Telangana) or unknown
+}
+
+/** Monthly TDS from annualized gross under new/old regime, minus verified investments. */
+export function calcTDS(monthlyGross: number, regime: "new" | "old", investments = 0): number {
   const annual = monthlyGross * 12;
+  const invested = Math.min(Math.max(investments, 0), 500000); // sanity cap
   let taxable: number;
   let rebateLimit: number;
   let slabs: Array<[number, number]>; // [threshold, rate]
 
   if (regime === "new") {
-    taxable = Math.max(annual - 75000, 0); // standard deduction
+    taxable = Math.max(annual - 75000 - invested, 0); // standard deduction
     rebateLimit = 1200000; // 87A rebate under new regime
     slabs = [
-      [400000, 0.05],
-      [800000, 0.1],
-      [1200000, 0.15],
-      [1600000, 0.2],
-      [2000000, 0.25],
+      [400000, 0],
+      [800000, 0.05],
+      [1200000, 0.1],
+      [1600000, 0.15],
+      [2000000, 0.2],
+      [2400000, 0.25],
       [Infinity, 0.3],
     ];
   } else {
-    taxable = Math.max(annual - 50000, 0);
+    taxable = Math.max(annual - 50000 - invested, 0);
     rebateLimit = 500000;
     slabs = [
       [250000, 0.05],
@@ -218,6 +254,30 @@ export function calcTDS(monthlyGross: number, regime: "new" | "old"): number {
   }
   if (taxable <= rebateLimit) tax = 0; // 87A rebate
   return round2(tax / 12);
+}
+
+export interface PayrollAdjustmentInput {
+  id: string;
+  type: string;
+  label: string;
+  amount: number;
+}
+
+/** Split adjustments into earnings (+) and deductions (−). */
+export function splitAdjustments(adjustments: PayrollAdjustmentInput[]): {
+  earnings: number;
+  deductions: number;
+  list: { label: string; amount: number }[];
+} {
+  let earnings = 0;
+  let deductions = 0;
+  const list = adjustments.map((a) => {
+    const amount = round2(a.amount);
+    if (amount >= 0) earnings += amount;
+    else deductions += Math.abs(amount);
+    return { label: a.label || a.type, amount };
+  });
+  return { earnings: round2(earnings), deductions: round2(deductions), list };
 }
 
 // ─── Loan / advance deduction ───────────────────────────────────────────────
@@ -254,20 +314,52 @@ export function loanDeductionForMonth(
 
 // ─── Payroll result ─────────────────────────────────────────────────────────
 
+export interface SalaryStructure {
+  basic?: number;
+  hra?: number;
+  conveyance?: number;
+  medical?: number;
+  other?: number;
+}
+
+/** Split a monthly salary into its components from the structure (if set). */
+export function splitSalary(
+  total: number,
+  structure: unknown,
+  config: PayrollConfig
+): { basic: number; allowances: number } {
+  const s = (structure ?? {}) as SalaryStructure;
+  if (s.basic != null && Number.isFinite(s.basic) && s.basic > 0) {
+    // Structure set → Basic is explicit; everything else rolls up as allowances.
+    const basic = round2(Math.min(s.basic, total));
+    return { basic, allowances: round2(Math.max(total - basic, 0)) };
+  }
+  // Fallback: percentage split.
+  return {
+    basic: round2(total * (config.basicPercent / 100)),
+    allowances: round2(total * (config.allowancesPercent / 100)),
+  };
+}
+
 export interface PayrollResult {
   baseSalary: number;
+  basic: number;
   allowances: number;
   overtimePay: number;
+  adjustmentEarnings: number;
   grossEarnings: number;
+  gratuity: number;
   pfEmployee: number;
   pfEmployer: number;
   esicEmployee: number;
   esicEmployer: number;
   professionalTax: number;
+  lwf: number;
   tds: number;
   lateFines: number;
   loanDeduction: number;
   absentDeduction: number;
+  adjustmentDeductions: number;
   deductions: number;
   netSalary: number;
   presentDays: number;
@@ -275,48 +367,93 @@ export interface PayrollResult {
   halfDays: number;
   absentDays: number;
   overtimeHours: number;
+  workedHours: number;
+  adjustments: { label: string; amount: number }[];
+}
+
+/** Compute the base amount for the employee's pay mode. */
+export function baseForPayMode(
+  mode: string | null | undefined,
+  rate: number,
+  summary: AttendanceSummary
+): number {
+  const attended = summary.presentDays + summary.halfDays * 0.5;
+  switch (mode) {
+    case "daily":
+      return round2(rate * attended);
+    case "weekly":
+      return round2(rate * (attended / 6)); // 6-day week pro-rata
+    case "hourly":
+      return round2(rate * summary.workedHours);
+    case "work_basis":
+      return round2(rate * attended);
+    default:
+      return rate; // monthly — rate is the monthly salary
+  }
 }
 
 export function computePayroll(
   config: PayrollConfig,
-  employee: { salary: number },
+  employee: { salary: number; salaryStructure?: unknown; payMode?: string | null; workBasisRate?: number | null },
   summary: AttendanceSummary,
-  loanDeduction: number
+  loanDeduction: number,
+  adjustments: PayrollAdjustmentInput[] = [],
+  investments = 0
 ): PayrollResult {
-  const base = employee.salary;
-  const basic = round2(base * (config.basicPercent / 100));
-  const allowances = round2(base * (config.allowancesPercent / 100));
+  const mode = employee.payMode ?? "monthly";
+  const rate = mode === "work_basis" && employee.workBasisRate != null && employee.workBasisRate > 0 ? employee.workBasisRate! : employee.salary;
+  const base = baseForPayMode(mode, rate, summary);
+
+  let { basic, allowances } = splitSalary(base, employee.salaryStructure, config);
+  // Non-monthly workers without an explicit structure: the whole base is basic
+  // (no artificial HRA/special allowance split on a daily/hourly wage).
+  if (!employee.salaryStructure && mode !== "monthly") {
+    basic = round2(base);
+    allowances = 0;
+  }
 
   // Overtime pay at (basic / 26 / 8) × multiplier.
   const otRate = (basic / 26 / 8) * config.otMultiplier;
   const overtimePay = round2(summary.overtimeHours * otRate);
 
-  const gross = round2(base + allowances + overtimePay);
+  const adj = splitAdjustments(adjustments);
+  const gross = round2(base + allowances + overtimePay + adj.earnings);
+
+  // Gratuity: employer contribution, 4.81% of basic (Payment of Gratuity Act).
+  const gratuity = round2(basic * 0.0481);
 
   const { employee: pfEmployee, employer: pfEmployer } = calcPF(basic, config);
   const { employee: esicEmployee, employer: esicEmployer } = calcESIC(gross, config);
   const pt = config.pt.enabled ? professionalTax(config.pt.state, gross) : 0;
-  const tds = config.tds.enabled ? calcTDS(gross, config.tds.regime) : 0;
+  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, gross) : 0;
+  const tds = config.tds.enabled ? calcTDS(gross, config.tds.regime, investments) : 0;
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   const absentDeduction = config.deductAbsentDays ? round2((base / 26) * summary.absentDays) : 0;
 
-  const deductions = round2(pfEmployee + esicEmployee + pt + tds + lateFines + loanDeduction + absentDeduction);
+  const deductions = round2(
+    pfEmployee + esicEmployee + pt + lwf + tds + lateFines + loanDeduction + absentDeduction + adj.deductions
+  );
   const netSalary = round2(gross - deductions);
 
   return {
-    baseSalary: base,
+    baseSalary: round2(base),
+    basic,
     allowances,
     overtimePay,
+    adjustmentEarnings: adj.earnings,
     grossEarnings: gross,
+    gratuity,
     pfEmployee,
     pfEmployer,
     esicEmployee,
     esicEmployer,
     professionalTax: pt,
+    lwf,
     tds,
     lateFines,
     loanDeduction,
     absentDeduction,
+    adjustmentDeductions: adj.deductions,
     deductions,
     netSalary,
     presentDays: summary.presentDays,
@@ -324,6 +461,8 @@ export function computePayroll(
     halfDays: summary.halfDays,
     absentDays: summary.absentDays,
     overtimeHours: round2(summary.overtimeHours),
+    workedHours: round2(summary.workedHours),
+    adjustments: adj.list,
   };
 }
 
@@ -332,19 +471,40 @@ export function computePayroll(
 export async function generatePayslipForEmployee(
   tenantId: string,
   tenantConfig: unknown,
-  employee: { id: string; salary: number; shiftId: string | null; joiningDate?: Date | null },
+  employee: {
+    id: string;
+    salary: number;
+    salaryStructure?: unknown;
+    payMode?: string | null;
+    workBasisRate?: number | null;
+    shiftId: string | null;
+    joiningDate?: Date | null;
+  },
   month: string
 ): Promise<{ created: boolean; netSalary?: number; loanApplied?: number }> {
   const config = getPayrollConfig(tenantConfig);
   const summary = await attendanceSummary(tenantId, employee, month);
 
-  const loans = await prisma.employeeLoan.findMany({
-    where: { tenantId, employeeId: employee.id },
-    select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true },
-  });
+  const [loans, adjustments, taxDecl] = await Promise.all([
+    prisma.employeeLoan.findMany({
+      where: { tenantId, employeeId: employee.id },
+      select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true },
+    }),
+    prisma.payrollAdjustment.findMany({
+      where: { tenantId, employeeId: employee.id, month },
+      select: { id: true, type: true, label: true, amount: true },
+    }),
+    prisma.taxDeclaration.findUnique({
+      where: { employeeId_fy: { employeeId: employee.id, fy: fyFromMonth(month) } },
+      select: { sections: true, status: true },
+    }),
+  ]);
   const { total: loanDeduction, updates } = loanDeductionForMonth(loans, month);
 
-  const result = computePayroll(config, employee, summary, loanDeduction);
+  const decl = (taxDecl?.sections ?? {}) as Record<string, number>;
+  const investments = taxDecl?.status === "verified" ? Number(decl.total ?? 0) || 0 : 0;
+
+  const result = computePayroll(config, employee, summary, loanDeduction, adjustments, investments);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.payslip.findUnique({
@@ -361,20 +521,24 @@ export async function generatePayslipForEmployee(
         allowances: result.allowances,
         overtimePay: result.overtimePay,
         grossEarnings: result.grossEarnings,
+        gratuity: result.gratuity,
         pfEmployee: result.pfEmployee,
         pfEmployer: result.pfEmployer,
         esicEmployee: result.esicEmployee,
         esicEmployer: result.esicEmployer,
         professionalTax: result.professionalTax,
+        lwf: result.lwf,
         tds: result.tds,
         lateFines: result.lateFines,
         loanDeduction: result.loanDeduction,
         deductions: result.deductions,
+        adjustments: result.adjustments.length > 0 ? (result.adjustments as unknown as Prisma.InputJsonValue) : undefined,
         presentDays: result.presentDays,
         lateDays: result.lateDays,
         halfDays: result.halfDays,
         absentDays: result.absentDays,
         overtimeHours: result.overtimeHours,
+        workedHours: result.workedHours,
         netSalary: result.netSalary,
       },
     });

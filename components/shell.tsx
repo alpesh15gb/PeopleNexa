@@ -18,11 +18,28 @@ import {
   Package,
   Fingerprint,
   Settings,
+  Wrench,
+  Receipt,
   LogOut,
   Menu,
   X,
   ChevronDown,
   Sun,
+  Route,
+  Sparkles,
+  FileText,
+  ClipboardList,
+  LifeBuoy,
+  Megaphone,
+  ScrollText,
+  CalendarRange,
+  Network,
+  UserCheck,
+  DoorOpen,
+  Webhook,
+  MonitorCheck,
+  BadgePercent,
+  MessageSquareText,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { relativeDay, toDateKey } from "@/lib/dates";
@@ -38,31 +55,58 @@ interface NavItem {
   icon: ReactNode;
   match?: string[];
   exact?: boolean;
+  module?: string; // module key this item requires (see lib/modules.ts)
 }
 
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
-  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" /> },
-  { href: "/admin/employees", label: "Employees", icon: <Users className="h-4 w-4" /> },
+  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance" },
+  { href: "/admin/regularization", label: "Regularization", icon: <Wrench className="h-4 w-4" />, module: "attendance" },
+  { href: "/admin/employees", label: "Employees", icon: <Users className="h-4 w-4" />, module: "employees" },
   { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" /> },
-  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" /> },
-  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" /> },
-  { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" /> },
-  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" /> },
-  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" /> },
-  { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" /> },
-  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" /> },
-  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" /> },
-  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" /> },
+  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts" },
+  { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters" },
+  { href: "/admin/org-chart", label: "Org Chart", icon: <Network className="h-4 w-4" />, module: "orgchart" },
+  { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding" },
+  { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit" },
+  { href: "/admin/webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" />, module: "platform" },
+  { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform" },
+  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches" },
+  { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves" },
+  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays" },
+  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets" },
+  { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices" },
+  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll" },
+  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll" },
+  { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll" },
+  { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses" },
+  { href: "/admin/journeys", label: "Journey Tracker", icon: <Route className="h-4 w-4" />, module: "journey" },
+  { href: "/admin/ai", label: "Ask AI", icon: <Sparkles className="h-4 w-4" />, module: "ai" },
+  { href: "/admin/documents", label: "Documents", icon: <FileText className="h-4 w-4" />, module: "documents" },
+  { href: "/admin/performance", label: "Performance", icon: <ClipboardList className="h-4 w-4" />, module: "performance" },
+  { href: "/admin/helpdesk", label: "Helpdesk", icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk" },
+  { href: "/admin/policies", label: "Policies", icon: <ScrollText className="h-4 w-4" />, module: "policies" },
+  { href: "/employee/feed", label: "Org Feed", icon: <Megaphone className="h-4 w-4" />, module: "feed" },
+  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports" },
   { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
+  { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform" },
 ];
 
 function employeeNav(lang: Lang): NavItem[] {
   return [
     { href: "/employee", label: t(lang, "nav.myDashboard"), icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
-    { href: "/employee/attendance", label: t(lang, "nav.attendance"), icon: <CalendarClock className="h-4 w-4" /> },
-    { href: "/employee/leaves", label: t(lang, "nav.leaves"), icon: <CalendarCheck2 className="h-4 w-4" /> },
-    { href: "/employee/payslips", label: t(lang, "nav.payslips"), icon: <Banknote className="h-4 w-4" /> },
+    { href: "/employee/attendance", label: t(lang, "nav.attendance"), icon: <CalendarClock className="h-4 w-4" />, module: "attendance" },
+    { href: "/employee/onboarding", label: t(lang, "nav.onboarding"), icon: <UserCheck className="h-4 w-4" />, module: "onboarding" },
+    { href: "/employee/exits", label: t(lang, "nav.exits"), icon: <DoorOpen className="h-4 w-4" />, module: "exit" },
+    { href: "/employee/leaves", label: t(lang, "nav.leaves"), icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves" },
+    { href: "/employee/payslips", label: t(lang, "nav.payslips"), icon: <Banknote className="h-4 w-4" />, module: "payroll" },
+    { href: "/employee/tax", label: t(lang, "nav.taxDeclarations"), icon: <BadgePercent className="h-4 w-4" />, module: "payroll" },
+    { href: "/employee/expenses", label: t(lang, "nav.expenses"), icon: <Receipt className="h-4 w-4" />, module: "expenses" },
+    { href: "/employee/documents", label: t(lang, "nav.documents"), icon: <FileText className="h-4 w-4" />, module: "documents" },
+    { href: "/employee/performance", label: t(lang, "nav.performance"), icon: <ClipboardList className="h-4 w-4" />, module: "performance" },
+    { href: "/employee/helpdesk", label: t(lang, "nav.helpdesk"), icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk" },
+    { href: "/employee/feed", label: t(lang, "nav.feed"), icon: <Megaphone className="h-4 w-4" />, module: "feed" },
+    { href: "/employee/policies", label: t(lang, "nav.policies"), icon: <ScrollText className="h-4 w-4" />, module: "policies" },
   ];
 }
 
@@ -119,12 +163,14 @@ export function Shell({
   name,
   companyName,
   lang = "en",
+  enabledModules,
   children,
 }: {
   role: string;
   name: string;
   companyName: string;
   lang?: Lang;
+  enabledModules?: string[];
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -133,7 +179,9 @@ export function Shell({
   const router = useRouter();
   const toast = useToast();
 
-  const nav = role === "admin" ? adminNav : employeeNav(lang);
+  const moduleSet = new Set(enabledModules ?? []);
+  const allNav = role === "admin" ? adminNav : employeeNav(lang);
+  const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
 
   const current = nav.find((n) =>

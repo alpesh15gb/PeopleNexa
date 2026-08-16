@@ -1,13 +1,22 @@
-export type Lang = "en" | "hi";
+export type Lang = "en" | "hi" | "gu" | "mr" | "ta";
 
 export const LANG_COOKIE = "lang";
+
+export const LANG_CODES: Lang[] = ["en", "hi", "gu", "mr", "ta"];
+
+export function isLang(v: string): v is Lang {
+  return (LANG_CODES as string[]).includes(v);
+}
 
 export const languages: { code: Lang; label: string; native: string }[] = [
   { code: "en", label: "English", native: "English" },
   { code: "hi", label: "Hindi", native: "हिन्दी" },
+  { code: "gu", label: "Gujarati", native: "ગુજરાતી" },
+  { code: "mr", label: "Marathi", native: "मराठी" },
+  { code: "ta", label: "Tamil", native: "தமிழ்" },
 ];
 
-const dict: Record<string, Record<Lang, string>> = {
+const dict: Record<string, Partial<Record<Lang, string>>> = {
   // ---- shared ----
   "common.present": { en: "Present", hi: "उपस्थित" },
   "common.late": { en: "Late", hi: "विलंब" },
@@ -88,6 +97,63 @@ const dict: Record<string, Record<Lang, string>> = {
   "leaves.day": { en: "{n} day", hi: "{n} दिन" },
   "leaves.days": { en: "{n} days", hi: "{n} दिन" },
 
+  // ---- punch corrections (employee) ----
+  "corrections.title": { en: "Punch corrections", hi: "पंच सुधार" },
+  "corrections.request": { en: "Request correction", hi: "सुधार का अनुरोध करें" },
+  "corrections.pending": { en: "pending", hi: "लंबित" },
+  "corrections.none": { en: "No corrections yet", hi: "अभी तक कोई सुधार नहीं" },
+  "corrections.noneDesc": { en: "Missed or wrong a punch? Request a correction here — your admin will review it.", hi: "पंच मिस या गलत हुआ? यहाँ सुधार का अनुरोध करें — आपका एडमिन इसकी समीक्षा करेगा।" },
+  "corrections.requested": { en: "Requested", hi: "अनुरोधित" },
+  "corrections.date": { en: "Date", hi: "दिनांक" },
+  "corrections.inTime": { en: "Corrected in time", hi: "सही इन समय" },
+  "corrections.outTime": { en: "Corrected out time", hi: "सही आउट समय" },
+  "corrections.reason": { en: "Reason", hi: "कारण" },
+  "corrections.reasonPlaceholder": { en: "Why was the punch missed or wrong?", hi: "पंच मिस या गलत क्यों हुआ?" },
+  "corrections.submit": { en: "Submit request", hi: "अनुरोध जमा करें" },
+  "corrections.submitted": { en: "Correction request submitted.", hi: "सुधार अनुरोध जमा किया गया।" },
+
+  // ---- expenses (employee) ----
+  "nav.expenses": { en: "Expenses", hi: "खर्च" },
+  "nav.documents": { en: "Documents", hi: "दस्तावेज़" },
+  "nav.performance": { en: "Performance", hi: "प्रदर्शन" },
+  "nav.helpdesk": { en: "Helpdesk", hi: "सहायता डेस्क" },
+  "nav.feed": { en: "Org Feed", hi: "ऑर्ग फ़ीड" },
+  "nav.policies": { en: "Policies", hi: "नीतियां" },
+  "nav.onboarding": { en: "Onboarding", hi: "ऑनबोर्डिंग" },
+  "nav.exits": { en: "Exit", hi: "एग्ज़िट" },
+  "nav.taxDeclarations": { en: "Tax Declaration", hi: "टैक्स घोषणा", gu: "ટેક્સ જાહેરાત", mr: "कर घोषणा", ta: "வரி அறிவிப்பு" },
+  "documents.title": { en: "My Documents", hi: "मेरे दस्तावेज़" },
+  "documents.description": { en: "Your documents on file — keep an eye on expiry dates.", hi: "आपके दर्ज दस्तावेज़ — समाप्ति तिथियों पर नज़र रखें।" },
+  "documents.empty": { en: "No documents yet", hi: "अभी कोई दस्तावेज़ नहीं" },
+  "documents.emptyDesc": { en: "Your employer can add documents like passport, visa or Aadhaar here.", hi: "आपका नियोक्ता यहां पासपोर्ट, वीज़ा या आधार जैसे दस्तावेज़ जोड़ सकता है।" },
+  "policies.title": { en: "Company Policies", hi: "कंपनी नीतियां" },
+  "policies.description": { en: "The official policies that apply to everyone.", hi: "आधिकारिक नीतियां जो सभी पर लागू होती हैं।" },
+  "policies.empty": { en: "No policies published yet", hi: "अभी कोई नीति प्रकाशित नहीं" },
+  "policies.emptyDesc": { en: "Company policies will appear here once published.", hi: "प्रकाशित होने पर कंपनी नीतियां यहां दिखेंगी।" },
+  "expenses.title": { en: "My expenses", hi: "मेरे खर्च" },
+  "expenses.desc": { en: "Submit expense and reimbursement claims", hi: "खर्च और प्रतिपूर्ति दावे जमा करें" },
+  "expenses.settledTotal": { en: "settled total", hi: "निपटाया गया कुल" },
+  "expenses.claims": { en: "claims", hi: "दावे" },
+  "expenses.newClaim": { en: "New claim", hi: "नया दावा" },
+  "expenses.none": { en: "No claims yet", hi: "अभी तक कोई दावा नहीं" },
+  "expenses.noneDesc": { en: "Submit your first expense claim and it will appear here.", hi: "अपना पहला खर्च दावा जमा करें, यह यहाँ दिखेगा।" },
+  "expenses.titleField": { en: "Title", hi: "शीर्षक" },
+  "expenses.titlePlaceholder": { en: "e.g. Client visit — cab fare", hi: "जैसे ग्राहक मुलाकात — कैब किराया" },
+  "expenses.category": { en: "Category", hi: "श्रेणी" },
+  "expenses.amount": { en: "Amount (₹)", hi: "राशि (₹)" },
+  "expenses.description": { en: "Description", hi: "विवरण" },
+  "expenses.descPlaceholder": { en: "Optional details", hi: "वैकल्पिक विवरण" },
+  "expenses.attachReceipt": { en: "Attach receipt photo", hi: "रसीद फ़ोटो जोड़ें" },
+  "expenses.receiptTooLarge": { en: "Receipt image is too large (max 2MB).", hi: "रसीद इमेज बहुत बड़ी है (अधिकतम 2MB)।" },
+  "expenses.submit": { en: "Submit claim", hi: "दावा जमा करें" },
+  "expenses.submitted": { en: "Expense claim submitted.", hi: "खर्च दावा जमा किया गया।" },
+  "expenses.cat.travel": { en: "Travel", hi: "यात्रा" },
+  "expenses.cat.food": { en: "Food", hi: "भोजन" },
+  "expenses.cat.fuel": { en: "Fuel", hi: "ईंधन" },
+  "expenses.cat.mobile": { en: "Mobile", hi: "मोबाइल" },
+  "expenses.cat.medical": { en: "Medical", hi: "चिकित्सा" },
+  "expenses.cat.other": { en: "Other", hi: "अन्य" },
+
   // ---- payslips ----
   "payslips.title": { en: "My payslips", hi: "मेरी पेस्लिप" },
   "payslips.desc": { en: "Download and review your monthly salary", hi: "अपना मासिक वेतन देखें" },
@@ -162,8 +228,98 @@ const dict: Record<string, Record<Lang, string>> = {
   "notifications.markRead": { en: "Mark as read", hi: "पढ़ा हुआ चिह्नित करें" },
 };
 
+// Starter translations for the new regional languages. Keys without a value
+// fall back to हिन्दी (Hindi) and then English, so the app is always usable.
+const langExtra: Record<string, Partial<Record<Lang, string>>> = {
+  // ---- shared ----
+  "common.present": { gu: "હાજર", mr: "उपस्थित", ta: "வந்துள்ளார்" },
+  "common.late": { gu: "મોડું", mr: "उशीरा", ta: "தாமதம்" },
+  "common.onLeave": { gu: "રજા પર", mr: "रजेवर", ta: "விடுப்பில்" },
+  "common.absent": { gu: "ગેરહાજર", mr: "अनुपस्थित", ta: "வராதவர்" },
+  "common.cancel": { gu: "રદ કરો", mr: "रद्द करा", ta: "ரத்து" },
+  "status.present": { gu: "હાજર", mr: "उपस्थित", ta: "வந்துள்ளார்" },
+  "status.late": { gu: "મોડું", mr: "उशीरा", ta: "தாமதம்" },
+  "status.permission": { gu: "પરવાનગી", mr: "परवानगी", ta: "அனுமதி" },
+  "status.absent": { gu: "ગેરહાજર", mr: "अनुपस्थित", ta: "வராதவர்" },
+  "status.half_day": { gu: "અડધો દિવસ", mr: "अर्धा दिवस", ta: "அரை நாள்" },
+  "status.pending": { gu: "બાકી", mr: "प्रलंबित", ta: "நிலுவையில்" },
+  "status.approved": { gu: "મંજૂર", mr: "मंजूर", ta: "அங்கீகரிக்கப்பட்டது" },
+  "status.rejected": { gu: "નામંજૂર", mr: "नाकारले", ta: "நிராகரிக்கப்பட்டது" },
+  "status.active": { gu: "સક્રિય", mr: "सक्रिय", ta: "செயலில்" },
+  "status.inactive": { gu: "નિષ્ક્રિય", mr: "निष्क्रिय", ta: "செயலற்றது" },
+  "status.paid": { gu: "ચૂકવાયેલ", mr: "भरले", ta: "செலுத்தப்பட்டது" },
+  "status.draft": { gu: "ડ્રાફ્ટ", mr: "मसुदा", ta: "வரைவு" },
+  "status.available": { gu: "ઉપલબ્ધ", mr: "उपलब्ध", ta: "கிடைக்கிறது" },
+  "status.assigned": { gu: "સોંપાયેલ", mr: "नियुक्त", ta: "ஒதுக்கப்பட்டது" },
+  "status.maintenance": { gu: "જાળવણી", mr: "देखभाल", ta: "பராமரிப்பு" },
+  "status.retired": { gu: "નિવૃત્ત", mr: "निवृत्त", ta: "ஓய்வு" },
+  "status.lost": { gu: "ખોવાયેલ", mr: "हरवले", ta: "இழந்தது" },
+
+  // ---- navigation (employee) ----
+  "nav.myDashboard": { gu: "મારું ડેશબોર્ડ", mr: "माझे डॅशबोर्ड", ta: "எனது டாஷ்போர்டு" },
+  "nav.attendance": { gu: "હાજરી", mr: "उपस्थिती", ta: "வருகை" },
+  "nav.leaves": { gu: "રજાઓ", mr: "रजा", ta: "விடுப்பு" },
+  "nav.payslips": { gu: "પગારપત્રક", mr: "पगारपत्रक", ta: "சம்பள சீட்டு" },
+  "nav.myProfile": { gu: "મારી પ્રોફાઇલ", mr: "माझी प्रोफाइल", ta: "எனது சுயவிவரம்" },
+  "nav.signOut": { gu: "સાઇન આઉટ", mr: "साइन आउट", ta: "வெளியேறு" },
+  "nav.expenses": { gu: "ખર્ચ", mr: "खर्च", ta: "செலவுகள்" },
+  "nav.documents": { gu: "દસ્તાવેજો", mr: "कागदपत्रे", ta: "ஆவணங்கள்" },
+  "nav.performance": { gu: "કામગીરી", mr: "कामगिरी", ta: "செயல்திறன்" },
+  "nav.helpdesk": { gu: "હેલ્પડેસ્ક", mr: "हेल्पडेस्क", ta: "உதவி மையம்" },
+  "nav.feed": { gu: "ઓર્ગ ફીડ", mr: "ऑर्ग फीड", ta: "நிறுவன ஊட்டம்" },
+  "nav.policies": { gu: "નીતિઓ", mr: "धोरणे", ta: "கொள்கைகள்" },
+
+  // ---- dashboard ----
+  "dashboard.welcome": { gu: "પાછા સ્વાગત છે, {name} 👋", mr: "पुन्हा स्वागत आहे, {name} 👋", ta: "மீண்டும் வரவேற்கிறோம், {name} 👋" },
+  "dashboard.recentLeaves": { gu: "મારી તાજેતરની રજા અરજીઓ", mr: "माझ्या अलीकडील रजा अर्ज", ta: "எனது சமீபத்திய விடுப்பு கோரிக்கைகள்" },
+  "dashboard.days": { gu: "{n} દિવસ", mr: "{n} दिवस", ta: "{n} நாட்கள்" },
+
+  // ---- attendance ----
+  "attendance.title": { gu: "મારી હાજરી", mr: "माझी उपस्थिती", ta: "எனது வருகை" },
+  "attendance.date": { gu: "તારીખ", mr: "दिनांक", ta: "தேதி" },
+  "attendance.in": { gu: "ઇન", mr: "इन", ta: "இன்" },
+  "attendance.out": { gu: "આઉટ", mr: "आउट", ta: "அவுட்" },
+  "attendance.status": { gu: "સ્થિતિ", mr: "स्थिती", ta: "நிலை" },
+  "attendance.sunday": { gu: "રવિવાર", mr: "रविवार", ta: "ஞாயிறு" },
+  "attendance.onLeave": { gu: "રજા પર", mr: "रजेवर", ta: "விடுப்பில்" },
+
+  // ---- leaves ----
+  "leaves.title": { gu: "મારી રજાઓ", mr: "माझी रजा", ta: "எனது விடுப்புகள்" },
+  "leaves.apply": { gu: "રજા માટે અરજી કરો", mr: "रजेसाठी अर्ज करा", ta: "விடுப்பு விண்ணப்பிக்க" },
+  "leaves.leaveType": { gu: "રજાનો પ્રકાર", mr: "रजेचा प्रकार", ta: "விடுப்பு வகை" },
+  "leaves.from": { gu: "થી", mr: "पासून", ta: "இருந்து" },
+  "leaves.to": { gu: "સુધી", mr: "पर्यंत", ta: "வரை" },
+  "leaves.reason": { gu: "કારણ", mr: "कारण", ta: "காரணம்" },
+  "leaves.submit": { gu: "અરજી મોકલો", mr: "अर्ज पाठवा", ta: "கோரிக்கை சமர்ப்பி" },
+  "leaves.day": { gu: "{n} દિવસ", mr: "{n} दिवस", ta: "{n} நாள்" },
+  "leaves.days": { gu: "{n} દિવસો", mr: "{n} दिवस", ta: "{n} நாட்கள்" },
+
+  // ---- clock ----
+  "clock.dayComplete": { gu: "દિવસ પૂર્ણ", mr: "दिवस पूर्ण", ta: "நாள் முடிந்தது" },
+  "clock.clockedIn": { gu: "ક્લોક ઇન", mr: "क्लॉक इन", ta: "கிளாக் இன்" },
+  "clock.notClockedIn": { gu: "ક્લોક ઇન નથી", mr: "क्लॉक इन नाही", ta: "கிளாக் இன் இல்லை" },
+  "clock.in": { gu: "ઇન", mr: "इन", ta: "இன்" },
+  "clock.out": { gu: "આઉટ", mr: "आउट", ta: "அவுட்" },
+  "clock.clockIn": { gu: "ક્લોક ઇન", mr: "क्लॉक इन", ta: "கிளாக் இன்" },
+  "clock.clockOut": { gu: "ક્લોક આઉટ", mr: "क्लॉक आउट", ta: "கிளாக் அவுட்" },
+  "clock.allSet": { gu: "આજ માટે તમે તૈયાર છો.", mr: "आजसाठी तुम्ही तयार आहात.", ta: "இன்றைக்கு நீங்கள் தயார்." },
+  "clock.addSelfie": { gu: "સેલ્ફી ઉમેરો", mr: "सेल्फी जोडा", ta: "செல்பி சேர்" },
+  "clock.retakeSelfie": { gu: "સેલ્ફી ફરી લો", mr: "सेल्फी पुन्हा घ्या", ta: "செல்பி மீண்டும் எடு" },
+  "clock.captureSelfie": { gu: "સેલ્ફી લો", mr: "सेल्फी घ्या", ta: "செல்பி எடு" },
+  "clock.capture": { gu: "કેપ્ચર", mr: "कॅप्चर", ta: "பிடி" },
+  "clock.clockedInMsg": { gu: "ક્લોક ઇન — તમારો દિવસ શુભ રહે!", mr: "क्लॉक इन — तुमचा दिवस चांगला जावो!", ta: "கிளாக் இன் — நாள் இனிதாக அமையட்டும்!" },
+  "clock.clockedOutMsg": { gu: "ક્લોક આઉટ — આવતીકાલે મળીએ!", mr: "क्लॉक आउट — उद्या भेटू!", ta: "கிளாக் அவுட் — நாளை சந்திப்போம்!" },
+  "clock.geoRequired": { gu: "પંચ કરવા માટે લોકેશન જરૂરી છે", mr: "पंच करण्यासाठी लोकेशन आवश्यक आहे", ta: "பஞ்ச் செய்ய இருப்பிடம் தேவை" },
+
+  // ---- notifications ----
+  "notifications.title": { gu: "સૂચનાઓ", mr: "सूचना", ta: "அறிவிப்புகள்" },
+  "notifications.unread": { gu: "{n} વાંચેલી નથી", mr: "{n} न वाचलेल्या", ta: "{n} படிக்காதவை" },
+};
+
 export function t(lang: Lang, key: string, vars?: Record<string, string | number>): string {
-  let s = dict[key]?.[lang] ?? dict[key]?.en ?? key;
+  const entry = dict[key] ?? {};
+  const extra = langExtra[key] ?? {};
+  let s = entry[lang] ?? extra[lang] ?? entry.hi ?? entry.en ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       s = s.replaceAll(`{${k}}`, String(v));

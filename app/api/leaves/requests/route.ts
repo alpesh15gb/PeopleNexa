@@ -40,6 +40,19 @@ export async function POST(req: NextRequest) {
     });
     if (!leaveType) return NextResponse.json({ error: "Leave type not found." }, { status: 404 });
 
+    // Admins may log leave on behalf of an employee; employees apply for themselves.
+    let employeeId = session.sub;
+    let onBehalf = false;
+    if (body.employeeId && session.role === "admin") {
+      const target = await prisma.employee.findFirst({
+        where: { id: String(body.employeeId), tenantId: session.tenantId },
+        select: { id: true },
+      });
+      if (!target) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+      employeeId = target.id;
+      onBehalf = true;
+    }
+
     const from = fromDateKey(fromDate);
     const to = fromDateKey(toDate);
     if (to < from) return NextResponse.json({ error: "End date must be after start date." }, { status: 400 });
@@ -49,7 +62,7 @@ export async function POST(req: NextRequest) {
     const usedRows = await prisma.leaveRequest.findMany({
       where: {
         tenantId: session.tenantId,
-        employeeId: session.sub,
+        employeeId,
         leaveTypeId,
         status: { in: ["approved", "pending"] },
       },
@@ -65,7 +78,7 @@ export async function POST(req: NextRequest) {
     const request = await prisma.leaveRequest.create({
       data: {
         tenantId: session.tenantId,
-        employeeId: session.sub,
+        employeeId,
         leaveTypeId,
         fromDate: from,
         toDate: to,
@@ -77,7 +90,15 @@ export async function POST(req: NextRequest) {
     });
 
     // Notify admins about the new request (or the employee when auto-approved).
-    if (request.status === "pending") {
+    if (onBehalf) {
+      await notifyEmployee(
+        session.tenantId,
+        employeeId,
+        "info",
+        "Leave logged for you",
+        `${request.leaveType.name} (${toDateKey(request.fromDate)} → ${toDateKey(request.toDate)}) was logged on your behalf by an admin.`
+      );
+    } else if (request.status === "pending") {
       await notifyAdmins(
         session.tenantId,
         "info",
@@ -87,7 +108,7 @@ export async function POST(req: NextRequest) {
     } else {
       await notifyEmployee(
         session.tenantId,
-        session.sub,
+        employeeId,
         "success",
         "Leave approved",
         `Your ${request.leaveType.name} (${toDateKey(request.fromDate)} → ${toDateKey(request.toDate)}) was auto-approved.`

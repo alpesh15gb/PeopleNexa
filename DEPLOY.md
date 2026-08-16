@@ -102,6 +102,23 @@ curl -sI https://crk.peoplenexa.in/login        # 200, HTTPS
 Log in at `https://crk.peoplenexa.in/login` with the seeded demo admin
 (`admin@apex.com` / `admin123`) — **change these immediately**.
 
+## 7b. Super admin console
+
+The platform console lives at `https://peoplenexa.in/superadmin` — manage
+tenants, module flags, seats, plans and license history from there.
+
+The seed creates the super admin from env (always override in production):
+
+```bash
+# in .env.production
+SUPERADMIN_EMAIL=admin@peoplenexa.in
+SUPERADMIN_PASSWORD=<a long random password>
+```
+
+Defaults (dev only, printed by the seed):
+`superadmin@peoplenexa.in` / `superadmin123` — **change these immediately**
+and never run with the defaults in production.
+
 ## 8. eBioserver pull (cron)
 
 The device sync endpoint runs on a schedule from the host:

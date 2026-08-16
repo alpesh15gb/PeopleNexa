@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminLeavesPage() {
   const session = await requireSession();
-  const [requests, types] = await Promise.all([
+  const [requests, types, employees] = await Promise.all([
     prisma.leaveRequest.findMany({
       where: { tenantId: session.tenantId },
       include: {
@@ -17,6 +17,11 @@ export default async function AdminLeavesPage() {
       orderBy: { appliedAt: "desc" },
     }),
     prisma.leaveType.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "asc" } }),
+    prisma.employee.findMany({
+      where: { tenantId: session.tenantId, status: "active" },
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+      orderBy: { employeeNumber: "asc" },
+    }),
   ]);
 
   return (
@@ -27,7 +32,7 @@ export default async function AdminLeavesPage() {
       />
       <Card>
         <CardContent className="p-0">
-          <LeavesAdmin requests={requests} types={types} />
+          <LeavesAdmin requests={requests} types={types} employees={employees} />
         </CardContent>
       </Card>
     </div>

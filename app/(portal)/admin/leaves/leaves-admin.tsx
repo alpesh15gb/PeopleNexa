@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, Plus, Pencil, Trash2 } from "lucide-react";
+import { Check, X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, CalendarDays, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
+import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
 
 interface Request {
   id: string;
@@ -33,13 +34,31 @@ interface Type {
   requiresApproval: boolean;
 }
 
-export function LeavesAdmin({ requests, types }: { requests: Request[]; types: Type[] }) {
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  employeeNumber: string;
+}
+
+export function LeavesAdmin({
+  requests,
+  types,
+  employees,
+}: {
+  requests: Request[];
+  types: Type[];
+  employees: Employee[];
+}) {
   const router = useRouter();
   const toast = useToast();
-  const [tab, setTab] = useState<"requests" | "types">("requests");
+  const [tab, setTab] = useState<"requests" | "types" | "calendar">("requests");
   const [busy, setBusy] = useState<string | null>(null);
   const [typeModal, setTypeModal] = useState<Type | "new" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [onBehalfOpen, setOnBehalfOpen] = useState(false);
+  const [logSaving, setLogSaving] = useState(false);
+  const [month, setMonth] = useState(() => new Date());
 
   async function review(id: string, status: string) {
     setBusy(id);
@@ -112,6 +131,7 @@ export function LeavesAdmin({ requests, types }: { requests: Request[]; types: T
         <div className="flex gap-1">
           {([
             ["requests", `Requests${pending ? ` (${pending})` : ""}`],
+            ["calendar", "Team calendar"],
             ["types", "Leave types"],
           ] as const).map(([key, label]) => (
             <button
@@ -126,6 +146,11 @@ export function LeavesAdmin({ requests, types }: { requests: Request[]; types: T
             </button>
           ))}
         </div>
+        {tab === "requests" && (
+          <Button size="sm" variant="outline" onClick={() => setOnBehalfOpen(true)}>
+            <PenLine className="h-3.5 w-3.5" /> Log for employee
+          </Button>
+        )}
         {tab === "types" && (
           <Button size="sm" onClick={() => setTypeModal("new")}>
             <Plus className="h-3.5 w-3.5" /> New type
@@ -199,6 +224,8 @@ export function LeavesAdmin({ requests, types }: { requests: Request[]; types: T
             )}
           </TBody>
         </Table>
+      ) : tab === "calendar" ? (
+        <TeamCalendar month={month} setMonth={setMonth} requests={requests} />
       ) : (
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {types.map((t) => (
@@ -226,6 +253,77 @@ export function LeavesAdmin({ requests, types }: { requests: Request[]; types: T
           ))}
         </div>
       )}
+
+      <Modal
+        open={onBehalfOpen} onClose={() => setOnBehalfOpen(false)} title="Log leave for an employee" size="sm">
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setLogSaving(true);
+            const form = new FormData(e.currentTarget);
+            try {
+              const res = await fetch("/api/leaves/requests", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  employeeId: form.get("employeeId"),
+                  leaveTypeId: form.get("leaveTypeId"),
+                  fromDate: form.get("fromDate"),
+                  toDate: form.get("toDate"),
+                  reason: form.get("reason"),
+                }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                toast("error", data.error ?? "Failed to log leave");
+                return;
+              }
+              toast("success", "Leave logged — employee notified");
+              setOnBehalfOpen(false);
+              router.refresh();
+            } finally {
+              setLogSaving(false);
+            }
+          }}
+          className="space-y-4"
+        >
+          <Field label="Employee">
+            <Select name="employeeId" required>
+              <option value="">Select employee</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.firstName} {e.lastName} ({e.employeeNumber})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Leave type">
+            <Select name="leaveTypeId" required>
+              <option value="">Select type</option>
+              {types.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.maxDays} days)
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="From">
+              <Input name="fromDate" type="date" required />
+            </Field>
+            <Field label="To">
+              <Input name="toDate" type="date" required />
+            </Field>
+          </div>
+          <Field label="Reason">
+            <Input name="reason" placeholder="e.g. Leave sanctioned by manager" />
+          </Field>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setOnBehalfOpen(false)}>Cancel</Button>
+            <Button type="submit" loading={logSaving}>Log leave</Button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal
         open={typeModal !== null}
@@ -263,5 +361,105 @@ export function LeavesAdmin({ requests, types }: { requests: Request[]; types: T
         </form>
       </Modal>
     </>
+  );
+}
+
+function TeamCalendar({
+  month,
+  setMonth,
+  requests,
+}: {
+  month: Date;
+  setMonth: (d: Date) => void;
+  requests: Request[];
+}) {
+  const year = month.getFullYear();
+  const mon = month.getMonth();
+  const first = new Date(year, mon, 1);
+  const offset = (first.getDay() + 6) % 7; // Monday-first
+  const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const today = toDateKey(new Date());
+
+  const approved = requests.filter((r) => r.status === "approved");
+  const byDay = new Map<string, typeof approved>();
+  for (const r of approved) {
+    for (let d = fromDateKey(toDateKey(r.fromDate)); d <= r.toDate; d = addDays(d, 1)) {
+      const key = toDateKey(d);
+      if (!key.startsWith(`${year}-${String(mon + 1).padStart(2, "0")}`)) continue;
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key)!.push(r);
+    }
+  }
+
+  const cells: (string | null)[] = [
+    ...Array.from({ length: offset }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => `${year}-${String(mon + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`),
+  ];
+
+  return (
+    <div className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button size="icon" variant="outline" onClick={() => setMonth(new Date(year, mon - 1, 1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <p className="min-w-36 text-center font-display text-[15px] font-semibold capitalize">
+            {month.toLocaleString("en", { month: "long", year: "numeric" })}
+          </p>
+          <Button size="icon" variant="outline" onClick={() => setMonth(new Date(year, mon + 1, 1))}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setMonth(new Date())}>
+            Today
+          </Button>
+        </div>
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <CalendarDays className="h-4 w-4" />
+          Approved leaves only — tap a day to see who is out
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5">
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+          <div key={d} className="pb-1 text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {d}
+          </div>
+        ))}
+        {cells.map((key, i) => {
+          if (!key) return <div key={`empty-${i}`} />;
+          const dayLeaves = byDay.get(key) ?? [];
+          const isToday = key === today;
+          const isWeekend = new Date(year, mon, Number(key.slice(8))).getDay() === 0;
+          return (
+            <div
+              key={key}
+              className={`min-h-24 rounded-xl border p-2 transition-colors ${
+                isToday ? "border-indigo-400/50 bg-indigo-500/[0.06]" : "border-edge bg-card-2"
+              }`}
+            >
+              <p className={`text-[12px] font-semibold ${isToday ? "text-indigo-300" : isWeekend ? "text-muted-foreground/40" : "text-foreground"}`}>
+                {Number(key.slice(8))}
+                {isToday && <span className="ml-1 text-[9px] font-bold uppercase text-indigo-300">Today</span>}
+              </p>
+              <div className="mt-1.5 space-y-1">
+                {dayLeaves.slice(0, 3).map((r) => (
+                  <div
+                    key={r.id}
+                    className="truncate rounded-md px-1.5 py-0.5 text-[10.5px] font-medium"
+                    style={{ background: `${r.leaveType.color}1f`, color: r.leaveType.color }}
+                    title={`${r.employee.firstName} ${r.employee.lastName} — ${r.leaveType.name}`}
+                  >
+                    {r.employee.firstName} {r.employee.lastName.slice(0, 1)}
+                  </div>
+                ))}
+                {dayLeaves.length > 3 && (
+                  <p className="px-1 text-[10px] text-muted-foreground">+{dayLeaves.length - 3} more</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

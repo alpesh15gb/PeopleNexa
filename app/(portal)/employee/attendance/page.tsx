@@ -8,6 +8,8 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { CalendarClock } from "lucide-react";
+import { CorrectionsPanel } from "./corrections-panel";
+import { LocationPinger } from "./location-pinger";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +18,7 @@ export default async function EmployeeAttendancePage() {
   const lang = await getLang();
   const today = startOfDay(new Date());
 
-  const [records, leaves, holidays] = await Promise.all([
+  const [records, leaves, holidays, corrections] = await Promise.all([
     prisma.attendance.findMany({
       where: { employeeId: session.sub, date: { lte: today } },
       include: { branch: { select: { name: true } }, shift: { select: { name: true } } },
@@ -28,9 +30,16 @@ export default async function EmployeeAttendancePage() {
       include: { leaveType: true },
     }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId } }),
+    prisma.punchCorrection.findMany({
+      where: { employeeId: session.sub },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
   ]);
 
   const recordByDay = new Map(records.map((r) => [toDateKey(r.date), r]));
+  const todayRecord = recordByDay.get(toDateKey(today));
+  const openSession = todayRecord ? Boolean(todayRecord.punchInTime && !todayRecord.punchOutTime) : false;
   const leaveByDay = new Map<string, { type: string; color: string }>();
   for (const l of leaves) {
     for (let d = l.fromDate; d <= l.toDate; d = addDays(d, 1)) {
@@ -54,6 +63,7 @@ export default async function EmployeeAttendancePage() {
       <PageHeader
         title={t(lang, "attendance.title")}
         description={`${month} — ${present + late} ${t(lang, "common.present").toLowerCase()} · ${late} ${t(lang, "common.late").toLowerCase()} · ${onLeave} ${t(lang, "common.onLeave").toLowerCase()}`}
+        actions={<LocationPinger active={openSession} />}
       />
 
       {/* 30-day heat grid */}
@@ -102,6 +112,22 @@ export default async function EmployeeAttendancePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Punch corrections */}
+      <CorrectionsPanel
+        corrections={corrections.map((c) => ({
+          id: c.id,
+          date: c.date.toISOString(),
+          currentIn: c.currentIn?.toISOString() ?? null,
+          currentOut: c.currentOut?.toISOString() ?? null,
+          requestedIn: c.requestedIn?.toISOString() ?? null,
+          requestedOut: c.requestedOut?.toISOString() ?? null,
+          reason: c.reason,
+          status: c.status,
+          createdAt: c.createdAt.toISOString(),
+        }))}
+        lang={lang}
+      />
 
       {/* History table */}
       <Card>

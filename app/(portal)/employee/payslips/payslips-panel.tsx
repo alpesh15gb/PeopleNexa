@@ -20,6 +20,7 @@ interface Payslip {
   pfEmployee: number;
   esicEmployee: number;
   professionalTax: number;
+  lwf: number;
   tds: number;
   lateFines: number;
   loanDeduction: number;
@@ -30,6 +31,8 @@ interface Payslip {
   lateDays: number;
   absentDays: number;
   overtimeHours: number;
+  workedHours: number;
+  adjustments: { label: string; amount: number }[] | null;
 }
 
 export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Payslip[]; name: string; lang?: Lang }) {
@@ -89,12 +92,14 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
               {viewing.lateDays > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.lateDays} late</span>}
               {viewing.absentDays > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.absentDays} absent</span>}
               {viewing.overtimeHours > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.overtimeHours}h OT</span>}
+              {viewing.workedHours > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.workedHours}h worked</span>}
             </div>
             <div className="divide-y divide-white/[0.05]">
               {[
                 { label: t(lang, "payslips.basic"), value: formatMoney(viewing.baseSalary) },
                 { label: t(lang, "payslips.allowances"), value: formatMoney(viewing.allowances) },
                 ...(viewing.overtimePay > 0 ? [{ label: "Overtime", value: formatMoney(viewing.overtimePay) }] : []),
+                ...(viewing.adjustments?.filter((a) => a.amount > 0).map((a) => ({ label: a.label, value: formatMoney(a.amount) })) ?? []),
                 { label: "Gross earnings", value: formatMoney(viewing.grossEarnings) },
               ].map((r) => (
                 <div key={r.label} className="flex items-center justify-between py-2.5 text-[13.5px]">
@@ -108,9 +113,11 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
                 { label: "EPF (employee)", value: viewing.pfEmployee },
                 { label: "ESIC (employee)", value: viewing.esicEmployee },
                 { label: "Professional tax", value: viewing.professionalTax },
+                ...(viewing.lwf > 0 ? [{ label: "LWF", value: viewing.lwf }] : []),
                 { label: "TDS (income tax)", value: viewing.tds },
                 { label: "Late fines", value: viewing.lateFines },
                 { label: "Loan / advance", value: viewing.loanDeduction },
+                ...(viewing.adjustments?.filter((a) => a.amount < 0).map((a) => ({ label: a.label, value: Math.abs(a.amount) })) ?? []),
               ]
                 .filter((r) => r.value > 0)
                 .map((r) => (

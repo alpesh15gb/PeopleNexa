@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark } from "lucide-react";
+import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
-import { Input } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
@@ -21,6 +21,7 @@ interface Employee {
   accountNumber: string | null;
   ifscCode: string | null;
   bankName: string | null;
+  payMode?: string;
   department: { name: string } | null;
   branch: { name: string } | null;
 }
@@ -37,6 +38,7 @@ interface Payslip {
   esicEmployee: number;
   esicEmployer: number;
   professionalTax: number;
+  lwf: number;
   tds: number;
   lateFines: number;
   loanDeduction: number;
@@ -49,6 +51,8 @@ interface Payslip {
   halfDays: number;
   absentDays: number;
   overtimeHours: number;
+  workedHours: number;
+  adjustments: { label: string; amount: number }[] | null;
 }
 
 interface Row {
@@ -61,6 +65,8 @@ const BANKS = [
   { key: "hdfc", label: "HDFC eNET salary" },
   { key: "icici", label: "ICICI PAB-SAL salary transfer" },
 ];
+
+const STATES = ["Gujarat", "Maharashtra", "Karnataka", "Tamil Nadu", "Telangana", "Delhi", "Uttar Pradesh", "Rajasthan", "West Bengal", "Other"];
 
 export function PayrollPanel({
   month,
@@ -79,6 +85,9 @@ export function PayrollPanel({
   const [viewing, setViewing] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
   const [bank, setBank] = useState("generic");
   const [debitAccount, setDebitAccount] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
+  const [complianceType, setComplianceType] = useState("ecr");
 
   const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
 
@@ -151,6 +160,52 @@ export function PayrollPanel({
     }
   }
 
+  async function exportCompliance() {
+    setBusy("compliance");
+    try {
+      const q = new URLSearchParams({ type: complianceType, month });
+      const res = await fetch(`/api/payroll/compliance?${q.toString()}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast("error", data.error ?? "Failed to export");
+        return;
+      }
+      const blob = await res.blob();
+      const filename = (res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/) ?? [])[1] ?? `compliance-${month}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("success", "Compliance file downloaded");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function exportTally() {
+    setBusy("tally");
+    try {
+      const res = await fetch(`/api/payroll/tally?month=${month}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast("error", data.error ?? "Failed to export");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `tally-journal-${month}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("success", "Tally journal downloaded");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const stats = [
     { label: "Payslips", value: generated, cls: "text-foreground" },
     { label: "Gross", value: formatMoney(totals.gross), cls: "text-emerald-300" },
@@ -171,7 +226,13 @@ export function PayrollPanel({
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={bank} onChange={(e) => setBank(e.target.value)} className="w-56">
+          <Button size="sm" variant="ghost" onClick={() => setAdjustmentsOpen(true)}>
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Adjustments
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
+            <Settings2 className="h-3.5 w-3.5" /> Settings
+          </Button>
+          <Select value={bank} onChange={(e) => setBank(e.target.value)} className="w-52">
             {BANKS.map((b) => (
               <option key={b.key} value={b.key}>{b.label}</option>
             ))}
@@ -182,7 +243,18 @@ export function PayrollPanel({
           <Button size="sm" variant="outline" loading={busy === "export"} onClick={exportBankFile} disabled={generated === 0}>
             <Download className="h-3.5 w-3.5" /> Bank file
           </Button>
-          <Button size="sm" variant="outline" loading={busy === "generate"} onClick={generate}>
+          <Select value={complianceType} onChange={(e) => setComplianceType(e.target.value)} className="w-40">
+            <option value="ecr">PF ECR</option>
+            <option value="form16">Form 16</option>
+            <option value="form24q">Form 24Q</option>
+          </Select>
+          <Button size="sm" variant="outline" loading={busy === "compliance"} onClick={exportCompliance} disabled={generated === 0}>
+            <FileSpreadsheet className="h-3.5 w-3.5" /> Compliance
+          </Button>
+          <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
+            <Scale className="h-3.5 w-3.5" /> Tally
+          </Button>
+          <Button size="sm" loading={busy === "generate"} onClick={generate}>
             <Sparkles className="h-3.5 w-3.5" /> Generate payslips
           </Button>
         </div>
@@ -230,7 +302,14 @@ export function PayrollPanel({
                         <span className="ml-2 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">no bank</span>
                       )}
                     </p>
-                    <p className="text-[11.5px] text-muted-foreground">{employee.employeeNumber}</p>
+                    <p className="text-[11.5px] text-muted-foreground">
+                      {employee.employeeNumber}
+                      {employee.payMode && employee.payMode !== "monthly" && (
+                        <span className="ml-2 rounded-full bg-indigo-500/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-indigo-300">
+                          {employee.payMode.replace("_", " ")}
+                        </span>
+                      )}
+                    </p>
                   </div>
                 </div>
               </TD>
@@ -270,6 +349,8 @@ export function PayrollPanel({
       </Table>
 
       <PayslipModal data={viewing} onClose={() => setViewing(null)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <AdjustmentsModal open={adjustmentsOpen} onClose={() => setAdjustmentsOpen(false)} month={month} rows={rows} />
     </>
   );
 }
@@ -288,15 +369,18 @@ function PayslipModal({
   const earnings = [
     { label: "Basic salary", value: p.baseSalary, strong: false },
     { label: "Allowances", value: p.allowances, strong: false },
-    { label: `Overtime (${p.overtimeHours} h)`, value: p.overtimePay, strong: false },
+    ...(p.overtimePay > 0 ? [{ label: `Overtime (${p.overtimeHours} h)`, value: p.overtimePay, strong: false }] : []),
+    ...(p.adjustments?.filter((a) => a.amount > 0).map((a) => ({ label: a.label, value: a.amount, strong: false })) ?? []),
   ];
   const deductions = [
     { label: "EPF (employee)", value: p.pfEmployee },
     { label: "ESIC (employee)", value: p.esicEmployee },
     { label: "Professional tax", value: p.professionalTax },
+    { label: "LWF", value: p.lwf },
     { label: "TDS (income tax)", value: p.tds },
     { label: `Late fines (${p.lateDays} late)`, value: p.lateFines },
     { label: "Loan / advance", value: p.loanDeduction },
+    ...(p.adjustments?.filter((a) => a.amount < 0).map((a) => ({ label: a.label, value: Math.abs(a.amount) })) ?? []),
   ].filter((d) => d.value > 0);
 
   return (
@@ -309,6 +393,7 @@ function PayslipModal({
           <p className="font-display text-[15px] font-semibold">{emp.firstName} {emp.lastName}</p>
           <p className="text-[12px] text-muted-foreground">
             {emp.employeeNumber} · {emp.department?.name ?? "—"} · {emp.branch?.name ?? "—"}
+            {emp.payMode && emp.payMode !== "monthly" ? ` · ${emp.payMode.replace("_", " ")}` : ""}
           </p>
         </div>
         <div className="ml-auto">
@@ -321,6 +406,7 @@ function PayslipModal({
         <span className="rounded-md bg-tint px-2 py-1">{p.lateDays} late</span>
         <span className="rounded-md bg-tint px-2 py-1">{p.halfDays} half-day</span>
         <span className="rounded-md bg-tint px-2 py-1">{p.absentDays} absent</span>
+        {p.workedHours > 0 && <span className="rounded-md bg-tint px-2 py-1">{p.workedHours}h worked</span>}
       </div>
 
       <div className="mt-3 space-y-3">
@@ -362,6 +448,259 @@ function PayslipModal({
       <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12.5px] text-emerald-300">
         <Banknote className="h-4 w-4" />
         {p.status === "paid" ? "This salary has been disbursed." : "Draft — not yet disbursed."}
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Payroll settings ───────────────────────────────────────────────────────
+
+function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [cfg, setCfg] = useState<any>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch("/api/config/payroll")
+      .then((r) => r.json())
+      .then((d) => setCfg(d.config))
+      .catch(() => toast("error", "Failed to load settings"))
+      .finally(() => setLoading(false));
+  }, [open, toast]);
+
+  const set = (path: string, value: unknown) => {
+    setCfg((c: any) => {
+      const next = { ...c };
+      const parts = path.split(".");
+      let cur = next;
+      for (let i = 0; i < parts.length - 1; i++) cur = cur[parts[i]];
+      cur[parts[parts.length - 1]] = value;
+      return next;
+    });
+  };
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/config/payroll", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cfg),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      toast("success", "Payroll settings saved — regenerate payslips to apply");
+      onClose();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Payroll settings" size="md">
+      {loading || !cfg ? (
+        <p className="py-8 text-center text-[13px] text-muted-foreground">Loading…</p>
+      ) : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Basic % of salary (PF wage base)">
+              <Input type="number" value={cfg.basicPercent} onChange={(e) => set("basicPercent", Number(e.target.value))} />
+            </Field>
+            <Field label="Allowances %">
+              <Input type="number" value={cfg.allowancesPercent} onChange={(e) => set("allowancesPercent", Number(e.target.value))} />
+            </Field>
+            <Field label="Late fine per late day (₹)">
+              <Input type="number" value={cfg.lateFinePerLateDay} onChange={(e) => set("lateFinePerLateDay", Number(e.target.value))} />
+            </Field>
+            <Field label="OT multiplier">
+              <Input type="number" step="0.1" value={cfg.otMultiplier} onChange={(e) => set("otMultiplier", Number(e.target.value))} />
+            </Field>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-edge bg-tint p-4">
+            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Statutory</p>
+            <div className="grid grid-cols-2 gap-3">
+              <ToggleRow label="PF" checked={cfg.pf.enabled} onChange={(v) => set("pf.enabled", v)} />
+              <Field label="PF wage ceiling (₹)">
+                <Input type="number" value={cfg.pf.wageCeiling} onChange={(e) => set("pf.wageCeiling", Number(e.target.value))} />
+              </Field>
+              <ToggleRow label="ESIC" checked={cfg.esic.enabled} onChange={(v) => set("esic.enabled", v)} />
+              <Field label="ESIC gross ceiling (₹)">
+                <Input type="number" value={cfg.esic.grossCeiling} onChange={(e) => set("esic.grossCeiling", Number(e.target.value))} />
+              </Field>
+              <ToggleRow label="Professional tax" checked={cfg.pt.enabled} onChange={(v) => set("pt.enabled", v)} />
+              <Field label="State (PT + LWF slabs)">
+                <Select value={cfg.pt.state} onChange={(e) => set("pt.state", e.target.value)}>
+                  {STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </Select>
+              </Field>
+              <ToggleRow label="LWF (Labour Welfare Fund)" checked={cfg.lwf.enabled} onChange={(v) => set("lwf.enabled", v)} />
+              <ToggleRow label="TDS" checked={cfg.tds.enabled} onChange={(v) => set("tds.enabled", v)} />
+              <Field label="TDS regime">
+                <Select value={cfg.tds.regime} onChange={(e) => set("tds.regime", e.target.value)}>
+                  <option value="new">New regime</option>
+                  <option value="old">Old regime</option>
+                </Select>
+              </Field>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={save} loading={saving}>
+              <Settings2 className="h-4 w-4" /> Save settings
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between rounded-xl border border-edge bg-card px-3.5 py-2.5">
+      <span className="text-[13px] font-medium">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-gradient-brand" : "bg-muted"}`}
+      >
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+      </button>
+    </label>
+  );
+}
+
+// ─── Adjustments (arrears / bonus / one-off) ────────────────────────────────
+
+function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClose: () => void; month: string; rows: Row[] }) {
+  const toast = useToast();
+  const router = useRouter();
+  const [list, setList] = useState<any[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ employeeId: "", type: "arrears", label: "", amount: "", note: "" });
+
+  const load = () => {
+    fetch(`/api/payroll/adjustments?month=${month}`)
+      .then((r) => r.json())
+      .then((d) => setList(d.adjustments))
+      .catch(() => toast("error", "Failed to load adjustments"));
+  };
+  useEffect(() => {
+    if (open) {
+      setList(null);
+      load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, month]);
+
+  async function create() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/payroll/adjustments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, month, amount: Number(form.amount) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to create");
+      toast("success", "Adjustment added — regenerate payslips to include it");
+      setForm({ employeeId: "", type: "arrears", label: "", amount: "", note: "" });
+      load();
+      router.refresh();
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Failed to create");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(id: string) {
+    const res = await fetch(`/api/payroll/adjustments/${id}`, { method: "DELETE" });
+    if (!res.ok) return toast("error", "Failed to delete");
+    toast("success", "Adjustment removed");
+    load();
+    router.refresh();
+  }
+
+  const total = (list ?? []).reduce((s: number, a: any) => s + a.amount, 0);
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Adjustments · ${month}`} size="md">
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Employee" className="col-span-2">
+            <Select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+              <option value="">Select employee…</option>
+              {rows.map((r) => (
+                <option key={r.employee.id} value={r.employee.id}>
+                  {r.employee.firstName} {r.employee.lastName} ({r.employee.employeeNumber})
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Type">
+            <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+              <option value="arrears">Arrears</option>
+              <option value="bonus">Bonus / incentive</option>
+              <option value="deduction">Deduction</option>
+              <option value="other">Other</option>
+            </Select>
+          </Field>
+          <Field label="Label" hint="e.g. Dec revision arrears">
+            <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Label" />
+          </Field>
+          <Field label="Amount (₹)" hint="Negative = deduction">
+            <Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="e.g. 5000 or -2000" />
+          </Field>
+          <Field label="Note (optional)">
+            <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Optional" />
+          </Field>
+        </div>
+        <Button onClick={create} loading={saving} className="w-full">
+          <Plus className="h-4 w-4" /> Add adjustment
+        </Button>
+
+        <div>
+          <p className="mb-2 flex items-center justify-between text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span>For {month}</span>
+            <span className="font-mono text-foreground">net {formatMoney(total)}</span>
+          </p>
+          {list === null ? (
+            <p className="py-4 text-center text-[13px] text-muted-foreground">Loading…</p>
+          ) : list.length === 0 ? (
+            <p className="py-4 text-center text-[13px] text-muted-foreground">No adjustments yet for this month.</p>
+          ) : (
+            <div className="divide-y divide-white/[0.04] rounded-xl border border-edge">
+              {list.map((a: any) => (
+                <div key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-medium">{a.label}</p>
+                    <p className="text-[11.5px] text-muted-foreground">
+                      {a.employee?.firstName} {a.employee?.lastName} · {a.type}
+                    </p>
+                  </div>
+                  <span className={`font-mono text-[13px] ${a.amount >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                    {a.amount >= 0 ? "+" : "−"}{formatMoney(Math.abs(a.amount))}
+                  </span>
+                  <button onClick={() => remove(a.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-rose-300">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   );

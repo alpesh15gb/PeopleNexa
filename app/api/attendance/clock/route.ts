@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
 import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
   if (near) {
     return NextResponse.json({ error: "A punch was already recorded in the last minute." }, { status: 400 });
   }
-  await prisma.punch.create({
+  const punch = await prisma.punch.create({
     data: {
       tenantId: employee.tenantId,
       employeeId: employee.id,
@@ -66,6 +67,13 @@ export async function POST(req: NextRequest) {
       lng,
       selfie,
     },
+  });
+  await dispatchWebhook(employee.tenantId, "punch.created", {
+    employeeId: employee.id,
+    punchId: punch.id,
+    time: punch.punchTime.toISOString(),
+    lat,
+    lng,
   });
 
   // 2. Re-derive the day's attendance from all punches (night-shift morning

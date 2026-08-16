@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
+import { dispatchWebhook } from "@/lib/webhooks";
 
 const select = {
   id: true,
@@ -18,6 +19,10 @@ const select = {
   bankName: true,
   accountNumber: true,
   ifscCode: true,
+  pan: true,
+  uan: true,
+  payMode: true,
+  workBasisRate: true,
   branch: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   shift: { select: { id: true, name: true, startTime: true, endTime: true } },
@@ -50,7 +55,17 @@ export async function POST(req: NextRequest) {
     const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } });
     if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
 
-    const count = await prisma.employee.count({ where: { tenantId: session.tenantId } });
+    const [count, tenant] = await Promise.all([
+      prisma.employee.count({ where: { tenantId: session.tenantId } }),
+      prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true } }),
+    ]);
+    const seats = tenant?.seats ?? 0;
+    if (count >= seats) {
+      return NextResponse.json(
+        { error: `Seat limit reached (${seats} seats on your current plan). Please contact your account manager to upgrade.` },
+        { status: 403 }
+      );
+    }
     const employee = await prisma.employee.create({
       data: {
         tenantId: session.tenantId,
@@ -70,8 +85,21 @@ export async function POST(req: NextRequest) {
         bankName: body.bankName || null,
         accountNumber: body.accountNumber || null,
         ifscCode: body.ifscCode || null,
+        pan: body.pan || null,
+        uan: body.uan || null,
+        payMode: body.payMode || "monthly",
+        workBasisRate: body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null,
+        managerId: body.managerId || null,
+        salaryStructure: body.salaryStructure || null,
       },
       select,
+    });
+    await dispatchWebhook(session.tenantId, "employee.created", {
+      employeeId: employee.id,
+      employeeNumber: employee.employeeNumber,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      email: employee.email,
     });
     return NextResponse.json({ employee }, { status: 201 });
   } catch {

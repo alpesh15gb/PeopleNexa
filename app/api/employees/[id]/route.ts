@@ -25,9 +25,15 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       branchId: body.branchId || null,
       departmentId: body.departmentId || null,
       shiftId: body.shiftId || null,
+      managerId: body.managerId !== undefined ? body.managerId || null : employee.managerId,
+      salaryStructure: body.salaryStructure !== undefined ? body.salaryStructure || null : employee.salaryStructure,
       bankName: body.bankName ?? employee.bankName,
       accountNumber: body.accountNumber ?? employee.accountNumber,
       ifscCode: body.ifscCode ?? employee.ifscCode,
+      pan: body.pan ?? employee.pan,
+      uan: body.uan ?? employee.uan,
+      payMode: body.payMode ?? employee.payMode,
+      workBasisRate: body.workBasisRate !== undefined ? (body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null) : employee.workBasisRate,
     },
   });
   return NextResponse.json({ employee: updated });

@@ -12,6 +12,13 @@ const TYPES = [
   { key: "monthly", label: "Monthly" },
   { key: "matrix", label: "Present / Absent" },
   { key: "late", label: "Late-comers" },
+  { key: "shift", label: "Shift-wise" },
+  { key: "overtime", label: "Overtime" },
+  { key: "department", label: "Departments" },
+  { key: "trend", label: "Monthly trend" },
+  { key: "holiday", label: "Holiday-affected" },
+  { key: "attendance_pct", label: "Attendance %" },
+  { key: "missing", label: "Missing punches" },
 ];
 
 export function ReportControls({
