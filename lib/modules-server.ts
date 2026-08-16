@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { planFor } from "@/lib/modules";
 
 /**
  * Server-only tenant access snapshot (status + enabled modules).
@@ -21,7 +22,7 @@ export async function getTenantAccess(tenantId: string): Promise<AccessSnapshot>
   const [tenant, moduleRows] = await Promise.all([
     prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { status: true, subscriptionExpiry: true },
+      select: { status: true, subscriptionExpiry: true, plan: true },
     }),
     prisma.tenantModule.findMany({
       where: { tenantId, enabled: true },
@@ -29,10 +30,18 @@ export async function getTenantAccess(tenantId: string): Promise<AccessSnapshot>
     }),
   ]);
 
+  // Tenants with no module rows yet (e.g. seeded before gating existed, or the
+  // short window before the entrypoint backfill runs) fall back to their plan's
+  // default module set so the workspace is never locked out.
+  const modules =
+    moduleRows.length > 0
+      ? new Set(moduleRows.map((r) => r.module))
+      : new Set(planFor(tenant?.plan ?? "trial").modules);
+
   const snap: AccessSnapshot = {
     status: tenant?.status ?? "suspended",
     subscriptionExpiry: tenant?.subscriptionExpiry ?? null,
-    modules: new Set(moduleRows.map((r) => r.module)),
+    modules,
   };
   cache.set(tenantId, { at: Date.now(), snap });
   return snap;

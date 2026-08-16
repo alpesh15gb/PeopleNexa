@@ -43,6 +43,7 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 COPY --from=build /app/lib ./lib
 COPY --from=build /app/generated ./generated
+COPY --from=build /app/scripts ./scripts
 # Needed by tsx so the seed script can resolve the @/* path alias.
 COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY entrypoint.sh ./entrypoint.sh
