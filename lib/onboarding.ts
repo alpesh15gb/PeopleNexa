@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { hashPassword } from "./auth";
-import { MODULES, planFor } from "./modules";
+import { MODULES } from "./modules";
+import { getEffectivePlan } from "./plans-server";
 
 /** Days a new trial license runs. */
 const TRIAL_DAYS = 30;
@@ -59,7 +60,7 @@ export async function onboardTenant(input: {
   const slugTaken = await prisma.tenant.findUnique({ where: { slug } });
   if (slugTaken) throw new Error("That subdomain is already taken. Try another one.");
 
-  const trial = planFor("trial");
+  const trial = await getEffectivePlan("trial");
   const tenant = await prisma.tenant.create({
     data: {
       name: input.companyName.trim(),

@@ -4,7 +4,10 @@ import { RegisterForm } from "./register-form";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Create your company | PeopleNexa" };
+export const metadata: Metadata = {
+  title: "Create your company | PeopleNexa",
+  robots: { index: false, follow: false },
+};
 
 export default async function RegisterPage() {
   const session = await getSession();

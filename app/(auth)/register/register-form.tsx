@@ -100,7 +100,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
     <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
-          <Input name="companyName" required placeholder="Apex Integrations" className="h-11" />
+          <Input name="companyName" required placeholder="Acme Corp" className="h-11" />
         </Field>
 
         <Field label="Workspace subdomain" hint="This becomes your team's web address">
@@ -108,7 +108,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
             <input
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
-              placeholder="crk"
+              placeholder="acme-corp"
               autoComplete="off"
               spellCheck={false}
               className="h-11 w-2/5 min-w-0 flex-1 bg-transparent px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
@@ -130,7 +130,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
           >
             {slugState === "available" && `Great — ${normalize(slug)}.${baseDomain} is yours!`}
             {slugState === "taken" && `${normalize(slug)}.${baseDomain} is already taken.`}
-            {slugState === "idle" && "Letters, numbers and dashes — e.g. crk, acme-corp"}
+            {slugState === "idle" && "Letters, numbers and dashes — e.g. acme-corp, my-company"}
           </p>
         </Field>
 

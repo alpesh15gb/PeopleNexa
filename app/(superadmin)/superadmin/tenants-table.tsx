@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Building2, ExternalLink, MoreHorizontal, Pencil, Plus, ShieldOff, Trash2 } from "lucide-react";
@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { PLANS, planFor, MODULES } from "@/lib/modules";
+import { MODULES, type PlanDef } from "@/lib/modules";
 import { useToast } from "@/components/ui/toast";
 
 type TenantRow = {
@@ -35,12 +35,38 @@ const planTone: Record<string, "neutral" | "success" | "warning" | "info" | "vio
   enterprise: "violet",
 };
 
-export function TenantsTable({ tenants }: { tenants: TenantRow[] }) {
+export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: PlanDef[] }) {
   const router = useRouter();
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  // Close the row menu if the page scrolls while it's open (fixed-anchored menu
+  // would otherwise drift away from its button).
+  useEffect(() => {
+    if (!menuFor) return;
+    const close = () => setMenuFor(null);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [menuFor]);
+
+  const openMenu = (e: React.MouseEvent<HTMLButtonElement>, t: TenantRow) => {
+    if (menuFor === t.id) {
+      setMenuFor(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const MENU_W = 176; // w-44
+    const MENU_H = 96; // two items + padding
+    let top = rect.bottom + 4;
+    if (top + MENU_H > window.innerHeight) top = Math.max(8, rect.top - MENU_H - 4);
+    let right = Math.max(8, window.innerWidth - rect.right);
+    if (right + MENU_W > window.innerWidth) right = 8;
+    setMenuPos({ top, right });
+    setMenuFor(t.id);
+  };
 
   const toggle = async (id: string, status: string) => {
     setBusy(id);
@@ -161,15 +187,18 @@ export function TenantsTable({ tenants }: { tenants: TenantRow[] }) {
                     </a>
                     <div className="relative">
                       <button
-                        onClick={() => setMenuFor(menuFor === t.id ? null : t.id)}
+                        onClick={(e) => openMenu(e, t)}
                         className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-foreground"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
                       </button>
-                      {menuFor === t.id && (
+                      {menuFor === t.id && menuPos && (
                         <>
                           <div className="fixed inset-0 z-30" onClick={() => setMenuFor(null)} />
-                          <div className="card-surface absolute right-0 z-40 mt-1 w-44 rounded-xl bg-card-2 p-1.5 shadow-2xl">
+                          <div
+                            className="card-surface fixed z-40 w-44 rounded-xl bg-card-2 p-1.5 shadow-2xl"
+                            style={{ top: menuPos.top, right: menuPos.right }}
+                          >
                             <button
                               disabled={busy === t.id}
                               onClick={() => toggle(t.id, t.status)}
@@ -198,13 +227,17 @@ export function TenantsTable({ tenants }: { tenants: TenantRow[] }) {
       </div>
 
       {creating && (
-        <CreateTenantModal onClose={() => setCreating(false)} onCreated={() => { setCreating(false); router.refresh(); }} />
+        <CreateTenantModal
+          plans={plans}
+          onClose={() => setCreating(false)}
+          onCreated={() => { setCreating(false); router.refresh(); }}
+        />
       )}
     </div>
   );
 }
 
-function CreateTenantModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateTenantModal({ plans, onClose, onCreated }: { plans: PlanDef[]; onClose: () => void; onCreated: () => void }) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState("trial");
@@ -240,7 +273,7 @@ function CreateTenantModal({ onClose, onCreated }: { onClose: () => void; onCrea
     }
   }
 
-  const defaults = planFor(plan);
+  const defaults = plans.find((p) => p.key === plan) ?? plans[0];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -265,14 +298,14 @@ function CreateTenantModal({ onClose, onCreated }: { onClose: () => void; onCrea
             </Field>
             <Field label="Plan">
               <Select value={plan} onChange={(e) => setPlan(e.target.value)}>
-                {PLANS.map((p) => (
+                {plans.map((p) => (
                   <option key={p.key} value={p.key}>
                     {p.label}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Seats" hint={`Default for ${planFor(plan).label}: ${defaults.seats}`}>
+            <Field label="Seats" hint={`Default for ${defaults.label}: ${defaults.seats}`}>
               <Input name="seats" type="number" min={1} defaultValue={defaults.seats} />
             </Field>
             <Field label="Expiry" hint="Empty = never expires">

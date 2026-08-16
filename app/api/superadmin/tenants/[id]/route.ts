@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
-import { PLANS, planFor, MODULES } from "@/lib/modules";
+import { PLANS, MODULES } from "@/lib/modules";
+import { getEffectivePlan } from "@/lib/plans-server";
 import { invalidateTenantAccess } from "@/lib/modules-server";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -47,7 +48,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       data.plan = body.plan;
       // Changing plan applies its default seat count unless one is given.
-      if (body.seats === undefined) data.seats = planFor(body.plan).seats;
+      if (body.seats === undefined) data.seats = (await getEffectivePlan(body.plan)).seats;
     }
     if (body.seats !== undefined) {
       const seats = Number(body.seats);
@@ -116,7 +117,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 
 /** Re-point the tenant's module flags to a plan's defaults. */
 async function syncModulesToPlan(tenantId: string, planKey: string) {
-  const defaults = planFor(planKey).modules;
+  const defaults = (await getEffectivePlan(planKey)).modules;
   await prisma.$transaction(
     MODULES.map((m) =>
       prisma.tenantModule.upsert({

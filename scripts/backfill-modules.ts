@@ -10,7 +10,8 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.ts";
-import { MODULES, planFor } from "../lib/modules";
+import { MODULES } from "../lib/modules";
+import { getEffectivePlan } from "../lib/plans-server";
 
 async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
@@ -22,7 +23,7 @@ async function main() {
   for (const t of tenants) {
     const existing = await prisma.tenantModule.findMany({ where: { tenantId: t.id }, select: { module: true } });
     const have = new Set(existing.map((r) => r.module));
-    const defaults = planFor(t.plan).modules;
+    const defaults = (await getEffectivePlan(t.plan)).modules;
 
     const missing = MODULES.filter((m) => !have.has(m.key));
     for (const m of missing) {

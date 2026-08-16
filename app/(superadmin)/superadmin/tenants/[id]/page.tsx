@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { PageHeader } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
+import { getEffectivePlans } from "@/lib/plans-server";
 import { TenantDetailPanel } from "./tenant-detail-panel";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function SuperadminTenantDetailPage({ params }: { params: P
   if (!tenant) notFound();
 
   const { _count, ...rest } = tenant;
+  const plans = await getEffectivePlans();
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
@@ -29,6 +31,7 @@ export default async function SuperadminTenantDetailPage({ params }: { params: P
         description={`${tenant.slug}.peoplenexa.in · ${tenant.code} · ${_count.employees} employees`}
       />
       <TenantDetailPanel
+        plans={plans}
         tenant={{
           ...rest,
           subscriptionExpiry: rest.subscriptionExpiry ? rest.subscriptionExpiry.toISOString() : null,

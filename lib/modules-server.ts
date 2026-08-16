@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { planFor } from "@/lib/modules";
+import { getEffectivePlan } from "@/lib/plans-server";
 
 /**
  * Server-only tenant access snapshot (status + enabled modules).
@@ -36,7 +36,7 @@ export async function getTenantAccess(tenantId: string): Promise<AccessSnapshot>
   const modules =
     moduleRows.length > 0
       ? new Set(moduleRows.map((r) => r.module))
-      : new Set(planFor(tenant?.plan ?? "trial").modules);
+      : new Set((await getEffectivePlan(tenant?.plan ?? "trial")).modules);
 
   const snap: AccessSnapshot = {
     status: tenant?.status ?? "suspended",

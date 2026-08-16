@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
-import { PLANS, planFor, MODULES } from "@/lib/modules";
+import { PLANS, MODULES } from "@/lib/modules";
+import { getEffectivePlan } from "@/lib/plans-server";
 import { generateCompanyCode, normalizeSlug } from "@/lib/onboarding";
 import { hashPassword } from "@/lib/auth";
 
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest) {
     const name = String(body.name ?? "").trim();
     const slug = normalizeSlug(String(body.slug ?? ""));
     const planKey = String(body.plan ?? "trial");
-    const seats = Number(body.seats ?? planFor(planKey).seats) || planFor(planKey).seats;
+    const effectivePlan = await getEffectivePlan(planKey);
+    const seats = Number(body.seats ?? effectivePlan.seats) || effectivePlan.seats;
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     const adminEmail = String(body.adminEmail ?? "").toLowerCase().trim();
     const adminPassword = String(body.adminPassword ?? "");
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
       data: MODULES.map((m) => ({
         tenantId: tenant.id,
         module: m.key,
-        enabled: planFor(planKey).modules.includes(m.key),
+        enabled: effectivePlan.modules.includes(m.key),
       })),
     });
 

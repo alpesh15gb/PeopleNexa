@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
 import { addDays, startOfDay } from "@/lib/dates";
-import { PLANS } from "@/lib/modules";
+import { getEffectivePlans } from "@/lib/plans-server";
 
 export async function GET() {
   try {
@@ -22,10 +22,11 @@ export async function GET() {
     ]);
 
     // Revenue estimates: licensed seats × plan price (trial & enterprise = custom/₹0).
+    const plans = await getEffectivePlans();
     const byPlanRevenue: Record<string, { count: number; seats: number; mrr: number; arr: number }> = {};
     let mrr = 0;
     let arr = 0;
-    for (const p of PLANS) {
+    for (const p of plans) {
       const row = planRows.find((r) => r.plan === p.key);
       const count = byPlan.find((r) => r.plan === p.key)?._count ?? 0;
       const seats = row?._sum.seats ?? 0;
@@ -47,7 +48,7 @@ export async function GET() {
       arr,
       byPlan: Object.fromEntries(byPlan.map((r) => [r.plan, r._count])),
       byPlanRevenue,
-      plans: PLANS.map((p) => ({
+      plans: plans.map((p) => ({
         key: p.key,
         label: p.label,
         seats: p.seats,

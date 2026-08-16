@@ -904,3 +904,20 @@ model PayrollAdjustment {
 
   @@index([tenantId, month])
 }
+
+// ─── Plan overrides (superadmin pricing / module edits) ─────────────────────
+// One row per plan key when a super admin has customized the plan. Absent rows
+// mean the code defaults in lib/modules.ts apply. Null fields fall back to the
+// code default; modules, when non-empty, replaces the plan's module set.
+
+model PlanOverride {
+  planKey            String    @id
+  label              String?
+  pricePerSeat       Int?
+  annualPricePerSeat Int?
+  trialDays          Int?
+  seats              Int?
+  modules            String[]
+  updatedBy          String?
+  updatedAt          DateTime  @updatedAt
+}

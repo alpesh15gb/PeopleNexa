@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { MODULES, PLANS, planFor } from "@/lib/modules";
+import { MODULES, type PlanDef } from "@/lib/modules";
 import { useToast } from "@/components/ui/toast";
 
 type LicenseRow = {
@@ -51,9 +51,10 @@ const planTone: Record<string, "neutral" | "success" | "warning" | "info" | "vio
   enterprise: "violet",
 };
 
-export function TenantDetailPanel({ tenant }: { tenant: TenantDetail }) {
+export function TenantDetailPanel({ tenant, plans }: { tenant: TenantDetail; plans: PlanDef[] }) {
   const router = useRouter();
   const toast = useToast();
+  const planDef = (key: string) => plans.find((p) => p.key === key) ?? plans[0];
 
   const [name, setName] = useState(tenant.name);
   const [email, setEmail] = useState(tenant.email ?? "");
@@ -161,14 +162,14 @@ export function TenantDetailPanel({ tenant }: { tenant: TenantDetail }) {
               </Field>
               <Field label="Plan">
                 <Select value={plan} onChange={(e) => setPlan(e.target.value)}>
-                  {PLANS.map((p) => (
+                  {plans.map((p) => (
                     <option key={p.key} value={p.key}>
                       {p.label} — {p.blurb}
                     </option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Seats" hint={`Default for ${planFor(plan).label}: ${planFor(plan).seats}`}>
+              <Field label="Seats" hint={`Default for ${planDef(plan).label}: ${planDef(plan).seats}`}>
                 <Input value={seats} onChange={(e) => setSeats(e.target.value)} type="number" min={1} />
               </Field>
               <Field label="Status">
@@ -221,7 +222,7 @@ export function TenantDetailPanel({ tenant }: { tenant: TenantDetail }) {
                       <span className="block text-[13.5px] font-medium">{m.label}</span>
                       <span className="block text-[11.5px] text-muted-foreground">{m.description}</span>
                     </span>
-                    {planFor(tenant.plan).modules.includes(m.key) && !on && (
+                    {planDef(tenant.plan).modules.includes(m.key) && !on && (
                       <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">in {tenant.plan}</span>
                     )}
                   </button>

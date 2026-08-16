@@ -4,7 +4,10 @@ import { LoginForm } from "./login-form";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 
-export const metadata: Metadata = { title: "Login | PeopleNexa" };
+export const metadata: Metadata = {
+  title: "Login | PeopleNexa",
+  robots: { index: false, follow: false },
+};
 
 export default async function LoginPage() {
   const session = await getSession();

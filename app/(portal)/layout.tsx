@@ -1,5 +1,10 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 import { getSession } from "@/lib/session";
 import { getLang } from "@/lib/i18n-server";
 import { prisma } from "@/lib/prisma";

@@ -1,0 +1,24 @@
+# PeopleNexa
+
+> PeopleNexa is an all-in-one HRMS (Human Resource Management System) for Indian
+> businesses — attendance, leaves, payroll, field tracking and more, in one
+> workspace. Free 30-day trial, no credit card required.
+
+## Key facts
+
+- Product type: HRMS / attendance / payroll SaaS, built for Indian SMEs.
+- Attendance: geofenced clock-in/out from a mobile PWA, selfie check-ins, shift rosters, night shifts, weekly schedules, auto punch-out.
+- Leaves: leave types, auto accrual balances, half-days, approvals, encashment on exit.
+- Payroll: PF, ESIC, Professional Tax, TDS (old & new regime) and Labour Welfare Fund calculations; bank CSV for bulk payments; Tally export; Form 16, Form 24Q and PF ECR draft exports.
+- Field workforce: journey tracking with route replay, GPS check-ins at stops, expense claims.
+- Also included: asset tracking, loans & advances, performance reviews, helpdesk, org feed, policies, documents, onboarding & exit management, webhooks, biometric device sync.
+- Ask AI: natural-language answers over the workspace's attendance, payroll and leave data.
+- Languages: English, Hindi, Gujarati, Marathi, Tamil.
+- Privacy: data hosted in India; location recorded only while clocked in or on an approved journey.
+- Pricing: per-seat per-month plans (Trial free, Starter, Growth, Pro, Enterprise), billed monthly or annually. See https://peoplenexa.in/#pricing.
+
+## Links
+
+- Landing page: https://peoplenexa.in/
+- Create a free trial workspace: https://peoplenexa.in/register
+- Login: https://peoplenexa.in/login

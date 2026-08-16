@@ -4,7 +4,10 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { SuperAdminLoginForm } from "./superadmin-login-form";
 
-export const metadata: Metadata = { title: "Super Admin | PeopleNexa" };
+export const metadata: Metadata = {
+  title: "Super Admin | PeopleNexa",
+  robots: { index: false, follow: false },
+};
 
 export default async function SuperAdminLoginPage() {
   const session = await getSession();

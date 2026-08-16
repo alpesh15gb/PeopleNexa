@@ -2,10 +2,11 @@ import { Building2, Users, ShieldAlert, Timer, Sparkles, IndianRupee } from "luc
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { StatCard } from "@/components/ui/stat";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
-import { PLANS } from "@/lib/modules";
+import { getEffectivePlans } from "@/lib/plans-server";
 import { TenantsTable } from "./tenants-table";
+import { PlansTable } from "./plans-table";
 
 export const dynamic = "force-dynamic";
 
@@ -41,18 +42,21 @@ export default async function SuperadminOverviewPage() {
 
   const [total, active, suspended, employees, trials, expiringSoon, seatRows] = stats;
 
+  const plans = await getEffectivePlans();
+  const overrides = await prisma.planOverride.findMany({ select: { planKey: true } });
   let mrr = 0;
   let arr = 0;
-  const revenueByPlan = PLANS.map((p) => {
+  const usage: Record<string, { count: number; seats: number }> = {};
+  for (const p of plans) {
     const row = seatRows.find((r) => r.plan === p.key) as { _sum?: { seats?: number | null }; _count?: { _all?: number } } | undefined;
     const seats = row?._sum?.seats ?? 0;
     const count = row?._count?._all ?? 0;
     const planMrr = count > 0 ? seats * p.pricePerSeat : 0;
     const planArr = count > 0 ? seats * p.annualPricePerSeat * 12 : 0;
+    usage[p.key] = { count, seats };
     mrr += planMrr;
     arr += planArr;
-    return { plan: p, count, seats, mrr: planMrr, arr: planArr };
-  });
+  }
   const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
   return (
@@ -72,46 +76,17 @@ export default async function SuperadminOverviewPage() {
       </div>
 
       <div>
-        <h2 className="mb-3 font-display text-lg font-bold tracking-tight">Plans & pricing</h2>
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="border-b border-edge text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                    <th className="px-5 py-3 font-medium">Plan</th>
-                    <th className="px-3 py-3 font-medium">Price / seat</th>
-                    <th className="px-3 py-3 font-medium">Annual / seat</th>
-                    <th className="px-3 py-3 font-medium">Trial days</th>
-                    <th className="px-3 py-3 font-medium">Tenants</th>
-                    <th className="px-3 py-3 font-medium">Licensed seats</th>
-                    <th className="px-3 py-3 font-medium text-right">MRR</th>
-                    <th className="px-3 py-3 font-medium text-right">ARR</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {revenueByPlan.map(({ plan, count, seats, mrr: pm, arr: pa }) => (
-                    <tr key={plan.key} className="transition-colors hover:bg-tint/40">
-                      <td className="px-5 py-3 font-medium capitalize">{plan.label}</td>
-                      <td className="px-3 py-3 text-muted-foreground">{plan.pricePerSeat > 0 ? `₹${plan.pricePerSeat}` : plan.key === "enterprise" ? "Custom" : "Free"}</td>
-                      <td className="px-3 py-3 text-muted-foreground">{plan.annualPricePerSeat > 0 ? `₹${plan.annualPricePerSeat}` : "—"}</td>
-                      <td className="px-3 py-3 text-muted-foreground">{plan.trialDays > 0 ? `${plan.trialDays}` : "—"}</td>
-                      <td className="px-3 py-3">{count}</td>
-                      <td className="px-3 py-3">{seats.toLocaleString("en-IN")}</td>
-                      <td className="px-3 py-3 text-right font-mono text-emerald-300">{inr(pm)}</td>
-                      <td className="px-3 py-3 text-right font-mono text-violet-300">{inr(pa)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-lg font-bold tracking-tight">Plans & pricing</h2>
+          <p className="text-[12px] text-muted-foreground">Click ✎ on a plan to edit pricing, seats or modules</p>
+        </div>
+        <PlansTable plans={plans} usage={usage} customized={overrides.map((o) => o.planKey)} />
       </div>
 
       <div>
         <h2 className="mb-3 font-display text-lg font-bold tracking-tight">Tenants</h2>
         <TenantsTable
+          plans={plans}
           tenants={tenants.map(({ _count, modules, licenses, ...t }) => ({
             ...t,
             subscriptionExpiry: t.subscriptionExpiry ? t.subscriptionExpiry.toISOString() : null,
