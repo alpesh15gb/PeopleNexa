@@ -30,6 +30,8 @@ const select = {
   shift: { select: { id: true, name: true, startTime: true, endTime: true } },
 } as const;
 
+type EmployeeRow = Prisma.EmployeeGetPayload<{ select: typeof select }>;
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function nextEmployeeNumber(tenantId: string): Promise<string> {
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
     const joiningDate = parseJoiningDate(body.joiningDate);
     const passwordHash = await hashPassword(password);
 
-    let employee: Awaited<ReturnType<typeof prisma.employee.create>> | null = null;
+    let employee: EmployeeRow | null = null;
     for (let attempt = 0; attempt < 4 && !employee; attempt++) {
       const employeeNumber = await nextEmployeeNumber(session.tenantId);
       try {
@@ -123,7 +125,7 @@ export async function POST(req: NextRequest) {
             salaryStructure: salaryStructure === null ? Prisma.DbNull : salaryStructure,
           },
           select,
-        }) as Awaited<ReturnType<typeof prisma.employee.create>>;
+        });
       } catch (err) {
         if ((err as { code?: string }).code !== "P2002" || attempt === 3) throw err;
       }
