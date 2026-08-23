@@ -17,7 +17,7 @@ export default async function AdminDevicesPage() {
       include: { _count: { select: { logs: true } } },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { id: true, config: true } }),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
   ]);
 
   const rows = devices.map((d) => ({
@@ -39,7 +39,7 @@ export default async function AdminDevicesPage() {
     online: rows.filter((d) => d.lastSeenAt && now - d.lastSeenAt.getTime() < 5 * 60 * 1000).length,
     offline: rows.filter((d) => !d.lastSeenAt || now - d.lastSeenAt.getTime() >= 5 * 60 * 1000).length,
   };
-  const ebio = getEbioserverConfig({ id: tenant?.id ?? session.tenantId, config: tenant?.config ?? null });
+  const ebio = getEbioserverConfig({ config: tenant?.config ?? null });
 
   return (
     <div className="animate-fade-up space-y-6">
