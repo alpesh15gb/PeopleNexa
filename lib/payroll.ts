@@ -1,12 +1,13 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "../generated/prisma/client";
-import { istStartOfDay, parseIST } from "./ist";
+import { parseIST } from "./ist";
+import { toDateKey } from "./dates";
 import { round2 } from "./utils";
 import { dateInRange, getWorkCalendarConfig, isAfterLastWorkingDay, isBeforeJoining, isWeeklyOff } from "./work-calendar";
 
 export interface PayrollConfig {
   basicPercent: number;
-  /** Legacy setting retained for config compatibility; allowances are now the remainder of gross. */
+  /** Legacy setting retained for config compatibility; allowances are the remainder of gross. */
   allowancesPercent: number;
   lateFinePerLateDay: number;
   otMultiplier: number;
@@ -85,14 +86,7 @@ export async function attendanceSummary(
   const [records, leaves, holidays, tenant, exit] = await Promise.all([
     prisma.attendance.findMany({
       where: { tenantId, employeeId: employee.id, date: { gte: start, lt: end } },
-      select: {
-        date: true,
-        status: true,
-        punchInTime: true,
-        punchOutTime: true,
-        overtimeMinutes: true,
-        shift: { select: { startTime: true, endTime: true, isNightShift: true } },
-      },
+      select: { date: true, status: true, punchInTime: true, punchOutTime: true, overtimeMinutes: true, shift: { select: { startTime: true, endTime: true, isNightShift: true } } },
     }),
     prisma.leaveRequest.findMany({
       where: { tenantId, employeeId: employee.id, status: "approved", fromDate: { lt: end }, toDate: { gte: start } },
@@ -107,49 +101,35 @@ export async function attendanceSummary(
     }),
   ]);
 
-  const recordByDay = new Map(records.map((r) => [istDayKey(r.date), r]));
-  const holidaySet = new Set(holidays.map((h) => istDayKey(h.date)));
+  const recordByDay = new Map(records.map((r) => [toDateKey(r.date), r]));
+  const holidaySet = new Set(holidays.map((h) => toDateKey(h.date)));
   const calendar = getWorkCalendarConfig(tenant?.config ?? null);
-  const summary: AttendanceSummary = {
-    presentDays: 0,
-    lateDays: 0,
-    halfDays: 0,
-    absentDays: 0,
-    onLeaveDays: 0,
-    overtimeHours: 0,
-    workingDays: 0,
-    workedHours: 0,
-  };
+  const summary: AttendanceSummary = { presentDays: 0, lateDays: 0, halfDays: 0, absentDays: 0, onLeaveDays: 0, overtimeHours: 0, workingDays: 0, workedHours: 0 };
 
   for (let d = start; d < end; d = new Date(d.getTime() + 86400000)) {
     if (isBeforeJoining(d, employee.joiningDate) || isAfterLastWorkingDay(d, exit?.lastWorkingDay)) continue;
-    const key = istDayKey(d);
+    const key = toDateKey(d);
     if (holidaySet.has(key) || isWeeklyOff(d, calendar)) continue;
-
-    const onLeave = leaves.some((l) => dateInRange(d, l.fromDate, l.toDate));
     summary.workingDays++;
-    if (onLeave) {
+
+    if (leaves.some((l) => dateInRange(d, l.fromDate, l.toDate))) {
       summary.onLeaveDays++;
       continue;
     }
 
     const rec = recordByDay.get(key);
-    if (!rec) {
-      summary.absentDays++;
-      continue;
-    }
+    if (!rec || rec.status === "absent") { summary.absentDays++; continue; }
     if (rec.status === "present" || rec.status === "permission") summary.presentDays++;
     else if (rec.status === "late") summary.lateDays++;
     else if (rec.status === "half_day") summary.halfDays++;
-    else summary.absentDays++;
+    else { summary.absentDays++; continue; }
 
     if (rec.punchInTime && rec.punchOutTime) {
       const spanMin = Math.max(0, (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000);
       summary.workedHours += spanMin / 60;
       if (includeOvertime) {
-        if (rec.overtimeMinutes > 0) {
-          summary.overtimeHours += rec.overtimeMinutes / 60;
-        } else if (rec.shift) {
+        if (rec.overtimeMinutes > 0) summary.overtimeHours += rec.overtimeMinutes / 60;
+        else if (rec.shift) {
           const [sh, sm] = rec.shift.startTime.split(":").map(Number);
           const [eh, em] = rec.shift.endTime.split(":").map(Number);
           const scheduled = eh * 60 + em - (sh * 60 + sm) + (rec.shift.isNightShift ? 1440 : 0);
@@ -158,121 +138,83 @@ export async function attendanceSummary(
       }
     }
   }
-
   summary.workedHours = round2(summary.workedHours);
   summary.overtimeHours = round2(summary.overtimeHours);
   return summary;
 }
 
-function istDayKey(d: Date): string {
-  return new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
-const PF_RATE = 0.12;
-
+/** Standard EPF contribution; employee-specific excluded-EPS cases are handled at ECR master-data validation. */
 export function calcPF(basic: number, config: PayrollConfig) {
   const wage = Math.min(Math.max(basic, 0), Math.max(config.pf.wageCeiling, 0));
-  const employee = config.pf.enabled ? round2(wage * PF_RATE) : 0;
-  const employer = config.pf.enabled ? round2(wage * PF_RATE) : 0;
-  return { employee, employer };
+  const contribution = config.pf.enabled ? Math.round(wage * 0.12) : 0;
+  return { employee: contribution, employer: contribution };
 }
 
-export function calcESIC(gross: number, config: PayrollConfig) {
-  if (!config.esic.enabled || gross > config.esic.grossCeiling) return { employee: 0, employer: 0 };
-  return { employee: round2(gross * 0.0075), employer: round2(gross * 0.0325) };
+/** ESIC 0.75% / 3.25%, rounded up to the next rupee. */
+export function calcESIC(gross: number, config: PayrollConfig, averageDailyWage?: number) {
+  if (!config.esic.enabled || gross <= 0 || gross > config.esic.grossCeiling) return { employee: 0, employer: 0 };
+  const employeeExempt = averageDailyWage !== undefined && averageDailyWage <= 176;
+  return {
+    employee: employeeExempt ? 0 : Math.ceil(gross * 0.0075),
+    employer: Math.ceil(gross * 0.0325),
+  };
 }
 
+/** Currently certified state pack. Unsupported states fail closed instead of using guessed slabs. */
 export function professionalTax(state: string, monthlyGross: number): number {
   const s = state.trim().toLowerCase();
-  if (s === "gujarat") {
-    if (monthlyGross <= 12000) return 0;
-    if (monthlyGross <= 20000) return 150;
-    return 200;
-  }
-  if (s === "maharashtra") {
-    if (monthlyGross <= 7500) return 0;
-    if (monthlyGross <= 10000) return 175;
-    return 200;
-  }
-  if (s === "karnataka" || s === "tamil nadu" || s === "telangana") {
-    if (monthlyGross <= 15000) return 0;
-    return 200;
-  }
-  if (monthlyGross <= 15000) return 0;
-  return 200;
+  if (s === "gujarat") return monthlyGross > 12000 ? 200 : 0;
+  throw new Error(`Professional-tax rules for ${state || "this state"} are not configured. Disable PT or add a verified state pack before payroll.`);
 }
 
-export function labourWelfareFund(state: string, monthlyGross: number): number {
+/** Gujarat LWF employee share: June/December only. */
+export function labourWelfareFund(state: string, payrollMonth?: string): number {
   const s = state.trim().toLowerCase();
-  if (s === "gujarat") {
-    if (monthlyGross <= 2999) return 10;
-    if (monthlyGross <= 5999) return 20;
-    if (monthlyGross <= 8999) return 30;
-    if (monthlyGross <= 11999) return 40;
-    return 50;
-  }
-  if (s === "maharashtra") return monthlyGross <= 10000 ? 12 : 0;
-  if (s === "karnataka") return 40;
-  if (s === "tamil nadu") return 10;
-  return 0;
+  if (s !== "gujarat") throw new Error(`Labour Welfare Fund rules for ${state || "this state"} are not configured.`);
+  if (!payrollMonth) return 0;
+  return payrollMonth.endsWith("-06") || payrollMonth.endsWith("-12") ? 6 : 0;
 }
 
-export function calcTDS(monthlyGross: number, regime: "new" | "old", investments = 0): number {
-  const annual = monthlyGross * 12;
-  const invested = Math.min(Math.max(investments, 0), 500000);
-  let taxable: number;
-  let rebateLimit: number;
-  let slabs: Array<[number, number]>;
-
-  if (regime === "new") {
-    taxable = Math.max(annual - 75000 - invested, 0);
-    rebateLimit = 1200000;
-    slabs = [[400000, 0], [800000, 0.05], [1200000, 0.1], [1600000, 0.15], [2000000, 0.2], [2400000, 0.25], [Infinity, 0.3]];
-  } else {
-    taxable = Math.max(annual - 50000 - invested, 0);
-    rebateLimit = 500000;
-    slabs = [[250000, 0.05], [500000, 0.2], [Infinity, 0.3]];
-  }
-
+function annualIncomeTax(taxable: number, regime: "new" | "old"): number {
+  const slabs: Array<[number, number]> = regime === "new"
+    ? [[400000, 0], [800000, 0.05], [1200000, 0.10], [1600000, 0.15], [2000000, 0.20], [2400000, 0.25], [Infinity, 0.30]]
+    : [[250000, 0], [500000, 0.05], [1000000, 0.20], [Infinity, 0.30]];
   let tax = 0;
   let prev = 0;
   for (const [threshold, rate] of slabs) {
-    if (taxable > prev) tax += (Math.min(taxable, threshold) - prev) * rate;
+    if (taxable <= prev) break;
+    tax += (Math.min(taxable, threshold) - prev) * rate;
     prev = threshold;
   }
-  if (taxable <= rebateLimit) tax = 0;
-  return round2(tax / 12);
+  if ((regime === "new" && taxable <= 1200000) || (regime === "old" && taxable <= 500000)) tax = 0;
+  // Health & Education Cess, excluding surcharge/marginal-relief cases that
+  // require additional employee tax-master data not present in this schema.
+  return round2(tax * 1.04);
 }
 
-export interface PayrollAdjustmentInput {
-  id: string;
-  type: string;
-  label: string;
-  amount: number;
+/** Estimated monthly TDS for ordinary salary cases. New regime does not apply 80C/80D-style deductions. */
+export function calcTDS(monthlyGross: number, regime: "new" | "old", investments = 0): number {
+  const annual = Math.max(0, monthlyGross) * 12;
+  const deductibleInvestments = regime === "old" ? Math.min(Math.max(investments, 0), 500000) : 0;
+  const standardDeduction = regime === "new" ? 75000 : 50000;
+  const taxable = Math.max(0, annual - standardDeduction - deductibleInvestments);
+  return round2(annualIncomeTax(taxable, regime) / 12);
 }
 
-export function splitAdjustments(adjustments: PayrollAdjustmentInput[]): {
-  earnings: number;
-  deductions: number;
-  list: { label: string; amount: number }[];
-} {
+export interface PayrollAdjustmentInput { id: string; type: string; label: string; amount: number }
+
+export function splitAdjustments(adjustments: PayrollAdjustmentInput[]): { earnings: number; deductions: number; list: { label: string; amount: number }[] } {
   let earnings = 0;
   let deductions = 0;
   const list = adjustments.map((a) => {
     const amount = round2(a.amount);
-    if (amount >= 0) earnings += amount;
-    else deductions += Math.abs(amount);
+    if (amount >= 0) earnings += amount; else deductions += Math.abs(amount);
     return { label: a.label || a.type, amount };
   });
   return { earnings: round2(earnings), deductions: round2(deductions), list };
 }
 
-export interface LoanDeductionUpdate {
-  id: string;
-  newOutstanding: number;
-  lastDeductedMonth: string;
-  close: boolean;
-}
+export interface LoanDeductionUpdate { id: string; newOutstanding: number; lastDeductedMonth: string; close: boolean }
 
 export function loanDeductionForMonth(
   loans: Array<{ id: string; status: string; startMonth: string; lastDeductedMonth: string | null; outstanding: number; emiAmount: number }>,
@@ -295,53 +237,24 @@ export function loanDeductionForMonth(
   return { total: round2(total), updates };
 }
 
-export interface SalaryStructure {
-  basic?: number;
-  hra?: number;
-  conveyance?: number;
-  medical?: number;
-  other?: number;
-}
+export interface SalaryStructure { basic?: number; hra?: number; conveyance?: number; medical?: number; other?: number }
 
 /** Split gross into Basic + allowances; the components always add back to gross. */
 export function splitSalary(total: number, structure: unknown, config: PayrollConfig): { basic: number; allowances: number } {
   const safeTotal = Math.max(0, round2(total));
   const s = (structure ?? {}) as SalaryStructure;
   const pct = Math.min(100, Math.max(0, Number(config.basicPercent) || 0));
-  const requestedBasic = s.basic != null && Number.isFinite(Number(s.basic)) && Number(s.basic) >= 0
-    ? Number(s.basic)
-    : safeTotal * (pct / 100);
+  const requestedBasic = s.basic != null && Number.isFinite(Number(s.basic)) && Number(s.basic) >= 0 ? Number(s.basic) : safeTotal * (pct / 100);
   const basic = round2(Math.min(requestedBasic, safeTotal));
   return { basic, allowances: round2(safeTotal - basic) };
 }
 
 export interface PayrollResult {
-  baseSalary: number;
-  basic: number;
-  allowances: number;
-  overtimePay: number;
-  adjustmentEarnings: number;
-  grossEarnings: number;
-  gratuity: number;
-  pfEmployee: number;
-  pfEmployer: number;
-  esicEmployee: number;
-  esicEmployer: number;
-  professionalTax: number;
-  lwf: number;
-  tds: number;
-  lateFines: number;
-  loanDeduction: number;
-  absentDeduction: number;
-  adjustmentDeductions: number;
-  deductions: number;
-  netSalary: number;
-  presentDays: number;
-  lateDays: number;
-  halfDays: number;
-  absentDays: number;
-  overtimeHours: number;
-  workedHours: number;
+  baseSalary: number; basic: number; allowances: number; overtimePay: number; adjustmentEarnings: number;
+  grossEarnings: number; gratuity: number; pfEmployee: number; pfEmployer: number; esicEmployee: number;
+  esicEmployer: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number;
+  absentDeduction: number; adjustmentDeductions: number; deductions: number; netSalary: number; presentDays: number;
+  lateDays: number; halfDays: number; absentDays: number; overtimeHours: number; workedHours: number;
   adjustments: { label: string; amount: number }[];
 }
 
@@ -359,7 +272,7 @@ export function baseForPayMode(mode: string | null | undefined, rate: number, su
 
 function overtimeRate(mode: string, employeeRate: number, contractBasic: number, multiplier: number): number {
   const m = Math.max(0, multiplier);
-  if (mode === "hourly") return employeeRate * Math.max(m - 1, 0); // base already includes every worked hour
+  if (mode === "hourly") return employeeRate * Math.max(m - 1, 0);
   if (mode === "daily") return (employeeRate / 8) * m;
   if (mode === "weekly") return (employeeRate / 6 / 8) * m;
   if (mode === "work_basis") return 0;
@@ -372,25 +285,21 @@ export function computePayroll(
   summary: AttendanceSummary,
   loanDeduction: number,
   adjustments: PayrollAdjustmentInput[] = [],
-  investments = 0
+  investments = 0,
+  payrollMonth?: string
 ): PayrollResult {
   const mode = employee.payMode ?? "monthly";
   const rate = mode === "work_basis" && employee.workBasisRate != null && employee.workBasisRate > 0 ? employee.workBasisRate : employee.salary;
   const contractBase = baseForPayMode(mode, rate, summary);
-
   const absentDeduction = mode === "monthly" && config.deductAbsentDays && summary.workingDays > 0
-    ? round2(Math.min(contractBase, (contractBase / summary.workingDays) * summary.absentDays))
-    : 0;
+    ? round2(Math.min(contractBase, (contractBase / summary.workingDays) * summary.absentDays)) : 0;
   const payableBase = round2(Math.max(0, contractBase - absentDeduction));
 
   const contractSplit = splitSalary(contractBase, employee.salaryStructure, config);
   const ratio = contractBase > 0 ? payableBase / contractBase : 0;
   let basic = round2(contractSplit.basic * ratio);
   let allowances = round2(payableBase - basic);
-  if (!employee.salaryStructure && mode !== "monthly") {
-    basic = payableBase;
-    allowances = 0;
-  }
+  if (!employee.salaryStructure && mode !== "monthly") { basic = payableBase; allowances = 0; }
 
   const otRate = overtimeRate(mode, rate, contractSplit.basic, config.otMultiplier);
   const overtimePay = round2(summary.overtimeHours * otRate);
@@ -398,9 +307,10 @@ export function computePayroll(
   const gross = round2(payableBase + overtimePay + adj.earnings);
   const gratuity = round2(basic * 0.0481);
   const { employee: pfEmployee, employer: pfEmployer } = calcPF(basic, config);
-  const { employee: esicEmployee, employer: esicEmployer } = calcESIC(gross, config);
+  const averageDailyWage = summary.workingDays > 0 ? gross / summary.workingDays : undefined;
+  const { employee: esicEmployee, employer: esicEmployer } = calcESIC(gross, config, averageDailyWage);
   const pt = config.pt.enabled ? professionalTax(config.pt.state, gross) : 0;
-  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, gross) : 0;
+  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, payrollMonth) : 0;
   const tds = config.tds.enabled ? calcTDS(gross, config.tds.regime, investments) : 0;
   const lateFines = round2(summary.lateDays * Math.max(0, config.lateFinePerLateDay));
 
@@ -411,48 +321,18 @@ export function computePayroll(
   const systemAdjustments = absentDeduction > 0 ? [{ label: "Unpaid absence", amount: -absentDeduction }] : [];
 
   return {
-    baseSalary: payableBase,
-    basic,
-    allowances,
-    overtimePay,
-    adjustmentEarnings: adj.earnings,
-    grossEarnings: gross,
-    gratuity,
-    pfEmployee,
-    pfEmployer,
-    esicEmployee,
-    esicEmployer,
-    professionalTax: pt,
-    lwf,
-    tds,
-    lateFines,
-    loanDeduction: appliedLoan,
-    absentDeduction,
-    adjustmentDeductions: adj.deductions,
-    deductions,
-    netSalary,
-    presentDays: summary.presentDays,
-    lateDays: summary.lateDays,
-    halfDays: summary.halfDays,
-    absentDays: summary.absentDays,
-    overtimeHours: round2(summary.overtimeHours),
-    workedHours: round2(summary.workedHours),
-    adjustments: [...adj.list, ...systemAdjustments],
+    baseSalary: payableBase, basic, allowances, overtimePay, adjustmentEarnings: adj.earnings, grossEarnings: gross,
+    gratuity, pfEmployee, pfEmployer, esicEmployee, esicEmployer, professionalTax: pt, lwf, tds, lateFines,
+    loanDeduction: appliedLoan, absentDeduction, adjustmentDeductions: adj.deductions, deductions, netSalary,
+    presentDays: summary.presentDays, lateDays: summary.lateDays, halfDays: summary.halfDays, absentDays: summary.absentDays,
+    overtimeHours: round2(summary.overtimeHours), workedHours: round2(summary.workedHours), adjustments: [...adj.list, ...systemAdjustments],
   };
 }
 
 export async function generatePayslipForEmployee(
   tenantId: string,
   tenantConfig: unknown,
-  employee: {
-    id: string;
-    salary: number;
-    salaryStructure?: unknown;
-    payMode?: string | null;
-    workBasisRate?: number | null;
-    shiftId: string | null;
-    joiningDate?: Date | null;
-  },
+  employee: { id: string; salary: number; salaryStructure?: unknown; payMode?: string | null; workBasisRate?: number | null; shiftId: string | null; joiningDate?: Date | null },
   month: string
 ): Promise<{ created: boolean; netSalary?: number; loanApplied?: number }> {
   const existing = await prisma.payslip.findUnique({ where: { employeeId_month: { employeeId: employee.id, month } } });
@@ -461,68 +341,35 @@ export async function generatePayslipForEmployee(
   const config = getPayrollConfig(tenantConfig);
   const summary = await attendanceSummary(tenantId, employee, month);
   const [loans, adjustments, taxDecl] = await Promise.all([
-    prisma.employeeLoan.findMany({
-      where: { tenantId, employeeId: employee.id },
-      select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true },
-    }),
-    prisma.payrollAdjustment.findMany({
-      where: { tenantId, employeeId: employee.id, month },
-      select: { id: true, type: true, label: true, amount: true },
-    }),
-    prisma.taxDeclaration.findUnique({
-      where: { employeeId_fy: { employeeId: employee.id, fy: fyFromMonth(month) } },
-      select: { sections: true, status: true },
-    }),
+    prisma.employeeLoan.findMany({ where: { tenantId, employeeId: employee.id }, select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true } }),
+    prisma.payrollAdjustment.findMany({ where: { tenantId, employeeId: employee.id, month }, select: { id: true, type: true, label: true, amount: true } }),
+    prisma.taxDeclaration.findUnique({ where: { employeeId_fy: { employeeId: employee.id, fy: fyFromMonth(month) } }, select: { sections: true, status: true } }),
   ]);
 
   const decl = (taxDecl?.sections ?? {}) as Record<string, number>;
   const investments = taxDecl?.status === "verified" ? Number(decl.total ?? 0) || 0 : 0;
-  const beforeLoan = computePayroll(config, employee, summary, 0, adjustments, investments);
+  const beforeLoan = computePayroll(config, employee, summary, 0, adjustments, investments, month);
   const { total: loanDeduction, updates } = loanDeductionForMonth(loans, month, beforeLoan.netSalary);
-  const result = computePayroll(config, employee, summary, loanDeduction, adjustments, investments);
+  const result = computePayroll(config, employee, summary, loanDeduction, adjustments, investments, month);
 
   return prisma.$transaction(async (tx) => {
     const raceExisting = await tx.payslip.findUnique({ where: { employeeId_month: { employeeId: employee.id, month } } });
     if (raceExisting) return { created: false, netSalary: raceExisting.netSalary, loanApplied: raceExisting.loanDeduction };
 
-    await tx.payslip.create({
-      data: {
-        tenantId,
-        employeeId: employee.id,
-        month,
-        baseSalary: result.baseSalary,
-        allowances: result.allowances,
-        overtimePay: result.overtimePay,
-        grossEarnings: result.grossEarnings,
-        gratuity: result.gratuity,
-        pfEmployee: result.pfEmployee,
-        pfEmployer: result.pfEmployer,
-        esicEmployee: result.esicEmployee,
-        esicEmployer: result.esicEmployer,
-        professionalTax: result.professionalTax,
-        lwf: result.lwf,
-        tds: result.tds,
-        lateFines: result.lateFines,
-        loanDeduction: result.loanDeduction,
-        deductions: result.deductions,
-        adjustments: result.adjustments.length > 0 ? (result.adjustments as unknown as Prisma.InputJsonValue) : undefined,
-        presentDays: Math.round(result.presentDays),
-        lateDays: Math.round(result.lateDays),
-        halfDays: Math.round(result.halfDays),
-        absentDays: Math.round(result.absentDays),
-        overtimeHours: result.overtimeHours,
-        workedHours: result.workedHours,
-        netSalary: result.netSalary,
-      },
-    });
+    await tx.payslip.create({ data: {
+      tenantId, employeeId: employee.id, month, baseSalary: result.baseSalary, allowances: result.allowances,
+      overtimePay: result.overtimePay, grossEarnings: result.grossEarnings, gratuity: result.gratuity,
+      pfEmployee: result.pfEmployee, pfEmployer: result.pfEmployer, esicEmployee: result.esicEmployee,
+      esicEmployer: result.esicEmployer, professionalTax: result.professionalTax, lwf: result.lwf, tds: result.tds,
+      lateFines: result.lateFines, loanDeduction: result.loanDeduction, deductions: result.deductions,
+      adjustments: result.adjustments.length ? (result.adjustments as unknown as Prisma.InputJsonValue) : undefined,
+      presentDays: Math.round(result.presentDays), lateDays: Math.round(result.lateDays), halfDays: Math.round(result.halfDays),
+      absentDays: Math.round(result.absentDays), overtimeHours: result.overtimeHours, workedHours: result.workedHours, netSalary: result.netSalary,
+    } });
 
     for (const u of updates) {
-      await tx.employeeLoan.update({
-        where: { id: u.id },
-        data: { outstanding: u.newOutstanding, lastDeductedMonth: u.lastDeductedMonth, status: u.close ? "closed" : "active" },
-      });
+      await tx.employeeLoan.update({ where: { id: u.id }, data: { outstanding: u.newOutstanding, lastDeductedMonth: u.lastDeductedMonth, status: u.close ? "closed" : "active" } });
     }
-
     return { created: true, netSalary: result.netSalary, loanApplied: result.loanDeduction };
   });
 }
