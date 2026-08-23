@@ -16,16 +16,18 @@ const normalize = (s: string) =>
     .replace(/^-|-$/g, "")
     .slice(0, 32);
 
+function strongPassword(password: string) {
+  return password.length >= 12 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password);
+}
+
 export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
   const [slug, setSlug] = useState("");
   const [slugState, setSlugState] = useState<"idle" | "checking" | "available" | "taken">("idle");
 
-  // Debounced availability check as the user types.
   useEffect(() => {
     const s = normalize(slug);
     if (s.length < 2) {
@@ -61,14 +63,15 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
       setError("That subdomain is not available. Pick another one.");
       return;
     }
-    setLoading(true);
+
     const form = new FormData(e.currentTarget);
     const password = String(form.get("password") ?? "");
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      setLoading(false);
+    if (!strongPassword(password)) {
+      setError("Password must be at least 12 characters and include upper-case, lower-case and a number.");
       return;
     }
+
+    setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
@@ -100,7 +103,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
     <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
-          <Input name="companyName" required placeholder="Acme Corp" className="h-11" />
+          <Input name="companyName" required minLength={2} maxLength={120} placeholder="Acme Corp" className="h-11" />
         </Field>
 
         <Field label="Workspace subdomain" hint="This becomes your team's web address">
@@ -111,23 +114,17 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
               placeholder="acme-corp"
               autoComplete="off"
               spellCheck={false}
+              maxLength={32}
               className="h-11 w-2/5 min-w-0 flex-1 bg-transparent px-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
             />
-            <span className="hidden select-none whitespace-nowrap pr-3.5 text-[12.5px] text-muted-foreground sm:block">
-              .{baseDomain}
-            </span>
+            <span className="hidden select-none whitespace-nowrap pr-3.5 text-[12.5px] text-muted-foreground sm:block">.{baseDomain}</span>
             <span className="flex h-11 w-11 shrink-0 items-center justify-center border-l border-edge">
               {slugState === "checking" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               {slugState === "available" && <Check className="h-4 w-4 text-emerald-400" />}
               {slugState === "taken" && <X className="h-4 w-4 text-rose-400" />}
             </span>
           </div>
-          <p
-            className={cn(
-              "mt-1.5 text-[12px]",
-              slugState === "taken" ? "text-rose-300" : slugState === "available" ? "text-emerald-400" : "text-muted-foreground"
-            )}
-          >
+          <p className={cn("mt-1.5 text-[12px]", slugState === "taken" ? "text-rose-300" : slugState === "available" ? "text-emerald-400" : "text-muted-foreground")}>
             {slugState === "available" && `Great — ${normalize(slug)}.${baseDomain} is yours!`}
             {slugState === "taken" && `${normalize(slug)}.${baseDomain} is already taken.`}
             {slugState === "idle" && "Letters, numbers and dashes — e.g. acme-corp, my-company"}
@@ -135,21 +132,17 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         </Field>
 
         <Field label="Your full name">
-          <Input name="name" required placeholder="Admin" className="h-11" />
+          <Input name="name" required minLength={2} maxLength={100} placeholder="Admin" className="h-11" />
         </Field>
         <Field label="Work email">
-          <Input name="email" type="email" required autoComplete="email" placeholder="admin@yourcompany.com" className="h-11" />
+          <Input name="email" type="email" required maxLength={254} autoComplete="email" placeholder="admin@yourcompany.com" className="h-11" />
         </Field>
-        <Field label="Password" hint="At least 6 characters">
-          <Input name="password" type="password" required autoComplete="new-password" placeholder="Create a password" className="h-11" />
+        <Field label="Password" hint="12+ characters with upper-case, lower-case and a number">
+          <Input name="password" type="password" required minLength={12} autoComplete="new-password" placeholder="Create a strong password" className="h-11" />
         </Field>
       </div>
 
-      {error && (
-        <p className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">
-          {error}
-        </p>
-      )}
+      {error && <p className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">{error}</p>}
 
       <Button type="submit" size="lg" loading={loading} className="mt-6 w-full">
         <Rocket className="h-4 w-4" />
