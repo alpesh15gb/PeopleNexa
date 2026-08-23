@@ -1,0 +1,60 @@
+name: Hardening CI
+
+on:
+  push:
+    branches:
+      - hardening/go-live-2026-08-23
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://peoplenexa:peoplenexa@127.0.0.1:5432/peoplenexa
+      JWT_SECRET: ci-only-jwt-secret-ci-only-jwt-secret
+      EBIO_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CRON_SECRET: ci-only-cron-secret
+      DEVICE_INGEST_SECRET: ci-only-device-secret
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: peoplenexa
+          POSTGRES_PASSWORD: peoplenexa
+          POSTGRES_DB: peoplenexa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U peoplenexa"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply schema to CI database
+        run: npx prisma db push
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
