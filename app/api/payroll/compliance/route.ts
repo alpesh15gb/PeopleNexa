@@ -8,8 +8,8 @@ const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const csv = (rows: (string | number)[][]) =>
   rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
 const pad = (n: number) => String(n).padStart(2, "0");
+const integerRupees = (n: number) => Math.max(0, Math.round(n));
 
-/** FY months Apr..Mar, e.g. 2026-27 => 2026-04 ... 2027-03. */
 export function financialYearMonths(fy: string): string[] {
   const startYear = Number(fy.slice(0, 4));
   if (!Number.isInteger(startYear)) throw new Error("Invalid financial year.");
@@ -19,7 +19,6 @@ export function financialYearMonths(fy: string): string[] {
   ];
 }
 
-/** Indian TDS quarter containing the given calendar month. */
 export function quarterMonths(month: string): string[] {
   if (!MONTH_RE.test(month)) throw new Error("Invalid month.");
   const [y, m] = month.split("-").map(Number);
@@ -28,9 +27,6 @@ export function quarterMonths(month: string): string[] {
 }
 
 function basicFromPayslip(p: { baseSalary: number; allowances: number }): number {
-  // Since payroll hardening, baseSalary = payable contractual earnings and
-  // allowances are the non-Basic remainder. This also provides a sane fallback
-  // for records created before a dedicated Basic column exists.
   return Math.max(0, p.baseSalary - p.allowances);
 }
 
@@ -50,39 +46,71 @@ export async function GET(req: NextRequest) {
   const fy = fyFromMonth(month);
 
   try {
-    if (type === "ecr") {
+    if (type === "ecr" || type === "pf_register") {
       const payslips = await prisma.payslip.findMany({
         where: { tenantId: session.tenantId, month },
-        include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, joiningDate: true } } },
+        include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, uan: true, joiningDate: true } } },
         orderBy: { employee: { employeeNumber: "asc" } },
       });
       ensureFinalPayroll(payslips, month);
-      const missingUan = payslips.filter((p) => !p.employee.uan?.trim());
+      const covered = payslips.filter((p) => p.pfEmployee > 0 || p.pfEmployer > 0);
+      const missingUan = covered.filter((p) => !/^\d{12}$/.test(p.employee.uan?.trim() ?? ""));
       if (missingUan.length) {
-        return NextResponse.json({ error: `${missingUan.length} paid employee(s) are missing UAN. Complete statutory master data before ECR export.` }, { status: 409 });
+        return NextResponse.json({ error: `${missingUan.length} PF-covered employee(s) have a missing/invalid 12-digit UAN.` }, { status: 409 });
+      }
+
+      if (type === "ecr") {
+        // Current EPFO regular-return file: 11 fields separated by #~#.
+        // EPS/EDLI use the standard ₹15,000 wage ceiling. Employee-specific
+        // excluded-EPS cases require master-data support and are therefore
+        // deliberately blocked below when contribution math is inconsistent.
+        const lines: string[] = [];
+        for (const p of covered) {
+          const grossWages = integerRupees(p.grossEarnings);
+          const basic = basicFromPayslip(p);
+          const epfWages = integerRupees(Math.min(basic, 15000));
+          const epsWages = epfWages;
+          const edliWages = epfWages;
+          const ee = integerRupees(p.pfEmployee);
+          const employerTotal = integerRupees(p.pfEmployer);
+          const eps = integerRupees(Math.min(epsWages * 0.0833, 1250));
+          const erEpf = Math.max(0, employerTotal - eps);
+          if (ee > grossWages || employerTotal < eps) {
+            throw new Error(`PF calculation for employee ${p.employee.employeeNumber} is inconsistent; regenerate payroll before ECR.`);
+          }
+          const ncpDays = Math.max(0, Math.round(p.absentDays));
+          const fields = [
+            p.employee.uan!.trim(),
+            `${p.employee.firstName} ${p.employee.lastName}`.trim().replace(/[\r\n#~]/g, " "),
+            grossWages,
+            epfWages,
+            epsWages,
+            edliWages,
+            ee,
+            eps,
+            erEpf,
+            ncpDays,
+            0,
+          ];
+          lines.push(fields.join("#~#"));
+        }
+        return new NextResponse(lines.join("\r\n") + (lines.length ? "\r\n" : ""), {
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Content-Disposition": `attachment; filename="ecr-${month}.txt"` },
+        });
       }
 
       const rows: (string | number)[][] = [
-        ["S.No", "Member ID", "Member Name", "UAN", "Date of Joining", "Gross Wages", "EPF Wages", "EE EPF", "ER EPF", "ER EPS"],
-        ...payslips.map((p, i) => {
-          const basic = basicFromPayslip(p);
-          const epfWages = Math.min(basic, 15000);
-          const ee = Math.round(epfWages * 0.12);
-          const eps = Math.round(epfWages * 0.0833);
-          const erEpf = Math.max(0, ee - eps);
-          return [
-            i + 1,
-            p.employee.employeeNumber,
-            `${p.employee.firstName} ${p.employee.lastName}`.trim(),
-            p.employee.uan ?? "",
-            p.employee.joiningDate ? p.employee.joiningDate.toISOString().slice(0, 10) : "",
-            p.grossEarnings.toFixed(2),
-            epfWages.toFixed(2),
-            ee.toFixed(2),
-            erEpf.toFixed(2),
-            eps.toFixed(2),
-          ];
-        }),
+        ["Employee Code", "Member Name", "UAN", "Gross Wages", "EPF Wages", "EE PF", "Employer PF Total", "NCP Days"],
+        ...covered.map((p) => [
+          p.employee.employeeNumber,
+          `${p.employee.firstName} ${p.employee.lastName}`.trim(),
+          p.employee.uan ?? "",
+          p.grossEarnings.toFixed(2),
+          Math.min(basicFromPayslip(p), 15000).toFixed(2),
+          p.pfEmployee.toFixed(2),
+          p.pfEmployer.toFixed(2),
+          p.absentDays,
+        ]),
       ];
       return new NextResponse(csv(rows), {
         headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="pf-contribution-register-${month}.csv"` },
@@ -97,9 +125,9 @@ export async function GET(req: NextRequest) {
         orderBy: { employee: { employeeNumber: "asc" } },
       });
       ensureFinalPayroll(payslips, fy);
-      const missingPan = payslips.filter((p) => !p.employee.pan?.trim());
+      const missingPan = payslips.filter((p) => !/^[A-Z]{5}\d{4}[A-Z]$/.test(p.employee.pan?.trim().toUpperCase() ?? ""));
       if (missingPan.length) {
-        return NextResponse.json({ error: `${new Set(missingPan.map((p) => p.employee.id)).size} paid employee(s) are missing PAN.` }, { status: 409 });
+        return NextResponse.json({ error: `${new Set(missingPan.map((p) => p.employee.id)).size} paid employee(s) have a missing/invalid PAN.` }, { status: 409 });
       }
 
       const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; gross: number; tds: number; pf: number; net: number; months: number }>();
@@ -119,6 +147,8 @@ export async function GET(req: NextRequest) {
           gross.toFixed(2), months, tds.toFixed(2), pf.toFixed(2), net.toFixed(2),
         ]),
       ];
+      // This is the annual salary/TDS working used to prepare Form 16. The
+      // digitally-signed TRACES Form 16 itself is issued through the tax portal.
       return new NextResponse(csv(rows), {
         headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="form16-working-${fy}.csv"` },
       });
@@ -132,9 +162,9 @@ export async function GET(req: NextRequest) {
         orderBy: { employee: { employeeNumber: "asc" } },
       });
       ensureFinalPayroll(payslips, months.join(", "));
-      const missingPan = payslips.filter((p) => !p.employee.pan?.trim());
+      const missingPan = payslips.filter((p) => !/^[A-Z]{5}\d{4}[A-Z]$/.test(p.employee.pan?.trim().toUpperCase() ?? ""));
       if (missingPan.length) {
-        return NextResponse.json({ error: `${new Set(missingPan.map((p) => p.employee.id)).size} paid employee(s) are missing PAN.` }, { status: 409 });
+        return NextResponse.json({ error: `${new Set(missingPan.map((p) => p.employee.id)).size} paid employee(s) have a missing/invalid PAN.` }, { status: 409 });
       }
 
       const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; tds: number; salary: number }>();
@@ -150,6 +180,9 @@ export async function GET(req: NextRequest) {
           `${emp.firstName} ${emp.lastName}`.trim(), emp.employeeNumber, emp.pan ?? "", months.join(" / "), salary.toFixed(2), tds.toFixed(2),
         ]),
       ];
+      // Form 24Q filing requires deductor/TAN/challan metadata not modelled in
+      // the current schema. Export a validated working rather than fabricating
+      // a filing file with missing statutory fields.
       return new NextResponse(csv(rows), {
         headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="form24q-working-${months[0]}-${months[2]}.csv"` },
       });
