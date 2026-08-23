@@ -46,7 +46,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=dev
 
-      - name: Dependency security audit
+      - name: Audit high-severity dependencies
         run: npm audit --audit-level=high
 
       - name: Generate Prisma client
