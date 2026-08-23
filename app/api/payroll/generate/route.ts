@@ -112,8 +112,14 @@ export async function POST(req: NextRequest) {
   const failures: Array<{ employeeId: string; error: string }> = [];
 
   for (const emp of employees) {
+    if (emp.salary == null || emp.salary <= 0) {
+      failures.push({ employeeId: emp.id, error: "Employee has no valid salary configured." });
+      continue;
+    }
+
     try {
-      const res = await generatePayslipForEmployee(session.tenantId, tenant.config ?? null, emp, month);
+      const payrollEmployee = { ...emp, salary: emp.salary };
+      const res = await generatePayslipForEmployee(session.tenantId, tenant.config ?? null, payrollEmployee, month);
       if (res.created) created++;
       else existing++;
       totalLoanApplied += res.loanApplied ?? 0;
