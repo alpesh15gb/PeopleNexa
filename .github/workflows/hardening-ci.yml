@@ -59,3 +59,33 @@ jobs:
         run: npm run build
         env:
           NODE_ENV: production
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_ENV=production npm start > /tmp/peoplenexa.log 2>&1 &
+          APP_PID=$!
+          trap 'kill "$APP_PID" 2>/dev/null || true; cat /tmp/peoplenexa.log' EXIT
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"db":"up"' /tmp/health.json
+          curl -fsS http://127.0.0.1:3000/ > /tmp/home.html
+          curl -fsS http://127.0.0.1:3000/login > /tmp/login.html
+          grep -q 'PeopleNexa' /tmp/home.html
+          grep -q 'Login to your account' /tmp/login.html
+
+          ADMIN_CODE=$(curl -sS -o /tmp/admin.html -w '%{http_code}' http://127.0.0.1:3000/admin)
+          test "$ADMIN_CODE" = "307"
+          grep -qi '/login' /tmp/admin.html || true
+
+          DEVICE_CODE=$(curl -sS -o /tmp/device.txt -w '%{http_code}' 'http://127.0.0.1:3000/iclock/cdata?SN=smoke-device')
+          test "$DEVICE_CODE" = "401"
+          grep -qi 'unauthorized' /tmp/device.txt
