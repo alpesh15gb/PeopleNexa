@@ -20,13 +20,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid payroll month." }, { status: 400 });
   }
   const { start, end } = monthRange(month);
-  if (start.getTime() > Date.now()) {
-    return NextResponse.json({ error: "Payroll cannot be generated for a future month." }, { status: 400 });
+  if (end.getTime() > Date.now()) {
+    return NextResponse.json(
+      { error: "Payroll can be generated only after the selected month has fully closed in IST." },
+      { status: 409 }
+    );
   }
 
-  // Close every eligible attendance row before preflight. Current-month payroll
-  // is allowed only for closed days; the preflight below catches open rows and
-  // pending decisions instead of silently using mutable attendance.
+  // Close every eligible attendance row before preflight. Payroll only consumes
+  // a closed month and is blocked if any attendance/leave decision is mutable.
   await finalizeEligibleDays(session.tenantId, 5000);
 
   const [tenant, employees, openAttendance, pendingCorrections, pendingLeaves] = await Promise.all([
@@ -35,10 +37,7 @@ export async function POST(req: NextRequest) {
       where: {
         tenantId: session.tenantId,
         salary: { gt: 0 },
-        OR: [
-          { joiningDate: null },
-          { joiningDate: { lt: end } },
-        ],
+        OR: [{ joiningDate: null }, { joiningDate: { lt: end } }],
         AND: [
           {
             OR: [
