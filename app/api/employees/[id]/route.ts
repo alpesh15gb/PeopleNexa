@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
@@ -36,7 +37,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const salary = body.salary !== undefined ? parseOptionalMoney(body.salary, "Salary") : employee.salary;
     const workBasisRate = body.workBasisRate !== undefined ? parseOptionalMoney(body.workBasisRate, "Work-basis rate") : employee.workBasisRate;
     const payMode = body.payMode !== undefined ? validatePayMode(body.payMode) : employee.payMode;
-    const salaryStructure = body.salaryStructure !== undefined ? validateSalaryStructure(body.salaryStructure) : employee.salaryStructure;
+    const salaryStructure = body.salaryStructure !== undefined ? validateSalaryStructure(body.salaryStructure) : undefined;
     const joiningDate = body.joiningDate !== undefined ? parseJoiningDate(body.joiningDate) : employee.joiningDate;
 
     const updated = await prisma.employee.update({
@@ -53,7 +54,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         departmentId: refs.departmentId,
         shiftId: refs.shiftId,
         managerId: refs.managerId,
-        salaryStructure,
+        ...(body.salaryStructure !== undefined
+          ? { salaryStructure: salaryStructure === null ? Prisma.DbNull : salaryStructure }
+          : {}),
         bankName: body.bankName !== undefined ? (body.bankName ? String(body.bankName).trim() : null) : employee.bankName,
         accountNumber: body.accountNumber !== undefined ? (body.accountNumber ? String(body.accountNumber).trim() : null) : employee.accountNumber,
         ifscCode: body.ifscCode !== undefined ? (body.ifscCode ? String(body.ifscCode).trim().toUpperCase() : null) : employee.ifscCode,
