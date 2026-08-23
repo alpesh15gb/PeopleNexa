@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { getSession } from "@/lib/session";
-import { getEffectivePlans } from "@/lib/plans-server";
+import { PLANS } from "@/lib/modules";
 import { LandingPage } from "@/components/landing/landing-page";
 
 const base = process.env.APP_BASE_DOMAIN ?? "peoplenexa.in";
@@ -98,13 +98,21 @@ export default async function LandingRoute() {
     redirect(session.role === "superadmin" ? "/superadmin" : session.role === "admin" ? "/admin" : "/employee");
   }
 
-  // Live pricing — reflects super-admin plan edits from the console, always
-  // read fresh so a price change shows on the next page load.
-  const plans = await getEffectivePlans({ fresh: true });
+  // Live pricing normally reflects super-admin plan edits from the database.
+  // The public marketing page must remain available during a DB outage or on a
+  // preview that has not yet been connected to Postgres, so fall back to the
+  // code-defined plans without weakening any authenticated/HRMS data path.
+  let plans = [...PLANS];
+  try {
+    const { getEffectivePlans } = await import("@/lib/plans-server");
+    plans = await getEffectivePlans({ fresh: true });
+  } catch (error) {
+    console.warn("Landing pricing database unavailable; using default plans.", error);
+  }
 
   // Structured data: Organization + WebSite + SoftwareApplication (Google's
   // preferred JSON-LD format). Offers mirror the effective plans, so schema
-  // pricing stays in sync with super-admin edits.
+  // pricing stays in sync with super-admin edits when the DB is available.
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [

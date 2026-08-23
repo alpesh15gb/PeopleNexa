@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getEbioserverConfig, importEmployeesFromEbioserver } from "@/lib/ebioserver";
+import { validateOutboundHttpUrl } from "@/lib/outbound-url";
 
-// POST /api/settings/ebioserver/import — pull the employee master from this
-// workspace's eBioserver and create employees (idempotent).
 export async function POST() {
   const session = await getSession();
   if (!session || session.role !== "admin") {
@@ -17,7 +16,12 @@ export async function POST() {
   if (!profile.url || !profile.username) {
     return NextResponse.json({ error: "Configure the eBioserver connection first." }, { status: 400 });
   }
+  try {
+    await validateOutboundHttpUrl(profile.url);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Invalid eBioserver URL" }, { status: 400 });
+  }
 
   const result = await importEmployeesFromEbioserver(session.tenantId, profile);
-  return NextResponse.json(result);
+  return NextResponse.json(result, { status: result.ok ? 200 : 502 });
 }

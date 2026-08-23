@@ -1,0 +1,93 @@
+name: Hardening CI
+
+on:
+  push:
+    branches:
+      - hardening/go-live-2026-08-23
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://peoplenexa:peoplenexa@127.0.0.1:5432/peoplenexa
+      JWT_SECRET: ci-only-jwt-secret-ci-only-jwt-secret
+      EBIO_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CRON_SECRET: ci-only-cron-secret
+      DEVICE_INGEST_SECRET: ci-only-device-secret
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: peoplenexa
+          POSTGRES_PASSWORD: peoplenexa
+          POSTGRES_DB: peoplenexa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U peoplenexa"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Audit high-severity dependencies
+        run: npm audit --audit-level=high
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply schema to CI database
+        run: npx prisma db push
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_ENV=production npm start > /tmp/peoplenexa.log 2>&1 &
+          APP_PID=$!
+          trap 'kill "$APP_PID" 2>/dev/null || true; cat /tmp/peoplenexa.log' EXIT
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"db":"up"' /tmp/health.json
+          curl -fsS http://127.0.0.1:3000/ > /tmp/home.html
+          curl -fsS http://127.0.0.1:3000/login > /tmp/login.html
+          grep -q 'PeopleNexa' /tmp/home.html
+          grep -q 'Login to your account' /tmp/login.html
+
+          ADMIN_CODE=$(curl -sS -o /tmp/admin.html -w '%{http_code}' http://127.0.0.1:3000/admin)
+          test "$ADMIN_CODE" = "307"
+
+          DEVICE_CODE=$(curl -sS -o /tmp/device.txt -w '%{http_code}' 'http://127.0.0.1:3000/iclock/cdata?SN=smoke-device')
+          test "$DEVICE_CODE" = "401"
+          grep -qi 'unauthorized' /tmp/device.txt

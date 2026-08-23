@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 import { dispatchWebhook } from "@/lib/webhooks";
+import { parseJoiningDate, parseOptionalMoney, validateEmployeeReferences, validatePayMode, validateSalaryStructure } from "@/lib/employee-validation";
 
 const select = {
   id: true,
@@ -28,11 +30,26 @@ const select = {
   shift: { select: { id: true, name: true, startTime: true, endTime: true } },
 } as const;
 
+type EmployeeRow = Prisma.EmployeeGetPayload<{ select: typeof select }>;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function nextEmployeeNumber(tenantId: string): Promise<string> {
+  const rows = await prisma.employee.findMany({
+    where: { tenantId, employeeNumber: { startsWith: "EMP-" } },
+    select: { employeeNumber: true },
+  });
+  let max = 0;
+  for (const row of rows) {
+    const m = /^EMP-(\d+)$/.exec(row.employeeNumber);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `EMP-${String(max + 1).padStart(3, "0")}`;
+}
+
 export async function GET() {
   const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const employees = await prisma.employee.findMany({
     where: { tenantId: session.tenantId },
     select,
@@ -43,17 +60,22 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   try {
     const body = await req.json();
+    const firstName = String(body.firstName ?? "").trim();
+    const lastName = String(body.lastName ?? "").trim();
     const email = String(body.email ?? "").toLowerCase().trim();
-    if (!body.firstName || !email || !body.password) {
-      return NextResponse.json({ error: "First name, email and password are required." }, { status: 400 });
+    const password = String(body.password ?? "");
+    if (firstName.length < 1 || firstName.length > 80) throw new Error("First name is required and must be under 80 characters.");
+    if (!EMAIL_RE.test(email) || email.length > 254) throw new Error("Enter a valid employee email address.");
+    if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+      throw new Error("Employee password must be at least 12 characters and include upper-case, lower-case and a number.");
     }
-    const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } });
-    if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
+
+    const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email }, select: { id: true } });
+    if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 409 });
 
     const [count, tenant] = await Promise.all([
       prisma.employee.count({ where: { tenantId: session.tenantId } }),
@@ -61,39 +83,55 @@ export async function POST(req: NextRequest) {
     ]);
     const seats = tenant?.seats ?? 0;
     if (count >= seats) {
-      return NextResponse.json(
-        { error: `Seat limit reached (${seats} seats on your current plan). Please contact your account manager to upgrade.` },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: `Seat limit reached (${seats} seats on your current plan). Please contact your account manager to upgrade.` }, { status: 403 });
     }
-    const employee = await prisma.employee.create({
-      data: {
-        tenantId: session.tenantId,
-        employeeNumber: `EMP-${String(count + 1).padStart(3, "0")}`,
-        firstName: body.firstName,
-        lastName: body.lastName ?? "",
-        email,
-        phone: body.phone ?? null,
-        password: await hashPassword(String(body.password)),
-        role: "employee",
-        position: body.position ?? null,
-        salary: body.salary != null && body.salary !== "" ? Number(body.salary) : null,
-        joiningDate: body.joiningDate ? new Date(body.joiningDate) : null,
-        branchId: body.branchId || null,
-        departmentId: body.departmentId || null,
-        shiftId: body.shiftId || null,
-        bankName: body.bankName || null,
-        accountNumber: body.accountNumber || null,
-        ifscCode: body.ifscCode || null,
-        pan: body.pan || null,
-        uan: body.uan || null,
-        payMode: body.payMode || "monthly",
-        workBasisRate: body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null,
-        managerId: body.managerId || null,
-        salaryStructure: body.salaryStructure || null,
-      },
-      select,
-    });
+
+    const refs = await validateEmployeeReferences(session.tenantId, body);
+    const salary = parseOptionalMoney(body.salary, "Salary");
+    const workBasisRate = parseOptionalMoney(body.workBasisRate, "Work-basis rate");
+    const payMode = validatePayMode(body.payMode);
+    const salaryStructure = validateSalaryStructure(body.salaryStructure);
+    const joiningDate = parseJoiningDate(body.joiningDate);
+    const passwordHash = await hashPassword(password);
+
+    let employee: EmployeeRow | null = null;
+    for (let attempt = 0; attempt < 4 && !employee; attempt++) {
+      const employeeNumber = await nextEmployeeNumber(session.tenantId);
+      try {
+        employee = await prisma.employee.create({
+          data: {
+            tenantId: session.tenantId,
+            employeeNumber,
+            firstName,
+            lastName,
+            email,
+            phone: body.phone ? String(body.phone).trim() : null,
+            password: passwordHash,
+            role: "employee",
+            position: body.position ? String(body.position).trim() : null,
+            salary,
+            joiningDate,
+            branchId: refs.branchId,
+            departmentId: refs.departmentId,
+            shiftId: refs.shiftId,
+            bankName: body.bankName ? String(body.bankName).trim() : null,
+            accountNumber: body.accountNumber ? String(body.accountNumber).trim() : null,
+            ifscCode: body.ifscCode ? String(body.ifscCode).trim().toUpperCase() : null,
+            pan: body.pan ? String(body.pan).trim().toUpperCase() : null,
+            uan: body.uan ? String(body.uan).trim() : null,
+            payMode,
+            workBasisRate,
+            managerId: refs.managerId,
+            salaryStructure: salaryStructure === null ? Prisma.DbNull : salaryStructure,
+          },
+          select,
+        });
+      } catch (err) {
+        if ((err as { code?: string }).code !== "P2002" || attempt === 3) throw err;
+      }
+    }
+    if (!employee) throw new Error("Could not allocate an employee number. Please retry.");
+
     await dispatchWebhook(session.tenantId, "employee.created", {
       employeeId: employee.id,
       employeeNumber: employee.employeeNumber,
@@ -102,7 +140,9 @@ export async function POST(req: NextRequest) {
       email: employee.email,
     });
     return NextResponse.json({ employee }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Failed to create employee." }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to create employee.";
+    const status = (err as { code?: string }).code === "P2002" ? 409 : 400;
+    return NextResponse.json({ error: message }, { status });
   }
 }

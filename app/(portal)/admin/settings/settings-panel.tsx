@@ -96,7 +96,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
-      <div className="card-surface rounded-2xl p-6 lg:col-span-2">
+      <div id="ebioserver" className="card-surface scroll-mt-24 rounded-2xl p-6 lg:col-span-2">
         <div className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-brand text-white">
             <Link2 className="h-4 w-4" />
@@ -112,12 +112,12 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         <div className="mt-6 space-y-4">
           <Field
             label="Web Service URL"
-            hint="e.g. http://192.168.6.47:8080/Webservice.asmx or the eSSL cloud demo"
+            hint="Use an HTTPS/public endpoint by default. Private/LAN addresses require the deployment operator to explicitly enable private integration URLs."
           >
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://192.168.x.x:8080/Webservice.asmx"
+              placeholder="https://bio.example.com/Webservice.asmx"
               className="h-11 font-mono"
             />
           </Field>
@@ -205,9 +205,9 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <UserPlus className="h-4 w-4 text-brand" /> Employees from eBioserver
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Pulls the employee master (codes + names) from this server so their punches flow into attendance
-            automatically. Idempotent — re-running only adds what's new. Imported employees get the default
-            login password <span className="font-mono text-foreground">123456</span>.
+            Pulls the employee master (codes + names) from this server so their punches flow into attendance automatically.
+            Idempotent — re-running only adds what&apos;s new. Imported employees receive a non-guessable internal credential;
+            set a new portal password from the employee record before giving them login access.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button variant="outline" onClick={importEmployees} loading={importing}>
@@ -254,7 +254,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             )}
             {!status.lastError && (
               <p className="text-[12px] text-muted-foreground">
-                After saving, run the polling job — it pulls from this workspace's own server and isolates failures per client.
+                After saving, run the polling job — it pulls from this workspace&apos;s own server and isolates failures per client.
               </p>
             )}
           </dl>
@@ -266,7 +266,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <li>Enter your eBioserver Web Service URL + credentials (password encrypted).</li>
             <li>Test the connection, then enable the automated pull.</li>
             <li>Devices appear under <span className="text-foreground">Admin → Devices</span> automatically; their punches flow into attendance.</li>
-            <li>Each client's server is polled in isolation — a slow or failing server only flags itself.</li>
+            <li>Each client&apos;s server is polled in isolation — a slow or failing server only flags itself.</li>
           </ol>
         </div>
       </div>

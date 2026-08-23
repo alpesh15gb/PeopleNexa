@@ -11,11 +11,7 @@
  * access helper lives in lib/modules-server.ts.
  */
 
-export interface ModuleDef {
-  key: string;
-  label: string;
-  description: string;
-}
+export interface ModuleDef { key: string; label: string; description: string }
 
 export const MODULES: ModuleDef[] = [
   { key: "attendance", label: "Attendance", description: "Clock-in/out, daily marking, geofenced punches" },
@@ -44,155 +40,49 @@ export const MODULES: ModuleDef[] = [
 ];
 
 export interface PlanDef {
-  key: string;
-  label: string;
-  seats: number;
-  /** Monthly price per seat in INR (0 = free / custom). */
-  pricePerSeat: number;
-  /** Monthly-equivalent per seat when billed annually (0 = free / custom). */
-  annualPricePerSeat: number;
-  /** Free trial length in days for self-serve signups. */
-  trialDays: number;
-  /** Modules included in this plan by default. */
-  modules: string[];
-  blurb: string;
+  key: string; label: string; seats: number; pricePerSeat: number; annualPricePerSeat: number;
+  trialDays: number; modules: string[]; blurb: string;
 }
 
 export const PLANS: PlanDef[] = [
-  {
-    key: "trial",
-    label: "Trial",
-    seats: 10,
-    pricePerSeat: 0,
-    annualPricePerSeat: 0,
-    trialDays: 30,
-    modules: MODULES.map((m) => m.key),
-    blurb: "Free 30-day trial — everything enabled",
-  },
-  {
-    key: "starter",
-    label: "Starter",
-    seats: 10,
-    pricePerSeat: 39,
-    annualPricePerSeat: 31,
-    trialDays: 30,
-    modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches"],
-    blurb: "Core HR & attendance",
-  },
-  {
-    key: "growth",
-    label: "Growth",
-    seats: 50,
-    pricePerSeat: 69,
-    annualPricePerSeat: 55,
-    trialDays: 30,
-    modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches", "payroll", "expenses", "reports", "documents", "rosters", "orgchart"],
-    blurb: "Adds payroll, expenses, reports, rosters & org chart",
-  },
-  {
-    key: "pro",
-    label: "Pro",
-    seats: 200,
-    pricePerSeat: 99,
-    annualPricePerSeat: 79,
-    trialDays: 30,
-    modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches", "payroll", "expenses", "reports", "assets", "devices", "journey", "ai", "documents", "performance", "helpdesk", "feed", "policies", "rosters", "orgchart", "onboarding", "exit", "platform"],
-    blurb: "Everything included",
-  },
-  {
-    key: "enterprise",
-    label: "Enterprise",
-    seats: 1000,
-    pricePerSeat: 0,
-    annualPricePerSeat: 0,
-    trialDays: 0,
-    modules: MODULES.map((m) => m.key),
-    blurb: "Custom contracts & dedicated support",
-  },
+  { key: "trial", label: "Trial", seats: 10, pricePerSeat: 0, annualPricePerSeat: 0, trialDays: 30, modules: MODULES.map((m) => m.key), blurb: "Free 30-day trial — everything enabled" },
+  { key: "starter", label: "Starter", seats: 10, pricePerSeat: 39, annualPricePerSeat: 31, trialDays: 30, modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches"], blurb: "Core HR & attendance" },
+  { key: "growth", label: "Growth", seats: 50, pricePerSeat: 69, annualPricePerSeat: 55, trialDays: 30, modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches", "payroll", "expenses", "reports", "documents", "rosters", "orgchart"], blurb: "Adds payroll, expenses, reports, rosters & org chart" },
+  { key: "pro", label: "Pro", seats: 200, pricePerSeat: 99, annualPricePerSeat: 79, trialDays: 30, modules: ["attendance", "employees", "leaves", "holidays", "shifts", "branches", "payroll", "expenses", "reports", "assets", "devices", "journey", "ai", "documents", "performance", "helpdesk", "feed", "policies", "rosters", "orgchart", "onboarding", "exit", "platform"], blurb: "Everything included" },
+  { key: "enterprise", label: "Enterprise", seats: 1000, pricePerSeat: 0, annualPricePerSeat: 0, trialDays: 0, modules: MODULES.map((m) => m.key), blurb: "Custom contracts & dedicated support" },
 ];
 
-/** Annual per-seat rate if it beats monthly; falls back to monthly × 12. */
-export function planMonthlyPrice(plan: PlanDef): number {
-  return plan.pricePerSeat;
-}
-
-export function planAnnualPrice(plan: PlanDef): number {
-  return plan.annualPricePerSeat > 0 ? plan.annualPricePerSeat : plan.pricePerSeat;
-}
-
+export function planMonthlyPrice(plan: PlanDef): number { return plan.pricePerSeat }
+export function planAnnualPrice(plan: PlanDef): number { return plan.annualPricePerSeat > 0 ? plan.annualPricePerSeat : plan.pricePerSeat }
 export const planFor = (key: string): PlanDef => PLANS.find((p) => p.key === key) ?? PLANS[0];
-
 export const moduleFor = (key: string): ModuleDef | undefined => MODULES.find((m) => m.key === key);
 
-/** Path prefixes mapped to the module they belong to (pages + APIs). */
+/** Path prefixes mapped to the module they belong to. Put specific paths first. */
 const ROUTE_MODULES: Array<[string, string]> = [
-  ["/admin/attendance", "attendance"],
-  ["/admin/employees", "employees"],
-  ["/admin/leaves", "leaves"],
-  ["/admin/holidays", "holidays"],
-  ["/admin/shifts", "shifts"],
-  ["/admin/rosters", "rosters"],
-  ["/admin/org-chart", "orgchart"],
-  ["/admin/onboarding", "onboarding"],
-  ["/admin/exits", "exit"],
-  ["/admin/webhooks", "platform"],
-  ["/admin/device-health", "platform"],
-  ["/admin/branches", "branches"],
-  ["/admin/assets", "assets"],
-  ["/admin/devices", "devices"],
-  ["/admin/payroll", "payroll"],
-  ["/admin/loans", "payroll"],
-  ["/admin/tax", "payroll"],
-  ["/admin/reports", "reports"],
-  ["/admin/whatsapp", "platform"],
-  ["/admin/expenses", "expenses"],
-  ["/admin/regularization", "attendance"],
-  ["/admin/journeys", "journey"],
-  ["/admin/ai", "ai"],
-  ["/admin/documents", "documents"],
-  ["/admin/performance", "performance"],
-  ["/admin/helpdesk", "helpdesk"],
-  ["/admin/policies", "policies"],
-  ["/employee/attendance", "attendance"],
-  ["/employee/documents", "documents"],
-  ["/employee/performance", "performance"],
-  ["/employee/helpdesk", "helpdesk"],
-  ["/employee/feed", "feed"],
-  ["/employee/policies", "policies"],
-  ["/employee/leaves", "leaves"],
-  ["/employee/payslips", "payroll"],
-  ["/employee/tax", "payroll"],
-  ["/employee/expenses", "expenses"],
-  ["/api/attendance", "attendance"],
-  ["/api/employees", "employees"],
-  ["/api/leaves", "leaves"],
-  ["/api/holidays", "holidays"],
-  ["/api/shifts", "shifts"],
-  ["/api/branches", "branches"],
-  ["/api/assets", "assets"],
-  ["/api/devices", "devices"],
-  ["/api/payroll", "payroll"],
-  ["/api/loans", "payroll"],
-  ["/api/expenses", "expenses"],
-  ["/api/attendance/corrections", "attendance"],
-  ["/api/reports", "reports"],
-  ["/api/location", "journey"],
-  ["/api/journeys", "journey"],
-  ["/api/ai", "ai"],
-  ["/api/documents", "documents"],
-  ["/api/performance", "performance"],
-  ["/api/helpdesk", "helpdesk"],
-  ["/api/feed", "feed"],
-  ["/api/policies", "policies"],
-  ["/api/rosters", "rosters"],
-  ["/api/onboarding", "onboarding"],
-  ["/api/exits", "exit"],
-  ["/api/webhooks", "platform"],
-  ["/api/device-health", "platform"],
-  ["/api/employees/org-chart", "orgchart"],
+  ["/api/settings/ebioserver", "devices"],
+  ["/api/config/payroll", "payroll"],
+  ["/api/settings/whatsapp", "platform"],
+  ["/admin/attendance", "attendance"], ["/admin/employees", "employees"], ["/admin/leaves", "leaves"],
+  ["/admin/holidays", "holidays"], ["/admin/shifts", "shifts"], ["/admin/rosters", "rosters"],
+  ["/admin/org-chart", "orgchart"], ["/admin/onboarding", "onboarding"], ["/admin/exits", "exit"],
+  ["/admin/webhooks", "platform"], ["/admin/device-health", "platform"], ["/admin/branches", "branches"],
+  ["/admin/assets", "assets"], ["/admin/devices", "devices"], ["/admin/payroll", "payroll"],
+  ["/admin/loans", "payroll"], ["/admin/tax", "payroll"], ["/admin/reports", "reports"],
+  ["/admin/whatsapp", "platform"], ["/admin/expenses", "expenses"], ["/admin/regularization", "attendance"],
+  ["/admin/journeys", "journey"], ["/admin/ai", "ai"], ["/admin/documents", "documents"],
+  ["/admin/performance", "performance"], ["/admin/helpdesk", "helpdesk"], ["/admin/policies", "policies"],
+  ["/employee/attendance", "attendance"], ["/employee/documents", "documents"], ["/employee/performance", "performance"],
+  ["/employee/helpdesk", "helpdesk"], ["/employee/feed", "feed"], ["/employee/policies", "policies"],
+  ["/employee/leaves", "leaves"], ["/employee/payslips", "payroll"], ["/employee/tax", "payroll"], ["/employee/expenses", "expenses"],
+  ["/api/attendance", "attendance"], ["/api/employees", "employees"], ["/api/leaves", "leaves"],
+  ["/api/holidays", "holidays"], ["/api/shifts", "shifts"], ["/api/branches", "branches"],
+  ["/api/assets", "assets"], ["/api/devices", "devices"], ["/api/payroll", "payroll"], ["/api/loans", "payroll"],
+  ["/api/expenses", "expenses"], ["/api/reports", "reports"], ["/api/location", "journey"], ["/api/journeys", "journey"],
+  ["/api/ai", "ai"], ["/api/documents", "documents"], ["/api/performance", "performance"], ["/api/helpdesk", "helpdesk"],
+  ["/api/feed", "feed"], ["/api/policies", "policies"], ["/api/rosters", "rosters"], ["/api/onboarding", "onboarding"],
+  ["/api/exits", "exit"], ["/api/webhooks", "platform"], ["/api/device-health", "platform"],
 ];
 
-/** Which module (if any) a path belongs to. */
 export function moduleForPath(pathname: string): string | null {
   for (const [prefix, module] of ROUTE_MODULES) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) return module;

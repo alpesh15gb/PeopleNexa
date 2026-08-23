@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getEbioserverConfig, saveEbioserverConfig } from "@/lib/ebioserver";
+import { validateOutboundHttpUrl } from "@/lib/outbound-url";
 
 export async function GET() {
   const session = await getSession();
@@ -33,16 +34,28 @@ export async function PUT(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    const url = String(body.url ?? "");
-    if (url && !/^https?:\/\//i.test(url)) {
-      return NextResponse.json({ error: "URL must start with http:// or https://" }, { status: 400 });
+    const rawUrl = String(body.url ?? "").trim();
+    const enabled = Boolean(body.enabled);
+    const username = String(body.username ?? "").trim();
+    const interval = Number(body.pollIntervalMinutes ?? 15);
+
+    if (enabled && !rawUrl) {
+      return NextResponse.json({ error: "eBioserver URL is required when sync is enabled." }, { status: 400 });
     }
+    if (enabled && !username) {
+      return NextResponse.json({ error: "eBioserver username is required when sync is enabled." }, { status: 400 });
+    }
+    if (!Number.isFinite(interval) || interval < 1 || interval > 1440) {
+      return NextResponse.json({ error: "Polling interval must be between 1 and 1440 minutes." }, { status: 400 });
+    }
+
+    const url = rawUrl ? await validateOutboundHttpUrl(rawUrl) : "";
     const profile = await saveEbioserverConfig(session.tenantId, {
       url,
-      username: String(body.username ?? ""),
+      username,
       password: body.password ? String(body.password) : "",
-      enabled: Boolean(body.enabled),
-      pollIntervalMinutes: Number(body.pollIntervalMinutes ?? 15),
+      enabled,
+      pollIntervalMinutes: interval,
     });
     return NextResponse.json({
       success: true,
@@ -56,6 +69,6 @@ export async function PUT(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to save settings";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

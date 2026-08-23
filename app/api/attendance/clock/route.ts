@@ -3,8 +3,11 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
-import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
+import { reconcileEmployeeDay } from "@/lib/reconcile";
+import { punchDayForEmployee } from "@/lib/punch-day";
 import { notifyEmployee } from "@/lib/notifications";
+
+const MAX_SELFIE_LENGTH = 3_000_000;
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -13,19 +16,25 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const lat = body.lat != null ? Number(body.lat) : null;
   const lng = body.lng != null ? Number(body.lng) : null;
-  const selfie = body.selfie || null;
+  const selfie = typeof body.selfie === "string" ? body.selfie : null;
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: session.sub },
-    include: { branch: true, shift: true },
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return NextResponse.json({ error: "A valid location is required to punch in/out." }, { status: 400 });
+  }
+  if (selfie && selfie.length > MAX_SELFIE_LENGTH) {
+    return NextResponse.json({ error: "Selfie image is too large." }, { status: 413 });
+  }
+
+  const employee = await prisma.employee.findFirst({
+    where: { id: session.sub, tenantId: session.tenantId },
+    include: { branch: true },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (employee.status !== "active") {
     return NextResponse.json({ error: "Your account is inactive." }, { status: 403 });
   }
 
-  // Location validation when a branch geofence is configured.
-  if (lat != null && lng != null && employee.branch) {
+  if (employee.branch) {
     const inside = isInsideGeofence(
       employee.branch.latitude,
       employee.branch.longitude,
@@ -34,28 +43,28 @@ export async function POST(req: NextRequest) {
       lng
     );
     if (!inside) {
-      const dist = Math.round(distanceMeters(employee.branch.latitude!, employee.branch.longitude!, lat, lng));
+      const dist = Math.round(
+        distanceMeters(employee.branch.latitude!, employee.branch.longitude!, lat, lng)
+      );
       return NextResponse.json(
         { error: `You are ${dist}m away from the ${employee.branch.name} geofence (${employee.branch.geofenceRadius}m allowed).` },
         { status: 403 }
       );
     }
-  } else if (lat == null || lng == null) {
-    return NextResponse.json({ error: "Location is required to punch in/out." }, { status: 400 });
   }
 
   const now = new Date();
-
-  // 1. Record the immutable punch (dedupe ±60s).
   const near = await prisma.punch.findFirst({
     where: {
+      tenantId: employee.tenantId,
       employeeId: employee.id,
       punchTime: { gte: new Date(now.getTime() - 60000), lte: new Date(now.getTime() + 60000) },
     },
   });
   if (near) {
-    return NextResponse.json({ error: "A punch was already recorded in the last minute." }, { status: 400 });
+    return NextResponse.json({ error: "A punch was already recorded in the last minute." }, { status: 409 });
   }
+
   const punch = await prisma.punch.create({
     data: {
       tenantId: employee.tenantId,
@@ -68,6 +77,7 @@ export async function POST(req: NextRequest) {
       selfie,
     },
   });
+
   await dispatchWebhook(employee.tenantId, "punch.created", {
     employeeId: employee.id,
     punchId: punch.id,
@@ -76,31 +86,31 @@ export async function POST(req: NextRequest) {
     lng,
   });
 
-  // 2. Re-derive the day's attendance from all punches (night-shift morning
-  //    outs reconcile against the previous calendar day).
   const tenant = await prisma.tenant.findUnique({ where: { id: employee.tenantId } });
+  const attendanceDay = await punchDayForEmployee(employee, now);
   const result = await reconcileEmployeeDay(
     tenant ?? { id: employee.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: employee.tenantId, branchId: employee.branchId },
-    punchDayForShift(now, employee.shift),
+    attendanceDay,
     { finalize: false }
   );
 
-  // 3. Tell the client which transition happened.
-  const isIn = result.inAt !== null && Math.abs(result.inAt.getTime() - now.getTime()) < 120000;
-  const action = result.action === "created" ? "in" : isIn ? "in" : "out";
-
+  const interpreted = result.punches.find((p) => p.id === punch.id)?.type;
+  const action = interpreted === "out" ? "out" : "in";
   const record = result.attendanceId
-    ? await prisma.attendance.findUnique({ where: { id: result.attendanceId } })
+    ? await prisma.attendance.findFirst({ where: { id: result.attendanceId, tenantId: employee.tenantId } })
     : null;
 
   if (action === "in" && result.status === "late") {
+    const shift = record?.shiftId
+      ? await prisma.shift.findFirst({ where: { id: record.shiftId, tenantId: employee.tenantId } })
+      : null;
     await notifyEmployee(
       employee.tenantId,
       employee.id,
       "warning",
       "Marked late",
-      `You clocked in ${result.lateMinutes} min late (${employee.shift?.name ?? "your shift"} starts at ${employee.shift?.startTime ?? "—"}).`
+      `You clocked in ${result.lateMinutes} min late (${shift?.name ?? "your shift"} starts at ${shift?.startTime ?? "—"}).`
     );
   }
 

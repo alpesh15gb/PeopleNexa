@@ -1,15 +1,14 @@
+import { randomBytes } from "node:crypto";
 import * as soapNs from "soap";
-// CJS/ESM interop: module.exports carries createClientAsync directly; some
-// bundlers wrap it in .default, so accept both shapes.
 const soap = (soapNs as { default?: typeof soapNs }).default ?? soapNs;
 import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
 import { parseIST } from "./ist";
+import { toDateKey } from "./dates";
 import { hashPassword } from "./auth";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
+import { validateOutboundHttpUrl } from "./outbound-url";
 import type { Tenant } from "@/generated/prisma/client";
-
-// ── Tenant config helpers ──────────────────────────────────────────────────
 
 export interface EbioserverProfile {
   url: string;
@@ -20,21 +19,13 @@ export interface EbioserverProfile {
   lastPulledAt: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
-  lastLogId: number; // global transaction-log cursor for GetDeviceLogsByLogId
+  lastLogId: number;
 }
 
 const DEFAULT_PROFILE: EbioserverProfile = {
-  url: "",
-  username: "",
-  passwordEnc: null,
-  enabled: false,
-  pollIntervalMinutes: 15,
-  lastPulledAt: null,
-  lastError: null,
-  lastErrorAt: null,
-  lastLogId: 0,
+  url: "", username: "", passwordEnc: null, enabled: false, pollIntervalMinutes: 15,
+  lastPulledAt: null, lastError: null, lastErrorAt: null, lastLogId: 0,
 };
-
 type TenantConfig = { ebioserver?: Partial<EbioserverProfile> };
 
 export function getEbioserverConfig(tenant: Pick<Tenant, "config">): EbioserverProfile {
@@ -42,7 +33,6 @@ export function getEbioserverConfig(tenant: Pick<Tenant, "config">): EbioserverP
   return { ...DEFAULT_PROFILE, ...(cfg.ebioserver ?? {}) };
 }
 
-/** Decrypt the stored password (or return null). Callers must have EBIO_ENCRYPTION_KEY set. */
 export function getEbioserverPassword(profile: EbioserverProfile): string | null {
   if (!profile.passwordEnc) return null;
   return decryptSecret(profile.passwordEnc);
@@ -54,34 +44,21 @@ export async function saveEbioserverConfig(
 ): Promise<EbioserverProfile> {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) throw new Error("Tenant not found");
-
   const current = getEbioserverConfig(tenant);
   const next: Partial<EbioserverProfile> = {
-    url: input.url.trim(),
-    username: input.username.trim(),
-    enabled: input.enabled,
+    url: input.url.trim(), username: input.username.trim(), enabled: input.enabled,
     pollIntervalMinutes: Math.max(1, Math.min(1440, input.pollIntervalMinutes || 15)),
+    passwordEnc: input.password ? encryptSecret(input.password) : current.passwordEnc,
   };
-  // Blank password means "keep the existing one"; a real value is re-encrypted.
-  if (input.password && input.password.length > 0) {
-    next.passwordEnc = encryptSecret(input.password);
-  } else {
-    next.passwordEnc = current.passwordEnc;
+  if (next.url !== current.url || next.username !== current.username || (input.password && input.password.length > 0)) {
+    next.lastPulledAt = null; next.lastError = null; next.lastErrorAt = null; next.lastLogId = 0;
   }
-  // A change of URL/creds invalidates the last successful pull window + cursor.
-  if (next.url !== current.url || next.username !== current.username) {
-    next.lastPulledAt = null;
-    next.lastError = null;
-    next.lastErrorAt = null;
-    next.lastLogId = 0;
-  }
-
-  const config = {
-    ...((tenant.config ?? {}) as Record<string, unknown>),
-    ebioserver: { ...current, ...next },
-  };
-  await prisma.tenant.update({ where: { id: tenantId }, data: { config } });
-  return { ...current, ...next };
+  const profile = { ...current, ...next };
+  await prisma.tenant.update({
+    where: { id: tenantId },
+    data: { config: { ...((tenant.config ?? {}) as Record<string, unknown>), ebioserver: profile } },
+  });
+  return profile;
 }
 
 export async function updateEbioserverStatus(
@@ -90,95 +67,61 @@ export async function updateEbioserverStatus(
 ) {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) return;
-  const current = getEbioserverConfig(tenant);
-  const ebioserver = { ...current, ...patch };
+  const ebioserver = { ...getEbioserverConfig(tenant), ...patch };
   await prisma.tenant.update({
     where: { id: tenantId },
     data: { config: { ...((tenant.config ?? {}) as Record<string, unknown>), ebioserver } },
   });
 }
 
-// ── SOAP client ────────────────────────────────────────────────────────────
-
-const CALL_TIMEOUT_MS = 20000;
-const LOG_BATCH = 200; // records per GetDeviceLogsByLogId call
-const BACKFILL_DAYS = 7; // date-based backfill on a fresh cursor
-
+const CALL_TIMEOUT_MS = 20_000;
+const LOG_BATCH = 200;
+const BACKFILL_DAYS = 7;
 type SoapClient = Awaited<ReturnType<typeof soap.createClientAsync>>;
 
 async function createClient(profile: EbioserverProfile): Promise<SoapClient> {
-  const wsdlUrl = profile.url.includes("?") ? profile.url : `${profile.url}?WSDL`;
-  return soap.createClientAsync(wsdlUrl, { timeout: 15000 } as Parameters<typeof soap.createClientAsync>[1]);
+  if (!profile.url || !profile.username || !getEbioserverPassword(profile)) throw new Error("eBioserver credentials are incomplete.");
+  const safeUrl = await validateOutboundHttpUrl(profile.url);
+  const wsdlUrl = safeUrl.includes("?") ? safeUrl : `${safeUrl}?WSDL`;
+  return soap.createClientAsync(wsdlUrl, { timeout: 15_000 } as Parameters<typeof soap.createClientAsync>[1]);
 }
 
-/** eBioserver authenticates with UserName/Password as method arguments. */
 function authArgs(profile: EbioserverProfile): { UserName: string; Password: string } {
   return { UserName: profile.username, Password: getEbioserverPassword(profile) ?? "" };
 }
 
-/** Call a SOAP method with a hard timeout so one hung tenant cannot stall the loop. */
 async function call<T>(client: SoapClient, method: string, args: Record<string, unknown>): Promise<T> {
   const fn = client[method + "Async"] as ((a: Record<string, unknown>) => Promise<[T, unknown, unknown]>) | undefined;
   if (typeof fn !== "function") throw new Error(`SOAP method ${method} not found in WSDL`);
   return Promise.race([
     fn(args).then(([result]) => result),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${method} timed out`)), CALL_TIMEOUT_MS)
-    ),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${method} timed out`)), CALL_TIMEOUT_MS)),
   ]);
 }
 
-// ── Response parsing (real eBioserver formats) ─────────────────────────────
-//
-// GetDeviceListResult:   "BANGLORE,NYU7255300639,BLR;DWARKA,CGKK231461798,DW;"
-//   → LocationName,SerialNumber,DeviceName  (records split by ';', fields by ',')
-//
-// GetDeviceLogsResult:   "2026-08-12 08:34:20,HO076,HO,HO,INOUT;\n"
-//   → DateTime,EnrollNo,LocationName,DeviceName,State
-//
-// GetDeviceLogsByLogIdResult: "2,2026-02-18 18:00:14,HO079,HO,HO,INOUT;\n"
-//   → LogId,DateTime,EnrollNo,LocationName,DeviceName,State
-
-export interface EbioDevice {
-  location: string;
-  serialNumber: string;
-  deviceName: string;
-}
-
+export interface EbioDevice { location: string; serialNumber: string; deviceName: string }
 export interface EbioLogRecord {
-  logId: number | null;
-  punchTime: Date;
-  userId: string;
-  location: string;
-  deviceName: string;
-  state: string;
+  logId: number | null; punchTime: Date; userId: string; location: string; deviceName: string; state: string;
 }
 
-/** soap wraps each result in `{ <Method>Result: ... }` — pull the inner string out. */
 function resultString(x: unknown): string {
   if (x && typeof x === "object" && !Array.isArray(x)) {
     const obj = x as Record<string, unknown>;
     const key = Object.keys(obj).find((k) => /Result$/i.test(k));
-    if (key && typeof obj[key] === "string") return obj[key];
+    if (key && typeof obj[key] === "string") return obj[key] as string;
   }
-  if (typeof x === "string") return x;
-  return "";
+  return typeof x === "string" ? x : "";
 }
 
 function splitRecords(result: string): string[] {
-  // Records are ';'-terminated; tolerate \r\n and trailing junk.
-  return result
-    .split(";")
-    .map((r) => r.replace(/[\r\n]+$/, "").trim())
-    .filter(Boolean);
+  return result.split(";").map((r) => r.replace(/[\r\n]+$/, "").trim()).filter(Boolean);
 }
 
 export function parseDeviceListResult(result: string): EbioDevice[] {
   const devices: EbioDevice[] = [];
   for (const rec of splitRecords(result)) {
     const [location, serialNumber, deviceName] = rec.split(",").map((s) => s.trim());
-    if (!serialNumber) continue;
-    devices.push({ location: location ?? "", serialNumber, deviceName: deviceName ?? serialNumber });
+    if (serialNumber) devices.push({ location: location ?? "", serialNumber, deviceName: deviceName ?? serialNumber });
   }
   return devices;
 }
@@ -187,40 +130,24 @@ export function parseLogRecords(result: string): EbioLogRecord[] {
   const records: EbioLogRecord[] = [];
   for (const rec of splitRecords(result)) {
     const parts = rec.split(",").map((s) => s.trim());
-    // With log id: [logId, dt, enroll, loc, dev, state]; without: [dt, enroll, loc, dev, state].
-    const hasId = parts.length === 6 && /^\d+$/.test(parts[0]);
-    const [dt, enroll, location, deviceName, state] = hasId ? parts.slice(1) : parts;
-    if (!dt || !enroll) continue;
-    // Skip device operation/enrollment records, not punches.
-    if (/^OPLOG|^USER PIN=|^NEW USER/i.test(enroll)) continue;
+    const hasId = parts.length >= 6 && /^\d+$/.test(parts[0]);
+    const payload = hasId ? parts.slice(1) : parts;
+    const [dt, enroll, location = "", deviceName = "", state = ""] = payload;
+    if (!dt || !enroll || /^OPLOG|^USER PIN=|^NEW USER/i.test(enroll)) continue;
     const punchTime = parseIST(dt);
-    if (!punchTime || punchTime.getUTCFullYear() < 2000) continue; // BOGUS_YEAR guard
-    records.push({
-      logId: hasId ? parseInt(parts[0], 10) : null,
-      punchTime,
-      userId: enroll,
-      location: location ?? "",
-      deviceName: deviceName ?? "",
-      state: state ?? "",
-    });
+    if (!punchTime || punchTime.getUTCFullYear() < 2000) continue;
+    records.push({ logId: hasId ? Number(parts[0]) : null, punchTime, userId: enroll, location, deviceName, state });
   }
   return records;
 }
-
-// ── Employee master import ─────────────────────────────────────────────────
-//
-// GetEmployeeCodesResult: "HO009,HO115,..." (comma-separated codes)
-// GetEmployeeDetailsResult: "EmployeeName=N Subba Rao,EmployeeLocation=HO,"
-//   "EmployeeRole=Normal User,EmployeeVerificationType=0,..." (Key=Value pairs)
 
 export function parseEmployeeDetails(result: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const pair of result.split(",")) {
     const i = pair.indexOf("=");
     if (i < 0) continue;
-    const k = pair.slice(0, i).trim();
-    const v = pair.slice(i + 1).trim();
-    if (k) out[k] = v;
+    const key = pair.slice(0, i).trim();
+    if (key) out[key] = pair.slice(i + 1).trim();
   }
   return out;
 }
@@ -232,69 +159,66 @@ function splitName(name: string): [string, string] {
   return [parts.slice(0, -1).join(" "), parts[parts.length - 1]];
 }
 
-/**
- * Pull the employee master from eBioserver and create matching employees in
- * this tenant. Idempotent: codes already present are skipped, so re-running
- * only adds what's new. Employees get a default login password (123456).
- */
+function deviceEmail(code: string): string {
+  const safe = code.toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-").slice(0, 50) || randomBytes(6).toString("hex");
+  return `device-${safe}@device.local`;
+}
+
 export async function importEmployeesFromEbioserver(
   tenantId: string,
   profile: EbioserverProfile
 ): Promise<{ ok: boolean; total: number; created: number; skipped: number; failed: number; reprocessed: number; message?: string }> {
   const result = { ok: false, total: 0, created: 0, skipped: 0, failed: 0, reprocessed: 0, message: "" as string | undefined };
   try {
-    const client = await createClient(profile);
+    const [tenant, currentCount, client] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: tenantId }, select: { seats: true } }),
+      prisma.employee.count({ where: { tenantId } }),
+      createClient(profile),
+    ]);
+    if (!tenant) throw new Error("Workspace not found.");
+
     const codesResult = await call<unknown>(client, "GetEmployeeCodes", { ...authArgs(profile), EmployeeLocation: "" });
-    const codes = String(resultString(codesResult))
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean);
+    const codes = resultString(codesResult).split(",").map((c) => c.trim()).filter(Boolean);
     result.total = codes.length;
+    let seatsUsed = currentCount;
 
     for (const code of codes) {
-      const existing = await prisma.employee.findFirst({ where: { tenantId, employeeNumber: code } });
-      if (existing) {
-        result.skipped++;
-        continue;
-      }
+      const existing = await prisma.employee.findFirst({ where: { tenantId, employeeNumber: code }, select: { id: true } });
+      if (existing) { result.skipped++; continue; }
+      if (seatsUsed >= tenant.seats) { result.failed++; result.message = `Seat limit reached (${tenant.seats}). Upgrade before importing the remaining employees.`; continue; }
+
       try {
         const detail = await call<unknown>(client, "GetEmployeeDetails", { ...authArgs(profile), EmployeeCode: code });
         const fields = parseEmployeeDetails(resultString(detail));
-        const name = fields.EmployeeName || code;
-        const [firstName, lastName] = splitName(name);
+        const [firstName, lastName] = splitName(fields.EmployeeName || code);
         const location = fields.EmployeeLocation || "";
-
         let branchId: string | null = null;
         if (location) {
           const branchCode = location.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20) || "UNKNOWN";
           let branch = await prisma.branch.findFirst({ where: { tenantId, code: branchCode } });
-          if (!branch) {
-            branch = await prisma.branch.create({ data: { tenantId, name: location, code: branchCode } });
-          }
+          if (!branch) branch = await prisma.branch.create({ data: { tenantId, name: location, code: branchCode } });
           branchId = branch.id;
         }
 
+        // Biometric master import is identity provisioning, not password
+        // provisioning. Use an unguessable random password; an admin must set a
+        // real credential later if this employee should log into PeopleNexa.
+        const lockedPassword = randomBytes(32).toString("base64url");
         await prisma.employee.create({
           data: {
-            tenantId,
-            employeeNumber: code,
-            firstName,
-            lastName,
-            email: `${code.toLowerCase()}@device.local`,
-            password: await hashPassword("123456"),
-            role: "employee",
-            position: fields.EmployeeRole || null,
-            branchId,
+            tenantId, employeeNumber: code, firstName, lastName,
+            email: deviceEmail(code), password: await hashPassword(lockedPassword),
+            role: "employee", position: fields.EmployeeRole || null, branchId,
           },
         });
+        seatsUsed++;
         result.created++;
-      } catch {
+      } catch (err) {
+        console.error(`[eBio] Employee import failed for ${code}:`, err instanceof Error ? err.message : err);
         result.failed++;
       }
     }
-    result.ok = true;
-    // Now that employees exist, reconcile punches that were flagged earlier
-    // because their code had no match at ingest time.
+    result.ok = result.created + result.skipped > 0 || codes.length === 0;
     result.reprocessed = await reprocessFailedLogs(tenantId);
     return result;
   } catch (err) {
@@ -303,11 +227,41 @@ export async function importEmployeesFromEbioserver(
   }
 }
 
-/**
- * Backfill N days of history by date (GetDeviceLogs per day, all devices).
- * The incremental cursor is left untouched — future pulls continue from the
- * head. Idempotent: already-ingested punches are deduped by handleDevicePunch.
- */
+type DeviceRow = Awaited<ReturnType<typeof prisma.device.create>>;
+
+async function discoverDevices(tenantId: string, client: SoapClient, profile: EbioserverProfile) {
+  const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
+  const deviceByName = new Map<string, DeviceRow>();
+  let count = 0;
+  for (const d of parseDeviceListResult(resultString(deviceResult))) {
+    let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
+    if (!device) {
+      device = await prisma.device.create({
+        data: { tenantId, name: `${d.deviceName} (${d.location})`.trim(), serialNumber: d.serialNumber, type: "biometric", protocol: "json", config: { ebioserver: true, location: d.location } },
+      });
+    } else if (device.tenantId !== tenantId) {
+      continue;
+    }
+    deviceByName.set(d.deviceName, device);
+    count++;
+  }
+  return { deviceByName, count };
+}
+
+async function ingestEbioRecord(rec: EbioLogRecord, deviceByName: Map<string, DeviceRow>) {
+  let device = deviceByName.get(rec.deviceName);
+  if (!device && deviceByName.size === 1) device = deviceByName.values().next().value;
+  if (!device) return { accepted: false, newPunch: false };
+  const raw: RawPunch = {
+    userId: rec.userId,
+    punchTime: rec.punchTime,
+    verifyMode: "0",
+    inOutMode: /^OUT$/i.test(rec.state) ? "1" : /^IN$/i.test(rec.state) ? "5" : "0",
+    rawLine: rec.logId !== null ? `${rec.logId},${rec.userId},${rec.punchTime.toISOString()}` : rec.userId,
+  };
+  return handleDevicePunch(device, raw);
+}
+
 export async function backfillDays(
   tenantId: string,
   profile: EbioserverProfile,
@@ -317,66 +271,25 @@ export async function backfillDays(
   const summary = { ok: false, days: 0, records: 0, ingested: 0, devices: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
+    const discovered = await discoverDevices(tenantId, client, profile);
+    summary.devices = discovered.count;
+    if (!summary.devices) return { ...summary, message: "No devices found on this eBioserver." };
 
-    // Discover + register devices (same as pullTenant) and map by device name.
-    const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
-    const deviceByDeviceName = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
-    for (const d of parseDeviceListResult(resultString(deviceResult))) {
-      let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
-      if (!device) {
-        device = await prisma.device.create({
-          data: {
-            tenantId,
-            name: `${d.deviceName} (${d.location})`.trim(),
-            serialNumber: d.serialNumber,
-            type: "biometric",
-            protocol: "json",
-            config: { ebioserver: true, location: d.location },
-          },
-        });
-      } else if (device.tenantId !== tenantId) {
-        continue;
-      }
-      deviceByDeviceName.set(d.deviceName, device);
-      summary.devices++;
-    }
-    if (summary.devices === 0) {
-      summary.message = "No devices found on this eBioserver.";
-      return summary;
-    }
-
-    for (let d = days - 1; d >= 0; d--) {
-      const day = new Date(Date.now() - d * 86400000);
-      const dateStr = day.toISOString().slice(0, 10);
-      const dayResult = await call<unknown>(client, "GetDeviceLogs", {
-        ...authArgs(profile),
-        Location: "",
-        LogDate: dateStr,
-      });
-      const records = parseLogRecords(resultString(dayResult));
+    const boundedDays = Math.max(1, Math.min(366, Math.floor(days)));
+    for (let offset = boundedDays - 1; offset >= 0; offset--) {
+      const day = new Date(Date.now() - offset * 86400000);
+      const dateStr = toDateKey(day);
+      const rawResult = await call<unknown>(client, "GetDeviceLogs", { ...authArgs(profile), Location: "", LogDate: dateStr });
+      const records = parseLogRecords(resultString(rawResult));
       let dayIngested = 0;
       for (const rec of records) {
-        let device = deviceByDeviceName.get(rec.deviceName);
-        if (!device && deviceByDeviceName.size === 1) device = deviceByDeviceName.values().next().value;
-        if (!device) continue;
         summary.records++;
-        const raw: RawPunch = {
-          userId: rec.userId,
-          punchTime: rec.punchTime,
-          verifyMode: "0",
-          inOutMode: rec.state === "OUT" ? "1" : rec.state === "IN" ? "5" : "0",
-          rawLine: rec.userId,
-        };
-        const res = await handleDevicePunch(device, raw);
-        if (res.action === "in" || res.action === "out") {
-          summary.ingested++;
-          dayIngested++;
-        }
+        const res = await ingestEbioRecord(rec, discovered.deviceByName);
+        if (res.newPunch) { summary.ingested++; dayIngested++; }
       }
       summary.days++;
-      onProgress?.(d, dateStr, records.length, dayIngested);
+      onProgress?.(offset, dateStr, records.length, dayIngested);
     }
-
     summary.ok = true;
     return summary;
   } catch (err) {
@@ -384,8 +297,6 @@ export async function backfillDays(
     return summary;
   }
 }
-
-// ── Operations ─────────────────────────────────────────────────────────────
 
 export async function testConnection(profile: EbioserverProfile): Promise<{ ok: boolean; message: string }> {
   if (!profile.url) return { ok: false, message: "Enter the eBioserver Web Service URL first." };
@@ -396,7 +307,6 @@ export async function testConnection(profile: EbioserverProfile): Promise<{ ok: 
       await call(client, "IseSSLebioServer", {});
       return { ok: true, message: "Connected — eBioserver responded." };
     } catch {
-      // Some deployments only expose the data methods; GetDeviceList is a good probe.
       const devices = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
       return { ok: true, message: `Connected — ${parseDeviceListResult(resultString(devices)).length} devices found.` };
     }
@@ -405,12 +315,6 @@ export async function testConnection(profile: EbioserverProfile): Promise<{ ok: 
   }
 }
 
-/**
- * Pull punches for one tenant from its own eBioserver, feeding the shared
- * punch pipeline. Incremental via the global transaction-log cursor
- * (GetDeviceLogsByLogId); a fresh cursor backfills a bounded window so the
- * first run stays fast and later runs only fetch what's new.
- */
 export async function pullTenant(
   tenantId: string,
   profile: EbioserverProfile
@@ -418,157 +322,79 @@ export async function pullTenant(
   const summary = { ok: false, pulled: 0, ingested: 0, devices: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
+    const discovered = await discoverDevices(tenantId, client, profile);
+    summary.devices = discovered.count;
+    if (!summary.devices) return { ...summary, message: "No devices found on this eBioserver." };
 
-    // 1. Discover devices: LocationName,SerialNumber,DeviceName.
-    const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
-    const discovered = parseDeviceListResult(resultString(deviceResult));
-
-    // Auto-register into this tenant; serial is globally unique so a device can
-    // never be captured by a different tenant. Map deviceName → our Device row.
-    const deviceBySerial = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
-    const deviceByDeviceName = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
-    for (const d of discovered) {
-      let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
-      if (!device) {
-        device = await prisma.device.create({
-          data: {
-            tenantId,
-            name: `${d.deviceName} (${d.location})`.trim(),
-            serialNumber: d.serialNumber,
-            type: "biometric",
-            protocol: "json",
-            config: { ebioserver: true, location: d.location },
-          },
-        });
-      } else if (device.tenantId !== tenantId) {
-        continue; // serial belongs to another tenant — never cross the boundary
-      }
-      deviceBySerial.set(d.serialNumber, device);
-      deviceByDeviceName.set(d.deviceName, device);
-      summary.devices++;
-    }
-    if (summary.devices === 0) {
-      summary.message = "No devices found on this eBioserver.";
-      return summary;
-    }
-
-    // 2. Pull. A fresh cursor bootstraps: probe the head of the transaction
-    // log (so we don't walk another company's full history), then backfill the
-    // last few days by date so reports populate immediately. Established
-    // cursors just walk forward with GetDeviceLogsByLogId.
-    let cursor = profile.lastLogId || 0;
-
+    let cursor = Math.max(0, profile.lastLogId || 0);
     if (cursor === 0) {
       cursor = await probeLogHead(client, profile);
       await updateEbioserverStatus(tenantId, { lastLogId: cursor });
-      // Backfill recent days (all devices at once via empty Location).
-      for (let d = 0; d < BACKFILL_DAYS; d++) {
-        const day = new Date(Date.now() - d * 24 * 3600 * 1000);
-        const dateStr = day.toISOString().slice(0, 10);
-        const dayResult = await call<unknown>(client, "GetDeviceLogs", {
-          ...authArgs(profile),
-          Location: "",
-          LogDate: dateStr,
-        });
-        const dayRecords = parseLogRecords(resultString(dayResult));
-        for (const rec of dayRecords) {
-          await ingestRecord(rec, deviceByDeviceName);
+      for (let offset = 0; offset < BACKFILL_DAYS; offset++) {
+        const dateStr = toDateKey(new Date(Date.now() - offset * 86400000));
+        const rawResult = await call<unknown>(client, "GetDeviceLogs", { ...authArgs(profile), Location: "", LogDate: dateStr });
+        for (const rec of parseLogRecords(resultString(rawResult))) {
+          summary.pulled++;
+          const res = await ingestEbioRecord(rec, discovered.deviceByName);
+          if (res.newPunch) summary.ingested++;
         }
       }
     } else {
-      while (true) {
+      for (let pages = 0; pages < 1000; pages++) {
         const batchResult = await call<unknown>(client, "GetDeviceLogsByLogId", {
-          ...authArgs(profile),
-          Location: "",
-          LogId: String(cursor),
-          LogCount: String(LOG_BATCH),
+          ...authArgs(profile), Location: "", LogId: String(cursor), LogCount: String(LOG_BATCH),
         });
         const records = parseLogRecords(resultString(batchResult));
-        if (records.length === 0) break;
-
-        let batchMax = 0;
+        if (!records.length) break;
+        let maxId = cursor;
         for (const rec of records) {
-          if (rec.logId !== null) batchMax = Math.max(batchMax, rec.logId);
-          await ingestRecord(rec, deviceByDeviceName);
+          summary.pulled++;
+          if (rec.logId !== null) maxId = Math.max(maxId, rec.logId);
+          const res = await ingestEbioRecord(rec, discovered.deviceByName);
+          if (res.newPunch) summary.ingested++;
         }
-
-        // Persist the cursor so an interrupted run resumes rather than re-pulls.
-        const newCursor = batchMax > cursor ? batchMax : cursor + records.length;
-        if (newCursor > cursor) {
-          cursor = newCursor;
-          await updateEbioserverStatus(tenantId, { lastLogId: cursor });
+        if (maxId <= cursor) {
+          throw new Error("eBioserver cursor did not advance; stopping to prevent an infinite pull loop.");
         }
-        // A short batch means the history is exhausted — done.
+        cursor = maxId;
+        await updateEbioserverStatus(tenantId, { lastLogId: cursor });
         if (records.length < LOG_BATCH) break;
       }
     }
-
     summary.ok = true;
     return summary;
-
-    /** Ingest one parsed record; returns true when it produced a punch. */
-    async function ingestRecord(
-      rec: EbioLogRecord,
-      deviceByName: Map<string, Awaited<ReturnType<typeof prisma.device.create>>>
-    ): Promise<boolean> {
-      // Attribute the punch to the device this eBioserver reports by its
-      // device name; with a single device, fall back to it directly.
-      let device = deviceByName.get(rec.deviceName);
-      if (!device && deviceByName.size === 1) device = deviceByName.values().next().value;
-      if (!device) return false;
-      summary.pulled++;
-      const raw: RawPunch = {
-        userId: rec.userId,
-        punchTime: rec.punchTime,
-        verifyMode: "0",
-        inOutMode: rec.state === "OUT" ? "1" : rec.state === "IN" ? "5" : "0",
-        rawLine: rec.logId !== null ? `${rec.logId},${rec.userId},${rec.punchTime.toISOString()}` : rec.userId,
-      };
-      const res = await handleDevicePunch(device, raw);
-      if (res.action === "in" || res.action === "out") {
-        summary.ingested++;
-        return true;
-      }
-      return false;
-    }
   } catch (err) {
     summary.message = err instanceof Error ? err.message : "Pull failed";
     return summary;
   }
 }
 
-/**
- * Find the exact head (max LogId) of the global transaction log so the cursor
- * starts AT the head — new records (head+1) are then picked up incrementally.
- * Exponential probe to bracket the head, then binary search to pin it down.
- */
+/** Return the last log id that is known to have data after it. */
 async function probeLogHead(client: SoapClient, profile: EbioserverProfile): Promise<number> {
-  const hasRecords = async (logId: number): Promise<boolean> => {
+  const hasRecordsAfter = async (logId: number): Promise<boolean> => {
     const probe = await call<unknown>(client, "GetDeviceLogsByLogId", {
-      ...authArgs(profile),
-      Location: "",
-      LogId: String(logId),
-      LogCount: "1",
+      ...authArgs(profile), Location: "", LogId: String(logId), LogCount: "1",
     });
     return parseLogRecords(resultString(probe)).length > 0;
   };
 
-  // Exponential probe: find a LogId that returns nothing.
-  let lo = 1024;
-  while (await hasRecords(lo)) lo *= 2;
-
-  // Binary search in (lo/2, lo] for the last LogId that still has records.
-  let low = lo / 2;
-  let high = lo;
+  if (!(await hasRecordsAfter(0))) return 0;
+  let low = 0;
+  let high = 1;
+  while (await hasRecordsAfter(high)) {
+    low = high;
+    high *= 2;
+    if (high > 2_147_483_647) throw new Error("eBioserver log cursor exceeded supported range.");
+  }
   while (high - low > 1) {
     const mid = Math.floor((low + high) / 2);
-    if (await hasRecords(mid)) low = mid;
+    if (await hasRecordsAfter(mid)) low = mid;
     else high = mid;
   }
-  return low; // exact head
+  // high is the first id for which there is nothing after it: the head.
+  return high;
 }
 
-/** Map a high-level action to an eBioserver DeviceCommand_* call. */
 export async function runDeviceCommand(
   profile: EbioserverProfile,
   deviceSerial: string,
@@ -577,19 +403,10 @@ export async function runDeviceCommand(
   try {
     const client = await createClient(profile);
     const args = { ...authArgs(profile), DeviceSerialNumber: deviceSerial };
-    switch (action) {
-      case "reboot":
-        await call(client, "DeviceCommand_Reboot", args);
-        break;
-      case "clear_logs":
-        await call(client, "DeviceCommand_ClearLogs", args);
-        break;
-      case "sync":
-        await call(client, "DeviceCommand_GetDeviceLogs", args);
-        break;
-      default:
-        return { ok: false, message: `Command "${action}" is not available in eBioserver mode.` };
-    }
+    if (action === "reboot") await call(client, "DeviceCommand_Reboot", args);
+    else if (action === "clear_logs") await call(client, "DeviceCommand_ClearLogs", args);
+    else if (action === "sync") await call(client, "DeviceCommand_GetDeviceLogs", args);
+    else return { ok: false, message: `Command "${action}" is not available in eBioserver mode.` };
     return { ok: true, message: `${action} command sent to device ${deviceSerial}.` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : "Command failed" };

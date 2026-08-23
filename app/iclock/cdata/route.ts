@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
-import { handleDevicePunch } from "@/lib/iclock";
+import { handleDevicePunch, parseAttlogLine } from "@/lib/iclock";
+import { deviceUnauthorizedResponse, verifyDeviceRequest } from "@/lib/device-auth";
 
 async function findDevice(sn: string) {
   return prisma.device.findUnique({ where: { serialNumber: sn } });
@@ -14,15 +15,17 @@ async function touch(deviceId: string) {
   });
 }
 
-// GET /iclock/cdata?SN=...&options=all — device registration + config pull.
+// GET /iclock/cdata?key=...&SN=...&options=all — registration/config pull.
 export async function GET(req: NextRequest) {
-  const sn = req.nextUrl.searchParams.get("SN");
+  if (!verifyDeviceRequest(req)) return deviceUnauthorizedResponse();
+
+  const sn = req.nextUrl.searchParams.get("SN")?.trim();
   if (!sn) return new NextResponse("ERROR: No serial number", { status: 400 });
 
   const device = await findDevice(sn);
-  if (!device) {
-    console.log(`[iClock] Unknown device: ${sn}`);
-    return new NextResponse("OK", { headers: { "Content-Type": "text/plain" } });
+  if (!device || device.status === "inactive") {
+    console.warn(`[iClock] Rejected unknown/inactive device: ${sn}`);
+    return new NextResponse("ERROR: unknown device\r\n", { status: 404 });
   }
 
   await touch(device.id);
@@ -43,21 +46,27 @@ export async function GET(req: NextRequest) {
       "ATTLOGStamp=0",
       "OPERLOGStamp=0",
     ].join("\r\n") + "\r\n";
-    return new NextResponse(config, { headers: { "Content-Type": "text/plain" } });
+    return new NextResponse(config, {
+      headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+    });
   }
 
-  return new NextResponse("OK\r\n", { headers: { "Content-Type": "text/plain" } });
+  return new NextResponse("OK\r\n", {
+    headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+  });
 }
 
-// POST /iclock/cdata?SN=...&table=ATTLOG — device pushes tab-delimited punch logs.
+// POST /iclock/cdata?key=...&SN=...&table=ATTLOG — tab-delimited punches.
 export async function POST(req: NextRequest) {
-  const sn = req.nextUrl.searchParams.get("SN");
+  if (!verifyDeviceRequest(req)) return deviceUnauthorizedResponse();
+
+  const sn = req.nextUrl.searchParams.get("SN")?.trim();
   if (!sn) return new NextResponse("ERROR: No SN", { status: 400 });
 
   const device = await findDevice(sn);
-  if (!device) {
-    console.log(`[iClock] POST from unknown device: ${sn}`);
-    return new NextResponse("OK: 0\r\n", { headers: { "Content-Type": "text/plain" } });
+  if (!device || device.status === "inactive") {
+    console.warn(`[iClock] POST rejected for unknown/inactive device: ${sn}`);
+    return new NextResponse("ERROR: unknown device\r\n", { status: 404 });
   }
 
   await touch(device.id);
@@ -68,47 +77,40 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text();
   if (!rawBody || rawBody.trim().length === 0) {
-    // Empty heartbeat POST.
     return new NextResponse("OK: 0\r\n", { headers: { "Content-Type": "text/plain" } });
   }
 
-  // Format per line: userId \t dateTime \t verifyMode \t inOutMode \t workCode
-  const lines = rawBody.split("\n").filter((l) => l.trim());
+  const lines = rawBody.split(/\r?\n/).filter((l) => l.trim());
   let accepted = 0;
 
   for (const line of lines) {
     try {
-      let parts = line.split("\t");
-      if (parts.length < 2) parts = line.split(/\s+/).filter((p) => p.trim());
-      if (parts.length < 2) continue;
+      const parsed = parseAttlogLine(line);
+      if (!parsed) {
+        console.warn(`[iClock] Malformed ATTLOG line from ${sn}`);
+        continue;
+      }
 
-      const userId = parts[0].trim();
-      const dateTimeStr = parts[1] + (parts[1].length < 11 && parts[2] ? " " + parts[2] : "");
-      const verifyMode = parts[3]?.trim() || "0";
-      const inOutMode = parts[4]?.trim() || "0";
-
-      if (!userId || !dateTimeStr) continue;
-
-      const punchTime = parseIST(dateTimeStr);
+      const punchTime = parseIST(parsed.dateTime);
       if (!punchTime) {
-        console.log(`[iClock] Unparseable date: ${dateTimeStr}`);
+        console.warn(`[iClock] Unparseable ATTLOG timestamp from ${sn}: ${parsed.dateTime}`);
         continue;
       }
 
       const result = await handleDevicePunch(device, {
-        userId,
+        userId: parsed.userId,
         punchTime,
-        verifyMode,
-        inOutMode,
+        verifyMode: parsed.verifyMode,
+        inOutMode: parsed.inOutMode,
         rawLine: line,
       });
       if (result.accepted) accepted++;
-      console.log(`[iClock] ${sn} emp=${userId} ${dateTimeStr} → ${result.action}`);
     } catch (err) {
-      console.error(`[iClock] Line error: ${line}`, err instanceof Error ? err.message : err);
+      console.error(`[iClock] ATTLOG line error from ${sn}:`, err instanceof Error ? err.message : err);
     }
   }
 
-  console.log(`[iClock] Device ${sn}: accepted ${accepted}/${lines.length} records`);
-  return new NextResponse(`OK: ${accepted}\r\n`, { headers: { "Content-Type": "text/plain" } });
+  return new NextResponse(`OK: ${accepted}\r\n`, {
+    headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+  });
 }
