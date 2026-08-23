@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
             payMode,
             workBasisRate,
             managerId: refs.managerId,
-            salaryStructure,
+            salaryStructure: salaryStructure === null ? Prisma.DbNull : salaryStructure,
           },
           select,
         }) as Awaited<ReturnType<typeof prisma.employee.create>>;
