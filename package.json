@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "postinstall": "prisma generate",
-    "build": "node -e \"console.log('DB_ENV_KEYS=' + Object.keys(process.env).filter((k) => /DATABASE|POSTGRES|NEON|PGHOST|PGUSER|PGDATABASE/.test(k)).sort().join(','))\" && prisma generate && prisma db push && next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit"
   },
