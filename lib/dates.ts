@@ -60,6 +60,11 @@ export function monthKey(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
+/** True only for a canonical calendar month key such as 2026-08. */
+export function isMonthKey(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}
+
 export function daysBetween(from: Date, to: Date): number {
   return Math.round((startOfDay(to).getTime() - startOfDay(from).getTime()) / 86400000) + 1;
 }

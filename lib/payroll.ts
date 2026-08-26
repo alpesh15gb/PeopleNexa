@@ -89,7 +89,7 @@ export async function attendanceSummary(
   includeOvertime = true
 ): Promise<AttendanceSummary> {
   const { start, end } = monthRange(month);
-  const [records, leaves, holidays, shift] = await Promise.all([
+  const [records, leaves, holidays, shift, rosters] = await Promise.all([
     prisma.attendance.findMany({
       where: { tenantId, employeeId: employee.id, date: { gte: start, lt: end } },
       select: { date: true, status: true, punchInTime: true, punchOutTime: true },
@@ -100,6 +100,10 @@ export async function attendanceSummary(
     }),
     prisma.holiday.findMany({ where: { tenantId, date: { gte: start, lt: end } }, select: { date: true } }),
     employee.shiftId ? prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null,
+    prisma.rosterAssignment.findMany({
+      where: { tenantId, employeeId: employee.id, date: { gte: start, lt: end } },
+      include: { shift: true },
+    }),
   ]);
 
   const recordByDay = new Map(records.map((r) => [istDayStartKey(r.date), r]));
@@ -116,14 +120,13 @@ export async function attendanceSummary(
     workedHours: 0,
   };
 
-  const shiftSpanMin =
-    shift && shift.endTime
-      ? minutesOfDay(shift.endTime) - minutesOfDay(shift.startTime) + (shift.isNightShift ? 24 * 60 : 0)
-      : 8 * 60;
+  const rosterByDay = new Map(rosters.map((r) => [istDayStartKey(r.date), r.shift]));
 
   for (let d = start; d < end; d = new Date(d.getTime() + 24 * 3600 * 1000)) {
-    if (d.getUTCDay() === 0) continue; // Sunday — IST day check via UTC on shifted date
+    const istDay = new Date(d.getTime() + 5.5 * 3600 * 1000);
+    if (istDay.getUTCDay() === 0) continue; // Sunday in the IST wall clock
     const key = istDayStartKey(d);
+    if (employee.joiningDate && key < istDayStartKey(employee.joiningDate)) continue;
     if (holidaySet.has(key)) continue;
 
     const onLeave = leaves.some((l) => istStartOfDay(l.fromDate).getTime() <= d.getTime() && istStartOfDay(l.toDate).getTime() >= d.getTime());
@@ -147,7 +150,12 @@ export async function attendanceSummary(
     if (rec.punchInTime && rec.punchOutTime) {
       const spanMin = (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000;
       summary.workedHours += spanMin / 60;
-      if (includeOvertime && shift && spanMin > shiftSpanMin) {
+      const dayShift = rosterByDay.get(key) ?? shift;
+      const shiftSpanMin =
+        dayShift && dayShift.endTime
+          ? minutesOfDay(dayShift.endTime) - minutesOfDay(dayShift.startTime) + (dayShift.isNightShift ? 24 * 60 : 0)
+          : 8 * 60;
+      if (includeOvertime && dayShift && spanMin > shiftSpanMin) {
         summary.overtimeHours += (spanMin - shiftSpanMin) / 60;
       }
     }
@@ -518,6 +526,7 @@ export async function generatePayslipForEmployee(
         employeeId: employee.id,
         month,
         baseSalary: result.baseSalary,
+        basicSalary: result.basic,
         allowances: result.allowances,
         overtimePay: result.overtimePay,
         grossEarnings: result.grossEarnings,

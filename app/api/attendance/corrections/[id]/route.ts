@@ -116,6 +116,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
   }
 
+  // A reviewed correction is authoritative. Reopen a previously finalized
+  // derived row so reconciliation cannot return the old locked values.
+  await prisma.attendance.updateMany({
+    where: {
+      tenantId: session.tenantId,
+      employeeId: correction.employeeId,
+      date: { gte: windowStart, lt: windowEnd },
+    },
+    data: { finalized: false, reviewStatus: null },
+  });
+
   // Re-run reconciliation so status / late minutes / overtime reflect the
   // corrected times and the day locks at its corrected values.
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });

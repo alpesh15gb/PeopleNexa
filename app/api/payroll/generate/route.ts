@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { isMonthKey, monthKey } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
 import { sendWhatsApp } from "@/lib/whatsapp";
 
@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const month = String(body.month ?? monthKey(new Date()));
+  if (!isMonthKey(month)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employees = await prisma.employee.findMany({

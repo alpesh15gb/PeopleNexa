@@ -108,6 +108,7 @@ export default async function AdminReportsPage({
                   <TH>Present</TH>
                   <TH>Late</TH>
                   <TH>Permission</TH>
+                  <TH>Half day</TH>
                   <TH>On leave</TH>
                   <TH>Absent</TH>
                 </TR>
@@ -117,10 +118,11 @@ export default async function AdminReportsPage({
                   const dayLeaves = leaveByDate.get(day);
                   const onLeave = dayLeaves ? dayLeaves.size : 0;
                   const dayRecords = records.filter((r) => toDateKey(r.date) === day);
-                  const present = dayRecords.filter((r) => r.status === "present" || r.status === "half_day").length;
+                  const present = dayRecords.filter((r) => r.status === "present").length;
                   const late = dayRecords.filter((r) => r.status === "late").length;
                   const permission = dayRecords.filter((r) => r.status === "permission").length;
-                  const absent = Math.max(employees.length - onLeave - present - late - permission, 0);
+                  const halfDay = dayRecords.filter((r) => r.status === "half_day").length;
+                  const absent = Math.max(employees.length - onLeave - present - late - permission - halfDay, 0);
                   const isToday = day === todayKey();
                   return (
                     <TR key={day} className={isToday ? "bg-indigo-500/[0.06]" : ""}>
@@ -131,7 +133,8 @@ export default async function AdminReportsPage({
                       <TD className="font-semibold text-emerald-300">{present}</TD>
                       <TD className="font-semibold text-amber-300">{late}</TD>
                       <TD className="font-semibold text-sky-300">{permission}</TD>
-                      <TD className="font-semibold text-violet-300">{onLeave}</TD>
+                      <TD className="font-semibold text-violet-300">{halfDay}</TD>
+                      <TD className="font-semibold text-indigo-300">{onLeave}</TD>
                       <TD className="font-semibold text-rose-300">{absent}</TD>
                     </TR>
                   );
@@ -509,9 +512,10 @@ export default async function AdminReportsPage({
                   const empLeaves = leaves.filter((l) => l.employee.id === emp.id);
                   const present = empRecs.filter((r) => r.status === "present" || r.status === "half_day").length;
                   const late = empRecs.filter((r) => r.status === "late").length;
+                  const permission = empRecs.filter((r) => r.status === "permission").length;
                   const onLeave = empLeaves.reduce((s, l) => s + l.days, 0);
-                  const absent = Math.max(days.length - present - late - onLeave, 0);
-                  const marked = present + late + onLeave;
+                  const absent = Math.max(days.length - present - late - permission - onLeave, 0);
+                  const marked = present + late + permission + onLeave;
                   const pct = days.length ? Math.round((marked / days.length) * 100) : 0;
                   return (
                     <TR key={emp.id}>

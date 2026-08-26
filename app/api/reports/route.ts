@@ -88,13 +88,12 @@ export async function GET(req: NextRequest) {
     const rows = days.map((day) => {
       const dayLeaves = leaveByDate.get(day);
       const onLeave = dayLeaves ? dayLeaves.size : 0;
-      const present = records.filter(
-        (r) => toDateKey(r.date) === day && (r.status === "present" || r.status === "late")
-      ).length;
+      const present = records.filter((r) => toDateKey(r.date) === day && r.status === "present").length;
       const late = records.filter((r) => toDateKey(r.date) === day && r.status === "late").length;
       const permission = records.filter((r) => toDateKey(r.date) === day && r.status === "permission").length;
-      const absent = Math.max(employees.length - onLeave - present, 0);
-      return { day, present, late, permission, absent, onLeave };
+      const halfDay = records.filter((r) => toDateKey(r.date) === day && r.status === "half_day").length;
+      const absent = Math.max(employees.length - onLeave - present - late - permission - halfDay, 0);
+      return { day, present, late, permission, halfDay, absent, onLeave };
     });
     return NextResponse.json({ type, days: rows, summary: rows[rows.length - 1] });
   }

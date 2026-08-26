@@ -1,22 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { isMonthKey, monthKey } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
+import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
 
 const csv = (rows: (string | number)[][]) =>
   rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** The three month keys of the quarter containing `month` (FY quarters). */
-function quarterMonths(month: string): string[] {
-  const [y, m] = month.split("-").map(Number);
-  const q = Math.floor((((m + 8) % 12) / 3) + 1); // Apr=Q1 … Mar=Q4
-  const startM = [4, 7, 10, 1][q - 1];
-  const startY = q === 4 ? y + 1 : y; // Q4 spans Jan–Mar of the next calendar year
-  return [0, 1, 2].map((i) => `${startY}-${pad(startM + i)}`);
-}
 
 /** GET /api/payroll/compliance?type=ecr|form16|form24q&month=2026-08 */
 export async function GET(req: NextRequest) {
@@ -27,6 +17,9 @@ export async function GET(req: NextRequest) {
 
   const type = String(req.nextUrl.searchParams.get("type") ?? "ecr");
   const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  if (!isMonthKey(month)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
   const fy = fyFromMonth(month);
 
   if (type === "ecr") {
@@ -38,7 +31,9 @@ export async function GET(req: NextRequest) {
     const rows: (string | number)[][] = [
       ["S.No", "Member ID", "Member Name", "UAN", "Date of Joining", "EPF Wages (Basic)", "EE EPF (12%)", "ER EPF (3.67%)", "ER EPS (8.33%)"],
       ...payslips.map((p, i) => {
-        const wages = p.baseSalary; // basic is the PF wage base
+        // New payslips persist the computed basic wage. For legacy rows created
+        // before that field existed, derive the best available compatible base.
+        const wages = p.basicSalary > 0 ? p.basicSalary : p.pfEmployee > 0 ? p.pfEmployee / 0.12 : p.baseSalary * 0.5;
         return [
           i + 1,
           p.employee.employeeNumber,
@@ -63,22 +58,23 @@ export async function GET(req: NextRequest) {
 
   if (type === "form16") {
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month: { startsWith: fy.slice(0, 4) } },
+      where: { tenantId: session.tenantId, month: { in: fiscalYearMonths(month) } },
       include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, pan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
-    const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; gross: number; tds: number; pf: number; months: number }>();
+    const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; gross: number; tds: number; pf: number; net: number; months: number }>();
     for (const p of payslips) {
-      const cur = byEmp.get(p.employee.id) ?? { emp: p.employee, gross: 0, tds: 0, pf: 0, months: 0 };
+      const cur = byEmp.get(p.employee.id) ?? { emp: p.employee, gross: 0, tds: 0, pf: 0, net: 0, months: 0 };
       cur.gross += p.grossEarnings;
       cur.tds += p.tds;
       cur.pf += p.pfEmployee;
+      cur.net += p.netSalary;
       cur.months++;
       byEmp.set(p.employee.id, cur);
     }
     const rows: (string | number)[][] = [
       ["Employee Name", "Employee Code", "PAN", "Gross Salary", "Months Paid", "Total TDS (Section 192)", "Total PF Deducted", "Net Salary (est.)"],
-      ...[...byEmp.values()].map(({ emp, gross, tds, pf, months }) => [
+      ...[...byEmp.values()].map(({ emp, gross, tds, pf, net, months }) => [
         `${emp.firstName} ${emp.lastName}`.trim(),
         emp.employeeNumber,
         emp.pan ?? "",
@@ -86,7 +82,7 @@ export async function GET(req: NextRequest) {
         months,
         tds.toFixed(2),
         pf.toFixed(2),
-        (gross - tds - pf).toFixed(2),
+        net.toFixed(2),
       ]),
     ];
     return new NextResponse(csv(rows), {

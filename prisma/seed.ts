@@ -372,6 +372,7 @@ async function main() {
         employeeId: emp.id,
         month: lastMonthKey,
         baseSalary: salary,
+        basicSalary: Math.round(salary * 0.5),
         allowances,
         deductions,
         netSalary: salary + allowances - deductions,

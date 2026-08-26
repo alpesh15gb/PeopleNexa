@@ -472,6 +472,7 @@ model Payslip {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   month      String // "2026-08"
   baseSalary Float
+  basicSalary Float   @default(0) // PF / gratuity wage base used by the payroll engine
   allowances Float    @default(0)
 
   // Earnings breakdown

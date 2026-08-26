@@ -23,7 +23,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
+  if (body.punchInTime !== undefined || body.punchOutTime !== undefined) {
+    return NextResponse.json(
+      { error: "Punch times must be changed through the punch correction flow." },
+      { status: 400 }
+    );
+  }
 
   const record = await prisma.attendance.findFirst({
     where: { id, tenantId: session.tenantId },
@@ -36,11 +42,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
     data.status = body.status;
+    data.finalized = true;
+    data.reviewStatus = "manual_override";
   }
-  if (body.note !== undefined) data.note = body.note || null;
-  if (body.punchInTime) data.punchInTime = new Date(body.punchInTime);
-  if (body.punchOutTime) data.punchOutTime = new Date(body.punchOutTime);
-  if (body.punchOutTime === null) data.punchOutTime = null;
+  if (body.note !== undefined) data.note = body.note ? String(body.note).trim() : null;
 
   const updated = await prisma.attendance.update({ where: { id }, data });
   return NextResponse.json({ record: updated });

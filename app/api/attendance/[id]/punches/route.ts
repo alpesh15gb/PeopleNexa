@@ -50,6 +50,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       inOutHint: "unknown",
     },
   });
+  if (attendance.finalized) {
+    await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { finalized: false, reviewStatus: null, note: "pending finalization" },
+    });
+  }
 
   const result = await reconcileEmployeeDay(
     tenant ?? { id: session.tenantId, config: null },
@@ -80,6 +86,12 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   if (!punch) return NextResponse.json({ error: "Punch not found" }, { status: 404 });
 
   await prisma.punch.delete({ where: { id: punchId } });
+  if (attendance.finalized) {
+    await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { finalized: false, reviewStatus: null, note: "pending finalization" },
+    });
+  }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employee = await prisma.employee.findUnique({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { isMonthKey, monthKey } from "@/lib/dates";
 import { round2 } from "@/lib/utils";
 
 /**
@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
   }
 
   const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  if (!isMonthKey(month)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
   const payslips = await prisma.payslip.findMany({ where: { tenantId: session.tenantId, month } });
 
   const totals = payslips.reduce(

@@ -281,7 +281,7 @@ export async function reconcileEmployeeDay(
   const data = {
     tenantId: tenant.id,
     branchId: employee.branchId ?? null,
-    shiftId: employee.shiftId ?? null,
+    shiftId: roster?.shiftId ?? employee.shiftId ?? null,
     punchInTime: inAt,
     punchOutTime: outAt,
     status,

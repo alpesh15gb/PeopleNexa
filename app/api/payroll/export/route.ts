@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { isMonthKey, monthKey } from "@/lib/dates";
 import { buildBankFile, bankFileName, type BankFormat } from "@/lib/bank-file";
 
 export async function GET(req: NextRequest) {
@@ -11,6 +11,9 @@ export async function GET(req: NextRequest) {
   }
 
   const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  if (!isMonthKey(month)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
   const bankParam = (req.nextUrl.searchParams.get("bank") || "generic").toLowerCase();
   const bank: BankFormat = bankParam === "hdfc" || bankParam === "icici" ? bankParam : "generic";
   const debitAccount = req.nextUrl.searchParams.get("debitAccount") || "";

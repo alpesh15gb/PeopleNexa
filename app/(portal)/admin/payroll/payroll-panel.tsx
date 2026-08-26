@@ -30,6 +30,7 @@ interface Payslip {
   id: string;
   month: string;
   baseSalary: number;
+  basicSalary: number;
   allowances: number;
   overtimePay: number;
   grossEarnings: number;
@@ -367,7 +368,7 @@ function PayslipModal({
   if (!p || !emp) return null;
 
   const earnings = [
-    { label: "Basic salary", value: p.baseSalary, strong: false },
+    { label: "Basic salary", value: p.basicSalary || p.baseSalary * 0.5, strong: false },
     { label: "Allowances", value: p.allowances, strong: false },
     ...(p.overtimePay > 0 ? [{ label: `Overtime (${p.overtimeHours} h)`, value: p.overtimePay, strong: false }] : []),
     ...(p.adjustments?.filter((a) => a.amount > 0).map((a) => ({ label: a.label, value: a.amount, strong: false })) ?? []),

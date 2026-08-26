@@ -7,6 +7,13 @@ export async function GET(req: NextRequest) {
   if (!slug || slug.length < 2) {
     return NextResponse.json({ available: false, slug, error: "Subdomain must be at least 2 characters." });
   }
-  const available = await slugAvailable(slug);
-  return NextResponse.json({ available, slug });
+  try {
+    const available = await slugAvailable(slug);
+    return NextResponse.json({ available, slug });
+  } catch {
+    return NextResponse.json(
+      { available: false, slug, error: "Workspace availability is temporarily unavailable. Please try again." },
+      { status: 503 }
+    );
+  }
 }
