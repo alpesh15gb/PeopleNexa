@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, verifyToken } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_COOKIE_DOMAIN, verifyToken } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { moduleForPath } from "@/lib/modules";
 import { getTenantAccess } from "@/lib/modules-server";
@@ -45,6 +45,7 @@ function clearSessionCookie(res: NextResponse) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
+    domain: SESSION_COOKIE_DOMAIN,
     maxAge: 0,
   });
   return res;

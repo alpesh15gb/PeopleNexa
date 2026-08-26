@@ -182,7 +182,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground selection:bg-indigo-500/20">
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-edge bg-background/80 backdrop-blur-xl">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
@@ -199,7 +199,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             </Link>
             <Link
               href="/register"
-              className="rounded-lg bg-gradient-brand px-4 py-2 text-[13.5px] font-semibold text-white shadow-[0_4px_20px_-6px_rgba(99,102,241,0.6)] transition-all hover:brightness-110 active:brightness-95"
+              className="rounded-lg bg-primary px-4 py-2 text-[13.5px] font-semibold text-primary-foreground shadow-[0_4px_14px_-8px_rgba(79,70,229,0.7)] transition-all hover:bg-indigo-500 active:translate-y-px"
             >
               Start free trial
             </Link>
@@ -229,7 +229,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
               ))}
               <div className="mt-2 flex gap-2 border-t border-edge pt-3">
                 <Link href="/login" className="flex-1 rounded-lg border border-edge px-3 py-2.5 text-center text-[14px] font-semibold">Log in</Link>
-                <Link href="/register" className="flex-1 rounded-lg bg-gradient-brand px-3 py-2.5 text-center text-[14px] font-semibold text-white">Start free trial</Link>
+                <Link href="/register" className="flex-1 rounded-lg bg-primary px-3 py-2.5 text-center text-[14px] font-semibold text-primary-foreground">Start free trial</Link>
               </div>
             </div>
           </div>
@@ -242,8 +242,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         <div className="pointer-events-none absolute inset-0" aria-hidden>
           <div className="absolute inset-0 bg-grid" />
           <div className="absolute -top-32 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-[120px]" />
-          <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-violet-600/20 blur-[100px]" />
-          <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-sky-500/15 blur-[100px]" />
+          <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-violet-600/10 blur-[100px]" />
+          <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-sky-500/10 blur-[100px]" />
           <div
             className="absolute inset-0"
             style={{
@@ -270,7 +270,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 href="/register"
-                className="group inline-flex items-center gap-2 rounded-xl bg-gradient-brand px-6 py-3.5 text-[15px] font-semibold text-white shadow-[0_8px_32px_-8px_rgba(99,102,241,0.7)] transition-all hover:brightness-110 active:brightness-95"
+                className="group inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-[15px] font-semibold text-primary-foreground shadow-[0_8px_24px_-10px_rgba(79,70,229,0.75)] transition-all hover:bg-indigo-500 active:translate-y-px"
               >
                 Start free trial
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />

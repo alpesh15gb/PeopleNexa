@@ -39,7 +39,14 @@ export function invalidatePlansCache() {
 
 /** Code defaults merged with any super-admin overrides, for every plan. */
 export async function getEffectivePlans(opts?: { fresh?: boolean }): Promise<PlanDef[]> {
-  const overrides = opts?.fresh ? await prisma.planOverride.findMany() : await getPlanOverrides();
+  let overrides: OverrideRow[] = [];
+  try {
+    overrides = opts?.fresh ? await prisma.planOverride.findMany() : await getPlanOverrides();
+  } catch {
+    // Public surfaces should still render with code defaults while the database
+    // is recovering. Existing cached overrides remain preferable when present.
+    overrides = cache?.rows ?? [];
+  }
   return PLANS.map((p) => {
     const o = overrides.find((r) => r.planKey === p.key);
     if (!o) return p;

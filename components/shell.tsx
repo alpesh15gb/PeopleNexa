@@ -56,39 +56,40 @@ interface NavItem {
   match?: string[];
   exact?: boolean;
   module?: string; // module key this item requires (see lib/modules.ts)
+  section?: string;
 }
 
 const adminNav: NavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
-  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance" },
-  { href: "/admin/regularization", label: "Regularization", icon: <Wrench className="h-4 w-4" />, module: "attendance" },
-  { href: "/admin/employees", label: "Employees", icon: <Users className="h-4 w-4" />, module: "employees" },
-  { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" /> },
-  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts" },
-  { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters" },
-  { href: "/admin/org-chart", label: "Org Chart", icon: <Network className="h-4 w-4" />, module: "orgchart" },
-  { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding" },
-  { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit" },
+  { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, exact: true, section: "Overview" },
+  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance", section: "People & time" },
+  { href: "/admin/regularization", label: "Regularization", icon: <Wrench className="h-4 w-4" />, module: "attendance", section: "People & time" },
+  { href: "/admin/employees", label: "Employees", icon: <Users className="h-4 w-4" />, module: "employees", section: "People & time" },
+  { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" />, section: "People & time" },
+  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts", section: "People & time" },
+  { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters", section: "People & time" },
+  { href: "/admin/org-chart", label: "Org Chart", icon: <Network className="h-4 w-4" />, module: "orgchart", section: "People & time" },
+  { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding", section: "People & time" },
+  { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit", section: "People & time" },
   { href: "/admin/webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" />, module: "platform" },
   { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform" },
-  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches" },
-  { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves" },
-  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays" },
-  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets" },
-  { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices" },
-  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll" },
-  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll" },
-  { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll" },
-  { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses" },
-  { href: "/admin/journeys", label: "Journey Tracker", icon: <Route className="h-4 w-4" />, module: "journey" },
+  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches", section: "People & time" },
+  { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves", section: "Time off" },
+  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays", section: "Time off" },
+  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets", section: "Operations" },
+  { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices", section: "Operations" },
+  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
+  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
+  { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
+  { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
+  { href: "/admin/journeys", label: "Journey Tracker", icon: <Route className="h-4 w-4" />, module: "journey", section: "Operations" },
   { href: "/admin/ai", label: "Ask AI", icon: <Sparkles className="h-4 w-4" />, module: "ai" },
   { href: "/admin/documents", label: "Documents", icon: <FileText className="h-4 w-4" />, module: "documents" },
   { href: "/admin/performance", label: "Performance", icon: <ClipboardList className="h-4 w-4" />, module: "performance" },
   { href: "/admin/helpdesk", label: "Helpdesk", icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk" },
   { href: "/admin/policies", label: "Policies", icon: <ScrollText className="h-4 w-4" />, module: "policies" },
   { href: "/employee/feed", label: "Org Feed", icon: <Megaphone className="h-4 w-4" />, module: "feed" },
-  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports" },
-  { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" /> },
+  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports", section: "Insights" },
+  { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" />, section: "Workspace" },
   { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform" },
 ];
 
@@ -112,8 +113,11 @@ function employeeNav(lang: Lang): NavItem[] {
 
 function Brand() {
   return (
-    <div className="flex h-9 items-center rounded-lg bg-white px-2.5 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.6)]">
-      <img src="/logo.png" alt="PeopleNexa logo" className="h-[22px] w-auto" />
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-9 items-center rounded-[10px] bg-white px-2.5 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.18)]">
+        <img src="/logo.png" alt="PeopleNexa logo" className="h-[22px] w-auto" />
+      </div>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">Workspace</span>
     </div>
   );
 }
@@ -126,34 +130,51 @@ function NavLinks({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const sections = items.reduce<{ label: string; items: NavItem[] }[]>((groups, item) => {
+    const label = item.section ?? "More";
+    const existing = groups.find((group) => group.label === label);
+    if (existing) existing.items.push(item);
+    else groups.push({ label, items: [item] });
+    return groups;
+  }, []);
+
   return (
-    <nav className="space-y-1">
-      {items.map((item) => {
-        const active = item.exact
-          ? pathname === item.href
-          : item.match
-            ? item.match.some((m) => pathname === m || pathname.startsWith(m + "/"))
-            : pathname.startsWith(item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13.5px] font-medium transition-all duration-150",
-              active
-                ? "bg-gradient-brand text-white shadow-[0_4px_20px_-6px_rgba(99,102,241,0.6)]"
-                : "text-muted-foreground hover:bg-tint hover:text-foreground"
-            )}
-          >
-            <span className={cn(active ? "text-white" : "text-muted-foreground group-hover:text-foreground")}>
-              {item.icon}
-            </span>
-            {item.label}
-            {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-white/80" />}
-          </Link>
-        );
-      })}
+    <nav className="space-y-4">
+      {sections.map((section) => (
+        <div key={section.label}>
+          <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/55">
+            {section.label}
+          </p>
+          <div className="space-y-0.5">
+            {section.items.map((item) => {
+              const active = item.exact
+                ? pathname === item.href
+                : item.match
+                  ? item.match.some((m) => pathname === m || pathname.startsWith(m + "/"))
+                  : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "group relative flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[13px] font-medium transition-colors duration-150",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-[0_5px_16px_-8px_rgba(79,70,229,0.8)]"
+                      : "text-muted-foreground hover:bg-tint-strong hover:text-foreground"
+                  )}
+                >
+                  <span className={cn(active ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")}>
+                    {item.icon}
+                  </span>
+                  {item.label}
+                  {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-current/80" />}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 }
@@ -204,8 +225,11 @@ export function Shell({
         <Brand />
       </div>
       <div className="px-3 pb-2">
-        <div className="mb-1 px-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/60">
-          {isAdmin ? "Admin Panel" : t(lang, "nav.employeePortal")}
+        <div className="mb-4 rounded-xl border border-edge bg-tint px-3 py-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">
+            {isAdmin ? "Admin workspace" : t(lang, "nav.employeePortal")}
+          </p>
+          <p className="mt-1 truncate text-[13px] font-semibold text-foreground">{companyName}</p>
         </div>
         <NavLinks items={nav} onNavigate={() => setOpen(false)} />
       </div>
@@ -228,7 +252,7 @@ export function Shell({
   return (
     <div className="min-h-screen">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-edge bg-sidebar/80 backdrop-blur-xl lg:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-edge bg-sidebar/92 backdrop-blur-xl lg:block">
         {sidebar}
       </aside>
 
@@ -236,7 +260,7 @@ export function Shell({
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-64 animate-fade-in border-r border-edge bg-sidebar">
+          <aside className="absolute inset-y-0 left-0 w-72 animate-fade-in border-r border-edge bg-sidebar">
             <button
               onClick={() => setOpen(false)}
               className="absolute right-3 top-5 rounded-lg p-1.5 text-muted-foreground hover:bg-tint"
@@ -249,9 +273,9 @@ export function Shell({
       )}
 
       {/* Main column */}
-      <div className="lg:pl-60">
+      <div className="lg:pl-64">
         {/* Topbar */}
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-edge bg-background/70 px-4 backdrop-blur-xl sm:px-6">
+        <header className="sticky top-0 z-20 flex h-[68px] items-center gap-3 border-b border-edge bg-background/82 px-4 backdrop-blur-xl sm:px-7">
           <button
             onClick={() => setOpen(true)}
             className="rounded-lg p-2 text-muted-foreground hover:bg-tint lg:hidden"
@@ -259,7 +283,7 @@ export function Shell({
             <Menu className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate font-display text-[17px] font-bold tracking-tight">
+              <h1 className="truncate font-display text-[17px] font-bold tracking-[-0.015em]">
               {current?.label ?? "Dashboard"}
             </h1>
           </div>
@@ -315,7 +339,7 @@ export function Shell({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9">{children}</main>
       </div>
     </div>
   );

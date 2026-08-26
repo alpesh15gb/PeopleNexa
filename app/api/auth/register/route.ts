@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { onboardTenant } from "@/lib/onboarding";
-import { signToken, SESSION_COOKIE } from "@/lib/auth";
+import { signToken, SESSION_COOKIE, SESSION_COOKIE_DOMAIN } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
+      domain: SESSION_COOKIE_DOMAIN,
       maxAge: 60 * 60 * 24 * 30,
     });
     return res;

@@ -7,10 +7,18 @@ import { cn } from "@/lib/utils";
 export function ThemeToggle({ className }: { className?: string }) {
   const [dark, setDark] = useState(false);
 
-  // Read the effective theme from the DOM (set by the pre-paint script) so the
-  // icon is correct without ever risking a hydration mismatch.
+  // Apply the saved preference after mount. Keeping this in the client component
+  // avoids inline-script errors in the App Router while still respecting the OS.
   useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
+    let preferred = "";
+    try {
+      preferred = localStorage.getItem("theme") ?? "";
+    } catch {
+      // Ignore storage errors and fall back to the OS preference.
+    }
+    const next = preferred ? preferred === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.classList.toggle("dark", next);
+    setDark(next);
   }, []);
 
   const toggle = () => {

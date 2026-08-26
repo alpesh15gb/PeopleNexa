@@ -15,17 +15,18 @@ export default async function LoginPage() {
 
   return (
     <div className="animate-fade-up">
-      <div className="mb-8">
-        <h2 className="font-display text-2xl font-bold tracking-tight">Login to your account</h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Welcome back — punch in and get to work.
+      <div className="mb-7">
+        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Welcome back</p>
+        <h2 className="font-display text-[30px] font-bold tracking-[-0.035em]">Sign in to your workspace</h2>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
+          Pick up where your team left off. Your people data, requests, and daily actions are waiting.
         </p>
       </div>
       <LoginForm />
-      <p className="mt-8 text-center text-[13px] text-muted-foreground">
+      <p className="mt-7 text-center text-[13px] text-muted-foreground">
         New to PeopleNexa?{" "}
         <Link href="/register" className="font-medium text-indigo-300 transition-colors hover:text-indigo-200">
-          Create your company
+          Create a workspace
         </Link>
       </p>
     </div>

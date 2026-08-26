@@ -15,14 +15,15 @@ export default async function RegisterPage() {
 
   return (
     <div className="animate-fade-up">
-      <div className="mb-8">
-        <h2 className="font-display text-2xl font-bold tracking-tight">Create your company</h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          We'll set up your company, default branch, shift and leave types automatically.
+      <div className="mb-7">
+        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Start with the essentials</p>
+        <h2 className="font-display text-[30px] font-bold tracking-[-0.035em]">Create your workspace</h2>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
+          We&apos;ll set up the sensible defaults so you can invite your team and get moving in minutes.
         </p>
       </div>
       <RegisterForm baseDomain={process.env.APP_BASE_DOMAIN ?? "peoplenexa.in"} />
-      <p className="mt-8 text-center text-[13px] text-muted-foreground">
+      <p className="mt-7 text-center text-[13px] text-muted-foreground">
         Already have an account?{" "}
         <Link href="/login" className="font-medium text-indigo-300 transition-colors hover:text-indigo-200">
           Sign in

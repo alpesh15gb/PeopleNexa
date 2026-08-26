@@ -15,7 +15,7 @@ export default async function AdminDashboardPage() {
   const session = await requireSession();
   const today = startOfDay(new Date());
 
-  const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
+  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, weekRecords] = await Promise.all([
     prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active" } }),
     prisma.attendance.findMany({
       where: { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) } },
@@ -34,6 +34,7 @@ export default async function AdminDashboardPage() {
       orderBy: { appliedAt: "desc" },
       take: 6,
     }),
+    prisma.leaveRequest.count({ where: { tenantId: session.tenantId, status: "pending" } }),
     prisma.attendance.groupBy({
       by: ["date", "status"],
       where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today } },
@@ -46,7 +47,7 @@ export default async function AdminDashboardPage() {
     if (counts[a.status as keyof typeof counts] !== undefined) counts[a.status as keyof typeof counts]!++;
   }
   const marked = attendance.length;
-  counts.absent = Math.max(employees.length - marked, 0);
+  counts.absent += Math.max(employees.length - marked, 0);
 
   const week = [];
   for (let i = 6; i >= 0; i--) {
@@ -65,9 +66,10 @@ export default async function AdminDashboardPage() {
     <div className="animate-fade-up space-y-6">
       {/* Greeting */}
       <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight">Good day, Admin 👋</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Here's what's happening at your company on {formatDate(today)} ({relativeDay(today)}).
+        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Today at a glance</p>
+        <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">Good day, Admin</h1>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
+          Here&apos;s what needs your attention on {formatDate(today)} ({relativeDay(today)}).
         </p>
       </div>
 
@@ -80,7 +82,7 @@ export default async function AdminDashboardPage() {
         <StatCard label="Absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" />
         <StatCard
           label="Pending leaves"
-          value={pendingLeaves.length}
+          value={pendingLeaveCount}
           icon={<CalendarCheck2 className="h-4.5 w-4.5" />}
           tone="violet"
         />
@@ -91,7 +93,7 @@ export default async function AdminDashboardPage() {
         <Card className="xl:col-span-2">
           <CardHeader>
             <div>
-              <CardTitle>Today's attendance</CardTitle>
+              <CardTitle>Today&apos;s attendance</CardTitle>
               <CardDescription>{marked} of {employees.length} employees marked · {toDateKey(today)}</CardDescription>
             </div>
             <CalendarClock className="h-4.5 w-4.5 text-muted-foreground" />
@@ -169,8 +171,8 @@ export default async function AdminDashboardPage() {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Pending leave requests</CardTitle>
-            <CardDescription>Waiting for your approval</CardDescription>
+          <CardTitle>Leave requests waiting for review</CardTitle>
+          <CardDescription>{pendingLeaveCount} request{pendingLeaveCount === 1 ? "" : "s"} currently need your approval</CardDescription>
           </div>
         </CardHeader>
         <CardContent className="pt-4">

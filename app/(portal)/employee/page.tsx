@@ -15,6 +15,7 @@ export default async function EmployeeDashboardPage() {
   const session = await requireSession();
   const lang = await getLang();
   const today = startOfDay(new Date());
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
   const employee = await prisma.employee.findUnique({
     where: { id: session.sub },
@@ -27,7 +28,7 @@ export default async function EmployeeDashboardPage() {
       where: { employeeId: employee.id, date: { gte: today, lt: addDays(today, 1) } },
     }),
     prisma.attendance.findMany({
-      where: { employeeId: employee.id, date: { gte: today } },
+      where: { employeeId: employee.id, date: { gte: monthStart, lt: addDays(today, 1) } },
     }),
     prisma.leaveRequest.findMany({
       where: { employeeId: employee.id, status: "approved", toDate: { gte: today } },
@@ -46,10 +47,11 @@ export default async function EmployeeDashboardPage() {
   return (
     <div className="animate-fade-up space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight">
+        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Your workday</p>
+        <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">
           {t(lang, "dashboard.welcome", { name: employee.firstName })}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
           {employee.department?.name ?? t(lang, "common.general")} · {employee.shift?.name ?? t(lang, "common.noShift")} · {toDateKey(today)}
         </p>
       </div>

@@ -47,90 +47,94 @@ export async function onboardTenant(input: {
   password: string;
 }) {
   const email = input.email.toLowerCase().trim();
-  const existing = await prisma.employee.findFirst({
-    where: { email },
-    include: { tenant: true },
-  });
-  if (existing) throw new Error("An account with this email already exists.");
-
   const slug = normalizeSlug(input.slug);
   if (!slug || slug.length < 2 || ["www", "api", "admin", "app"].includes(slug)) {
     throw new Error("Please choose a valid subdomain.");
   }
-  const slugTaken = await prisma.tenant.findUnique({ where: { slug } });
-  if (slugTaken) throw new Error("That subdomain is already taken. Try another one.");
+  if (!input.companyName.trim() || !input.name.trim() || !email || input.password.length < 6) {
+    throw new Error("Please complete all required fields.");
+  }
 
   const trial = await getEffectivePlan("trial");
-  const tenant = await prisma.tenant.create({
-    data: {
-      name: input.companyName.trim(),
-      code: generateCompanyCode(),
-      slug,
-      email,
-      status: "active",
-      plan: "trial",
-      seats: trial.seats,
-      subscriptionExpiry: new Date(Date.now() + TRIAL_DAYS * 24 * 3600 * 1000),
-      config: {},
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    const [existing, slugTaken] = await Promise.all([
+      tx.employee.findFirst({ where: { email }, include: { tenant: true } }),
+      tx.tenant.findUnique({ where: { slug } }),
+    ]);
+    if (existing) throw new Error("An account with this email already exists.");
+    if (slugTaken) throw new Error("That subdomain is already taken. Try another one.");
 
-  // Enable every module for the trial, and record the initial license.
-  await prisma.tenantModule.createMany({
-    data: MODULES.map((m) => ({ tenantId: tenant.id, module: m.key, enabled: trial.modules.includes(m.key) })),
-  });
-  await prisma.license.create({
-    data: {
-      tenantId: tenant.id,
-      plan: "trial",
-      seats: trial.seats,
-      expiresAt: tenant.subscriptionExpiry,
-      note: "Self-serve signup (30-day trial)",
-    },
-  });
+    const subscriptionExpiry = new Date(Date.now() + TRIAL_DAYS * 24 * 3600 * 1000);
+    const tenant = await tx.tenant.create({
+      data: {
+        name: input.companyName.trim(),
+        code: generateCompanyCode(),
+        slug,
+        email,
+        status: "active",
+        plan: "trial",
+        seats: trial.seats,
+        subscriptionExpiry,
+        config: {},
+      },
+    });
 
-  const branch = await prisma.branch.create({
-    data: {
-      tenantId: tenant.id,
-      name: "Main Branch",
-      code: "MAIN",
-      geofenceRadius: 200,
-      isDefault: true,
-    },
-  });
+    await tx.tenantModule.createMany({
+      data: MODULES.map((m) => ({ tenantId: tenant.id, module: m.key, enabled: trial.modules.includes(m.key) })),
+    });
+    await tx.license.create({
+      data: {
+        tenantId: tenant.id,
+        plan: "trial",
+        seats: trial.seats,
+        expiresAt: subscriptionExpiry,
+        note: "Self-serve signup (30-day trial)",
+      },
+    });
 
-  const shift = await prisma.shift.create({
-    data: {
-      tenantId: tenant.id,
-      name: "General Shift",
-      startTime: "09:00",
-      endTime: "18:00",
-      graceMinutes: 15,
-      isDefault: true,
-    },
-  });
+    const branch = await tx.branch.create({
+      data: {
+        tenantId: tenant.id,
+        name: "Main Branch",
+        code: "MAIN",
+        geofenceRadius: 200,
+        isDefault: true,
+      },
+    });
 
-  await prisma.leaveType.createMany({
-    data: [
-      { tenantId: tenant.id, name: "Casual Leave", code: "CL", maxDays: 12, color: "#3b82f6" },
-      { tenantId: tenant.id, name: "Sick Leave", code: "SL", maxDays: 10, color: "#f59e0b" },
-      { tenantId: tenant.id, name: "Privilege Leave", code: "PL", maxDays: 15, color: "#10b981" },
-    ],
-  });
+    const shift = await tx.shift.create({
+      data: {
+        tenantId: tenant.id,
+        name: "General Shift",
+        startTime: "09:00",
+        endTime: "18:00",
+        graceMinutes: 15,
+        isDefault: true,
+      },
+    });
 
-  const admin = await prisma.employee.create({
-    data: {
-      tenantId: tenant.id,
-      employeeNumber: "ADM-001",
-      firstName: input.name.trim().split(" ")[0] || "Admin",
-      lastName: input.name.trim().split(" ").slice(1).join(" "),
-      email,
-      password: await hashPassword(input.password),
-      role: "admin",
-      branchId: branch.id,
-      shiftId: shift.id,
-    },
-  });
+    await tx.leaveType.createMany({
+      data: [
+        { tenantId: tenant.id, name: "Casual Leave", code: "CL", maxDays: 12, color: "#3b82f6" },
+        { tenantId: tenant.id, name: "Sick Leave", code: "SL", maxDays: 10, color: "#f59e0b" },
+        { tenantId: tenant.id, name: "Privilege Leave", code: "PL", maxDays: 15, color: "#10b981" },
+      ],
+    });
 
-  return { tenant, admin };
+    const admin = await tx.employee.create({
+      data: {
+        tenantId: tenant.id,
+        employeeNumber: "ADM-001",
+        firstName: input.name.trim().split(" ")[0] || "Admin",
+        lastName: input.name.trim().split(" ").slice(1).join(" "),
+        email,
+        password: await hashPassword(input.password),
+        role: "admin",
+        branchId: branch.id,
+        shiftId: shift.id,
+      },
+    });
+
+    return { tenant, admin };
+  });
 }
