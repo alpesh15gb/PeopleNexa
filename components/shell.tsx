@@ -220,11 +220,11 @@ export function Shell({
   };
 
   const sidebar = (
-    <div className="flex h-full flex-col">
-      <div className="flex h-16 items-center px-5">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-16 shrink-0 items-center px-5">
         <Brand />
       </div>
-      <div className="px-3 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3 [scrollbar-color:var(--edge)_transparent] [scrollbar-width:thin]">
         <div className="mb-4 rounded-xl border border-edge bg-tint px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">
             {isAdmin ? "Admin workspace" : t(lang, "nav.employeePortal")}
@@ -233,7 +233,7 @@ export function Shell({
         </div>
         <NavLinks items={nav} onNavigate={() => setOpen(false)} />
       </div>
-      <div className="mt-auto p-3">
+      <div className="shrink-0 p-3">
         <div className="card-surface rounded-xl p-3">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[12px] font-bold text-white">
