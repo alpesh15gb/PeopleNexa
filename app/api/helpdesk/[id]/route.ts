@@ -18,6 +18,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
   if (action === "message") {
+    if (session.role !== "admin" && ticket.requesterId !== session.sub && ticket.assigneeId !== session.sub) {
+      return NextResponse.json({ error: "You are not a participant in this ticket." }, { status: 403 });
+    }
     const text = String(body.body ?? "").trim();
     if (!text) return NextResponse.json({ error: "Message is required." }, { status: 400 });
     const msg = await prisma.ticketMessage.create({

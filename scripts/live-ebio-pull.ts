@@ -1,16 +1,26 @@
-import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { saveEbioserverConfig, pullTenant } from "../lib/ebioserver";
 
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} must be set to run the eBioserver pull.`);
+  return value;
+}
+
 async function main() {
-  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: "crk" } });
+  const tenantSlug = required("EBIO_TENANT_SLUG");
+  const url = required("EBIO_URL");
+  const username = required("EBIO_USERNAME");
+  const password = required("EBIO_PASSWORD");
+
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: tenantSlug } });
 
   const profile = await saveEbioserverConfig(tenant.id, {
-    url: "http://183.82.103.125:8080/Webservice.asmx",
-    username: "keystone",
-    password: "Keystone@999",
+    url,
+    username,
+    password,
     enabled: true,
-    pollIntervalMinutes: 5,
+    pollIntervalMinutes: Number(process.env.EBIO_POLL_INTERVAL_MINUTES ?? "5"),
   });
   console.log("profile saved:", { url: profile.url, username: profile.username, enabled: profile.enabled, lastLogId: profile.lastLogId });
 

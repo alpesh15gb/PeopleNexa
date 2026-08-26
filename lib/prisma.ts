@@ -1,7 +1,12 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
-const databaseUrl = process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/peoplenexa";
+const databaseUrl = process.env.DATABASE_URL ??
+  (process.env.NODE_ENV === "production" ? undefined : "postgresql://postgres:postgres@localhost:5432/peoplenexa");
+
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL must be set in production.");
+}
 
 function createClient() {
   const adapter = new PrismaPg({ connectionString: databaseUrl });

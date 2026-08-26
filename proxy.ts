@@ -22,8 +22,10 @@ function resolveSlug(request: NextRequest): string | null {
   const host = (request.headers.get("host") ?? "").toLowerCase();
   const hostname = host.split(":")[0];
   const parts = hostname.split(".");
-  const header = request.headers.get("x-tenant-slug");
-  if (header) return header;
+  // x-tenant-slug is a local test convenience only. In production it is
+  // client-controlled and must never override the reverse-proxy Host header.
+  const header = process.env.NODE_ENV !== "production" ? request.headers.get("x-tenant-slug") : null;
+  if (header) return header.trim().toLowerCase();
   if (hostname.endsWith(`.${BASE_DOMAIN}`) && parts.length >= 3) return parts[0];
   if (hostname.endsWith(".localhost") && parts.length >= 2) return parts[0];
   if (hostname === "localhost" || hostname === "127.0.0.1") return "crk";

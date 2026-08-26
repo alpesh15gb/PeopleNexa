@@ -6,6 +6,7 @@ import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
 import { parseIST } from "./ist";
 import { hashPassword } from "./auth";
+import crypto from "node:crypto";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
 import type { Tenant } from "@/generated/prisma/client";
 
@@ -235,7 +236,8 @@ function splitName(name: string): [string, string] {
 /**
  * Pull the employee master from eBioserver and create matching employees in
  * this tenant. Idempotent: codes already present are skipped, so re-running
- * only adds what's new. Employees get a default login password (123456).
+ * only adds what's new. Imported identities are inactive until an admin provisions
+ * a real email, password, and account activation.
  */
 export async function importEmployeesFromEbioserver(
   tenantId: string,
@@ -281,8 +283,11 @@ export async function importEmployeesFromEbioserver(
             firstName,
             lastName,
             email: `${code.toLowerCase()}@device.local`,
-            password: await hashPassword("123456"),
+            // Device identities must never be born with a shared predictable
+            // credential. Keep them inactive until an admin provisions access.
+            password: await hashPassword(crypto.randomBytes(32).toString("hex")),
             role: "employee",
+            status: "inactive",
             position: fields.EmployeeRole || null,
             branchId,
           },

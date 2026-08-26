@@ -82,13 +82,35 @@ docker compose up -d --build
 docker compose ps          # wait for app to show (healthy)
 ```
 
-First boot applies the schema (`prisma db push`) automatically. To load the
-demo tenant on the very first boot only:
+The container applies committed PostgreSQL migrations (`prisma migrate deploy`)
+before starting the app. Do not use `prisma db push` against production.
+
+This release includes a PostgreSQL baseline migration. For a brand-new database,
+`migrate deploy` creates the schema. If an existing database was previously
+created with `db push`, take a backup and verify it matches the current schema
+before marking the baseline as applied once:
 
 ```bash
-# in .env.production: SEED_DB=true
+docker compose run --rm app npx prisma migrate resolve --applied 20260826000000_postgresql_baseline
+```
+
+Only use `migrate resolve` after schema verification; it records migration
+history and does not alter the database.
+
+To load the demo tenant on a disposable environment only:
+
+```bash
+# in .env.production for a disposable/demo environment only:
+SEED_DB=true
+ALLOW_DESTRUCTIVE_SEED=true
+SUPERADMIN_EMAIL=admin@example.com
+SUPERADMIN_PASSWORD=<16+ character random password>
+DEMO_ADMIN_PASSWORD=<16+ character random password>
+DEMO_EMPLOYEE_PASSWORD=<16+ character random password>
 docker compose up -d
-# after the container is healthy, set SEED_DB=false and restart:
+# after the container is healthy, set both flags to false and restart:
+SEED_DB=false
+ALLOW_DESTRUCTIVE_SEED=false
 docker compose up -d
 ```
 
@@ -99,8 +121,8 @@ curl -s https://peoplenexa.in/api/health        # {"ok":true,"db":"up"}
 curl -sI https://crk.peoplenexa.in/login        # 200, HTTPS
 ```
 
-Log in at `https://crk.peoplenexa.in/login` with the seeded demo admin
-(`admin@apex.com` / `admin123`) — **change these immediately**.
+If a disposable demo tenant was intentionally seeded, log in with the configured
+`DEMO_ADMIN_PASSWORD`; production should not contain seeded demo credentials.
 
 ## 7b. Super admin console
 
@@ -154,5 +176,6 @@ cat backup.sql | docker compose exec -T db psql -U peoplenexa peoplenexa
 - **Session bounces to /login after deploy** — sessions are JWT-signed with
   `JWT_SECRET`; changing it invalidates everyone's session (they just log in
   again — not a bug).
-- **`prisma db push` fails at boot** — usually the db container isn't healthy
-  yet; `docker compose restart app` once `docker compose ps` shows db healthy.
+- **`prisma migrate deploy` fails at boot** — inspect `docker compose logs app`
+  and verify the database is healthy. Never replace it with `prisma db push` in
+  production; repair or add a committed migration instead.

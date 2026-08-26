@@ -19,6 +19,9 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
+  }
   if (secret && req.headers.get("x-cron-secret") !== secret) {
     const { getSession } = await import("@/lib/session");
     const session = await getSession();

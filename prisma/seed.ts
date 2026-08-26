@@ -15,6 +15,18 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction) {
+    if (process.env.ALLOW_DESTRUCTIVE_SEED !== "true") {
+      throw new Error("Refusing destructive demo seed in production. Set ALLOW_DESTRUCTIVE_SEED=true only for an intentional disposable environment.");
+    }
+    const superadminPassword = process.env.SUPERADMIN_PASSWORD ?? "";
+    const adminPassword = process.env.DEMO_ADMIN_PASSWORD ?? "";
+    const employeePassword = process.env.DEMO_EMPLOYEE_PASSWORD ?? "";
+    if (superadminPassword.length < 16 || adminPassword.length < 16 || employeePassword.length < 16) {
+      throw new Error("Production demo seed requires SUPERADMIN_PASSWORD, DEMO_ADMIN_PASSWORD, and DEMO_EMPLOYEE_PASSWORD of at least 16 characters.");
+    }
+  }
   console.log("Seeding demo data…");
 
   // Wipe everything for a clean demo (dev only).
@@ -204,8 +216,8 @@ async function main() {
   });
 
   // ── Employees ────────────────────────────────────────────────────────────
-  const password = await hashPassword("admin123");
-  const empPassword = await hashPassword("emp123");
+  const password = await hashPassword(process.env.DEMO_ADMIN_PASSWORD ?? "admin123");
+  const empPassword = await hashPassword(process.env.DEMO_EMPLOYEE_PASSWORD ?? "emp123");
 
   const admin = await prisma.employee.create({
     data: {
@@ -811,9 +823,9 @@ async function main() {
   console.log(`✅ Seeded: ${company.name} (${company.code}) @ ${company.slug}.peoplenexa.in`);
   console.log(`   ${employees.length} employees · ${punches} attendance punches · 4 leave types · 2 branches · 3 departments · ${assets.length} assets · 1 device`);
   console.log("");
-  console.log("   Admin login:     admin@apex.com / admin123");
-  console.log("   Employee:        rahul@apex.com / emp123");
-  console.log("   Super admin:     superadmin@peoplenexa.in / superadmin123");
+  console.log("   Admin login:     admin@apex.com / [configured password]");
+  console.log("   Employee:        rahul@apex.com / [configured password]");
+  console.log("   Super admin:     [configured email] / [configured password]");
 }
 
 main()

@@ -3,7 +3,7 @@
 # PeopleNexa — multi-stage build.
 #   deps   : install all packages (incl. devDeps for prisma CLI + seed tooling)
 #   build  : prisma generate + next build (standalone output)
-#   runner : traced server + static assets + prisma CLI (for boot-time db push)
+#   runner : traced server + static assets + prisma CLI (for boot-time migrate deploy)
 #
 # Build-time DATABASE_URL is only needed because prisma.config.ts requires it
 # to load; generate/build never connect to the database, so any dummy value
@@ -35,7 +35,7 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 
-# Prisma CLI + schema for `prisma db push` at boot, and the seed script
+# Prisma CLI + schema for `prisma migrate deploy` at boot, and the seed script
 # (runs with tsx when SEED_DB=true).
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
