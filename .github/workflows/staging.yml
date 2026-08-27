@@ -1,0 +1,55 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peoplenexa-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, staging]
+    timeout-minutes: 20
+
+    steps:
+      - name: Update source
+        run: |
+          cd /opt/apps/PeopleNexa
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Build and deploy
+        run: |
+          cd /opt/apps/PeopleNexa
+          docker compose up -d --build --remove-orphans
+
+      - name: Wait for application
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health; then
+              echo
+              echo "PeopleNexa staging is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for PeopleNexa... attempt $i/30"
+            sleep 5
+          done
+
+          echo "Health check failed"
+          cd /opt/apps/PeopleNexa
+          docker compose ps
+          docker compose logs --tail=100 app
+          exit 1
+
+      - name: Deployment status
+        run: |
+          cd /opt/apps/PeopleNexa
+          docker compose ps
