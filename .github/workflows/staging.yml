@@ -15,8 +15,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, linux, x64, staging]
-    timeout-minutes: 20
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Update source
@@ -30,7 +29,7 @@ jobs:
           cd /opt/apps/PeopleNexa
           docker compose up -d --build --remove-orphans
 
-      - name: Wait for application
+      - name: Health check
         run: |
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:3000/api/health; then
@@ -38,18 +37,11 @@ jobs:
               echo "PeopleNexa staging is healthy"
               exit 0
             fi
-
-            echo "Waiting for PeopleNexa... attempt $i/30"
+            echo "Waiting for app... $i/30"
             sleep 5
           done
 
-          echo "Health check failed"
           cd /opt/apps/PeopleNexa
           docker compose ps
           docker compose logs --tail=100 app
           exit 1
-
-      - name: Deployment status
-        run: |
-          cd /opt/apps/PeopleNexa
-          docker compose ps
