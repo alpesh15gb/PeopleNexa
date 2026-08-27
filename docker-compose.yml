@@ -40,6 +40,7 @@ services:
       # Overrides env_file — built from .env so credentials live in one place.
       DATABASE_URL: postgresql://${POSTGRES_USER:-peoplenexa}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-peoplenexa}
       NODE_ENV: production
+      HOSTNAME: "0.0.0.0"     
     ports:
       # Host nginx proxies here; never expose this publicly.
       - "127.0.0.1:${APP_PORT:-3000}:3000"
