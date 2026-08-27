@@ -1,7 +1,10 @@
-name: Deploy Staging
+name: CI and Deploy Staging
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
   workflow_dispatch:
@@ -9,13 +12,53 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: peoplenexa-staging
-  cancel-in-progress: false
-
 jobs:
+  ci:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DATABASE_URL: postgresql://build:build@localhost:5432/peoplenexa
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Test production Docker build
+        run: docker build -t peoplenexa-ci .
+
   deploy:
-    runs-on: [self-hosted, Linux, X64]
+    name: Deploy staging
+    if: github.event_name != 'pull_request'
+    needs: ci
+
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - staging
+
+    timeout-minutes: 30
+
+    concurrency:
+      group: peoplenexa-staging
+      cancel-in-progress: false
 
     steps:
       - name: Update source
@@ -37,11 +80,20 @@ jobs:
               echo "PeopleNexa staging is healthy"
               exit 0
             fi
-            echo "Waiting for app... $i/30"
+
+            echo "Waiting for PeopleNexa... $i/30"
             sleep 5
           done
+
+          echo "Staging health check failed"
 
           cd /opt/apps/PeopleNexa
           docker compose ps
           docker compose logs --tail=100 app
+
           exit 1
+
+      - name: Show deployment
+        run: |
+          cd /opt/apps/PeopleNexa
+          docker compose ps
