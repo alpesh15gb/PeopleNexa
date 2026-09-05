@@ -66,10 +66,14 @@ export default async function EmployeeAttendancePage() {
         actions={<LocationPinger active={openSession} />}
       />
 
-      {/* 30-day heat grid */}
+      {/* 30-day heat grid — color is redundant: each cell also exposes text via aria + table fallback */}
       <Card>
         <CardContent className="p-5">
-          <div className="grid grid-cols-10 gap-1.5 sm:grid-cols-[repeat(15,minmax(0,1fr))]">
+          <div
+            role="img"
+            aria-label={`Last 30 days: ${present} present, ${late} late, ${onLeave} on leave this month.`}
+            className="grid grid-cols-6 gap-1.5 sm:grid-cols-10 lg:grid-cols-15"
+          >
             {days.map((day) => {
               const key = toDateKey(day);
               const isToday = key === toDateKey(today);
@@ -77,32 +81,69 @@ export default async function EmployeeAttendancePage() {
               const leave = leaveByDay.get(key);
               const holiday = holidayByDay.get(key);
               let bg = "bg-tint";
+              let statusText = t(lang, "attendance.absent");
               let title = key;
               if (holiday) {
                 bg = "bg-violet-500/25";
-                title = `${key} · ${t(lang, "attendance.holiday", { name: holiday })}`;
+                statusText = t(lang, "attendance.holiday", { name: holiday });
+                title = `${key} · ${statusText}`;
               } else if (leave) {
                 bg = "bg-indigo-500/30";
-                title = `${key} · ${t(lang, "attendance.onLeaveTitle", { type: leave.type })}`;
+                statusText = t(lang, "attendance.onLeaveTitle", { type: leave.type });
+                title = `${key} · ${statusText}`;
               } else if (record) {
                 bg = record.status === "late" ? "bg-amber-400/50" : record.status === "permission" ? "bg-sky-400/50" : "bg-emerald-400/60";
-                title = `${key} · ${t(lang, `status.${record.status}`)}${record.punchInTime ? " · " + t(lang, "attendance.in").toLowerCase() + " " + formatTime(record.punchInTime) : ""}`;
+                statusText = `${t(lang, `status.${record.status}`)}${record.punchInTime ? " · " + t(lang, "attendance.in").toLowerCase() + " " + formatTime(record.punchInTime) : ""}`;
+                title = `${key} · ${statusText}`;
               } else if (day.getDay() === 0) {
                 bg = "bg-tint";
-                title = `${key} · ${t(lang, "attendance.sunday")}`;
+                statusText = t(lang, "attendance.sunday");
+                title = `${key} · ${statusText}`;
               } else {
                 bg = "bg-rose-400/20";
-                title = `${key} · ${t(lang, "attendance.absent")}`;
+                title = `${key} · ${statusText}`;
               }
               return (
                 <div
                   key={key}
                   title={title}
-                  className={`relative aspect-square rounded-md ${bg} ${isToday ? "ring-2 ring-indigo-400" : ""}`}
-                />
+                  tabIndex={0}
+                  role="img"
+                  aria-label={title}
+                  className={`relative aspect-square min-h-[28px] rounded-md ${bg} focus-visible:outline-2 focus-visible:outline-primary ${isToday ? "ring-2 ring-indigo-400" : ""}`}
+                >
+                  <span className="sr-only">{title}</span>
+                </div>
               );
             })}
           </div>
+          {/* Screen-reader table fallback for the same 30-day data */}
+          <table className="sr-only">
+            <caption>Attendance for the last 30 days</caption>
+            <tbody>
+              {days.map((day) => {
+                const key = toDateKey(day);
+                const record = recordByDay.get(key);
+                const leave = leaveByDay.get(key);
+                const holiday = holidayByDay.get(key);
+                const text = holiday
+                  ? `Holiday: ${holiday}`
+                  : leave
+                    ? `On leave: ${leave.type}`
+                    : record
+                      ? t(lang, `status.${record.status}`)
+                      : day.getDay() === 0
+                        ? t(lang, "attendance.sunday")
+                        : t(lang, "attendance.absent");
+                return (
+                  <tr key={key}>
+                    <th scope="row">{key}</th>
+                    <td>{text}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           <div className="mt-4 flex flex-wrap gap-4 text-[11.5px] text-muted-foreground">
             <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-400/60" /> {t(lang, "common.present")}</span>
             <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400/50" /> {t(lang, "common.late")}</span>

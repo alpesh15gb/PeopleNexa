@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 
 /** GET — exit requests (admins see all, employees see their own). */
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const requests = await prisma.exitRequest.findMany({
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
 /** POST — an employee raises a resignation / exit request. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));

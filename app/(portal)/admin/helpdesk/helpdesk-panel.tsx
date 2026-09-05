@@ -6,6 +6,7 @@ import { LifeBuoy, Send, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 
 type Msg = { id: string; sender: { id: string; firstName: string; lastName: string; role: string }; body: string; createdAt: string };
@@ -34,6 +35,8 @@ export function HelpdeskPanel() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [filter, setFilter] = useState("all");
 
   async function load() {
@@ -93,13 +96,23 @@ export function HelpdeskPanel() {
     }
   }
 
-  async function del(id: string) {
-    if (!confirm("Delete this ticket?")) return;
-    const res = await fetch(`/api/helpdesk/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toast("success", "Ticket deleted.");
-      await load();
-    } else toast("error", "Failed");
+  function del(id: string) {
+    setConfirmTarget(id);
+  }
+
+  async function doConfirm() {
+    if (!confirmTarget) return;
+    setConfirmBusy(true);
+    try {
+      const res = await fetch(`/api/helpdesk/${confirmTarget}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("success", "Ticket deleted.");
+        await load();
+      } else toast("error", "Failed");
+    } finally {
+      setConfirmBusy(false);
+      setConfirmTarget(null);
+    }
   }
 
   const filtered = filter === "all" ? tickets : filter === "open" ? tickets.filter((t) => t.status === "open" || t.status === "in_progress") : tickets.filter((t) => t.status === "resolved" || t.status === "closed");
@@ -143,7 +156,7 @@ export function HelpdeskPanel() {
               </button>
 
               {openId === t.id && (
-                <div className="border-t border-white/[0.06] px-5 py-4">
+                <div className="border-t border-edge px-5 py-4">
                   <p className="mb-3 text-[13px] text-muted-foreground">{t.description}</p>
                   <div className="space-y-2">
                     {t.messages.map((m) => (
@@ -173,6 +186,18 @@ export function HelpdeskPanel() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Delete ticket?"
+        description="Delete this ticket? This action cannot be undone."
+        confirmLabel="Delete"
+        busy={confirmBusy}
+        onCancel={() => {
+          if (!confirmBusy) setConfirmTarget(null);
+        }}
+        onConfirm={doConfirm}
+      />
     </div>
   );
 }

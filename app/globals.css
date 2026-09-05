@@ -112,8 +112,17 @@
   --violet-300: #c4b5fd;
 }
 
-* {
+*,
+::before,
+::after {
   border-color: var(--border);
+}
+
+/* Explicit transparent borders must stay transparent (e.g. tab underlines). */
+.border-transparent,
+.border-transparent::before,
+.border-transparent::after {
+  border-color: transparent;
 }
 
 html {
@@ -176,7 +185,12 @@ body {
   background: linear-gradient(135deg, var(--gradient-soft-from) 0%, var(--gradient-soft-mid) 45%, var(--gradient-soft-to) 100%);
   -webkit-background-clip: text;
   background-clip: text;
-  color: transparent;
+  color: var(--gradient-soft-mid);
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .text-gradient {
+    color: transparent;
+  }
 }
 :root {
   --gradient-soft-from: #4f46e5;

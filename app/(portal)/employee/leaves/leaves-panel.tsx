@@ -116,7 +116,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
           {requests.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">{t(lang, "common.noLeaveRequests")}</p>
           ) : (
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[color:var(--border)]">
               {requests.map((r) => (
                 <div key={r.id} className="flex flex-wrap items-center gap-3 py-3.5">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: r.leaveType.color }} />

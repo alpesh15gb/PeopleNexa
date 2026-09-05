@@ -33,7 +33,10 @@ export async function POST(req: NextRequest) {
         const sn = req.nextUrl.searchParams.get("SN") || deviceSn;
         const device = await prisma.device.findUnique({ where: { serialNumber: sn } });
         if (!device) {
-          console.log(`[iClock][AI] Unknown device: ${sn}`);
+          // DeviceLog needs a deviceId FK, so an unknown SN has no tenant to
+          // attribute the error to. Surface it in server logs for admins.
+          // TODO: persist unknown-SN pushes to a global alert store for admin visibility.
+          console.warn(`[iClock][AI] Unknown device: ${sn || "(missing SN)"}`);
           continue;
         }
 

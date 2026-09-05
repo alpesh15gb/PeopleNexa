@@ -217,46 +217,47 @@ export function PayrollPanel({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-4">
+      <div className="grid grid-cols-1 gap-3 border-b border-edge px-5 py-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <Input
             type="month"
             defaultValue={month}
+            aria-label="Payroll month"
             onChange={(e) => e.target.value && router.push(`/admin/payroll?month=${e.target.value}`)}
-            className="w-44"
+            className="w-full sm:w-44"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
           <Button size="sm" variant="ghost" onClick={() => setAdjustmentsOpen(true)}>
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Adjustments
+            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" /> Adjustments
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
-            <Settings2 className="h-3.5 w-3.5" /> Settings
+            <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Settings
           </Button>
-          <Select value={bank} onChange={(e) => setBank(e.target.value)} className="w-52">
+          <Select value={bank} onChange={(e) => setBank(e.target.value)} aria-label="Bank format" className="w-full sm:w-auto lg:w-52">
             {BANKS.map((b) => (
               <option key={b.key} value={b.key}>{b.label}</option>
             ))}
           </Select>
           {bank === "icici" && (
-            <Input value={debitAccount} onChange={(e) => setDebitAccount(e.target.value)} placeholder="Debit account no." className="w-40" />
+            <Input value={debitAccount} onChange={(e) => setDebitAccount(e.target.value)} placeholder="Debit account no." aria-label="Debit account number" className="w-full sm:w-auto lg:w-40" />
           )}
           <Button size="sm" variant="outline" loading={busy === "export"} onClick={exportBankFile} disabled={generated === 0}>
-            <Download className="h-3.5 w-3.5" /> Bank file
+            <Download aria-hidden="true" className="h-3.5 w-3.5" /> Bank file
           </Button>
-          <Select value={complianceType} onChange={(e) => setComplianceType(e.target.value)} className="w-40">
+          <Select value={complianceType} onChange={(e) => setComplianceType(e.target.value)} aria-label="Compliance type" className="w-full sm:w-auto lg:w-40">
             <option value="ecr">PF ECR</option>
             <option value="form16">Form 16</option>
             <option value="form24q">Form 24Q</option>
           </Select>
           <Button size="sm" variant="outline" loading={busy === "compliance"} onClick={exportCompliance} disabled={generated === 0}>
-            <FileSpreadsheet className="h-3.5 w-3.5" /> Compliance
+            <FileSpreadsheet aria-hidden="true" className="h-3.5 w-3.5" /> Compliance
           </Button>
           <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
-            <Scale className="h-3.5 w-3.5" /> Tally
+            <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Tally
           </Button>
           <Button size="sm" loading={busy === "generate"} onClick={generate}>
-            <Sparkles className="h-3.5 w-3.5" /> Generate payslips
+            <Sparkles aria-hidden="true" className="h-3.5 w-3.5" /> Generate payslips
           </Button>
         </div>
       </div>
@@ -419,7 +420,7 @@ function PayslipModal({
               <span className="font-mono">{formatMoney(r.value)}</span>
             </div>
           ))}
-          <div className="mt-1 flex items-center justify-between border-t border-white/5 pt-2">
+          <div className="mt-1 flex items-center justify-between border-t border-edge pt-2">
             <span className="text-[13px] font-medium">Gross earnings</span>
             <span className="font-mono font-semibold">{formatMoney(p.grossEarnings)}</span>
           </div>
@@ -434,7 +435,7 @@ function PayslipModal({
               <span className="font-mono">− {formatMoney(r.value)}</span>
             </div>
           ))}
-          <div className="mt-1 flex items-center justify-between border-t border-white/5 pt-2">
+          <div className="mt-1 flex items-center justify-between border-t border-edge pt-2">
             <span className="text-[13px] font-medium">Total deductions</span>
             <span className="font-mono font-semibold">− {formatMoney(p.deductions)}</span>
           </div>
@@ -567,18 +568,19 @@ function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }
 
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between rounded-xl border border-edge bg-card px-3.5 py-2.5">
+    <div className="flex items-center justify-between rounded-xl border border-edge bg-card px-3.5 py-2.5">
       <span className="text-[13px] font-medium">{label}</span>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         onClick={() => onChange(!checked)}
         className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-gradient-brand" : "bg-muted"}`}
       >
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+        <span aria-hidden="true" className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
       </button>
-    </label>
+    </div>
   );
 }
 
@@ -682,7 +684,7 @@ function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClo
           ) : list.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-muted-foreground">No adjustments yet for this month.</p>
           ) : (
-            <div className="divide-y divide-white/[0.04] rounded-xl border border-edge">
+            <div className="divide-y divide-[color:var(--border)] rounded-xl border border-edge">
               {list.map((a: any) => (
                 <div key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
                   <div className="min-w-0 flex-1">

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, startOfDay, endOfDay, todayKey } from "@/lib/dates";
 import { finalizeEligibleDays } from "@/lib/reconcile";

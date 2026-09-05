@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { monthKey, isMonthKey } from "@/lib/dates";
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -32,8 +32,11 @@ export async function POST(req: NextRequest) {
   const startMonth = String(body.startMonth ?? monthKey(new Date()));
   const note = body.note ? String(body.note).slice(0, 200) : null;
 
-  if (!employeeId || !amount || amount <= 0) {
+  if (!employeeId || !Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: "Employee and a positive amount are required." }, { status: 400 });
+  }
+  if (!isMonthKey(startMonth)) {
+    return NextResponse.json({ error: "Invalid startMonth. Use YYYY-MM." }, { status: 400 });
   }
 
   const employee = await prisma.employee.findFirst({
@@ -42,6 +45,12 @@ export async function POST(req: NextRequest) {
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
   const emiAmount = type === "loan" && emiCount > 1 ? Math.ceil((amount / emiCount) * 100) / 100 : 0;
+  if (!Number.isFinite(emiAmount) || (type === "loan" && emiCount > 1 && emiAmount <= 0)) {
+    return NextResponse.json({ error: "Invalid EMI amount." }, { status: 400 });
+  }
+  if (!Number.isFinite(amount)) {
+    return NextResponse.json({ error: "Invalid outstanding amount." }, { status: 400 });
+  }
 
   const loan = await prisma.employeeLoan.create({
     data: {

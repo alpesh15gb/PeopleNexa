@@ -22,10 +22,15 @@ export async function POST(req: NextRequest) {
   if (!secret && process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
   }
-  if (secret && req.headers.get("x-cron-secret") !== secret) {
-    const { getSession } = await import("@/lib/session");
-    const session = await getSession();
-    if (!session || session.role !== "admin") {
+  // CRON_SECRET holders (scheduler) or superadmins may trigger a global pull.
+  // A single tenant admin must never trigger pulls for all tenants.
+  // When no secret is configured (non-prod), still require a superadmin —
+  // never allow an open trigger.
+  const authorizedBySecret = Boolean(secret) && req.headers.get("x-cron-secret") === secret;
+  if (!authorizedBySecret) {
+    const { requireActiveSession } = await import("@/lib/session");
+    const session = await requireActiveSession().catch(() => null);
+    if (!session || session.role !== "superadmin") {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
   }
@@ -47,7 +52,7 @@ export async function POST(req: NextRequest) {
       const finalized = await finalizeEligibleDays(tenant.id, 500);
       if (res.ok) {
         await updateEbioserverStatus(tenant.id, { lastPulledAt: now, lastError: null, lastErrorAt: null });
-        results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, finalized });
+        results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, finalized });
       } else {
         await updateEbioserverStatus(tenant.id, { lastError: res.message ?? "Pull failed", lastErrorAt: now });
         results.push({ tenant: tenant.slug, ok: false, error: res.message });

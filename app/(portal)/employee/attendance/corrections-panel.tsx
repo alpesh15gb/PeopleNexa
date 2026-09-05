@@ -40,6 +40,25 @@ export function CorrectionsPanel({
     setLoading(true);
     const form = new FormData(e.currentTarget);
     try {
+      const dateStr = String(form.get("date") ?? "");
+      const inStr = String(form.get("requestedIn") ?? "");
+      const outStr = String(form.get("requestedOut") ?? "");
+      if (!inStr && !outStr) {
+        toast("error", "Provide at least one corrected punch time.");
+        return;
+      }
+      // Client-side in < out + future checks before hitting the server.
+      const inAt = inStr ? new Date(`${dateStr}T${inStr}`) : null;
+      const outAt = outStr ? new Date(`${dateStr}T${outStr}`) : null;
+      if (inAt && outAt && inAt.getTime() >= outAt.getTime()) {
+        toast("error", "In-time must be before out-time.");
+        return;
+      }
+      const now = new Date();
+      if ((inAt && inAt.getTime() > now.getTime()) || (outAt && outAt.getTime() > now.getTime())) {
+        toast("error", "Corrected punch times cannot be in the future.");
+        return;
+      }
       const res = await fetch("/api/attendance/corrections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,7 +103,7 @@ export function CorrectionsPanel({
           description={t(lang, "corrections.noneDesc")}
         />
       ) : (
-        <div className="mt-4 divide-y divide-white/[0.04]">
+        <div className="mt-4 divide-y divide-[color:var(--border)]">
           {corrections.map((c) => (
             <div key={c.id} className="flex flex-wrap items-center gap-3 py-3">
               <span className="font-mono text-[12.5px] text-muted-foreground">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Pencil, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { MODULES, type PlanDef } from "@/lib/modules";
 import { useToast } from "@/components/ui/toast";
@@ -54,7 +55,7 @@ export function PlansTable({
                 <th className="px-3 py-3 font-medium text-right" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04]">
+            <tbody className="divide-y divide-[color:var(--border)]">
               {rows.map(({ plan, count, seats, mrr: pm, arr: pa }) => (
                 <tr key={plan.key} className="transition-colors hover:bg-tint/40">
                   <td className="px-5 py-3">
@@ -114,6 +115,8 @@ function EditPlanModal({
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState("");
   const [label, setLabel] = useState(plan.label);
   const [price, setPrice] = useState(String(plan.pricePerSeat));
@@ -159,26 +162,31 @@ function EditPlanModal({
     }
   };
 
-  const reset = async () => {
-    if (!confirm(`Reset ${plan.label} to default pricing & modules?`)) return;
-    setBusy(true);
+  const reset = () => {
+    setConfirmReset(true);
+  };
+
+  const doReset = async () => {
+    setResetting(true);
     setError("");
     try {
       const res = await fetch(`/api/superadmin/plans/${plan.key}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to reset plan");
       toast("success", `${plan.label} reset to defaults.`);
+      setConfirmReset(false);
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to reset plan");
     } finally {
-      setBusy(false);
+      setResetting(false);
     }
   };
 
   const numField = (v: string) => (v === "" ? "" : Number(v));
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="card-surface relative max-h-[90vh] w-full max-w-2xl animate-scale-in overflow-y-auto rounded-2xl bg-card-2 p-6 shadow-2xl">
@@ -252,5 +260,17 @@ function EditPlanModal({
         </div>
       </div>
     </div>
+      <ConfirmDialog
+        open={confirmReset}
+        title={`Reset ${plan.label}?`}
+        description={`Reset ${plan.label} to default pricing & modules?`}
+        confirmLabel="Reset"
+        busy={resetting}
+        onCancel={() => {
+          if (!resetting) setConfirmReset(false);
+        }}
+        onConfirm={doReset}
+      />
+    </>
   );
 }

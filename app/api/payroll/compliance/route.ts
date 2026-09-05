@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKey } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
@@ -34,6 +34,10 @@ export async function GET(req: NextRequest) {
         // New payslips persist the computed basic wage. For legacy rows created
         // before that field existed, derive the best available compatible base.
         const wages = p.basicSalary > 0 ? p.basicSalary : p.pfEmployee > 0 ? p.pfEmployee / 0.12 : p.baseSalary * 0.5;
+        // EPS is capped at 8.33% of 15000 = 1250. ER PF = 12% - EPS.
+        const epsBase = Math.min(wages, 15000);
+        const eps = epsBase * 0.0833;
+        const erPpf = wages * 0.12 - eps;
         return [
           i + 1,
           p.employee.employeeNumber,
@@ -42,8 +46,8 @@ export async function GET(req: NextRequest) {
           p.employee.joiningDate ? p.employee.joiningDate.toISOString().slice(0, 10) : "",
           wages.toFixed(2),
           (wages * 0.12).toFixed(2),
-          (wages * 0.0367).toFixed(2),
-          (wages * 0.0833).toFixed(2),
+          erPpf.toFixed(2),
+          eps.toFixed(2),
         ];
       }),
     ];

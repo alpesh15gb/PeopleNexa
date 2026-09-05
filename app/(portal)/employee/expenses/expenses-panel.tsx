@@ -98,7 +98,7 @@ export function ExpensesPanel({ claims, lang = "en" }: { claims: Claim[]; lang?:
           description={t(lang, "expenses.noneDesc")}
         />
       ) : (
-        <div className="divide-y divide-white/[0.04]">
+        <div className="divide-y divide-[color:var(--border)]">
           {claims.map((c) => (
             <div key={c.id} className="flex items-center gap-3 px-5 py-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">

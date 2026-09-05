@@ -55,7 +55,7 @@ export function NotificationsList({ notifications, lang = "en" }: { notification
   }
 
   return (
-    <div className="divide-y divide-white/[0.04]">
+    <div className="divide-y divide-[color:var(--border)]">
       {notifications.map((n) => (
         <div
           key={n.id}
@@ -81,9 +81,10 @@ export function NotificationsList({ notifications, lang = "en" }: { notification
             <button
               onClick={() => markRead(n.id)}
               title={t(lang, "notifications.markRead")}
-              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+              aria-label={`${t(lang, "notifications.markRead")}: ${n.title}`}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
             >
-              <CheckCheck className="h-4 w-4" />
+              <CheckCheck aria-hidden="true" className="h-4 w-4" />
             </button>
           )}
         </div>

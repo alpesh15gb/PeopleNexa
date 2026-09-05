@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
@@ -19,6 +20,7 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Dept | "new" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Dept | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -55,6 +57,7 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
         return;
       }
       toast("success", "Department removed");
+      setConfirmDelete(null);
       router.refresh();
     } finally {
       setLoading(false);
@@ -84,11 +87,11 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
                 {d._count.employees}
               </span>
             </div>
-            <div className="mt-3 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
               <Button size="sm" variant="outline" onClick={() => setEditing(d)}>
                 <Pencil className="h-3 w-3" /> Edit
               </Button>
-              <Button size="sm" variant="outline" className="text-rose-300" onClick={() => remove(d)}>
+              <Button size="sm" variant="outline" className="text-rose-300" onClick={() => setConfirmDelete(d)}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </div>
@@ -115,6 +118,19 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title={`Delete ${confirmDelete?.name ?? "department"}?`}
+        description={
+          confirmDelete && confirmDelete._count.employees > 0
+            ? `${confirmDelete._count.employees} employee(s) are assigned to this department. They will become unassigned.`
+            : "This cannot be undone."
+        }
+        busy={loading}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && remove(confirmDelete)}
+      />
     </>
   );
 }

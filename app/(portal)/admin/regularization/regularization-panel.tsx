@@ -62,7 +62,7 @@ export function RegularizationPanel({ corrections }: { corrections: Correction[]
   }
 
   return (
-    <div className="divide-y divide-white/[0.04]">
+    <div className="divide-y divide-[color:var(--border)]">
       {corrections.map((c) => {
         const pending = c.status === "pending";
         return (

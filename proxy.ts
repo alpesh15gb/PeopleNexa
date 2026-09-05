@@ -35,6 +35,10 @@ function resolveSlug(request: NextRequest): string | null {
 /** Pass the request through with the tenant slug attached for the handler. */
 function passWithTenant(request: NextRequest, slug: string | null) {
   const requestHeaders = new Headers(request.headers);
+  // Always overwrite: when slug is null (custom domain / direct IP) we must
+  // delete any client-supplied header so handlers can't be spoofed into
+  // another tenant.
+  requestHeaders.delete("x-tenant-slug");
   if (slug) requestHeaders.set("x-tenant-slug", slug);
   return NextResponse.next({
     request: { headers: requestHeaders },
@@ -124,10 +128,14 @@ async function proxy(request: NextRequest) {
         }
       }
     } catch {
-      // DB unavailable — fall back to the token claim so the app isn't
-      // taken down by a transient database error.
-      role = payload.role === "superadmin" ? "superadmin" : payload.role;
-      tenantId = payload.tenantId ?? null;
+      // DB unavailable — fail closed. Falling back to the JWT claim would let
+      // stale/deleted/inactive users retain access during an outage.
+      if (pathname.startsWith("/api")) {
+        return json("Service temporarily unavailable. Try again.", 503);
+      }
+      const res = NextResponse.redirect(new URL("/login", request.url));
+      if (token) clearSessionCookie(res);
+      return res;
     }
   }
 

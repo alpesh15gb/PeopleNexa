@@ -197,12 +197,13 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                         size="sm"
                         variant="ghost"
                         title="View / correct punches"
+                        aria-label={`View punches for ${row.name ?? row.employeeId}`}
                         onClick={() => setCorrection(row.record!)}
                       >
-                        <ListChecks className="h-3.5 w-3.5" />
+                        <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
-                        <Pencil className="h-3.5 w-3.5" />
+                      <Button size="sm" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
+                        <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   ) : null}
@@ -242,10 +243,11 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                 <span className="text-[11px] capitalize text-muted-foreground">{p.source}{p.deviceSn ? ` · ${p.deviceSn}` : ""}</span>
                 <button
                   onClick={() => deletePunch(p.id)}
-                  className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+                  aria-label={`Delete punch at ${fmtISTFull(p.time)}`}
+                  className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
                   title="Delete punch"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))

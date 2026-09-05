@@ -318,8 +318,8 @@ export async function backfillDays(
   profile: EbioserverProfile,
   days: number,
   onProgress?: (day: number, date: string, records: number, ingested: number) => void
-): Promise<{ ok: boolean; days: number; records: number; ingested: number; devices: number; message?: string }> {
-  const summary = { ok: false, days: 0, records: 0, ingested: 0, devices: 0, message: "" as string | undefined };
+): Promise<{ ok: boolean; days: number; records: number; ingested: number; devices: number; skipped: number; message?: string }> {
+  const summary = { ok: false, days: 0, records: 0, ingested: 0, devices: 0, skipped: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
 
@@ -363,7 +363,11 @@ export async function backfillDays(
       for (const rec of records) {
         let device = deviceByDeviceName.get(rec.deviceName);
         if (!device && deviceByDeviceName.size === 1) device = deviceByDeviceName.values().next().value;
-        if (!device) continue;
+        if (!device) {
+          console.warn(`[eBioserver] Skipping punch: deviceName "${rec.deviceName}" did not match any registered device (user=${rec.userId})`);
+          summary.skipped++;
+          continue;
+        }
         summary.records++;
         const raw: RawPunch = {
           userId: rec.userId,
@@ -419,8 +423,8 @@ export async function testConnection(profile: EbioserverProfile): Promise<{ ok: 
 export async function pullTenant(
   tenantId: string,
   profile: EbioserverProfile
-): Promise<{ ok: boolean; pulled: number; ingested: number; devices: number; message?: string }> {
-  const summary = { ok: false, pulled: 0, ingested: 0, devices: 0, message: "" as string | undefined };
+): Promise<{ ok: boolean; pulled: number; ingested: number; devices: number; skipped: number; message?: string }> {
+  const summary = { ok: false, pulled: 0, ingested: 0, devices: 0, skipped: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
 
@@ -520,7 +524,11 @@ export async function pullTenant(
       // device name; with a single device, fall back to it directly.
       let device = deviceByName.get(rec.deviceName);
       if (!device && deviceByName.size === 1) device = deviceByName.values().next().value;
-      if (!device) return false;
+      if (!device) {
+        console.warn(`[eBioserver] Skipping punch: deviceName "${rec.deviceName}" did not match any registered device (user=${rec.userId} logId=${rec.logId ?? "?"})`);
+        summary.skipped++;
+        return false;
+      }
       summary.pulled++;
       const raw: RawPunch = {
         userId: rec.userId,

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -33,6 +34,8 @@ export function LoansPanel({ loans, employees }: { loans: Loan[]; employees: { i
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -76,9 +79,21 @@ export function LoansPanel({ loans, employees }: { loans: Loan[]; employees: { i
   }
 
   async function removeLoan(id: string) {
-    const res = await fetch(`/api/loans/${id}`, { method: "DELETE" });
-    if (!res.ok) return toast("error", "Failed to delete");
+    setConfirmDelete(id);
+  }
+
+  async function doRemoveLoan() {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    const res = await fetch(`/api/loans/${confirmDelete}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast("error", "Failed to delete");
+      setDeleting(false);
+      return;
+    }
     toast("success", "Loan removed");
+    setConfirmDelete(null);
+    setDeleting(false);
     router.refresh();
   }
 
@@ -142,12 +157,12 @@ export function LoansPanel({ loans, employees }: { loans: Loan[]; employees: { i
                 <TD>
                   <div className="flex items-center justify-end gap-1">
                     {l.status === "active" && (
-                      <Button size="sm" variant="ghost" title="Mark closed" onClick={() => closeLoan(l.id)}>
-                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      <Button size="sm" variant="ghost" title="Mark closed" aria-label={`Mark loan ${l.id} closed`} onClick={() => closeLoan(l.id)}>
+                        <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    <Button size="sm" variant="ghost" className="text-rose-300" title="Delete" onClick={() => removeLoan(l.id)}>
-                      <Trash2 className="h-3.5 w-3.5" />
+                    <Button size="sm" variant="ghost" className="text-rose-300" title="Delete" aria-label={`Delete loan ${l.id}`} onClick={() => removeLoan(l.id)}>
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </TD>
@@ -192,11 +207,21 @@ export function LoansPanel({ loans, employees }: { loans: Loan[]; employees: { i
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
             <Button type="submit" loading={saving}>
-              <HandCoins className="h-4 w-4" /> Create
+              <HandCoins aria-hidden="true" className="h-4 w-4" /> Create
             </Button>
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        title="Delete this loan?"
+        description="Outstanding balance will no longer be deducted. This can't be undone."
+        confirmLabel="Delete loan"
+        busy={deleting}
+        onCancel={() => !deleting && setConfirmDelete(null)}
+        onConfirm={doRemoveLoan}
+      />
     </>
   );
 }

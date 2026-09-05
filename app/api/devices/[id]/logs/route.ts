@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -11,11 +11,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const device = await prisma.device.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!device) return NextResponse.json({ error: "Device not found" }, { status: 404 });
 
-  const limit = Math.min(Number(req.nextUrl.searchParams.get("limit") ?? 100), 500);
+  const n = Number(req.nextUrl.searchParams.get("limit") ?? 100);
+  const take = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), 500) : 100;
   const logs = await prisma.deviceLog.findMany({
     where: { deviceId: id },
     orderBy: { createdAt: "desc" },
-    take: limit,
+    take,
   });
   return NextResponse.json({ logs });
 }

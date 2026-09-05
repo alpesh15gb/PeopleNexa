@@ -2,7 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, signToken, SESSION_COOKIE, SESSION_COOKIE_DOMAIN } from "@/lib/auth";
 
+// Simple in-memory rate limit: 10 attempts / 10min per IP.
+const attempts = new Map<string, { count: number; reset: number }>();
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = attempts.get(ip);
+  if (!entry || now > entry.reset) {
+    attempts.set(ip, { count: 1, reset: now + 10 * 60 * 1000 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > 10;
+}
+
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for") ?? "local";
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { success: false, error: "Too many attempts. Try again later." },
+      { status: 429 }
+    );
+  }
   try {
     const body = await req.json();
     const email = String(body.email ?? "").toLowerCase().trim();
@@ -13,8 +33,9 @@ export async function POST(req: NextRequest) {
 
     // The tenant is implied by the subdomain the user arrived on (x-tenant-slug
     // is set by middleware.ts from the host). This keeps crk's users out of
-    // any other tenant.
-    const slug = req.headers.get("x-tenant-slug");
+    // any other tenant. Fall back to body.slug (sent by the login form's
+    // optional workspace input) when the header is missing.
+    const slug = (req.headers.get("x-tenant-slug") ?? String(body.slug ?? "").toLowerCase().trim())?.toLowerCase().trim() || null;
     const tenant = slug
       ? await prisma.tenant.findUnique({ where: { slug } })
       : null;

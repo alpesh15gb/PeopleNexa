@@ -241,7 +241,7 @@ export function LeavesAdmin({
                 {t.maxDays} days · {t.isCarryForward ? "carry forward" : "no carry forward"} ·{" "}
                 {t.requiresApproval ? "approval required" : "auto-approved"}
               </p>
-              <div className="mt-3 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
                 <Button size="sm" variant="outline" onClick={() => setTypeModal(t)}>
                   <Pencil className="h-3 w-3" /> Edit
                 </Button>
@@ -433,7 +433,7 @@ function TeamCalendar({
           return (
             <div
               key={key}
-              className={`min-h-24 rounded-xl border p-2 transition-colors ${
+              className={`min-h-16 rounded-xl border p-1.5 transition-colors sm:min-h-24 sm:p-2 ${
                 isToday ? "border-indigo-400/50 bg-indigo-500/[0.06]" : "border-edge bg-card-2"
               }`}
             >
@@ -441,7 +441,25 @@ function TeamCalendar({
                 {Number(key.slice(8))}
                 {isToday && <span className="ml-1 text-[9px] font-bold uppercase text-indigo-300">Today</span>}
               </p>
-              <div className="mt-1.5 space-y-1">
+              {/* Mobile: dots + count (names truncate badly at 360px). Desktop: names. */}
+              <div className="mt-1.5 flex flex-wrap gap-1 sm:hidden" aria-hidden="true">
+                {dayLeaves.slice(0, 5).map((r) => (
+                  <span
+                    key={r.id}
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: r.leaveType.color }}
+                  />
+                ))}
+                {dayLeaves.length > 0 && (
+                  <span className="text-[10px] font-medium text-muted-foreground">{dayLeaves.length}</span>
+                )}
+              </div>
+              <p className="sr-only">
+                {dayLeaves.length === 0
+                  ? "No leaves"
+                  : dayLeaves.map((r) => `${r.employee.firstName} ${r.employee.lastName} — ${r.leaveType.name}`).join(", ")}
+              </p>
+              <div className="mt-1.5 hidden space-y-1 sm:block">
                 {dayLeaves.slice(0, 3).map((r) => (
                   <div
                     key={r.id}

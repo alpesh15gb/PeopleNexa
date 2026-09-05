@@ -42,19 +42,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:items-end sm:pr-6">
+      <div aria-live="polite" aria-atomic="false" className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col items-center gap-2 px-4 sm:items-end sm:pr-6">
         {toasts.map((t) => (
           <div
             key={t.id}
+            role="status"
             className="card-surface pointer-events-auto flex w-full max-w-sm animate-scale-in items-center gap-3 rounded-xl bg-card-2/95 px-4 py-3 shadow-2xl backdrop-blur"
           >
             {icons[t.kind]}
             <p className="flex-1 text-[13px] font-medium leading-snug">{t.message}</p>
             <button
               onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-              className="text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Dismiss notification"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
             >
-              <X className="h-3.5 w-3.5" />
+              <X aria-hidden="true" className="h-3.5 w-3.5" />
             </button>
           </div>
         ))}

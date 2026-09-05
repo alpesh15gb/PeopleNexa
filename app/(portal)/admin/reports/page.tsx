@@ -213,7 +213,7 @@ export default async function AdminReportsPage({
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="divide-y divide-[color:var(--border)]">
                   {employees.map((emp) => (
                     <tr key={emp.id} className="hover:bg-tint">
                       <td className="sticky left-0 z-10 whitespace-nowrap bg-card px-4">

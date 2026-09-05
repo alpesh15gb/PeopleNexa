@@ -248,7 +248,7 @@ export function TenantDetailPanel({ tenant, plans }: { tenant: TenantDetail; pla
           {tenant.licenses.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-muted-foreground">No license changes yet.</p>
           ) : (
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[color:var(--border)]">
               {tenant.licenses.map((l) => (
                 <div key={l.id} className="flex flex-wrap items-center gap-3 py-3">
                   <Badge tone={planTone[l.plan] ?? "neutral"} className="capitalize">{l.plan}</Badge>

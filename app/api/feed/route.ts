@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
 
 /** GET — feed posts with comments (tenant-wide). */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const posts = await prisma.orgPost.findMany({
@@ -32,7 +32,7 @@ export async function GET() {
 
 /** POST — create a post (admins can mark as announcement). */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const text = String(body.body ?? "").trim();

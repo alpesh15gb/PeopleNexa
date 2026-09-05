@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { trackingState } from "@/lib/journey";
+import { istStartOfDay } from "@/lib/ist";
 
 /** POST — employee streams a location ping (only accepted while on duty). */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -19,6 +20,15 @@ export async function POST(req: NextRequest) {
   }
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     return NextResponse.json({ error: "Coordinates out of range." }, { status: 400 });
+  }
+  if (isNaN(at.getTime())) {
+    return NextResponse.json({ error: "Invalid timestamp." }, { status: 400 });
+  }
+  if (at.getTime() > Date.now() + 5 * 60 * 1000) {
+    return NextResponse.json({ error: "Timestamp cannot be in the future." }, { status: 400 });
+  }
+  if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
+    return NextResponse.json({ error: "Invalid accuracy." }, { status: 400 });
   }
 
   // Privacy guard: pings are only stored while the employee is on duty
@@ -44,7 +54,7 @@ export async function POST(req: NextRequest) {
 
 /** GET — live map: only employees currently on duty (open session today). */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -58,9 +68,10 @@ export async function GET() {
     },
   });
   const onDutyIds = new Set<string>();
+  const todayStart = istStartOfDay(new Date());
   for (const e of employees) {
     const rec = e.attendance[0];
-    if (rec?.punchInTime && !rec.punchOutTime) onDutyIds.add(e.id);
+    if (rec?.punchInTime && !rec.punchOutTime && rec.punchInTime >= todayStart) onDutyIds.add(e.id);
   }
 
   // Latest ping for those employees only (last 24h of duty pings).

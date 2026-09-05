@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -12,10 +12,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const department = await prisma.department.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!department) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  let name = department.name;
+  if (body.name !== undefined) {
+    name = String(body.name).trim();
+    if (!name) return NextResponse.json({ error: "Department name is required." }, { status: 400 });
+    const exists = await prisma.department.findFirst({
+      where: { tenantId: session.tenantId, name, NOT: { id } },
+    });
+    if (exists) return NextResponse.json({ error: "A department with this name already exists." }, { status: 400 });
+  }
+
   const updated = await prisma.department.update({
     where: { id },
     data: {
-      name: body.name ?? department.name,
+      name,
       description: body.description ?? department.description,
     },
   });
@@ -23,7 +33,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 }
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

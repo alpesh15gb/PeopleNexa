@@ -149,9 +149,9 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             />
           </Field>
 
-          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3.5">
+          <div className="flex items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3.5">
             <div>
-              <p className="text-[13.5px] font-medium">Enable automated pull</p>
+              <p id="ebio-auto-pull-label" className="text-[13.5px] font-medium">Enable automated pull</p>
               <p className="text-[12px] text-muted-foreground">
                 The polling job will pull punches from this server on schedule.
               </p>
@@ -160,6 +160,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
               type="button"
               role="switch"
               aria-checked={enabled}
+              aria-labelledby="ebio-auto-pull-label"
               onClick={() => setEnabled((v) => !v)}
               className={cn(
                 "relative h-6 w-11 shrink-0 rounded-full transition-colors",
@@ -167,13 +168,14 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
               )}
             >
               <span
+                aria-hidden="true"
                 className={cn(
                   "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
                   enabled ? "left-[22px]" : "left-0.5"
                 )}
               />
             </button>
-          </label>
+          </div>
         </div>
 
         <div className="mt-6 flex items-center gap-2">

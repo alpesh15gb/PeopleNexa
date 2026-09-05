@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, ExternalLink, MoreHorizontal, Pencil, Plus, ShieldOff, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { MODULES, type PlanDef } from "@/lib/modules";
@@ -42,6 +43,8 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
   const [busy, setBusy] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<TenantRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Close the row menu if the page scrolls while it's open (fixed-anchored menu
   // would otherwise drift away from its button).
@@ -90,26 +93,34 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
     }
   };
 
-  const remove = async (t: TenantRow) => {
-    if (!confirm(`Delete ${t.name} (${t.slug})? This permanently removes all of their data.`)) return;
-    setBusy(t.id);
+  const remove = (t: TenantRow) => {
+    setConfirmDelete(t);
+  };
+
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    setBusy(confirmDelete.id);
     try {
-      const res = await fetch(`/api/superadmin/tenants/${t.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/superadmin/tenants/${confirmDelete.id}`, { method: "DELETE" });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error ?? "Failed to delete");
       }
       toast("success", "Tenant deleted.");
+      setConfirmDelete(null);
       router.refresh();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to delete tenant");
     } finally {
+      setDeleting(false);
       setBusy(null);
       setMenuFor(null);
     }
   };
 
   return (
+    <>
     <div className="card-surface overflow-hidden rounded-2xl">
       <div className="flex items-center justify-between border-b border-edge px-5 py-4">
         <p className="text-[13px] text-muted-foreground">{tenants.length} workspace(s)</p>
@@ -131,7 +142,7 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
               <th className="px-3 py-3 font-medium" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/[0.04]">
+          <tbody className="divide-y divide-[color:var(--border)]">
             {tenants.map((t) => (
               <tr key={t.id} className="transition-colors hover:bg-tint/40">
                 <td className="px-5 py-3.5">
@@ -234,6 +245,22 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
         />
       )}
     </div>
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title={confirmDelete ? `Delete ${confirmDelete.name}?` : "Delete tenant?"}
+        description={
+          confirmDelete
+            ? `Delete ${confirmDelete.name} (${confirmDelete.slug})? This permanently removes all of their data.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        busy={deleting}
+        onCancel={() => {
+          if (!deleting) setConfirmDelete(null);
+        }}
+        onConfirm={doDelete}
+      />
+    </>
   );
 }
 

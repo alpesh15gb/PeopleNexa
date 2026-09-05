@@ -20,12 +20,17 @@ export function LoginForm() {
     setLoading(true);
     const form = new FormData(e.currentTarget);
     try {
+      const slug = String(form.get("slug") ?? "").toLowerCase().trim();
       const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(slug ? { "X-Tenant-Slug": slug } : {}),
+        },
         body: JSON.stringify({
           email: form.get("email"),
           password: form.get("password"),
+          ...(slug ? { slug } : {}),
         }),
       });
       const data = await res.json();
@@ -46,6 +51,15 @@ export function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
       <div className="space-y-4">
+        <Field label="Workspace (optional)" hint="Your workspace subdomain, e.g. acme-corp">
+          <Input
+            name="slug"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="your-workspace"
+            className="h-11"
+          />
+        </Field>
         <Field label="Email address">
           <Input
             name="email"
@@ -69,16 +83,18 @@ export function LoginForm() {
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
             >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
             </button>
           </div>
         </Field>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">
+        <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">
           {error}
         </p>
       )}
@@ -87,11 +103,6 @@ export function LoginForm() {
         <LogIn className="h-4 w-4" />
         Sign in
       </Button>
-
-      <p className="mt-5 text-center text-[12px] leading-relaxed text-muted-foreground">
-        Demo: <span className="text-foreground/80">admin@apex.com</span> /{" "}
-        <span className="text-foreground/80">admin123</span>
-      </p>
     </form>
   );
 }

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 /** GET — KPIs + reviews (role-aware). */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [kpis, reviews] = await Promise.all([
@@ -67,7 +67,7 @@ export async function GET() {
 
 /** POST — admin creates a KPI or a review cycle. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

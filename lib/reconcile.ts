@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { istStartOfDay, IST_OFFSET_MS } from "./ist";
+import { istStartOfDay, istDateKey, IST_OFFSET_MS } from "./ist";
 import { computePunchStatusIST } from "./attendance";
 import { minutesOfDay } from "./dates";
 import type { Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
@@ -226,6 +226,27 @@ export async function reconcileEmployeeDay(
     const r = computePunchStatusIST(shift as Pick<Shift, "startTime" | "graceMinutes"> | null, inAt);
     status = r.status;
     lateMinutes = r.lateMinutes;
+    // Night-shift late fallback: computePunchStatusIST compares the in-punch's
+    // IST wall-clock minutes against the shift start on the same clock day, so
+    // a next-morning in (e.g. 02:00 for a 22:00 → 06:00 shift whose punchDay is
+    // the prior evening) reads as "present" (02:00 < 22:00 + grace). When the
+    // in-punch falls on a later IST day than the reconciled day for a night
+    // shift, measure lateness as elapsed time since the shift start on the
+    // istDay evening instead: elapsed = (1440 - shiftStart) + punchMinutes.
+    if (shift?.isNightShift && shift.startTime && istDateKey(inAt) !== istDateKey(istDay)) {
+      const shiftStart = minutesOfDay(shift.startTime);
+      const ist = new Date(inAt.getTime() + IST_OFFSET_MS);
+      const punchMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+      const elapsed = (1440 - shiftStart) + punchMinutes;
+      const late = elapsed - (shift.graceMinutes ?? 0);
+      if (late > 0) {
+        status = "late";
+        lateMinutes = late;
+      } else {
+        status = "present";
+        lateMinutes = 0;
+      }
+    }
   }
 
   if (punches.length > 0) {

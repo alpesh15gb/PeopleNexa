@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
@@ -7,16 +7,19 @@ import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const lat = body.lat != null ? Number(body.lat) : null;
-  const lng = body.lng != null ? Number(body.lng) : null;
-  const selfie = body.selfie || null;
+  const lat = body.lat != null && body.lat !== "" ? Number(body.lat) : null;
+  const lng = body.lng != null && body.lng !== "" ? Number(body.lng) : null;
+  const selfie = typeof body.selfie === "string" && body.selfie.length < 500_000 ? body.selfie : null;
+  if ((lat != null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) || (lng != null && (!Number.isFinite(lng) || lng < -180 || lng > 180))) {
+    return NextResponse.json({ error: "Location coordinates are invalid." }, { status: 400 });
+  }
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: session.sub },
+  const employee = await prisma.employee.findFirst({
+    where: { id: session.sub, tenantId: session.tenantId },
     include: { branch: true, shift: true },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -24,8 +27,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Your account is inactive." }, { status: 403 });
   }
 
+  // Location is required when the branch has a geofence; otherwise an
+  // employee without a branch could punch from anywhere with no coordinates.
+  const branchHasCoords =
+    employee.branch?.latitude != null &&
+    employee.branch?.longitude != null &&
+    Number.isFinite(Number(employee.branch.latitude)) &&
+    Number.isFinite(Number(employee.branch.longitude));
+  if (branchHasCoords && (lat == null || lng == null)) {
+    return NextResponse.json({ error: "Location is required to punch in/out." }, { status: 400 });
+  }
   // Location validation when a branch geofence is configured.
-  if (lat != null && lng != null && employee.branch) {
+  if (lat != null && lng != null && employee.branch && branchHasCoords) {
     const inside = isInsideGeofence(
       employee.branch.latitude,
       employee.branch.longitude,
@@ -40,8 +53,6 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
-  } else if (lat == null || lng == null) {
-    return NextResponse.json({ error: "Location is required to punch in/out." }, { status: 400 });
   }
 
   const now = new Date();

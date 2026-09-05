@@ -6,6 +6,7 @@ import { FileText, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 
 type Policy = { id: string; title: string; category: string; body: string; version: number; updatedAt: string };
@@ -18,6 +19,8 @@ export function PoliciesPanel({ policies }: { policies: Policy[] }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Policy | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [form, setForm] = useState({ title: "", category: "general", body: "" });
 
   function startEdit(p?: Policy) {
@@ -53,13 +56,23 @@ export function PoliciesPanel({ policies }: { policies: Policy[] }) {
     }
   }
 
-  async function del(id: string) {
-    if (!confirm("Delete this policy?")) return;
-    const res = await fetch(`/api/policies/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toast("success", "Policy deleted.");
-      router.refresh();
-    } else toast("error", "Failed");
+  function del(id: string) {
+    setConfirmTarget(id);
+  }
+
+  async function doConfirm() {
+    if (!confirmTarget) return;
+    setConfirmBusy(true);
+    try {
+      const res = await fetch(`/api/policies/${confirmTarget}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("success", "Policy deleted.");
+        router.refresh();
+      } else toast("error", "Failed");
+    } finally {
+      setConfirmBusy(false);
+      setConfirmTarget(null);
+    }
   }
 
   const byCategory = CATEGORIES.map((c) => ({ category: c, items: policies.filter((p) => p.category === c) })).filter((g) => g.items.length > 0);
@@ -78,7 +91,7 @@ export function PoliciesPanel({ policies }: { policies: Policy[] }) {
           {byCategory.map((g) => (
             <div key={g.category}>
               <p className="mb-2 text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">{g.category}</p>
-              <div className="divide-y divide-white/[0.04] rounded-2xl border border-edge bg-card">
+              <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
                 {g.items.map((p) => (
                   <div key={p.id} className="flex items-start gap-3 px-5 py-4">
                     <div className="min-w-0 flex-1">
@@ -121,6 +134,18 @@ export function PoliciesPanel({ policies }: { policies: Policy[] }) {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Delete policy?"
+        description="Delete this policy? This action cannot be undone."
+        confirmLabel="Delete"
+        busy={confirmBusy}
+        onCancel={() => {
+          if (!confirmBusy) setConfirmTarget(null);
+        }}
+        onConfirm={doConfirm}
+      />
     </div>
   );
 }

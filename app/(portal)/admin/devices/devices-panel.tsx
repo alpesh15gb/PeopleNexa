@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
@@ -52,6 +53,8 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
   const [logsFor, setLogsFor] = useState<DeviceRow | null>(null);
   const [logs, setLogs] = useState<DeviceLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<DeviceRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const now = Date.now();
   const isOnline = (d: DeviceRow) => d.status === "active" && d.lastSeenAt && now - d.lastSeenAt.getTime() < 5 * 60 * 1000;
@@ -94,18 +97,24 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
         body: JSON.stringify({ action }),
       });
       const data = await res.json();
-      if (!res.ok || !data.queued) {
+      if (res.ok && (data.queued || data.success)) {
+        toast("success", successMsg);
+      } else {
         toast("error", data.error ?? "Command failed");
-        return;
       }
-      toast("success", successMsg);
     } catch {
       toast("error", "Something went wrong.");
     }
   }
 
   async function removeDevice(d: DeviceRow) {
-    if (!window.confirm(`Delete ${d.name}? Its logs will be removed too.`)) return;
+    setConfirmDelete(d);
+  }
+
+  async function doRemoveDevice() {
+    const d = confirmDelete;
+    if (!d) return;
+    setDeleting(true);
     try {
       const res = await fetch(`/api/devices/${d.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -114,8 +123,11 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
       }
       toast("success", `${d.name} deleted`);
       setDevices((prev) => prev.filter((x) => x.id !== d.id));
+      setConfirmDelete(null);
     } catch {
       toast("error", "Something went wrong.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -143,7 +155,7 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
 
   return (
     <>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stat("Total devices", counts.total, "text-foreground")}
         {stat("Online", counts.online, "text-emerald-400")}
         {stat("Offline", counts.offline, "text-amber-400")}
@@ -158,19 +170,20 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
             </p>
           </div>
           <Button onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4" /> Add device
+            <Plus aria-hidden="true" className="h-4 w-4" /> Add device
           </Button>
         </div>
 
+        <div className="overflow-x-auto">
         <Table>
           <THead>
             <TR>
               <TH>Device</TH>
-              <TH>Type</TH>
-              <TH>IP address</TH>
+              <TH className="hidden md:table-cell">Type</TH>
+              <TH className="hidden md:table-cell">IP address</TH>
               <TH>Status</TH>
               <TH>Logs</TH>
-              <TH>Last seen</TH>
+              <TH className="hidden lg:table-cell">Last seen</TH>
               <TH className="text-right">Actions</TH>
             </TR>
           </THead>
@@ -201,8 +214,8 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
                       </div>
                     </div>
                   </TD>
-                  <TD className="capitalize text-[13px]">{d.type}</TD>
-                  <TD className="font-mono text-[12px] text-muted-foreground">{d.ipAddress || "—"}</TD>
+                  <TD className="hidden capitalize text-[13px] md:table-cell">{d.type}</TD>
+                  <TD className="hidden font-mono text-[12px] text-muted-foreground md:table-cell">{d.ipAddress || "—"}</TD>
                   <TD>
                     <span
                       className={cn(
@@ -225,45 +238,50 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
                     </span>
                   </TD>
                   <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
-                  <TD className="text-[12.5px] text-muted-foreground">
+                  <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
                     {d.lastSeenAt ? formatDateTime(d.lastSeenAt) : "Never"}
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">
                       <button
+                        aria-label={`View logs for ${d.name}`}
                         title="View logs"
                         onClick={() => openLogs(d)}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
-                        <ScrollText className="h-4 w-4" />
+                        <ScrollText aria-hidden="true" className="h-4 w-4" />
                       </button>
                       <button
+                        aria-label={`Sync attendance logs for ${d.name}`}
                         title="Sync attendance logs"
                         onClick={() => runCommand(d.id, "sync", "Sync command queued")}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
-                        <RefreshCw className="h-4 w-4" />
+                        <RefreshCw aria-hidden="true" className="h-4 w-4" />
                       </button>
                       <button
+                        aria-label={`Reboot ${d.name}`}
                         title="Reboot device"
                         onClick={() => runCommand(d.id, "reboot", "Reboot command queued")}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
-                        <RotateCcw className="h-4 w-4" />
+                        <RotateCcw aria-hidden="true" className="h-4 w-4" />
                       </button>
                       <button
+                        aria-label={`Sync clock for ${d.name}`}
                         title="Sync device clock"
                         onClick={() => runCommand(d.id, "set_time", "Time-sync command queued")}
-                        className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
-                        <Clock className="h-4 w-4" />
+                        <Clock aria-hidden="true" className="h-4 w-4" />
                       </button>
                       <button
+                        aria-label={`Delete ${d.name}`}
                         title="Delete device"
                         onClick={() => removeDevice(d)}
-                        className="rounded-lg p-2 text-rose-300 transition-colors hover:bg-rose-500/10"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-rose-300 transition-colors hover:bg-rose-500/10"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 aria-hidden="true" className="h-4 w-4" />
                       </button>
                     </div>
                   </TD>
@@ -272,6 +290,7 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
             })}
           </TBody>
         </Table>
+        </div>
       </div>
 
       {/* Add device */}
@@ -354,6 +373,16 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        title={`Delete ${confirmDelete?.name ?? "device"}?`}
+        description="Its logs will be removed too. This can't be undone."
+        confirmLabel="Delete device"
+        busy={deleting}
+        onCancel={() => !deleting && setConfirmDelete(null)}
+        onConfirm={doRemoveDevice}
+      />
     </>
   );
 }

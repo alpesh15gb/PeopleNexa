@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
 
@@ -8,7 +8,7 @@ const PRIORITIES = ["low", "medium", "high", "urgent"];
 
 /** POST — any employee raises a ticket. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
 /** GET — role-aware ticket list with messages. */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const where = session.role === "admin" ? { tenantId: session.tenantId } : { requesterId: session.sub };

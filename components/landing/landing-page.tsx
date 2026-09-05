@@ -241,7 +241,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         {/* Aurora background: mesh gradient blobs + grid, per minimal/aurora hybrid */}
         <div className="pointer-events-none absolute inset-0" aria-hidden>
           <div className="absolute inset-0 bg-grid" />
-          <div className="absolute -top-32 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-[120px]" />
+          <div className="absolute -top-32 left-1/2 h-[520px] w-[min(820px,150vw)] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-[120px]" />
           <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-violet-600/10 blur-[100px]" />
           <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-sky-500/10 blur-[100px]" />
           <div
@@ -294,7 +294,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
 
           {/* Product mockup — glass dashboard preview */}
           <div className="relative mx-auto mt-14 max-w-4xl">
-            <div className="absolute -inset-x-8 -top-6 h-40 rounded-full bg-indigo-500/20 blur-3xl" aria-hidden />
+            <div className="absolute inset-x-0 -top-6 h-40 rounded-full bg-indigo-500/20 blur-3xl" aria-hidden />
             <div className="card-surface relative rounded-2xl p-5 shadow-2xl backdrop-blur-xl sm:p-7">
               <div className="flex items-center justify-between border-b border-edge pb-4">
                 <div className="flex items-center gap-2">
@@ -666,7 +666,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       {/* ── Final CTA ───────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0" aria-hidden>
-          <div className="absolute left-1/2 top-1/2 h-80 w-[700px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600/20 blur-[110px]" />
+          <div className="absolute left-1/2 top-1/2 h-80 w-[min(700px,140vw)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600/20 blur-[110px]" />
         </div>
         <div className="relative mx-auto max-w-3xl px-5 py-24 text-center">
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-5xl">
@@ -758,7 +758,7 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
         </div>
       </div>
 
-      <div className="mt-12 grid gap-5 md:grid-cols-3 xl:grid-cols-5">
+      <div className="mt-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {sorted.map((p) => {
           const isFeatured = p.key === featured;
           const isTrial = p.key === "trial";

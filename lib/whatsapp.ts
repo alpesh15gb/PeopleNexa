@@ -47,7 +47,8 @@ export async function saveWhatsAppConfig(
   const next: WhatsAppConfig = {
     enabled: patch.enabled ?? current.enabled,
     apiUrl: patch.apiUrl !== undefined ? patch.apiUrl : current.apiUrl,
-    apiToken: patch.apiToken !== undefined ? patch.apiToken : current.apiToken,
+    // Blank token means "keep the existing one" (same as eBio password).
+    apiToken: patch.apiToken === "" || patch.apiToken == null ? current.apiToken : patch.apiToken,
     sender: patch.sender !== undefined ? patch.sender : current.sender,
   };
   await prisma.tenant.update({

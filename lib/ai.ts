@@ -19,10 +19,8 @@ const ACTIVE_EMPLOYEES = /(active|working|current).*(employee|staff|people)/i;
 const PRESENT_TODAY = /(who|how many).*(present|clocked in|checked in|working).*(today|now)?/i;
 const ABSENT_TODAY = /(who|how many).*(absent|missing|not here|didn'?t come).*(today)?/i;
 const LATE_TODAY = /(who|how many).*(late|delayed).*(today)?/i;
-const PRESENT_ON = /(present|absent|late|attendance).*(on|for|yesterday|\d{4}-\d{2}-\d{2})/i;
 const PENDING_LEAVES = /(pending|open|waiting).*(leave|request)|(leave|request).*(pending|open|waiting)/i;
 const LEAVE_TODAY = /(who|how many).*(on leave|leave today|off today)/i;
-const LEAVE_BALANCE = /(balance|remaining|left).*(leave|days)/i;
 const EXPENSES = /(expense|reimbursement|claim)/i;
 const OVERTIME = /(overtime|ot hours|extra hours)/i;
 const HOLIDAYS = /(holiday|holidays|public holiday|upcoming holiday)/i;
@@ -99,11 +97,12 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
   const lateRows = dayRows.filter((r) => r.status === "late");
   const absentNow = employees.filter((e) => !dayRows.some((r) => r.employeeId === e.id));
 
-  if (holidaysToday) {
-    return { tone: "info", answer: `Today is a holiday — **${holidaysToday.name}**. No attendance expected.` };
-  }
-
   if (firstMatch(PRESENT_TODAY, q) || firstMatch(LATE_TODAY, q) || firstMatch(ABSENT_TODAY, q)) {
+    // Holiday short-circuit applies only to today-attendance queries — other
+    // intents (payroll, leaves, holidays, …) must still be answered.
+    if (holidaysToday) {
+      return { tone: "info", answer: `Today is a holiday — **${holidaysToday.name}**. No attendance expected.` };
+    }
     if (firstMatch(LATE_TODAY, q)) {
       return {
         tone: lateRows.length ? "warning" : "success",

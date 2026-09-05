@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, todayKey } from "@/lib/dates";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const holidays = await prisma.holiday.findMany({
@@ -18,7 +18,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -28,6 +28,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name and date are required." }, { status: 400 });
     }
     const date = fromDateKey(body.date);
+    if (isNaN(date.getTime())) {
+      return NextResponse.json({ error: "Invalid date. Use YYYY-MM-DD." }, { status: 400 });
+    }
     const holiday = await prisma.holiday.create({
       data: {
         tenantId: session.tenantId,
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
 
 /** Bulk import holidays: [{ name, date, isRecurring?, isHalfDay? }] */
 export async function PUT(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

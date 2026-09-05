@@ -37,19 +37,43 @@ export async function POST(req: NextRequest) {
     const sa = await requireSuperAdmin();
     const body = await req.json();
     const name = String(body.name ?? "").trim();
-    const slug = normalizeSlug(String(body.slug ?? ""));
+    const rawSlug = String(body.slug ?? "");
+    const slug = normalizeSlug(rawSlug);
     const planKey = String(body.plan ?? "trial");
     const effectivePlan = await getEffectivePlan(planKey);
-    const seats = Number(body.seats ?? effectivePlan.seats) || effectivePlan.seats;
+    const seats = Number(body.seats ?? effectivePlan.seats);
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
     const adminEmail = String(body.adminEmail ?? "").toLowerCase().trim();
     const adminPassword = String(body.adminPassword ?? "");
 
-    if (!name || !slug) {
-      return NextResponse.json({ error: "Company name and subdomain are required." }, { status: 400 });
+    if (!name) {
+      return NextResponse.json({ error: "Company name is required." }, { status: 400 });
+    }
+    if (!rawSlug.trim() || !slug) {
+      return NextResponse.json({ error: "Subdomain is invalid — use 2–32 letters, numbers or dashes." }, { status: 400 });
+    }
+    if (slug.length < 2) {
+      return NextResponse.json({ error: "Subdomain must be at least 2 characters." }, { status: 400 });
+    }
+    if (["www", "api", "admin", "app"].includes(slug)) {
+      return NextResponse.json({ error: "This subdomain is reserved. Choose another one." }, { status: 400 });
     }
     if (!PLANS.some((p) => p.key === planKey)) {
       return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
+    }
+    if (!Number.isInteger(seats) || seats < 1 || seats > 100000) {
+      return NextResponse.json({ error: "Seats must be an integer between 1 and 100000." }, { status: 400 });
+    }
+    const hasAdminEmail = adminEmail.length > 0;
+    const hasAdminPassword = adminPassword.length > 0;
+    if (hasAdminEmail !== hasAdminPassword) {
+      return NextResponse.json({ error: "Admin email and password must be provided together." }, { status: 400 });
+    }
+    if (hasAdminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+      return NextResponse.json({ error: "Admin email is invalid." }, { status: 400 });
+    }
+    if (hasAdminPassword && adminPassword.length < 6) {
+      return NextResponse.json({ error: "Admin password must be at least 6 characters." }, { status: 400 });
     }
     const slugTaken = await prisma.tenant.findUnique({ where: { slug } });
     if (slugTaken) {

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, toDateKey, daysBetween } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const status = req.nextUrl.searchParams.get("status");
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   try {
@@ -55,8 +55,23 @@ export async function POST(req: NextRequest) {
 
     const from = fromDateKey(fromDate);
     const to = fromDateKey(toDate);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return NextResponse.json({ error: "Leave dates are invalid. Use YYYY-MM-DD." }, { status: 400 });
+    }
     if (to < from) return NextResponse.json({ error: "End date must be after start date." }, { status: 400 });
     const days = daysBetween(from, to);
+    if (!Number.isFinite(days) || days <= 0 || days > 365) {
+      return NextResponse.json({ error: "Leave duration is invalid." }, { status: 400 });
+    }
+
+    // Inactive employees can't accrue new leave.
+    const applicant = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId: session.tenantId },
+      select: { id: true, status: true },
+    });
+    if (!applicant || applicant.status !== "active") {
+      return NextResponse.json({ error: "Only active employees can request leave." }, { status: 403 });
+    }
 
     // Balance check against approved + pending requests.
     const usedRows = await prisma.leaveRequest.findMany({

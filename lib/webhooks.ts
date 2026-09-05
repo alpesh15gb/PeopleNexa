@@ -28,14 +28,14 @@ export async function dispatchWebhook(tenantId: string, event: WebhookEvent, pay
     const targets = endpoints.filter((ep) => ep.events.split(",").map((s) => s.trim()).includes(event));
     for (const ep of targets) {
       // Fire-and-forget: failures never block or crash the caller.
-      void fire(ep.url, ep.secret, event, payload).catch(() => {});
+      void fireWebhook(ep.url, ep.secret, event, payload).catch(() => {});
     }
   } catch {
     // never throw — webhooks are best-effort
   }
 }
 
-async function fire(url: string, secret: string, event: WebhookEvent, payload: unknown): Promise<void> {
+export async function fireWebhook(url: string, secret: string, event: WebhookEvent, payload: unknown): Promise<void> {
   const body = JSON.stringify({ event, at: new Date().toISOString(), payload });
   const sig = createHmac("sha256", secret).update(body).digest("hex");
   await fetch(url, {

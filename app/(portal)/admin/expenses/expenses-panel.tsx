@@ -64,7 +64,7 @@ export function ExpensesPanel({ claims }: { claims: Claim[] }) {
           description="Employee-submitted expense claims will appear here."
         />
       ) : (
-        <div className="divide-y divide-white/[0.04]">
+        <div className="divide-y divide-[color:var(--border)]">
           {claims.map((c) => (
             <div key={c.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <button

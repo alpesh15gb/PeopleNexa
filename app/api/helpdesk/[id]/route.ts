@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee, notifyAdmins } from "@/lib/notifications";
 
@@ -8,7 +8,7 @@ const PRIORITIES = ["low", "medium", "high", "urgent"];
 
 /** PATCH — admin: status/assignee/priority; anyone involved: add a message. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
 /** DELETE — admin removes a ticket. */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

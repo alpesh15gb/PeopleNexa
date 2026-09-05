@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { DoorOpen, Ban, PartyPopper } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { StatusPill } from "@/components/ui/badge";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -37,6 +38,8 @@ export default function EmployeeExitsPage() {
   const [requests, setRequests] = useState<ExitRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   async function load() {
     const res = await fetch("/api/exits");
@@ -80,18 +83,26 @@ export default function EmployeeExitsPage() {
   }
 
   async function cancel(id: string) {
-    const res = await fetch(`/api/exits/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "cancel" }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast("error", data.error ?? "Failed to cancel");
-      return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/exits/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to cancel");
+        return;
+      }
+      toast("success", "Exit request cancelled");
+      setConfirmCancel(false);
+      await load();
+    } catch {
+      toast("error", "Failed to cancel");
+    } finally {
+      setCancelling(false);
     }
-    toast("success", "Exit request cancelled");
-    await load();
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -131,7 +142,7 @@ export default function EmployeeExitsPage() {
             </p>
           )}
           {open.status === "pending" && (
-            <Button size="sm" variant="outline" className="mt-4 text-rose-300" onClick={() => cancel(open.id)}>
+            <Button size="sm" variant="outline" className="mt-4 text-rose-300" onClick={() => setConfirmCancel(true)}>
               <Ban className="h-3.5 w-3.5" /> Cancel request
             </Button>
           )}
@@ -205,6 +216,16 @@ export default function EmployeeExitsPage() {
           <p className="text-[13px] text-muted-foreground">No exit requests yet.</p>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel exit request?"
+        description="Your resignation will be withdrawn. This can't be undone."
+        confirmLabel="Cancel request"
+        busy={cancelling}
+        onCancel={() => !cancelling && setConfirmCancel(false)}
+        onConfirm={() => open && cancel(open.id)}
+      />
     </div>
   );
 }

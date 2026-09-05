@@ -127,7 +127,7 @@ export function TaxDeclarationPanel({
               <dt className="text-muted-foreground">Declared investments</dt>
               <dd className="font-mono text-emerald-300">{formatMoney(total)}</dd>
             </div>
-            <div className="flex justify-between border-t border-white/5 pt-2">
+            <div className="flex justify-between border-t border-edge pt-2">
               <dt className="text-muted-foreground">Taxable (new regime, est.)</dt>
               <dd className="font-mono font-medium">{formatMoney(reduced)}</dd>
             </div>
@@ -144,7 +144,7 @@ export function TaxDeclarationPanel({
           {declarations.length === 0 ? (
             <p className="mt-3 text-[12.5px] text-muted-foreground">No declarations yet.</p>
           ) : (
-            <div className="mt-3 divide-y divide-white/[0.04]">
+            <div className="mt-3 divide-y divide-[color:var(--border)]">
               {declarations.map((d) => (
                 <div key={d.id} className="flex items-center justify-between py-2">
                   <span className="font-mono text-[12.5px]">{d.fy}</span>

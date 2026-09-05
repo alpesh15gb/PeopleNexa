@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
 import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
@@ -10,7 +10,7 @@ async function loadOwned(id: string, tenantId: string) {
 
 // POST /api/attendance/:id/punches  { time: "2026-08-12T09:05:00" } — add a punch (IST) and re-derive.
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 // DELETE /api/attendance/:id/punches?punchId=... — remove a punch and re-derive.
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

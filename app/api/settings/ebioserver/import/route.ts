@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getEbioserverConfig, importEmployeesFromEbioserver } from "@/lib/ebioserver";
 
 // POST /api/settings/ebioserver/import — pull the employee master from this
 // workspace's eBioserver and create employees (idempotent).
 export async function POST() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

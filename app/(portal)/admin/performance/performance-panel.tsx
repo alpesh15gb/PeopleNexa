@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 
 type Kpi = { id: string; name: string; description: string | null; category: string; enabled: boolean };
@@ -36,6 +37,8 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
   const [creatingReview, setCreatingReview] = useState(false);
   const [scoring, setScoring] = useState<Review | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<{ kind: "kpi" | "review"; id: string } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", category: "core" });
   const [rform, setRform] = useState({ employeeId: "", period: "", dueDate: "" });
   const [scores, setScores] = useState<Record<string, number | "">>({});
@@ -131,22 +134,35 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
     }
   }
 
-  async function deleteKpi(id: string) {
-    if (!confirm("Delete this KPI? Existing scores will be removed.")) return;
-    const res = await fetch(`/api/performance/kpis/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toast("success", "KPI deleted.");
-      router.refresh();
-    } else toast("error", "Failed");
+  function deleteKpi(id: string) {
+    setConfirmTarget({ kind: "kpi", id });
   }
 
-  async function deleteReview(id: string) {
-    if (!confirm("Delete this review cycle?")) return;
-    const res = await fetch(`/api/performance/reviews/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toast("success", "Review deleted.");
-      router.refresh();
-    } else toast("error", "Failed");
+  function deleteReview(id: string) {
+    setConfirmTarget({ kind: "review", id });
+  }
+
+  async function doConfirm() {
+    if (!confirmTarget) return;
+    setConfirmBusy(true);
+    try {
+      if (confirmTarget.kind === "kpi") {
+        const res = await fetch(`/api/performance/kpis/${confirmTarget.id}`, { method: "DELETE" });
+        if (res.ok) {
+          toast("success", "KPI deleted.");
+          router.refresh();
+        } else toast("error", "Failed");
+      } else {
+        const res = await fetch(`/api/performance/reviews/${confirmTarget.id}`, { method: "DELETE" });
+        if (res.ok) {
+          toast("success", "Review deleted.");
+          router.refresh();
+        } else toast("error", "Failed");
+      }
+    } finally {
+      setConfirmBusy(false);
+      setConfirmTarget(null);
+    }
   }
 
   const pending = reviews.filter((r) => r.status !== "completed").length;
@@ -173,7 +189,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
         kpis.length === 0 ? (
           <EmptyState icon={<Target className="h-5 w-5" />} title="No KPIs yet" description="Create measurable KPIs to use in review cycles." />
         ) : (
-          <div className="divide-y divide-white/[0.04] rounded-2xl border border-edge bg-card">
+          <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
             {kpis.map((k) => (
               <div key={k.id} className="flex items-center gap-3 px-5 py-4">
                 <div className="min-w-0 flex-1">
@@ -188,7 +204,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
       ) : reviews.length === 0 ? (
         <EmptyState icon={<ClipboardList className="h-5 w-5" />} title="No reviews yet" description="Start a review cycle for an employee — they self-score, you complete it, peers give 360° feedback." />
       ) : (
-        <div className="divide-y divide-white/[0.04] rounded-2xl border border-edge bg-card">
+        <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
           {reviews.map((r) => (
             <div key={r.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -297,6 +313,18 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
           </form>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title={confirmTarget?.kind === "kpi" ? "Delete KPI?" : "Delete review?"}
+        description={confirmTarget?.kind === "kpi" ? "Delete this KPI? Existing scores will be removed." : "Delete this review cycle? This action cannot be undone."}
+        confirmLabel="Delete"
+        busy={confirmBusy}
+        onCancel={() => {
+          if (!confirmBusy) setConfirmTarget(null);
+        }}
+        onConfirm={doConfirm}
+      />
     </div>
   );
 }

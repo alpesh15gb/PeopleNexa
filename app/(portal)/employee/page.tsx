@@ -89,7 +89,7 @@ export default async function EmployeeDashboardPage() {
           {pending.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-muted-foreground">{t(lang, "common.noLeaveRequests")}</p>
           ) : (
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[color:var(--border)]">
               {pending.map((l) => (
                 <div key={l.id} className="flex items-center gap-3 py-3">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.leaveType.color }} />

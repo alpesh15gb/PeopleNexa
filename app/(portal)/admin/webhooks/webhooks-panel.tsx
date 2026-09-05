@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Radio, Copy, Check, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
@@ -33,6 +34,8 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -96,14 +99,20 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
   }
 
   async function remove(id: string) {
-    const res = await fetch(`/api/webhooks?id=${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const data = await res.json();
-      toast("error", data.error ?? "Failed to delete");
-      return;
+    setDeleteBusy(true);
+    try {
+      const res = await fetch(`/api/webhooks?id=${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        toast("error", data.error ?? "Failed to delete");
+        return;
+      }
+      toast("success", "Webhook removed");
+      setDeleteId(null);
+      router.refresh();
+    } finally {
+      setDeleteBusy(false);
     }
-    toast("success", "Webhook removed");
-    router.refresh();
   }
 
   function copySecret(ep: Endpoint) {
@@ -136,7 +145,7 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.04]">
+        <div className="divide-y divide-[color:var(--border)]">
           {endpoints.map((ep) => (
             <div key={ep.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
               <span className={`h-2 w-2 shrink-0 rounded-full ${ep.active ? "bg-emerald-400" : "bg-muted-foreground/40"}`} />
@@ -171,7 +180,7 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
                 <Button size="sm" variant="ghost" disabled={busy === ep.id} onClick={() => toggle(ep)}>
                   {ep.active ? "Pause" : "Resume"}
                 </Button>
-                <Button size="icon" variant="ghost" className="text-rose-300" onClick={() => remove(ep.id)}>
+                <Button size="icon" variant="ghost" className="text-rose-300" onClick={() => setDeleteId(ep.id)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -204,6 +213,20 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        title="Delete webhook?"
+        description="This endpoint will stop receiving events. This action cannot be undone."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => {
+          if (!deleteBusy) setDeleteId(null);
+        }}
+        onConfirm={() => {
+          if (deleteId) void remove(deleteId);
+        }}
+      />
     </div>
   );
 }

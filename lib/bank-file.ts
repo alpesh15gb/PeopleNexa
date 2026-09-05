@@ -32,7 +32,11 @@ export function iciciSalaryFile(rows: BankRow[], debitAccount: string): string {
     const name = clean(r.name).slice(0, 32);
     const bene = clean(r.accountNumber).replace(/\s/g, "").slice(0, 34);
     const ifsc = clean(r.ifscCode).toUpperCase().slice(0, 11);
-    return `${pad(name, 32)}${pad(debit, 12)}${pad(bene, 34)}${pad(ifsc, 11)}NFT`;
+    // Amount in paise, 13-digit zero-padded (per ICICI PAB-SAL spec).
+    // Without this column the bank import pays 0 / rejects the file.
+    const paise = Math.max(0, Math.round(r.amount * 100));
+    const amount = String(paise).slice(0, 13).padStart(13, "0");
+    return `${pad(name, 32)}${pad(debit, 12)}${pad(bene, 34)}${pad(ifsc, 11)}${amount}NFT`;
   });
   return lines.join("\r\n") + "\r\n";
 }

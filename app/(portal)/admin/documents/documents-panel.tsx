@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 import { toDateKey } from "@/lib/dates";
 
@@ -43,6 +44,8 @@ export function DocumentsPanel({
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [viewing, setViewing] = useState<Doc | null>(null);
 
   const [form, setForm] = useState({ employeeId: "", name: "", docType: "passport", number: "", expiryDate: "", notes: "" });
@@ -74,14 +77,24 @@ export function DocumentsPanel({
     }
   }
 
-  async function del(id: string) {
-    if (!confirm("Delete this document record?")) return;
-    const res = await fetch(`/api/documents/${id}`, { method: "DELETE" });
-    if (res.ok) {
-      toast("success", "Deleted.");
-      router.refresh();
-    } else {
-      toast("error", "Failed to delete");
+  function del(id: string) {
+    setConfirmTarget(id);
+  }
+
+  async function doConfirm() {
+    if (!confirmTarget) return;
+    setConfirmBusy(true);
+    try {
+      const res = await fetch(`/api/documents/${confirmTarget}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("success", "Deleted.");
+        router.refresh();
+      } else {
+        toast("error", "Failed to delete");
+      }
+    } finally {
+      setConfirmBusy(false);
+      setConfirmTarget(null);
     }
   }
 
@@ -115,7 +128,7 @@ export function DocumentsPanel({
       {sorted.length === 0 ? (
         <EmptyState icon={<FileText className="h-5 w-5" />} title="No documents yet" description="Track passports, visas, Aadhaar cards and more — with expiry alerts." />
       ) : (
-        <div className="divide-y divide-white/[0.04] rounded-2xl border border-edge bg-card">
+        <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
           {sorted.map((d) => (
             <div key={d.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <button onClick={() => setViewing(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
@@ -201,6 +214,18 @@ export function DocumentsPanel({
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Delete document?"
+        description="Delete this document record? This action cannot be undone."
+        confirmLabel="Delete"
+        busy={confirmBusy}
+        onCancel={() => {
+          if (!confirmBusy) setConfirmTarget(null);
+        }}
+        onConfirm={doConfirm}
+      />
     </div>
   );
 }

@@ -32,25 +32,29 @@ export function computeFandF(input: {
   loanOutstanding: number;
   encashmentDays?: number; // unused encashable leave balance
 }): FandFSummary {
-  const perDay = round2(input.grossMonthly / 30);
+  // grossMonthly already contains basic+HRA+allowances — do NOT add PF on top.
+  const monthly = Math.max(0, input.grossMonthly);
+  const perDay = round2(monthly / 30);
 
   // Days worked in the final month: 1st of the LWD month → LWD inclusive.
   const lwd = startOfDay(input.lastWorkingDay);
   const monthStart = new Date(lwd.getFullYear(), lwd.getMonth(), 1);
   const earnedDays = daysBetween(monthStart, lwd);
-  const earnedSalary = round2(perDay * earnedDays);
+  // Cap earned salary at one full month (earnedDays/30 max 1).
+  const earnedSalary = Math.min(round2(perDay * earnedDays), monthly);
 
-  const noticeDaysGiven = daysBetween(input.resignationDate, input.lastWorkingDay);
+  // daysBetween is inclusive, so same-day resign+LWD = 1. Notice served should be 0 in that case.
+  const noticeDaysGiven = Math.max(0, daysBetween(input.resignationDate, input.lastWorkingDay) - 1);
   const noticeShortfallDays = Math.max(0, input.noticeDays - noticeDaysGiven);
   const noticeDeduction = round2(perDay * noticeShortfallDays);
 
   const encashmentDays = Math.max(0, Math.floor(input.encashmentDays ?? 0));
   const encashmentAmount = round2(perDay * encashmentDays);
 
-  const finalAmount = round2(earnedSalary + encashmentAmount - noticeDeduction - input.loanOutstanding);
+  const finalAmount = Math.max(0, round2(earnedSalary + encashmentAmount - noticeDeduction - input.loanOutstanding));
 
   return {
-    grossMonthly: input.grossMonthly,
+    grossMonthly: monthly,
     perDay,
     earnedDays,
     earnedSalary,

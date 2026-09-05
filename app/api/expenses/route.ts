@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
 import { dispatchWebhook } from "@/lib/webhooks";
@@ -8,7 +8,7 @@ const CATEGORIES = ["travel", "food", "fuel", "mobile", "medical", "other"];
 
 /** POST — employee submits a claim (amount, category, optional receipt photo). */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
 /** GET — employees see their own; admins see all + summary. */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const where = session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub };

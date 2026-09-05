@@ -27,10 +27,24 @@ export function normalizeSlug(raw: string): string {
     .slice(0, 32);
 }
 
+/** Slugs reserved for platform routes — never handed out as workspace subdomains. */
+const RESERVED_SLUGS = [
+  "www",
+  "api",
+  "app",
+  "admin",
+  "login",
+  "register",
+  "employee",
+  "superadmin",
+  "support",
+  "mail",
+];
+
 /** True when the slug is a valid subdomain label and not already taken. */
 export async function slugAvailable(slug: string): Promise<boolean> {
   const s = normalizeSlug(slug);
-  if (!s || s.length < 2 || s === "www" || s === "api" || s === "admin" || s === "app") return false;
+  if (!s || s.length < 2 || RESERVED_SLUGS.includes(s)) return false;
   const existing = await prisma.tenant.findUnique({ where: { slug: s } });
   return !existing;
 }
@@ -48,7 +62,7 @@ export async function onboardTenant(input: {
 }) {
   const email = input.email.toLowerCase().trim();
   const slug = normalizeSlug(input.slug);
-  if (!slug || slug.length < 2 || ["www", "api", "admin", "app"].includes(slug)) {
+  if (!slug || slug.length < 2 || RESERVED_SLUGS.includes(slug)) {
     throw new Error("Please choose a valid subdomain.");
   }
   if (!input.companyName.trim() || !input.name.trim() || !email || input.password.length < 6) {
@@ -56,7 +70,12 @@ export async function onboardTenant(input: {
   }
 
   const trial = await getEffectivePlan("trial");
-  return prisma.$transaction(async (tx) => {
+  // Company codes are random — retry the whole signup transaction on a code
+  // collision (P2002) so a rare clash doesn't fail onboarding.
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
     const [existing, slugTaken] = await Promise.all([
       tx.employee.findFirst({ where: { email }, include: { tenant: true } }),
       tx.tenant.findUnique({ where: { slug } }),
@@ -136,5 +155,18 @@ export async function onboardTenant(input: {
     });
 
     return { tenant, admin };
-  });
+      });
+    } catch (err: unknown) {
+      const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
+      const target = typeof err === "object" && err !== null && "meta" in err ? String((err as { meta?: { target?: unknown } }).meta?.target ?? "") : "";
+      // Only retry unique-constraint failures on the tenant code; email/slug
+      // conflicts already throw friendly errors above and must surface.
+      if (code === "P2002" && target.includes("code")) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Failed to generate a unique company code. Please retry.");
 }

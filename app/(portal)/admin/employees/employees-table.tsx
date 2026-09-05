@@ -39,6 +39,7 @@ interface Emp {
   branch: { id: string; name: string } | null;
   department: { id: string; name: string } | null;
   shift: { id: string; name: string; startTime: string; endTime: string } | null;
+  managerId: string | null;
 }
 
 export function EmployeesTable({
@@ -74,6 +75,7 @@ export function EmployeesTable({
       branchId: form.get("branchId") || null,
       departmentId: form.get("departmentId") || null,
       shiftId: form.get("shiftId") || null,
+      managerId: form.get("managerId") || null,
       bankName: form.get("bankName") || null,
       accountNumber: form.get("accountNumber") || null,
       ifscCode: form.get("ifscCode") || null,
@@ -273,6 +275,18 @@ export function EmployeesTable({
                 {shifts.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
+              </Select>
+            </Field>
+            <Field label="Manager" hint="Who this employee reports to">
+              <Select name="managerId" defaultValue={editing?.managerId ?? ""}>
+                <option value="">None</option>
+                {employees
+                  .filter((m) => !editing || m.id !== editing.id)
+                  .map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.firstName} {m.lastName} ({m.employeeNumber})
+                    </option>
+                  ))}
               </Select>
             </Field>
             {editing && (

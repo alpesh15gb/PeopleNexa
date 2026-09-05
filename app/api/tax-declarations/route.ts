@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fyFromMonth } from "@/lib/payroll";
 
 /** GET — declarations. Admins see everyone (optionally by FY), employees see their own. */
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const fy = req.nextUrl.searchParams.get("fy");
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 
 /** POST — an employee submits/updates their declaration for a financial year. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -47,6 +47,18 @@ export async function POST(req: NextRequest) {
       num(body.sections?.["80c"]) + num(body.sections?.["80d"]) + num(body.sections?.hra) + num(body.sections?.lta) + num(body.sections?.other),
   };
 
+  const existing = await prisma.taxDeclaration.findUnique({
+    where: { employeeId_fy: { employeeId: session.sub, fy } },
+  });
+  if (existing && existing.tenantId !== session.tenantId) {
+    return NextResponse.json({ error: "Declaration not found in this workspace." }, { status: 403 });
+  }
+  // Once verified, only an admin (via verify/reject) may change the status —
+  // an employee resubmission must not silently reset it to "submitted".
+  if (existing && existing.status === "verified" && session.role !== "admin") {
+    return NextResponse.json({ error: "Declaration is verified and cannot be modified." }, { status: 403 });
+  }
+
   const declaration = await prisma.taxDeclaration.upsert({
     where: { employeeId_fy: { employeeId: session.sub, fy } },
     update: { sections: sections as unknown as object, status: "submitted", note: null },
@@ -58,6 +70,12 @@ export async function POST(req: NextRequest) {
       status: "submitted",
     },
   });
+
+  // Tenant guard: an employeeId is globally unique, but never let a token from
+  // tenant A write a declaration row that belongs to tenant B.
+  if (declaration.tenantId !== session.tenantId) {
+    return NextResponse.json({ error: "Declaration not found in this workspace." }, { status: 403 });
+  }
 
   return NextResponse.json({ declaration }, { status: 201 });
 }

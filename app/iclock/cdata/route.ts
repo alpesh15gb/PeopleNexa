@@ -21,7 +21,11 @@ export async function GET(req: NextRequest) {
 
   const device = await findDevice(sn);
   if (!device) {
-    console.log(`[iClock] Unknown device: ${sn}`);
+    // DeviceLog requires a deviceId FK + tenantId, so an unknown SN cannot be
+    // persisted as a DeviceLog row (tenant is unresolvable). Keep an
+    // admin-visible server alert instead.
+    // TODO: add a tenant-less/global alert store so admins can see unknown-SN probes in the UI.
+    console.warn(`[iClock] Unknown device: ${sn}`);
     return new NextResponse("OK", { headers: { "Content-Type": "text/plain" } });
   }
 
@@ -56,7 +60,11 @@ export async function POST(req: NextRequest) {
 
   const device = await findDevice(sn);
   if (!device) {
-    console.log(`[iClock] POST from unknown device: ${sn}`);
+    // Same constraint as GET: no device row → no tenant → cannot create a
+    // DeviceLog (deviceId FK required). Warn loudly but still answer OK so the
+    // device keeps pushing.
+    // TODO: persist unknown-SN pushes to a global alert store for admin visibility.
+    console.warn(`[iClock] POST from unknown device: ${sn}`);
     return new NextResponse("OK: 0\r\n", { headers: { "Content-Type": "text/plain" } });
   }
 

@@ -104,8 +104,8 @@ export function JourneysPanel({
       {tab === "replay" ? (
         <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
           <div className="rounded-2xl border border-edge bg-card">
-            <p className="border-b border-white/[0.06] px-4 py-3 text-[13px] font-medium">Employees on field</p>
-            <div className="max-h-[460px] divide-y divide-white/[0.04] overflow-y-auto">
+            <p className="border-b border-edge px-4 py-3 text-[13px] font-medium">Employees on field</p>
+            <div className="max-h-[460px] divide-y divide-[color:var(--border)] overflow-y-auto">
               {journeys.length === 0 && (
                 <p className="px-4 py-6 text-[13px] text-muted-foreground">No location pings today yet.</p>
               )}

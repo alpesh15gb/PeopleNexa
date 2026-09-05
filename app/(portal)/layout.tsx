@@ -17,8 +17,8 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   if (!session) redirect("/login");
 
   const [employee, tenantModules] = await Promise.all([
-    prisma.employee.findUnique({
-      where: { id: session.sub },
+    prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
       include: { tenant: true },
     }),
     prisma.tenantModule.findMany({
@@ -26,7 +26,8 @@ export default async function PortalLayout({ children }: { children: ReactNode }
       select: { module: true },
     }),
   ]);
-  if (!employee) redirect("/login");
+  // Inactive / deleted employees must not retain portal access (tokens live 30d).
+  if (!employee || employee.status !== "active") redirect("/login");
 
   const name = `${employee.firstName} ${employee.lastName}`.trim() || "User";
   const lang = await getLang();

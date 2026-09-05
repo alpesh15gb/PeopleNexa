@@ -78,7 +78,7 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-edge px-5 py-3">
+      <div id="shifts-manager" className="flex scroll-mt-4 items-center justify-between border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">{shifts.length} shifts</p>
         <Button size="sm" onClick={() => setEditing("new")}>
           <Plus className="h-3.5 w-3.5" /> New shift
@@ -108,7 +108,7 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
               <p className="text-[11.5px] text-muted-foreground">
                 {s.graceMinutes} min grace for late marking
               </p>
-              <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
                 <Button size="sm" variant="outline" onClick={() => setEditing(s)}>
                   <Pencil className="h-3 w-3" />
                 </Button>

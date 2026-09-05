@@ -195,8 +195,8 @@ export function ClockCard({
               <Camera className="h-4 w-4" /> {selfie ? t(lang, "clock.retakeSelfie") : t(lang, "clock.addSelfie")}
             </Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => router.refresh()} title="Refresh">
-            <RefreshCw className="h-4 w-4" />
+          <Button variant="ghost" size="icon" onClick={() => router.refresh()} title="Refresh" aria-label="Refresh attendance status">
+            <RefreshCw aria-hidden="true" className="h-4 w-4" />
           </Button>
         </div>
 

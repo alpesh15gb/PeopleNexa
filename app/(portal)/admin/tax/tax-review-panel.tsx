@@ -63,7 +63,7 @@ export function TaxReviewPanel({ currentFy, declarations, fys }: { currentFy: st
       {filtered.length === 0 ? (
         <p className="py-10 text-center text-[13px] text-muted-foreground">No declarations for {fy}.</p>
       ) : (
-        <div className="divide-y divide-white/[0.04]">
+        <div className="divide-y divide-[color:var(--border)]">
           {filtered.map((d) => {
             const total = Object.values(d.sections).reduce((s, v) => s + (Number(v) || 0), 0);
             return (

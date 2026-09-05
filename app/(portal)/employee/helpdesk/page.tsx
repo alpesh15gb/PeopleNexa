@@ -138,7 +138,7 @@ export default function EmployeeHelpdeskPage() {
                 <Badge tone={tone[t.status] ?? "neutral"} className="capitalize">{t.status.replace("_", " ")}</Badge>
               </button>
               {openId === t.id && (
-                <div className="border-t border-white/[0.06] px-5 py-4">
+                <div className="border-t border-edge px-5 py-4">
                   <p className="mb-3 text-[13px] text-muted-foreground">{t.description}</p>
                   <div className="space-y-2">
                     {t.messages.map((m) => (

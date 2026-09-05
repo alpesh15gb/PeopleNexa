@@ -1,25 +1,27 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { startOfDay, addDays, toDateKey, formatTime } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
+import { istStartOfDay, istDateKey } from "@/lib/ist";
+import { formatTime } from "@/lib/dates";
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const employee = await prisma.employee.findUnique({
-    where: { id: session.sub },
+  const employee = await prisma.employee.findFirst({
+    where: { id: session.sub, tenantId: session.tenantId },
     include: { shift: true, branch: true },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const dayStart = startOfDay(new Date());
+  const dayStart = istStartOfDay(new Date());
   const record = await prisma.attendance.findFirst({
-    where: { employeeId: employee.id, date: { gte: dayStart, lt: addDays(dayStart, 1) } },
+    where: { employeeId: employee.id, tenantId: session.tenantId, date: { gte: dayStart, lt: addDays(dayStart, 1) } },
   });
 
   return NextResponse.json({
-    date: toDateKey(dayStart),
+    date: istDateKey(dayStart),
     record,
     shift: employee.shift,
     branch: employee.branch,

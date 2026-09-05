@@ -38,7 +38,7 @@ export default async function EmployeeDocumentsPage() {
           {docs.length === 0 ? (
             <EmptyState icon={<FileText className="h-5 w-5" />} title={t(lang, "documents.empty")} description={t(lang, "documents.emptyDesc")} />
           ) : (
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[color:var(--border)]">
               {docs.map((d) => {
                 const st = expiryStatus(d.expiryDate);
                 return (

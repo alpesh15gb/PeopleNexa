@@ -33,6 +33,9 @@ export function LanguageToggle({ lang }: { lang: Lang }) {
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
+        aria-label={`Language, current: ${current.label}`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         title="Language / भाषा / ભાષા / भाषा / மொழி"
         className={cn(
           "flex h-9 items-center gap-1.5 rounded-xl border border-edge bg-tint px-2.5 text-[12px] font-semibold transition-colors",
@@ -40,14 +43,15 @@ export function LanguageToggle({ lang }: { lang: Lang }) {
           busy && "opacity-60"
         )}
       >
-        <Languages className="h-3.5 w-3.5" />
-        {current.native}
+        <Languages aria-hidden="true" className="h-3.5 w-3.5" />
+        <span className="hidden md:inline">{current.native}</span>
+        <span aria-hidden="true" className="md:hidden">{current.code.toUpperCase()}</span>
       </button>
 
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="card-surface absolute right-0 z-50 mt-1 w-44 rounded-xl bg-card-2 p-1.5 shadow-2xl">
+          <div role="listbox" aria-label="Choose language" className="card-surface absolute right-0 z-50 mt-1 max-w-[calc(100vw-2rem)] w-44 rounded-xl bg-card-2 p-1.5 shadow-2xl">
             {languages.map((l) => (
               <button
                 key={l.code}

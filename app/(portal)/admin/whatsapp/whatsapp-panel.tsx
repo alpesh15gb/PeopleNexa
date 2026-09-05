@@ -86,9 +86,9 @@ export function WhatsAppPanel({
             </Field>
           </div>
 
-          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3.5">
+          <div className="flex items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3.5">
             <div>
-              <p className="text-[13.5px] font-medium">Enable WhatsApp notifications</p>
+              <p id="wa-enable-label" className="text-[13.5px] font-medium">Enable WhatsApp notifications</p>
               <p className="text-[12px] text-muted-foreground">
                 Alerts go to employee phones on file (10-digit Indian numbers auto-prefixed with 91).
               </p>
@@ -97,12 +97,13 @@ export function WhatsAppPanel({
               type="button"
               role="switch"
               aria-checked={enabled}
+              aria-labelledby="wa-enable-label"
               onClick={() => setEnabled((v) => !v)}
               className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${enabled ? "bg-gradient-brand" : "bg-muted"}`}
             >
-              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${enabled ? "left-[22px]" : "left-0.5"}`} />
+              <span aria-hidden="true" className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${enabled ? "left-[22px]" : "left-0.5"}`} />
             </button>
-          </label>
+          </div>
 
           <Button onClick={save} loading={saving}>
             <Save className="h-4 w-4" /> Save gateway

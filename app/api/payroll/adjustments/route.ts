@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { isMonthKey, monthKey } from "@/lib/dates";
 
 /** GET — adjustments for a month (admin). */
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  const rawMonth = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  if (!isMonthKey(rawMonth)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
+  const month = rawMonth;
   const adjustments = await prisma.payrollAdjustment.findMany({
     where: { tenantId: session.tenantId, month },
     include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
@@ -20,12 +24,15 @@ export async function GET(req: NextRequest) {
 
 /** POST — create an adjustment (arrears / bonus / one-off deduction). */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
   const month = String(body.month ?? monthKey(new Date()));
+  if (!isMonthKey(month)) {
+    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+  }
   const employeeId = String(body.employeeId ?? "");
   const label = String(body.label ?? "").trim();
   const amount = Number(body.amount);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, MapPin, LocateFixed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
@@ -25,6 +26,7 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -68,6 +70,7 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
         return;
       }
       toast("success", "Branch removed");
+      setConfirmDelete(null);
       router.refresh();
     } finally {
       setLoading(false);
@@ -128,12 +131,12 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
               </span>
               <span className="rounded-md bg-tint px-2 py-1">{b.geofenceRadius}m</span>
             </div>
-            <div className="mt-3 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
               <Button size="sm" variant="outline" onClick={() => setEditing(b)}>
                 <Pencil className="h-3 w-3" /> Edit
               </Button>
               {!b.isDefault && (
-                <Button size="sm" variant="outline" className="text-rose-300" onClick={() => remove(b)}>
+                <Button size="sm" variant="outline" className="text-rose-300" onClick={() => setConfirmDelete(b)}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
               )}
@@ -180,6 +183,19 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title={`Delete ${confirmDelete?.name ?? "branch"}?`}
+        description={
+          confirmDelete && confirmDelete._count.employees > 0
+            ? `${confirmDelete._count.employees} employee(s) are assigned to this branch. They will become unassigned.`
+            : "This cannot be undone."
+        }
+        busy={loading}
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && remove(confirmDelete)}
+      />
     </>
   );
 }

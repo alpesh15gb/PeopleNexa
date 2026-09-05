@@ -20,6 +20,20 @@ const SUGGESTIONS = [
   "How much overtime this month?",
 ];
 
+/** Render `**bold**` markers as <strong> so AI answers don't show raw asterisks. */
+function renderAnswer(answer: string) {
+  const parts = answer.split(/\*\*(.+?)\*\*/g);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <strong key={i} className="font-semibold">
+        {part}
+      </strong>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 export function AiPanel() {
   const [question, setQuestion] = useState("");
   const [history, setHistory] = useState<{ q: string; r: AiResult }[]>([]);
@@ -68,12 +82,12 @@ export function AiPanel() {
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-400">
                   <Sparkles className="h-3 w-3" /> Ask AI
                 </div>
-                <p className="mt-1.5 text-[13.5px] leading-relaxed">{h.r.answer}</p>
+                <p className="mt-1.5 text-[13.5px] leading-relaxed">{renderAnswer(h.r.answer)}</p>
                 {h.r.data && h.r.data.length > 0 && (
                   <div className="mt-3 overflow-hidden rounded-xl border border-edge">
                     <table className="w-full text-left text-[12.5px]">
                       <thead>
-                        <tr className="border-b border-white/[0.06] bg-tint/60">
+                        <tr className="border-b border-edge bg-tint/60">
                           {(h.r.columns ?? Object.keys(h.r.data[0])).map((c) => (
                             <th key={c} className="px-3 py-2 font-medium capitalize text-muted-foreground">{c}</th>
                           ))}
@@ -81,7 +95,7 @@ export function AiPanel() {
                       </thead>
                       <tbody>
                         {h.r.data.slice(0, 12).map((row, ri) => (
-                          <tr key={ri} className="border-b border-white/[0.03] last:border-0">
+                          <tr key={ri} className="border-b border-edge last:border-0">
                             {Object.values(row).map((v, ci) => (
                               <td key={ci} className="px-3 py-2">{String(v)}</td>
                             ))}

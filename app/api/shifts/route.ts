@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const shifts = await prisma.shift.findMany({
     where: { tenantId: session.tenantId },
@@ -14,7 +14,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -27,14 +27,21 @@ export async function POST(req: NextRequest) {
     const exists = await prisma.shift.findFirst({ where: { tenantId: session.tenantId, name } });
     if (exists) return NextResponse.json({ error: "A shift with this name already exists." }, { status: 400 });
 
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!timeRe.test(String(body.startTime)) || !timeRe.test(String(body.endTime))) {
+      return NextResponse.json({ error: "Start/end time must use HH:MM (24h)." }, { status: 400 });
+    }
+    const grace = Number(body.graceMinutes);
+    const graceMinutes = Number.isFinite(grace) ? Math.min(120, Math.max(0, Math.round(grace))) : 0;
+
     const shift = await prisma.shift.create({
       data: {
         tenantId: session.tenantId,
         name,
         code: body.code ?? null,
-        startTime: body.startTime,
-        endTime: body.endTime,
-        graceMinutes: Number(body.graceMinutes) || 0,
+        startTime: String(body.startTime),
+        endTime: String(body.endTime),
+        graceMinutes,
         isNightShift: Boolean(body.isNightShift),
       },
     });

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { WEBHOOK_EVENTS, dispatchWebhook } from "@/lib/webhooks";
 
 /** GET — list the tenant's webhook endpoints. */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -19,7 +19,7 @@ export async function GET() {
 
 /** POST — create an endpoint. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
 /** PUT — update (toggle active / change URL or events). */
 export async function PUT(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest) {
 
 /** DELETE — remove an endpoint. */
 export async function DELETE(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

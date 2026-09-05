@@ -8,8 +8,12 @@ export function toDateKey(d: Date): string {
 }
 
 export function fromDateKey(key: string): Date {
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(key)) return new Date(NaN);
   const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  const dt = new Date(y, m - 1, d);
+  // Guard against overflow (e.g. 2026-02-30 → Mar 02).
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return new Date(NaN);
+  return dt;
 }
 
 export function startOfDay(d: Date): Date {
@@ -21,8 +25,9 @@ export function endOfDay(d: Date): Date {
 }
 
 export function parseTime(t: string): { hour: number; minute: number } {
-  const [hour, minute] = t.split(":").map(Number);
-  return { hour: hour || 0, minute: minute || 0 };
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(t.trim());
+  if (!m) return { hour: 0, minute: 0 };
+  return { hour: Number(m[1]), minute: Number(m[2]) };
 }
 
 /** Minutes of the day for a given time string like "09:30". */

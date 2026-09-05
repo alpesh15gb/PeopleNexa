@@ -21,9 +21,10 @@ export function TR({ className, ...props }: HTMLAttributes<HTMLTableRowElement>)
   return <tr className={cn("transition-colors hover:bg-tint", className)} {...props} />;
 }
 
-export function TH({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
+export function TH({ className, scope = "col", ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
+      scope={scope}
       className={cn(
         "h-10 px-4 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
         className

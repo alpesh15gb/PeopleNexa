@@ -74,12 +74,14 @@ export function NotificationsBell() {
           setOpen((v) => !v);
           if (!open) load();
         }}
-        className="relative rounded-xl border border-edge bg-tint p-2 text-muted-foreground transition-colors hover:bg-tint-strong hover:text-foreground"
-        aria-label="Notifications"
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-edge bg-tint text-muted-foreground transition-colors hover:bg-tint-strong hover:text-foreground"
       >
-        <Bell className="h-4 w-4" />
+        <Bell aria-hidden="true" className="h-4 w-4" />
         {unread > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-gradient-brand px-1 text-[10px] font-bold text-white shadow-[0_2px_8px_-2px_rgba(99,102,241,0.8)]">
+          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-gradient-brand px-1 text-[10px] font-bold text-white shadow-[0_2px_8px_-2px_rgba(99,102,241,0.8)]">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -88,7 +90,7 @@ export function NotificationsBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="card-surface absolute right-0 z-40 mt-2 w-80 animate-scale-in overflow-hidden rounded-xl bg-card-2 shadow-2xl sm:w-96">
+          <div role="dialog" aria-label="Notifications" className="card-surface absolute right-0 z-40 mt-2 max-w-[calc(100vw-2rem)] w-80 animate-scale-in overflow-hidden rounded-xl bg-card-2 shadow-2xl sm:w-96">
             <div className="flex items-center justify-between border-b border-edge px-4 py-3">
               <p className="font-display text-sm font-semibold">Notifications</p>
               {unread > 0 && (

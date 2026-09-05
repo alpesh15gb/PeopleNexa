@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
@@ -7,7 +7,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const payslips = await prisma.payslip.findMany({
-    where: { employeeId: session.sub },
+    where: { employeeId: session.sub, tenantId: session.tenantId },
     orderBy: { month: "desc" },
   });
 

@@ -27,8 +27,15 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
     return map;
   }, [employees]);
 
-  const roots = childrenOf.get("__root__") ?? [];
-  const orphanCount = employees.length - roots.length - (childrenOf.get("__root__")?.length ?? 0);
+  const rootNodes = childrenOf.get("__root__") ?? [];
+  const employeeIds = useMemo(() => new Set(employees.map((e) => e.id)), [employees]);
+  const orphans = useMemo(
+    () => employees.filter((e) => e.managerId && !employeeIds.has(e.managerId)),
+    [employees, employeeIds]
+  );
+  // Dangling-manager employees have no active manager node — show them top-level.
+  const roots = useMemo(() => [...rootNodes, ...orphans], [rootNodes, orphans]);
+  const orphanCount = orphans.length;
 
   function toggle(id: string) {
     setCollapsed((prev) => {

@@ -106,7 +106,7 @@ export default async function AdminDashboardPage() {
                 description="Punches will appear here in real time as employees check in."
               />
             ) : (
-              <div className="divide-y divide-white/[0.04]">
+              <div className="divide-y divide-[color:var(--border)]">
                 {attendance.map((a) => (
                   <div key={a.id} className="flex items-center gap-3 py-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
@@ -179,7 +179,7 @@ export default async function AdminDashboardPage() {
           {pendingLeaves.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-muted-foreground">All caught up — nothing pending.</p>
           ) : (
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-[color:var(--border)]">
               {pendingLeaves.map((l) => (
                 <div key={l.id} className="flex items-center gap-3 py-3">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.leaveType.color }} />

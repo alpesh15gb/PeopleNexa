@@ -117,7 +117,7 @@ export function FeedPanel({ isAdmin }: { isAdmin: boolean }) {
               </div>
               <p className="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed">{p.body}</p>
               {p.comments.length > 0 && (
-                <div className="mt-3 space-y-2 border-t border-white/[0.05] pt-3">
+                <div className="mt-3 space-y-2 border-t border-edge pt-3">
                   {p.comments.map((c) => (
                     <p key={c.id} className="text-[12.5px] text-muted-foreground">
                       <span className="font-medium text-foreground">{c.author.firstName} {c.author.lastName}:</span> {c.body}

@@ -87,9 +87,11 @@ export default async function LandingRoute() {
   const host = ((await headers()).get("host") ?? "").toLowerCase();
   const hostname = host.split(":")[0];
   const base = process.env.APP_BASE_DOMAIN ?? "peoplenexa.in";
+  const isWwwHost = hostname === "www" || hostname.startsWith("www.");
   const isTenantHost =
-    (hostname.endsWith(`.${base}`) && hostname.split(".").length >= 3) ||
-    (hostname.endsWith(".localhost") && hostname.split(".").length >= 2);
+    !isWwwHost &&
+    ((hostname.endsWith(`.${base}`) && hostname.split(".").length >= 3) ||
+      (hostname.endsWith(".localhost") && hostname.split(".").length >= 2));
   if (isTenantHost) redirect("/login");
 
   // Logged-in users skip the marketing page and go straight to their portal.

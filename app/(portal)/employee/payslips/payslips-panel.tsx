@@ -97,7 +97,7 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
               {viewing.overtimeHours > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.overtimeHours}h OT</span>}
               {viewing.workedHours > 0 && <span className="rounded-md bg-tint px-2 py-0.5">{viewing.workedHours}h worked</span>}
             </div>
-            <div className="divide-y divide-white/[0.05]">
+            <div className="divide-y divide-[color:var(--border)]">
               {[
                 { label: t(lang, "payslips.basic"), value: formatMoney(viewing.basicSalary || viewing.baseSalary * 0.5) },
                 { label: t(lang, "payslips.allowances"), value: formatMoney(viewing.allowances) },
@@ -111,7 +111,7 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
                 </div>
               ))}
             </div>
-            <div className="mt-1 divide-y divide-white/[0.05] border-t border-edge pt-1">
+            <div className="mt-1 divide-y divide-[color:var(--border)] border-t border-edge pt-1">
               {[
                 { label: "EPF (employee)", value: viewing.pfEmployee },
                 { label: "ESIC (employee)", value: viewing.esicEmployee },

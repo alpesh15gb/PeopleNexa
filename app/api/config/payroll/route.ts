@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getPayrollConfig, DEFAULT_PAYROLL_CONFIG, type PayrollConfig } from "@/lib/payroll";
 
 /** GET — current payroll configuration (per tenant). */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -15,7 +15,7 @@ export async function GET() {
 
 /** PUT — update payroll configuration. */
 export async function PUT(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -26,20 +26,22 @@ export async function PUT(req: NextRequest) {
     const n = Number(v);
     return Number.isFinite(n) ? n : d;
   };
+  const clampPct = (n: number) => Math.min(100, Math.max(0, n));
+  const nonNeg = (n: number) => Math.max(0, n);
 
   const next: PayrollConfig = {
-    basicPercent: num(body.basicPercent, current.basicPercent),
-    allowancesPercent: num(body.allowancesPercent, current.allowancesPercent),
-    lateFinePerLateDay: num(body.lateFinePerLateDay, current.lateFinePerLateDay),
-    otMultiplier: num(body.otMultiplier, current.otMultiplier),
+    basicPercent: clampPct(num(body.basicPercent, current.basicPercent)),
+    allowancesPercent: clampPct(num(body.allowancesPercent, current.allowancesPercent)),
+    lateFinePerLateDay: nonNeg(num(body.lateFinePerLateDay, current.lateFinePerLateDay)),
+    otMultiplier: nonNeg(num(body.otMultiplier, current.otMultiplier)),
     deductAbsentDays: Boolean(body.deductAbsentDays ?? current.deductAbsentDays),
     pf: {
       enabled: body.pf?.enabled !== undefined ? Boolean(body.pf.enabled) : current.pf.enabled,
-      wageCeiling: num(body.pf?.wageCeiling, current.pf.wageCeiling),
+      wageCeiling: nonNeg(num(body.pf?.wageCeiling, current.pf.wageCeiling)),
     },
     esic: {
       enabled: body.esic?.enabled !== undefined ? Boolean(body.esic.enabled) : current.esic.enabled,
-      grossCeiling: num(body.esic?.grossCeiling, current.esic.grossCeiling),
+      grossCeiling: nonNeg(num(body.esic?.grossCeiling, current.esic.grossCeiling)),
     },
     pt: {
       enabled: body.pt?.enabled !== undefined ? Boolean(body.pt.enabled) : current.pt.enabled,

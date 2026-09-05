@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 const DOC_TYPES = ["passport", "visa", "aadhaar", "pan", "license", "other"];
@@ -14,7 +14,7 @@ export function expiryStatus(expiryDate: Date | null): "none" | "expired" | "exp
 
 /** POST — admin records a document for an employee. */
 export async function POST(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
 /** GET — admins see all (with expiry summary), employees see their own. */
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const where = session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub };
