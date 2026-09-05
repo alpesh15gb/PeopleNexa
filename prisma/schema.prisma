@@ -41,6 +41,7 @@ model Tenant {
   attendance  Attendance[]
   assets      Asset[]
   devices     Device[]
+  realtimeDevices RealtimeDevice[]
   modules     TenantModule[]
   licenses    License[]
   corrections PunchCorrection[]
@@ -137,6 +138,66 @@ model DeviceCommand {
   updatedAt DateTime @updatedAt
 
   @@index([deviceId, status])
+}
+
+// ─── Realtime cloud devices (own track; ESSL/eBio untouched) ───────────────
+// Pro1100B/F500 class speaking WSS or FK-Web HTTP. Management lives under
+// /api/realtime-devices/*; punches land in the shared Punch table so
+// attendance reconciles uniformly across ESSL / eBioserver / Realtime.
+
+model RealtimeDevice {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name            String
+  serialNumber    String   @unique // e.g. RSS2025…
+  productName     String? // e.g. Pro1100B
+  protocol        String   @default("wss") // wss | fkweb
+  capabilities    Json?    @default("[]") // ["FP","PASSWORD","IDCARD","FACE","QR"]
+  apiKey          String   @unique // X-API-Key for cloud calls
+  ipAddress       String?
+  status          String   @default("active") // active | inactive
+  lastSeenAt      DateTime?
+  lastSyncAt      DateTime?
+  linkedDeviceIds String[] @default([])
+  config          Json?    @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  commands RealtimeCommand[]
+  logs     RealtimeLog[]
+  punches  Punch[]
+
+  @@index([tenantId])
+}
+
+model RealtimeCommand {
+  id               String         @id @default(cuid())
+  realtimeDeviceId String
+  device           RealtimeDevice @relation(fields: [realtimeDeviceId], references: [id], onDelete: Cascade)
+  command          String
+  status           String         @default("pending") // pending | sent | executed | failed
+  response         String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([realtimeDeviceId, status])
+}
+
+model RealtimeLog {
+  id               String         @id @default(cuid())
+  tenantId         String
+  realtimeDeviceId String
+  device           RealtimeDevice @relation(fields: [realtimeDeviceId], references: [id], onDelete: Cascade)
+  rawData          String?
+  userId           String? // employee code as enrolled on the device
+  punchTime        DateTime?
+  processed        Boolean        @default(false)
+  error            String?
+  createdAt        DateTime       @default(now())
+
+  @@index([realtimeDeviceId, processed])
+  @@index([tenantId, punchTime])
 }
 
 model DeviceLog {
@@ -306,7 +367,9 @@ model Punch {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   deviceId   String?
   device     Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  source     String   @default("mobile") // mobile | device | ebioserver
+  realtimeDeviceId String?
+  realtimeDevice   RealtimeDevice? @relation(fields: [realtimeDeviceId], references: [id], onDelete: SetNull)
+  source     String   @default("mobile") // mobile | device | ebioserver | realtime
   punchTime  DateTime
   inOutHint  String   @default("unknown") // in | out | unknown (device-reported; weak hint only)
   lat        Float?

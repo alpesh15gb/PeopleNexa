@@ -171,8 +171,22 @@ export async function reconcileEmployeeDay(
     where: { id: { in: punches.map((p) => p.deviceId).filter(Boolean) as string[] } },
     select: { id: true, serialNumber: true },
   });
+  const rtDevices = await prisma.realtimeDevice.findMany({
+    where: { id: { in: punches.map((p) => p.realtimeDeviceId).filter(Boolean) as string[] } },
+    select: { id: true, serialNumber: true },
+  });
   const serialByDevice = new Map(devices.map((d) => [d.id, d.serialNumber]));
-  const serialByPunch = new Map(punches.map((p) => [p.id, p.deviceId ? serialByDevice.get(p.deviceId) ?? null : null]));
+  for (const d of rtDevices) serialByDevice.set(d.id, d.serialNumber);
+  const serialByPunch = new Map(
+    punches.map((p) => [
+      p.id,
+      p.deviceId
+        ? (serialByDevice.get(p.deviceId) ?? null)
+        : p.realtimeDeviceId
+          ? (serialByDevice.get(p.realtimeDeviceId) ?? null)
+          : null,
+    ])
+  );
 
   const config = (tenant.config ?? {}) as { punches?: { mode?: PunchMode } };
   const mode = opts.mode ?? config.punches?.mode ?? "first_last";

@@ -171,6 +171,8 @@ const ROUTE_MODULES: Array<[string, string]> = [
   ["/api/branches", "branches"],
   ["/api/assets", "assets"],
   ["/api/devices", "devices"],
+  ["/api/realtime-devices", "devices"],
+  ["/api/realtime", "devices"],
   ["/api/payroll", "payroll"],
   ["/api/loans", "payroll"],
   ["/api/expenses", "expenses"],
