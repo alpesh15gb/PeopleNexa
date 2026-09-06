@@ -285,7 +285,7 @@ model Employee {
   email          String
   phone          String?
   password       String // bcrypt hash
-  role           String    @default("employee") // admin | employee
+  role           String    @default("employee") // admin | supervisor | employee
   status         String    @default("active") // active | inactive
   position       String?
   salary         Float?
@@ -569,11 +569,34 @@ model Payslip {
   netSalary Float
   status    String   @default("draft") // draft | paid
   note      String?
+  // Payout tracking (bulk/online/offline payment reconciliation).
+  paidVia     String?   // cash | upi | bank | other
+  paidAt      DateTime?
+  paymentRef  String?   // bank UTR / batch id / offline receipt no.
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([employeeId, month])
   @@index([tenantId, month])
+}
+
+// ─── Cashbook (cash-in / cash-out + vendor payments, SME ledger lite) ───────
+// PagarBook-parity: record business cash flow beyond staff reimbursement.
+// tenantId is intentionally a plain string like Payslip.tenantId (no FK),
+// so old rows never block tenant deletes and reads stay tenant-scoped.
+model CashbookEntry {
+  id          String   @id @default(cuid())
+  tenantId    String
+  date        DateTime
+  type        String   // cash_in | cash_out
+  category    String   // salary | advance | vendor | expense | other
+  amount      Float
+  note        String?
+  paymentMode String?  // cash | upi | bank | other
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, date])
 }
 
 // ─── Loans & advances ──────────────────────────────────────────────────────
