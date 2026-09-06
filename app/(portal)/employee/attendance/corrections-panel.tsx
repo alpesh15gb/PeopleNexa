@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
+import { formatDateIST } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
 
 type Correction = {
@@ -130,7 +131,7 @@ export function CorrectionsPanel({
       <Modal open={open} onClose={() => setOpen(false)} title={t(lang, "corrections.request")} size="sm">
         <form onSubmit={submit} className="space-y-4">
           <Field label={t(lang, "corrections.date")}>
-            <Input name="date" type="date" required max={new Date().toISOString().slice(0, 10)} />
+            <Input name="date" type="date" required max={formatDateIST(new Date())} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t(lang, "corrections.inTime")}>

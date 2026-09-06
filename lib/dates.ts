@@ -38,12 +38,39 @@ export function minutesOfDay(t: string): number {
 
 export function formatTime(d: Date | null | undefined): string {
   if (!d) return "—";
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // Pinned to IST: server renders in UTC while browsers render local time,
+  // which hydrated mismatched text (React #418). Display-only; logic helpers
+  // below intentionally keep local-time semantics — do not "fix" those.
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  }).format(d);
 }
 
 export function formatDateTime(d: Date | null | undefined): string {
   if (!d) return "—";
-  return `${toDateKey(d)} ${formatTime(d)}`;
+  const date = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).format(d);
+  return `${date} ${formatTime(d)}`;
+}
+
+/** IST calendar day (YYYY-MM-DD) for display. Deterministic server+client. */
+export function formatDateIST(d: Date | string | null | undefined): string {
+  if (!d) return "—";
+  const dt = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).format(dt);
 }
 
 export function formatDate(d: Date | null | undefined): string {

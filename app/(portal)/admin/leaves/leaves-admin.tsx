@@ -11,6 +11,7 @@ import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
 
 interface Request {
   id: string;
@@ -378,7 +379,8 @@ function TeamCalendar({
   const first = new Date(year, mon, 1);
   const offset = (first.getDay() + 6) % 7; // Monday-first
   const daysInMonth = new Date(year, mon + 1, 0).getDate();
-  const today = toDateKey(new Date());
+  // IST-pinned so server (UTC) and browser hydrate the same day key.
+  const today = istDateKey(new Date());
 
   const approved = requests.filter((r) => r.status === "approved");
   const byDay = new Map<string, typeof approved>();
@@ -403,7 +405,7 @@ function TeamCalendar({
           <Button size="icon" variant="outline" onClick={() => setMonth(new Date(year, mon - 1, 1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <p className="min-w-36 text-center font-display text-[15px] font-semibold capitalize">
+          <p suppressHydrationWarning className="min-w-36 text-center font-display text-[15px] font-semibold capitalize">
             {month.toLocaleString("en", { month: "long", year: "numeric" })}
           </p>
           <Button size="icon" variant="outline" onClick={() => setMonth(new Date(year, mon + 1, 1))}>

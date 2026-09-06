@@ -38,6 +38,7 @@ export function ClockCard({
   const router = useRouter();
   const toast = useToast();
   const [now, setNow] = useState(new Date());
+  const [mounted, setMounted] = useState(false);
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -46,6 +47,7 @@ export function ClockCard({
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
+    setMounted(true);
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -131,7 +133,12 @@ export function ClockCard({
   const punchedIn = Boolean(record?.punchInTime);
   const punchedOut = Boolean(record?.punchOutTime);
   const geofenced = Boolean(branch?.latitude != null && branch?.longitude != null);
-  const time = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  // Ticking clock: server HTML and first client render must agree, so show a
+  // static placeholder until mount (else React #418 every load).
+  const time = mounted
+    ? now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" })
+    : "--:--:--";
+  const dateLabel = mounted ? toDateKey(now) : "";
 
   return (
     <div className="card-surface relative overflow-hidden rounded-2xl">
@@ -143,7 +150,7 @@ export function ClockCard({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-              {toDateKey(now)} · {employeeName}
+              {dateLabel ? `${dateLabel} · ${employeeName}` : employeeName}
             </p>
             <p className="mt-2 font-display text-5xl font-bold tabular-nums tracking-tight sm:text-6xl">{time}</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">

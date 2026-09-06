@@ -116,10 +116,42 @@ function employeeNav(lang: Lang): NavItem[] {
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-9 items-center rounded-[10px] border border-primary/15 bg-primary/[0.06] px-2.5 shadow-[0_4px_16px_-8px_rgba(37,99,235,0.35)] backdrop-blur dark:bg-primary/[0.08]">
+      <div className="flex h-9 items-center rounded-[10px] bg-card px-2.5 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.18)] dark:bg-white">
         <img src="/logo.png" alt="PeopleNexa logo" width={110} height={22} className="h-[22px] w-auto" />
       </div>
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Workspace</span>
+    </div>
+  );
+}
+
+/**
+ * Server renders UTC midnight-boundary dates while the browser renders IST,
+ * so rendering `new Date()` inline hydrates mismatched text (React #418).
+ * Render an identical placeholder on both, then swap to the live date after
+ * mount so the first client pass always matches the server HTML.
+ */
+function TopbarDate() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
+  if (!now) {
+    return (
+      <div
+        aria-hidden="true"
+        className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 backdrop-blur md:flex"
+      >
+        <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
+        <span className="inline-block h-3 w-28 animate-pulse rounded bg-muted" />
+      </div>
+    );
+  }
+  return (
+    <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur md:flex">
+      <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
+      <span className="font-medium capitalize">{relativeDay(now)}</span>
+      <span aria-hidden="true" className="text-muted-foreground/50">•</span>
+      <span>{toDateKey(now)}</span>
     </div>
   );
 }
@@ -404,12 +436,7 @@ export function Shell({
 
           <NotificationsBell />
 
-          <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur md:flex">
-            <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
-            <span className="font-medium capitalize">{relativeDay(new Date())}</span>
-            <span aria-hidden="true" className="text-muted-foreground/50">•</span>
-            <span>{toDateKey(new Date())}</span>
-          </div>
+          <TopbarDate />
 
           <ThemeToggle />
           <div className="hidden sm:block">
