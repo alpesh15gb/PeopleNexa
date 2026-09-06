@@ -6,7 +6,7 @@ const ALLOWED = ["present", "late", "permission", "absent", "half_day"];
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;

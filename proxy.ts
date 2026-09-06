@@ -157,10 +157,14 @@ async function proxy(request: NextRequest) {
 
   if (pathname === "/login" || pathname === "/register") {
     return NextResponse.redirect(
-      new URL(role === "admin" ? "/admin" : "/employee", request.url)
+      new URL(role === "admin" ? "/admin" : role === "supervisor" ? "/admin/attendance" : "/employee", request.url)
     );
   }
-  if (isAdminRoute && role !== "admin") {
+  // Supervisor is admin-lite for their scope: attendance + regularization only.
+  if (role === "supervisor" && isAdminRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization")) {
+    return NextResponse.redirect(new URL("/admin/attendance", request.url));
+  }
+  if (isAdminRoute && role !== "admin" && role !== "supervisor") {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
 
@@ -174,7 +178,7 @@ async function proxy(request: NextRequest) {
     }
     const mod = moduleForPath(pathname);
     if (mod && !access.modules.has(mod)) {
-      const target = role === "admin" ? "/admin" : "/employee";
+      const target = role === "admin" ? "/admin" : role === "supervisor" ? "/admin/attendance" : "/employee";
       return NextResponse.redirect(
         new URL(`${target}/module-unavailable?m=${encodeURIComponent(mod)}`, request.url)
       );

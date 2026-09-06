@@ -25,4 +25,21 @@ export async function notifyEmployee(
   await prisma.notification.create({
     data: { tenantId, employeeId, type, title, message },
   });
+
+  // SMS fallback (PagarBook parity): best-effort text for actionable kinds.
+  // Never throws and never blocks the caller — failures are swallowed.
+  if (type === "success" || type === "warning" || type === "danger") {
+    try {
+      const employee = await prisma.employee.findUnique({
+        where: { id: employeeId },
+        select: { phone: true, tenantId: true },
+      });
+      if (employee && employee.tenantId === tenantId && employee.phone) {
+        const { sendSms } = await import("./sms");
+        await sendSms(tenantId, employee.phone, `${title}: ${message}`).catch(() => undefined);
+      }
+    } catch {
+      // best-effort only — in-app notification above already persisted
+    }
+  }
 }

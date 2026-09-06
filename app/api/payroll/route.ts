@@ -14,6 +14,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
 
+  // Optional payout-status filter (PagarBook parity). `unpaid` is an alias for `draft`
+  // since the stored statuses are only draft | paid.
+  const statusParam = (req.nextUrl.searchParams.get("status") || "").toLowerCase();
+  if (statusParam && !["paid", "draft", "unpaid"].includes(statusParam)) {
+    return NextResponse.json({ error: "status must be one of: paid, draft, unpaid." }, { status: 400 });
+  }
+  const payslipStatusFilter =
+    statusParam === "paid" ? "paid" : statusParam === "draft" || statusParam === "unpaid" ? "draft" : undefined;
+
   const [employees, payslips] = await Promise.all([
     prisma.employee.findMany({
       where: { tenantId: session.tenantId },
@@ -32,7 +41,12 @@ export async function GET(req: NextRequest) {
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month },
+      where: {
+        tenantId: session.tenantId,
+        month,
+        ...(payslipStatusFilter ? { status: payslipStatusFilter } : {}),
+      },
+      // paidVia / paidAt / paymentRef are scalar fields so they are auto-included here.
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
     }),
   ]);

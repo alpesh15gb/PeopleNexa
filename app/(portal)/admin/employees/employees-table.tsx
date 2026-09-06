@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,37 @@ interface Emp {
   managerId: string | null;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const BULK_MAX = 500;
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (c === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur.trim());
+  return out.map((v) =>
+    v.length >= 2 && v.startsWith('"') && v.endsWith('"')
+      ? v.slice(1, -1).replace(/""/g, '"').trim()
+      : v
+  );
+}
+
 export function EmployeesTable({
   employees,
   branches,
@@ -58,6 +89,11 @@ export function EmployeesTable({
   const [modal, setModal] = useState<"create" | Emp | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Emp | null>(null);
   const [loading, setLoading] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkFileName, setBulkFileName] = useState("");
+  const [bulkRows, setBulkRows] = useState<Record<string, string>[]>([]);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -123,15 +159,124 @@ export function EmployeesTable({
     }
   }
 
+  async function onBulkFile(file: File) {
+    setBulkFileName(file.name);
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+    if (lines.length === 0) {
+      setBulkRows([]);
+      setBulkErrors(["File is empty."]);
+      return;
+    }
+    const headers = splitCsvLine(lines[0]).map((h) => h.trim());
+    const required = ["firstName", "email"];
+    const missing = required.filter((r) => !headers.includes(r));
+    if (missing.length > 0) {
+      setBulkRows([]);
+      setBulkErrors([`Missing required column(s): ${missing.join(", ")}`]);
+      return;
+    }
+    const valid: Record<string, string>[] = [];
+    const errs: string[] = [];
+    const seen = new Set<string>();
+    const dataLines = lines.slice(1, BULK_MAX + 1);
+    dataLines.forEach((line, idx) => {
+      const cols = splitCsvLine(line);
+      const row: Record<string, string> = {};
+      headers.forEach((h, i) => {
+        row[h] = (cols[i] ?? "").trim();
+      });
+      const label = row.email || `row ${idx + 2}`;
+      if (!row.firstName) {
+        errs.push(`Row ${idx + 2} (${label}): first name is required.`);
+        return;
+      }
+      if (!row.email || !EMAIL_RE.test(row.email.toLowerCase())) {
+        errs.push(`Row ${idx + 2} (${label}): invalid email.`);
+        return;
+      }
+      const key = row.email.toLowerCase();
+      if (seen.has(key)) {
+        errs.push(`Row ${idx + 2} (${label}): duplicate email in file.`);
+        return;
+      }
+      seen.add(key);
+      if (row.salary) {
+        const n = Number(row.salary);
+        if (!Number.isFinite(n) || n < 0 || n > 100_000_000) {
+          errs.push(`Row ${idx + 2} (${label}): salary must be 0–10,00,00,000.`);
+          return;
+        }
+      }
+      if (row.joiningDate) {
+        const d = new Date(row.joiningDate);
+        if (Number.isNaN(d.getTime())) {
+          errs.push(`Row ${idx + 2} (${label}): joining date is invalid.`);
+          return;
+        }
+      }
+      valid.push(row);
+    });
+    if (lines.length - 1 > BULK_MAX) {
+      errs.push(`Only first ${BULK_MAX} rows will be imported.`);
+    }
+    setBulkRows(valid);
+    setBulkErrors(errs);
+  }
+
+  async function submitBulk() {
+    if (bulkRows.length === 0) {
+      toast("error", "No valid rows to import.");
+      return;
+    }
+    setBulkLoading(true);
+    try {
+      const res = await fetch("/api/employees/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: bulkRows }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        created?: number;
+        failed?: { email: string; error: string }[];
+      };
+      if (!res.ok) {
+        toast("error", data.error ?? "Bulk import failed.");
+        return;
+      }
+      const created = data.created ?? 0;
+      const failed = data.failed ?? [];
+      if (failed.length > 0) {
+        setBulkErrors(failed.map((f) => `${f.email}: ${f.error}`));
+        toast("info", `Imported ${created}, ${failed.length} failed.`);
+      } else {
+        toast("success", `Imported ${created} employee${created === 1 ? "" : "s"}.`);
+        setBulkOpen(false);
+        setBulkRows([]);
+        setBulkErrors([]);
+        setBulkFileName("");
+      }
+      router.refresh();
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
   const editing = modal && modal !== "create" ? modal : null;
 
   return (
     <>
       <div className="flex items-center justify-between border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">Manage your team members</p>
-        <Button size="sm" onClick={() => setModal("create")}>
-          <Plus className="h-3.5 w-3.5" /> Add employee
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+            <Upload className="h-3.5 w-3.5" /> Bulk import
+          </Button>
+          <Button size="sm" onClick={() => setModal("create")}>
+            <Plus className="h-3.5 w-3.5" /> Add employee
+          </Button>
+        </div>
       </div>
 
       <Table>
@@ -305,6 +450,61 @@ export function EmployeesTable({
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Bulk import modal */}
+      <Modal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        title="Bulk import employees"
+        description="Upload a CSV file (max 500 rows). Passwords are auto-generated."
+      >
+        <div className="space-y-4">
+          <a
+            href="/api/employees/bulk"
+            download="employees-template.csv"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-indigo-300 hover:text-indigo-200"
+          >
+            <Download className="h-3.5 w-3.5" /> Download CSV template
+          </a>
+          <Field label="CSV file (.csv)">
+            <Input
+              type="file"
+              accept=".csv"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onBulkFile(f);
+              }}
+            />
+          </Field>
+          {bulkFileName && (
+            <p className="text-[13px] text-muted-foreground">
+              {bulkFileName} — {bulkRows.length} row{bulkRows.length === 1 ? "" : "s"} ready
+              {bulkErrors.length > 0 && `, ${bulkErrors.length} error${bulkErrors.length === 1 ? "" : "s"}`}
+            </p>
+          )}
+          {bulkErrors.length > 0 && (
+            <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-edge bg-card p-3 text-[12.5px] text-rose-300">
+              {bulkErrors.slice(0, 20).map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+              {bulkErrors.length > 20 && <li>…and {bulkErrors.length - 20} more</li>}
+            </ul>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setBulkOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              loading={bulkLoading}
+              disabled={bulkRows.length === 0}
+              onClick={() => void submitBulk()}
+            >
+              <Upload className="h-4 w-4" /> Import {bulkRows.length > 0 ? `(${bulkRows.length})` : ""}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Delete confirm */}

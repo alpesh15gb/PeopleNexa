@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { getLang } from "@/lib/i18n-server";
+import { PWARegister } from "@/components/pwa-register";
 import "./globals.css";
 
 const inter = Inter({
@@ -42,7 +43,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const lang = await getLang().catch(() => "en" as const);
   return (
     <html lang={lang} suppressHydrationWarning className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}>
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <PWARegister />
+        {children}
+      </body>
     </html>
   );
 }

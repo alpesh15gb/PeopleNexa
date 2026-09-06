@@ -8,7 +8,7 @@ import { notifyEmployee } from "@/lib/notifications";
 /** PATCH — admin approves or rejects a pending correction. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;

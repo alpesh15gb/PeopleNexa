@@ -40,6 +40,7 @@ import {
   MonitorCheck,
   BadgePercent,
   MessageSquareText,
+  Wallet,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { relativeDay, toDateKey } from "@/lib/dates";
@@ -80,6 +81,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
+  { href: "/admin/cashbook", label: "Cashbook", icon: <Wallet className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
   { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports", section: "Insights" },
   { href: "/admin/ai", label: "Ask AI", icon: <Sparkles className="h-4 w-4" />, module: "ai", section: "Insights" },
   { href: "/admin/documents", label: "Documents", icon: <FileText className="h-4 w-4" />, module: "documents", section: "Culture" },
@@ -285,7 +287,7 @@ export function Shell({
   const toast = useToast();
 
   const moduleSet = new Set(enabledModules ?? []);
-  const allNav = role === "admin" ? adminNav : employeeNav(lang);
+  const allNav = role === "admin" ? adminNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
 

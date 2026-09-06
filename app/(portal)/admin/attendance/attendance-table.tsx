@@ -55,6 +55,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [quickBusy, setQuickBusy] = useState<string | null>(null);
   const [correction, setCorrection] = useState<Row["record"] | null>(null);
   const [newTime, setNewTime] = useState("");
 
@@ -86,6 +87,32 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
       if (data.record) setCorrection(data.record);
     }
     router.refresh();
+  }
+
+  async function quickMark(employeeId: string, nextStatus: string) {
+    const target = rows.find((r) => r.employeeId === employeeId);
+    if (!target?.record) {
+      toast("error", "No attendance record yet for this day");
+      return;
+    }
+    const key = `${employeeId}:${nextStatus}`;
+    setQuickBusy(key);
+    try {
+      const res = await fetch(`/api/attendance/${target.record.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to update");
+        return;
+      }
+      toast("success", `Marked ${nextStatus.replace("_", " ")}`);
+      router.refresh();
+    } finally {
+      setQuickBusy(null);
+    }
   }
 
   async function addPunch() {
@@ -132,7 +159,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
             <TH>In</TH>
             <TH>Out</TH>
             <TH>Status</TH>
-            <TH className="w-24" />
+            <TH className="min-w-56">Quick mark</TH>
           </TR>
         </THead>
         <TBody>
@@ -191,22 +218,78 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                         <X className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                  ) : row.record ? (
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title="View / correct punches"
-                        aria-label={`View punches for ${row.name ?? row.employeeId}`}
-                        onClick={() => setCorrection(row.record!)}
-                      >
-                        <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
-                        <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-                      </Button>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      {row.record && !row.leave ? (
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="success"
+                            className="h-7 px-2 text-[11px]"
+                            loading={quickBusy === `${row.employeeId}:present`}
+                            disabled={quickBusy !== null}
+                            title={`Mark present for ${row.name}`}
+                            aria-label={`Mark present for ${row.name}`}
+                            onClick={() => quickMark(row.employeeId, "present")}
+                          >
+                            Present
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            className="h-7 px-2 text-[11px]"
+                            loading={quickBusy === `${row.employeeId}:absent`}
+                            disabled={quickBusy !== null}
+                            title={`Mark absent for ${row.name}`}
+                            aria-label={`Mark absent for ${row.name}`}
+                            onClick={() => quickMark(row.employeeId, "absent")}
+                          >
+                            Absent
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[11px]"
+                            loading={quickBusy === `${row.employeeId}:late`}
+                            disabled={quickBusy !== null}
+                            title={`Mark late for ${row.name}`}
+                            aria-label={`Mark late for ${row.name}`}
+                            onClick={() => quickMark(row.employeeId, "late")}
+                          >
+                            Late
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2 text-[11px]"
+                            loading={quickBusy === `${row.employeeId}:half_day`}
+                            disabled={quickBusy !== null}
+                            title={`Mark half-day for ${row.name}`}
+                            aria-label={`Mark half-day for ${row.name}`}
+                            onClick={() => quickMark(row.employeeId, "half_day")}
+                          >
+                            Half-day
+                          </Button>
+                        </div>
+                      ) : null}
+                      {row.record ? (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            title="View / correct punches"
+                            aria-label={`View punches for ${row.name ?? row.employeeId}`}
+                            onClick={() => setCorrection(row.record!)}
+                          >
+                            <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="sm" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
+                            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
+                  )}
                 </TD>
               </TR>
             );

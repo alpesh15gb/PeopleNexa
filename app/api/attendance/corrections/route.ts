@@ -102,7 +102,7 @@ export async function GET() {
 
   const corrections = await prisma.punchCorrection.findMany({
     where:
-      session.role === "admin"
+      session.role === "admin" || session.role === "supervisor"
         ? { tenantId: session.tenantId }
         : { employeeId: session.sub },
     include: {

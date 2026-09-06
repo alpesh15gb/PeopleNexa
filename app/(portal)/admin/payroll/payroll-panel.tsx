@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
@@ -47,6 +48,9 @@ interface Payslip {
   netSalary: number;
   status: string;
   note: string | null;
+  paidVia: string | null;
+  paidAt: string | Date | null;
+  paymentRef: string | null;
   presentDays: number;
   lateDays: number;
   halfDays: number;
@@ -69,6 +73,22 @@ const BANKS = [
 
 const STATES = ["Gujarat", "Maharashtra", "Karnataka", "Tamil Nadu", "Telangana", "Delhi", "Uttar Pradesh", "Rajasthan", "West Bengal", "Other"];
 
+const PAID_VIA_OPTIONS = [
+  { key: "bank", label: "Bank transfer" },
+  { key: "upi", label: "UPI" },
+  { key: "cash", label: "Cash" },
+  { key: "other", label: "Other" },
+];
+
+function formatPaidMeta(p: Pick<Payslip, "paidVia" | "paidAt" | "paymentRef">): string | null {
+  if (!p.paidVia && !p.paidAt) return null;
+  const date = p.paidAt
+    ? new Date(p.paidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : null;
+  const via = p.paidVia ? `via ${p.paidVia}` : null;
+  return [via, date].filter(Boolean).join(" · ");
+}
+
 export function PayrollPanel({
   month,
   rows,
@@ -89,8 +109,20 @@ export function PayrollPanel({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
   const [complianceType, setComplianceType] = useState("ecr");
+  // PAYOUT-STATUS tracking (PagarBook bulk-payment parity)
+  const [payTarget, setPayTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
+  const [payVia, setPayVia] = useState("bank");
+  const [payRef, setPayRef] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkVia, setBulkVia] = useState("bank");
+  const [bulkRef, setBulkRef] = useState("");
+  const [markExportedOpen, setMarkExportedOpen] = useState(false);
 
   const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
+  const draftSlips = rows.filter((r) => r.payslip && r.payslip.status !== "paid");
+  const exportedDraftSlips = rows.filter(
+    (r) => r.payslip && r.payslip.status !== "paid" && r.employee.accountNumber && r.employee.ifscCode
+  );
 
   async function generate() {
     setBusy("generate");
@@ -112,20 +144,97 @@ export function PayrollPanel({
     }
   }
 
-  async function setStatus(id: string, status: string) {
+  async function setStatus(id: string, status: string, opts?: { paidVia?: string; paymentRef?: string }) {
     setBusy(id);
     try {
       const res = await fetch(`/api/payroll/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(status === "paid" && opts?.paidVia ? { paidVia: opts.paidVia } : {}),
+          ...(status === "paid" && opts?.paymentRef !== undefined ? { paymentRef: opts.paymentRef } : {}),
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
         toast("error", data.error ?? "Failed to update");
-        return;
+        return false;
       }
       toast("success", status === "paid" ? "Payslip marked as paid" : "Payslip reverted to draft");
+      router.refresh();
+      return true;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function confirmSinglePaid() {
+    if (!payTarget) return;
+    const ok = await setStatus(payTarget.payslip.id, "paid", { paidVia: payVia, paymentRef: payRef.trim() });
+    if (ok) {
+      setPayTarget(null);
+      setPayRef("");
+    }
+  }
+
+  // Bulk "Mark month paid": client-side loop over PATCH to avoid a new route.
+  // Uses Promise.allSettled so one failure doesn't abort the rest; shows a summary toast.
+  async function confirmBulkPaid() {
+    if (draftSlips.length === 0) {
+      setBulkOpen(false);
+      return;
+    }
+    setBusy("bulk-paid");
+    try {
+      const results = await Promise.allSettled(
+        draftSlips.map(({ payslip }) =>
+          fetch(`/api/payroll/${payslip!.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "paid", paidVia: bulkVia, paymentRef: bulkRef.trim() }),
+          }).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          })
+        )
+      );
+      const okCount = results.filter((r) => r.status === "fulfilled").length;
+      const failCount = results.length - okCount;
+      if (okCount > 0 && failCount === 0) toast("success", `${okCount} payslip${okCount > 1 ? "s" : ""} marked paid via ${bulkVia}`);
+      else if (okCount > 0) toast("error", `${okCount} marked paid, ${failCount} failed — retry the remaining drafts`);
+      else toast("error", "Failed to mark payslips paid");
+      setBulkOpen(false);
+      setBulkRef("");
+      router.refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // After a bank-file export, the exported (bank-details) drafts can be marked paid via bank.
+  async function confirmMarkExportedPaid() {
+    if (exportedDraftSlips.length === 0) {
+      setMarkExportedOpen(false);
+      return;
+    }
+    setBusy("bulk-paid");
+    try {
+      const results = await Promise.allSettled(
+        exportedDraftSlips.map(({ payslip }) =>
+          fetch(`/api/payroll/${payslip!.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "paid", paidVia: "bank" }),
+          }).then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          })
+        )
+      );
+      const okCount = results.filter((r) => r.status === "fulfilled").length;
+      const failCount = results.length - okCount;
+      if (failCount === 0) toast("success", `${okCount} exported payslip${okCount > 1 ? "s" : ""} marked paid`);
+      else toast("error", `${okCount} marked paid, ${failCount} failed`);
+      setMarkExportedOpen(false);
       router.refresh();
     } finally {
       setBusy(null);
@@ -156,6 +265,8 @@ export function PayrollPanel({
       URL.revokeObjectURL(url);
       const skipped = res.headers.get("X-Skipped-Rows");
       toast("success", skipped ? `Bank file downloaded (${skipped} skipped — no bank details)` : "Bank file downloaded");
+      // Offer to mark the just-exported slips paid (only those with bank details can be in the file).
+      if (exportedDraftSlips.length > 0) setMarkExportedOpen(true);
     } finally {
       setBusy(null);
     }
@@ -256,6 +367,11 @@ export function PayrollPanel({
           <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
             <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Tally
           </Button>
+          {draftSlips.length > 0 && (
+            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)} disabled={generated === 0}>
+              <Banknote aria-hidden="true" className="h-3.5 w-3.5" /> Mark month paid ({draftSlips.length})
+            </Button>
+          )}
           <Button size="sm" loading={busy === "generate"} onClick={generate}>
             <Sparkles aria-hidden="true" className="h-3.5 w-3.5" /> Generate payslips
           </Button>
@@ -324,7 +440,17 @@ export function PayrollPanel({
               <TD className="text-right font-mono text-[13px] font-semibold">
                 {payslip ? formatMoney(payslip.netSalary) : "—"}
               </TD>
-              <TD>{payslip ? <StatusPill status={payslip.status} /> : <Badge tone="neutral">not generated</Badge>}</TD>
+              <TD>{payslip ? (
+                <div>
+                  <StatusPill status={payslip.status} />
+                  {payslip.status === "paid" && formatPaidMeta(payslip) && (
+                    <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                      {formatPaidMeta(payslip)}
+                      {payslip.paymentRef && <span className="block truncate font-mono" title={payslip.paymentRef}>ref: {payslip.paymentRef}</span>}
+                    </p>
+                  )}
+                </div>
+              ) : <Badge tone="neutral">not generated</Badge>}</TD>
               <TD>
                 {payslip ? (
                   <div className="flex items-center gap-1.5">
@@ -332,7 +458,16 @@ export function PayrollPanel({
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
                     {payslip.status === "draft" ? (
-                      <Button size="sm" variant="success" loading={busy === payslip.id} onClick={() => setStatus(payslip.id, "paid")}>
+                      <Button
+                        size="sm"
+                        variant="success"
+                        loading={busy === payslip.id}
+                        onClick={() => {
+                          setPayTarget({ employee, payslip });
+                          setPayVia("bank");
+                          setPayRef("");
+                        }}
+                      >
                         <CheckCircle2 className="h-3.5 w-3.5" /> Pay
                       </Button>
                     ) : (
@@ -353,6 +488,72 @@ export function PayrollPanel({
       <PayslipModal data={viewing} onClose={() => setViewing(null)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <AdjustmentsModal open={adjustmentsOpen} onClose={() => setAdjustmentsOpen(false)} month={month} rows={rows} />
+
+      {/* Single-payslip Mark paid (paidVia + paymentRef) */}
+      <Modal
+        open={payTarget !== null}
+        onClose={() => setPayTarget(null)}
+        title={payTarget ? `Mark paid · ${payTarget.employee.firstName} ${payTarget.employee.lastName}` : "Mark paid"}
+        description={payTarget ? `${formatMoney(payTarget.payslip.netSalary)} for ${payTarget.payslip.month}` : undefined}
+        size="sm"
+      >
+        <div className="space-y-3">
+          <Field label="Paid via">
+            <Select value={payVia} onChange={(e) => setPayVia(e.target.value)}>
+              {PAID_VIA_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Payment ref (optional)" hint="UTR / batch id / receipt no.">
+            <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="e.g. UTIB1234567890" maxLength={120} />
+          </Field>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setPayTarget(null)}>Cancel</Button>
+            <Button variant="success" loading={payTarget ? busy === payTarget.payslip.id : false} onClick={confirmSinglePaid}>
+              <CheckCircle2 className="h-4 w-4" /> Mark paid
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk Mark month paid (client loop of PATCH, no new route) */}
+      <Modal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        title={`Mark month paid · ${month}`}
+        description={`${draftSlips.length} draft payslip${draftSlips.length === 1 ? "" : "s"} will be marked paid`}
+        size="sm"
+      >
+        <div className="space-y-3">
+          <Field label="Paid via (applies to all)">
+            <Select value={bulkVia} onChange={(e) => setBulkVia(e.target.value)}>
+              {PAID_VIA_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Payment ref (optional)" hint="Same ref applied to all slips">
+            <Input value={bulkRef} onChange={(e) => setBulkRef(e.target.value)} placeholder="e.g. batch / UTR" maxLength={120} />
+          </Field>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setBulkOpen(false)}>Cancel</Button>
+            <Button variant="success" loading={busy === "bulk-paid"} onClick={confirmBulkPaid}>
+              <CheckCircle2 className="h-4 w-4" /> Mark {draftSlips.length} paid
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={markExportedOpen}
+        title="Mark exported slips paid?"
+        description={`${exportedDraftSlips.length} exported draft payslip${exportedDraftSlips.length === 1 ? "" : "s"} (with bank details) will be marked paid via bank.`}
+        confirmLabel="Mark paid"
+        busy={busy === "bulk-paid"}
+        onCancel={() => setMarkExportedOpen(false)}
+        onConfirm={confirmMarkExportedPaid}
+      />
     </>
   );
 }
@@ -449,7 +650,9 @@ function PayslipModal({
 
       <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12.5px] text-emerald-300">
         <Banknote className="h-4 w-4" />
-        {p.status === "paid" ? "This salary has been disbursed." : "Draft — not yet disbursed."}
+        {p.status === "paid"
+          ? `This salary has been disbursed${formatPaidMeta(p) ? ` (${formatPaidMeta(p)})` : ""}${p.paymentRef ? ` · ref ${p.paymentRef}` : ""}.`
+          : "Draft — not yet disbursed."}
       </div>
     </Modal>
   );

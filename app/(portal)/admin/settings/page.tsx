@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { PageHeader } from "@/components/ui/card";
+import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { getEbioserverConfig } from "@/lib/ebioserver";
+import { getSmsConfig } from "@/lib/sms";
 import { SettingsPanel } from "./settings-panel";
+import { SmsPanel } from "./sms-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,7 @@ export default async function AdminSettingsPage() {
   if (!tenant) return null;
 
   const profile = getEbioserverConfig(tenant);
+  const sms = getSmsConfig(tenant?.config ?? null);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -31,6 +34,18 @@ export default async function AdminSettingsPage() {
           lastErrorAt: profile.lastErrorAt,
         }}
       />
+      <Card>
+        <CardContent className="p-6">
+          <SmsPanel
+            initial={{
+              enabled: sms.enabled,
+              apiUrl: sms.apiUrl,
+              hasToken: Boolean(sms.apiToken),
+              sender: sms.sender,
+            }}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

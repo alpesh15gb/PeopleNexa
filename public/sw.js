@@ -1,5 +1,8 @@
-const CACHE = "peoplenexa-v1";
-const SHELL = ["/", "/login", "/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/profile"];
+// Bump CACHE_VERSION (e.g. v1 -> v2) whenever the offline SHELL list or the
+// navigation-fallback mapping below changes. Old caches are purged on activate.
+const CACHE_VERSION = "v2";
+const CACHE = "peoplenexa-" + CACHE_VERSION;
+const SHELL = ["/", "/login", "/admin", "/superadmin/login", "/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/profile"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -25,6 +28,9 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // Never cache API traffic: auth/session + payroll/cashbook data must always
+  // hit the network (stale-while-revalidate on /api risks stale money data).
+  if (url.pathname.startsWith("/api")) return;
 
   // Navigations: network-first, fall back to last cached copy (offline shell).
   if (req.mode === "navigate") {
@@ -39,9 +45,16 @@ self.addEventListener("fetch", (event) => {
           return res;
         })
         .catch(() =>
-          caches
-            .match(req)
-            .then((cached) => cached || caches.match("/employee") || caches.match("/"))
+          caches.match(req).then((cached) => {
+            if (cached) return cached;
+            // Role-aware offline shell: an /admin navigation must not fall
+            // back to the /employee shell (wrong nav/actions), and vice versa.
+            if (url.pathname.startsWith("/superadmin"))
+              return caches.match("/superadmin/login").then((s) => s || caches.match("/"));
+            if (url.pathname.startsWith("/admin"))
+              return caches.match("/admin").then((a) => a || caches.match("/"));
+            return caches.match("/employee").then((e) => e || caches.match("/"));
+          })
         )
     );
     return;
