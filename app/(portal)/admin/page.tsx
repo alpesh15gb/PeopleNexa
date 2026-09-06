@@ -9,6 +9,7 @@ import { StatusPill } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
+import { BranchPicker } from "./attendance/branch-picker";
 
 export const dynamic = "force-dynamic";
 
@@ -37,14 +38,31 @@ function StatsSkeleton() {
   );
 }
 
-export default async function AdminDashboardPage() {
+export default async function AdminDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ branch?: string }>;
+}) {
   const session = await requireSession();
+  const { branch: branchParam } = await searchParams;
   const today = startOfDay(new Date());
 
-  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, weekRecords] = await Promise.all([
-    prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active" } }),
+  // Branch filter must belong to this tenant; unknown ids are ignored.
+  const branchFilter = branchParam
+    ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+    : null;
+  const branchId = branchFilter?.id ?? null;
+  const empScope = { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) };
+
+  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches] = await Promise.all([
+    prisma.employee.findMany({
+      where: empScope,
+      select: { id: true, department: { select: { name: true } } },
+    }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) } },
+      where: branchId
+        ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
+        : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) } },
       include: {
         employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } },
       },
@@ -55,18 +73,39 @@ export default async function AdminDashboardPage() {
       include: { _count: { select: { employees: true } } },
     }),
     prisma.leaveRequest.findMany({
-      where: { tenantId: session.tenantId, status: "pending" },
+      where: branchId
+        ? { tenantId: session.tenantId, status: "pending", employee: { branchId } }
+        : { tenantId: session.tenantId, status: "pending" },
       include: { employee: { select: { firstName: true, lastName: true } }, leaveType: true },
       orderBy: { appliedAt: "desc" },
       take: 6,
     }),
-    prisma.leaveRequest.count({ where: { tenantId: session.tenantId, status: "pending" } }),
-    prisma.attendance.groupBy({
+    prisma.leaveRequest.count({
+      where: branchId
+        ? { tenantId: session.tenantId, status: "pending", employee: { branchId } }
+        : { tenantId: session.tenantId, status: "pending" },
+    }),
+    prisma.branch.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
+
+  // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
+  // rows in code when filtered; global path keeps the cheap groupBy).
+  type WeekRow = { date: Date; status: string; _count?: number };
+  let weekRows: WeekRow[];
+  if (branchId) {
+    const rows = await prisma.attendance.findMany({
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId } },
+      select: { date: true, status: true },
+    });
+    weekRows = rows.map((r) => ({ date: r.date, status: r.status }));
+  } else {
+    const grouped = await prisma.attendance.groupBy({
       by: ["date", "status"],
       where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today } },
       _count: true,
-    }),
-  ]);
+    });
+    weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
+  }
 
   const counts = { present: 0, late: 0, permission: 0, half_day: 0, absent: 0 };
   for (const a of attendance) {
@@ -76,27 +115,36 @@ export default async function AdminDashboardPage() {
   counts.absent += Math.max(employees.length - marked, 0);
 
   const week = [];
+  // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
+  const tally = new Map<string, { present: number; late: number; absent: number }>();
+  for (const r of weekRows as Array<{ date: Date; status: string; _count?: number }>) {
+    const key = toDateKey(r.date);
+    const cur = tally.get(key) ?? { present: 0, late: 0, absent: 0 };
+    const n = r._count ?? 1;
+    if (r.status === "present" || r.status === "late" || r.status === "half_day") cur.present += n;
+    if (r.status === "late") cur.late += n;
+    if (r.status === "absent") cur.absent += n;
+    tally.set(key, cur);
+  }
   for (let i = 6; i >= 0; i--) {
     const day = addDays(today, -i);
-    const recs = weekRecords.filter((r) => toDateKey(r.date) === toDateKey(day));
-    week.push({
-      day: toDateKey(day),
-      label: toDateKey(day).slice(5),
-      present: recs.filter((r) => r.status === "present" || r.status === "late" || r.status === "half_day").reduce((s, r) => s + r._count, 0),
-      late: recs.filter((r) => r.status === "late").reduce((s, r) => s + r._count, 0),
-      absent: recs.filter((r) => r.status === "absent").reduce((s, r) => s + r._count, 0),
-    });
+    const t = tally.get(toDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
+    week.push({ day: toDateKey(day), label: toDateKey(day).slice(5), ...t });
   }
 
   return (
     <div className="animate-fade-up space-y-6">
       {/* Greeting */}
-      <div>
-        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary">Today at a glance</p>
-        <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">Good day, Admin</h1>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-          Here&apos;s what needs your attention on {formatDate(today)} ({relativeDay(today)}).
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary">Today at a glance</p>
+          <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">Good day, Admin</h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
+            Here&apos;s what needs your attention on {formatDate(today)} ({relativeDay(today)})
+            {branchFilter ? ` · ${branchFilter.name}` : ""}.
+          </p>
+        </div>
+        <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
       </div>
 
       {/* Stats */}
@@ -189,7 +237,16 @@ export default async function AdminDashboardPage() {
               {departments.length === 0 ? (
                 <p className="py-6 text-center text-[13px] text-muted-foreground">No departments yet.</p>
               ) : (
-                <DepartmentBars data={departments.map((d) => ({ name: d.name, count: d._count.employees }))} />
+                <DepartmentBars
+                  data={
+                    branchId
+                      ? departments.map((d) => ({
+                          name: d.name,
+                          count: employees.filter((e) => e.department?.name === d.name).length,
+                        }))
+                      : departments.map((d) => ({ name: d.name, count: d._count.employees }))
+                  }
+                />
               )}
             </CardContent>
           </Card>

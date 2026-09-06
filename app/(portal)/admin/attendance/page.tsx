@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
 import { AttendanceTable } from "./attendance-table";
 import { DatePicker } from "./date-picker";
+import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 
 export const dynamic = "force-dynamic";
@@ -14,19 +15,25 @@ export const dynamic = "force-dynamic";
 export default async function AdminAttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; branch?: string }>;
 }) {
   const session = await requireSession();
-  const { date: dateParam } = await searchParams;
+  const { date: dateParam, branch: branchParam } = await searchParams;
   const dateKey = dateParam || todayKey();
   const dayStart = startOfDay(fromDateKey(dateKey));
+
+  // Branch filter must belong to this tenant; unknown ids are ignored.
+  const branchFilter = branchParam
+    ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true } })
+    : null;
+  const branchId = branchFilter?.id ?? null;
 
   // Lazy finalization of past days (Phase 4 reconciliation).
   await finalizeEligibleDays(session.tenantId);
 
-  const [employees, records, leaves, holidays] = await Promise.all([
+  const [employees, records, leaves, holidays, branches] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
@@ -51,6 +58,11 @@ export default async function AdminAttendancePage({
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lte: endOfDay(dayStart) } } }),
+    prisma.branch.findMany({
+      where: { tenantId: session.tenantId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   const leaveByEmp = new Map(leaves.map((l) => [l.employee.id, l]));
@@ -114,8 +126,13 @@ export default async function AdminAttendancePage({
       )}
       <PageHeader
         title="Attendance"
-        description={`Daily attendance for ${formatDate(dayStart)}`}
-        actions={<DatePicker value={dateKey} />}
+        description={`Daily attendance for ${formatDate(dayStart)}${branchId ? ` · ${branches.find((b) => b.id === branchId)?.name ?? ""}` : ""}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <BranchPicker branches={branches} value={branchId ?? ""} />
+            <DatePicker value={dateKey} />
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
@@ -130,7 +147,10 @@ export default async function AdminAttendancePage({
       <Card>
         <CardContent className="p-0 pt-0">
           {rows.length === 0 ? (
-            <EmptyState title="No employees yet" description="Add employees to start tracking attendance." />
+            <EmptyState
+              title={branchId ? "No employees in this branch" : "No employees yet"}
+              description={branchId ? "Try another branch or date." : "Add employees to start tracking attendance."}
+            />
           ) : (
             <AttendanceTable rows={rows} date={dateKey} />
           )}
