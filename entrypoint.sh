@@ -43,6 +43,16 @@ fi
 echo "→ Applying database migrations..."
 npx prisma migrate deploy
 
+# One-off command mode (bypasses the web server boot):
+#   docker compose run --rm app run-script scripts/backfill-90d.ts
+# Requires the same production env; runs migrations above first so the
+# script always sees a current schema.
+if [ "${RUN_SCRIPT:-}" != "" ]; then
+  echo "→ Running one-off script: $RUN_SCRIPT"
+  # shellcheck disable=SC2086
+  exec npx tsx $RUN_SCRIPT
+fi
+
 echo "→ Backfilling tenant module rows..."
 npx tsx scripts/backfill-modules.ts
 
