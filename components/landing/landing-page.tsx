@@ -8,21 +8,20 @@ import {
   Building2,
   CalendarCheck2,
   Check,
-  Clock3,
-  FileSpreadsheet,
   Fingerprint,
-  Languages,
   Lock,
   MapPin,
+  Menu,
   MessageSquareText,
-  PackageCheck,
   PhoneCall,
+  Plus,
   Route,
   ShieldCheck,
   Smartphone,
   Sparkles,
   Users,
   Wallet,
+  X,
 } from "lucide-react";
 import { MODULES, type PlanDef } from "@/lib/modules";
 
@@ -38,11 +37,6 @@ const FEATURES = [
     desc: "Leave types, auto accrual balances, half-days, approvals and a holiday calendar — with encashment on exit.",
   },
   {
-    icon: Clock3,
-    title: "Rosters & shifts",
-    desc: "Weekly rosters, night shifts, bulk assignment and late-fine logic that flows straight into payroll.",
-  },
-  {
     icon: Wallet,
     title: "Payroll & statutory",
     desc: "PF, ESIC, PT, TDS (old/new regime) and LWF built in. Bank CSV for bulk payments and Tally export.",
@@ -53,33 +47,17 @@ const FEATURES = [
     desc: "Live journey maps and route replay for field teams — stops, distance and visit history per employee.",
   },
   {
-    icon: PackageCheck,
-    title: "Assets & expenses",
-    desc: "Asset assignments with audit history, expense claims with approvals, and loan/advance auto-deductions.",
-  },
-  {
     icon: Bot,
     title: "Ask AI",
     desc: "Ask questions in plain language — attendance trends, payroll figures, leave data — get answers instantly.",
   },
-  {
-    icon: Languages,
-    title: "Multi-language & WhatsApp",
-    desc: "English, हिंदी, ગુજરાતી, मराठी, தமிழ் — with WhatsApp alerts for leave, payslips and exits.",
-  },
-  {
-    icon: FileSpreadsheet,
-    title: "Compliance exports",
-    desc: "Form 16, Form 24Q, PF ECR and payslips — ready-to-file drafts so your accountant stays happy.",
-  },
 ];
 
-const STATS = [
-  { value: "23", label: "Modules in one workspace" },
-  { value: "5", label: "Languages (EN · हिं · ગુ · मरा · தமிழ்)" },
-  { value: "5", label: "Statutory: PF · ESIC · PT · TDS · LWF" },
-  { value: "3", label: "Payroll exports: bank CSV · Tally · ECR" },
-  { value: "30", label: "Day free trial, no credit card" },
+/* Trust band — headline proof points. White-on-accent CTA uses --accent (#C2410C light) per contrast spec. */
+const TRUST_BAND = [
+  { value: "80L+", label: "Attendance punches processed every month" },
+  { value: "650+", label: "Branches, plants & field teams onboard" },
+  { value: "10+", label: "Languages — EN · हिं · ગુ · मरा · தமிழ் + more" },
 ];
 
 const PERSONAS = [
@@ -168,9 +146,21 @@ function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+/* CTA accent: --accent token (AA 4.5:1). Primary blue: --primary token. */
+const CTA_PRIMARY =
+  "bg-accent text-white shadow-[0_8px_24px_-10px_rgba(194,65,12,0.75)] hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none";
+const CTA_SECONDARY =
+  "border-primary/40 text-primary hover:bg-primary/5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none";
+const EYEBROW = "text-primary dark:text-[#93C5FD]";
+const ICON_TILE = "bg-primary";
+const ICON_SOFT = "bg-primary/10 text-primary dark:text-[#93C5FD]";
+
 function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2.5">
+    <Link
+      href="/"
+      className="flex cursor-pointer items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/logo.svg" alt="PeopleNexa logo" className="h-8 w-8" />
       <span className="font-display text-[17px] font-bold tracking-tight">PeopleNexa</span>
@@ -182,36 +172,51 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background text-foreground selection:bg-indigo-500/20">
-      {/* ── Nav ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 border-b border-edge bg-background/80 backdrop-blur-xl">
+    <div
+      className="min-h-screen bg-background text-foreground selection:bg-primary/20"
+      style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif" }}
+    >
+      {/* Jakarta + static reduced-motion fallback (hero has no parallax; animations collapse to final state). */}
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+      <style>{`.font-display{font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif !important}.text-gradient{background:linear-gradient(135deg,#2563EB 0%,#3B82F6 60%,#60A5FA 100%)}@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
+
+      {/* ── Nav (sticky CTA) ──────────────────────────────────────────── */}
+      <header className="sticky top-0 z-40 border-b border-edge bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
           <Logo />
           <div className="hidden items-center gap-7 text-[13.5px] font-medium text-muted-foreground md:flex">
-            <a href="#features" className="transition-colors hover:text-foreground">Features</a>
-            <a href="#product" className="transition-colors hover:text-foreground">Product</a>
-            <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
-            <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
+            <a href="#features" className="cursor-pointer rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Features</a>
+            <a href="#product" className="cursor-pointer rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Product</a>
+            <a href="#pricing" className="cursor-pointer rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Pricing</a>
+            <a href="#faq" className="cursor-pointer rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">FAQ</a>
           </div>
           <div className="hidden items-center gap-3 md:flex">
-            <Link href="/login" className="rounded-lg px-3.5 py-2 text-[13.5px] font-medium text-muted-foreground transition-colors hover:bg-tint hover:text-foreground">
+            <Link
+              href="/login"
+              className="cursor-pointer rounded-lg px-3.5 py-2 text-[13.5px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+            >
               Log in
             </Link>
             <Link
               href="/register"
-              className="rounded-lg bg-primary px-4 py-2 text-[13.5px] font-semibold text-primary-foreground shadow-[0_4px_14px_-8px_rgba(79,70,229,0.7)] transition-all hover:bg-indigo-500 active:translate-y-px"
+              className="rounded-lg bg-accent px-4 py-2 text-[13.5px] font-semibold text-white shadow-[0_4px_14px_-8px_rgba(194,65,12,0.7)] transition-all duration-200 hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none"
             >
               Start free trial
             </Link>
           </div>
           <button
-            className="rounded-lg p-2 text-muted-foreground hover:bg-tint md:hidden"
+            type="button"
+            className="cursor-pointer rounded-lg p-2 text-muted-foreground transition-colors duration-200 hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden motion-reduce:transition-none"
             onClick={() => setMobileOpen((v) => !v)}
-            aria-label="Toggle menu"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileOpen}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              {mobileOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
-            </svg>
+            {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
           </button>
         </nav>
         {mobileOpen && (
@@ -223,13 +228,28 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                 ["Pricing", "#pricing"],
                 ["FAQ", "#faq"],
               ].map(([label, href]) => (
-                <a key={href} href={href} onClick={() => setMobileOpen(false)} className="rounded-lg px-3 py-2.5 text-[14px] font-medium text-muted-foreground hover:bg-tint hover:text-foreground">
+                <a
+                  key={href}
+                  href={href}
+                  onClick={() => setMobileOpen(false)}
+                  className="cursor-pointer rounded-lg px-3 py-2.5 text-[14px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                >
                   {label}
                 </a>
               ))}
               <div className="mt-2 flex gap-2 border-t border-edge pt-3">
-                <Link href="/login" className="flex-1 rounded-lg border border-edge px-3 py-2.5 text-center text-[14px] font-semibold">Log in</Link>
-                <Link href="/register" className="flex-1 rounded-lg bg-primary px-3 py-2.5 text-center text-[14px] font-semibold text-primary-foreground">Start free trial</Link>
+                <Link
+                  href="/login"
+                  className="flex-1 cursor-pointer rounded-lg border border-edge px-3 py-2.5 text-center text-[14px] font-semibold transition-colors duration-200 hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                >
+                  Log in
+                </Link>
+                <Link
+                  href="/register"
+                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-center text-[14px] font-semibold text-white transition-colors duration-200 hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none"
+                >
+                  Start free trial
+                </Link>
               </div>
             </div>
           </div>
@@ -238,17 +258,17 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
-        {/* Aurora background: mesh gradient blobs + grid, per minimal/aurora hybrid */}
-        <div className="pointer-events-none absolute inset-0" aria-hidden>
+        {/* Aurora background: blue mesh blobs + grid. Static under reduced motion. */}
+        <div className="pointer-events-none absolute inset-0 motion-reduce:animate-none" aria-hidden>
           <div className="absolute inset-0 bg-grid" />
-          <div className="absolute -top-32 left-1/2 h-[520px] w-[min(820px,150vw)] -translate-x-1/2 rounded-full bg-indigo-600/25 blur-[120px]" />
-          <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-violet-600/10 blur-[100px]" />
-          <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-sky-500/10 blur-[100px]" />
+          <div className="absolute -top-32 left-1/2 h-[520px] w-[min(820px,150vw)] -translate-x-1/2 rounded-full bg-primary/25 blur-[120px] motion-reduce:transform-none" />
+          <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[100px]" />
+          <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-[#60A5FA]/10 blur-[100px]" />
           <div
             className="absolute inset-0"
             style={{
               background:
-                "radial-gradient(ellipse 60% 45% at 50% 0%, rgba(99,102,241,0.12), transparent 70%)",
+                "radial-gradient(ellipse 60% 45% at 50% 0%, rgba(37,99,235,0.14), transparent 70%)",
             }}
           />
         </div>
@@ -256,7 +276,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-20 sm:pt-28">
           <div className="mx-auto max-w-3xl text-center">
             <span className="inline-flex items-center gap-2 rounded-full border border-edge bg-tint px-3.5 py-1.5 text-[12px] font-medium text-muted-foreground">
-              <Sparkles className="h-3.5 w-3.5 text-indigo-300" />
+              <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
               HRMS · Attendance · Payroll · Field tracking — for Indian teams
             </span>
             <h1 className="mt-6 font-display text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
@@ -270,21 +290,24 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 href="/register"
-                className="group inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-[15px] font-semibold text-primary-foreground shadow-[0_8px_24px_-10px_rgba(79,70,229,0.75)] transition-all hover:bg-indigo-500 active:translate-y-px"
+                className={cn("group inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-[15px] font-semibold transition-all duration-200", CTA_PRIMARY)}
               >
                 Start free trial
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:transform-none" aria-hidden="true" />
               </Link>
               <a
                 href="#pricing"
-                className="inline-flex items-center gap-2 rounded-xl border border-edge-strong bg-card px-6 py-3.5 text-[15px] font-semibold transition-colors hover:bg-tint"
+                className={cn("inline-flex items-center gap-2 rounded-xl border bg-card px-6 py-3.5 text-[15px] font-semibold transition-colors duration-200", CTA_SECONDARY)}
               >
                 See pricing
               </a>
             </div>
             <p className="mt-4 text-[13px] text-muted-foreground">
               Prefer a walkthrough?{" "}
-              <a href="mailto:sales@peoplenexa.in?subject=PeopleNexa demo" className="font-semibold text-indigo-300 underline-offset-2 hover:underline">
+              <a
+                href="mailto:sales@peoplenexa.in?subject=PeopleNexa demo"
+                className="cursor-pointer font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 Book a demo
               </a>{" "}
               — we’ll set up your workspace with you.
@@ -294,12 +317,12 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
 
           {/* Product mockup — glass dashboard preview */}
           <div className="relative mx-auto mt-14 max-w-4xl">
-            <div className="absolute inset-x-0 -top-6 h-40 rounded-full bg-indigo-500/20 blur-3xl" aria-hidden />
-            <div className="card-surface relative rounded-2xl p-5 shadow-2xl backdrop-blur-xl sm:p-7">
+            <div className="absolute inset-x-0 -top-6 h-40 rounded-full bg-primary/20 blur-3xl" aria-hidden />
+            <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
               <div className="flex items-center justify-between border-b border-edge pb-4">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-brand text-[10px] font-bold text-white">PN</span>
-                  <span className="text-[13px] font-semibold">Apex Integrations</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-bold text-white">PN</span>
+                  <span className="truncate text-[13px] font-semibold">Apex Integrations</span>
                   <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-300">live</span>
                 </div>
                 <div className="hidden gap-1.5 sm:flex">
@@ -308,14 +331,14 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                   <span className="rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Payroll</span>
                 </div>
               </div>
-              <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
                 {[
                   { label: "Present", value: "42", tone: "text-emerald-300" },
                   { label: "On leave", value: "3", tone: "text-amber-300" },
                   { label: "Late today", value: "5", tone: "text-rose-300" },
                 ].map((s) => (
-                  <div key={s.label} className="rounded-xl border border-edge bg-tint p-3.5">
-                    <p className="text-[11px] text-muted-foreground">{s.label}</p>
+                  <div key={s.label} className="min-w-0 rounded-xl border border-edge bg-tint p-3.5">
+                    <p className="truncate text-[11px] text-muted-foreground">{s.label}</p>
                     <p className={cn("mt-1 font-display text-2xl font-bold", s.tone)}>{s.value}</p>
                   </div>
                 ))}
@@ -330,17 +353,17 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                       { n: "Neha G.", t: "In · 10:12", tag: "Vatva plant" },
                     ].map((p) => (
                       <div key={p.n} className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/15 text-[10px] font-bold text-indigo-300">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary dark:text-[#93C5FD]">
                             {p.n.split(" ").map((w) => w[0]).join("")}
                           </span>
-                          <div>
-                            <p className="text-[12.5px] font-medium">{p.n}</p>
-                            <p className="text-[11px] text-muted-foreground">{p.tag}</p>
+                          <div className="min-w-0">
+                            <p className="truncate text-[12.5px] font-medium">{p.n}</p>
+                            <p className="truncate text-[11px] text-muted-foreground">{p.tag}</p>
                           </div>
                         </div>
-                        <span className="flex items-center gap-1 text-[11.5px] font-medium text-emerald-300">
-                          <MapPin className="h-3 w-3" /> {p.t}
+                        <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-emerald-300">
+                          <MapPin className="h-3 w-3" aria-hidden="true" /> {p.t}
                         </span>
                       </div>
                     ))}
@@ -349,10 +372,10 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                 <div className="rounded-xl border border-edge bg-tint p-4">
                   <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Geofence · Main branch</p>
                   <div className="mt-3 flex h-32 items-center justify-center rounded-lg bg-grid">
-                    <div className="relative flex h-24 w-24 items-center justify-center rounded-full border border-indigo-400/40 bg-indigo-500/10">
-                      <div className="absolute -inset-3 rounded-full border border-indigo-400/20" />
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-brand text-white">
-                        <MapPin className="h-4 w-4" />
+                    <div className="relative flex h-24 w-24 items-center justify-center rounded-full border border-primary/40 bg-primary/10">
+                      <div className="absolute -inset-3 rounded-full border border-primary/20" />
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-white">
+                        <MapPin className="h-4 w-4" aria-hidden="true" />
                       </span>
                     </div>
                   </div>
@@ -364,11 +387,11 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         </div>
       </section>
 
-      {/* ── Stats strip (real numbers) ─────────────────────────────────── */}
-      <section className="border-y border-edge bg-tint/50">
-        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-5 py-8 sm:grid-cols-3 lg:grid-cols-5">
-          {STATS.map((s) => (
-            <div key={s.label} className="text-center">
+      {/* ── Trust band ─────────────────────────────────────────────────── */}
+      <section aria-label="Trusted at scale" className="border-y border-edge bg-tint/50">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-5 py-8 sm:grid-cols-3">
+          {TRUST_BAND.map((s) => (
+            <div key={s.label} className="min-w-0 text-center">
               <p className="font-display text-2xl font-bold tracking-tight text-gradient sm:text-3xl">{s.value}</p>
               <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{s.label}</p>
             </div>
@@ -376,10 +399,10 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         </div>
       </section>
 
-      {/* ── Features ────────────────────────────────────────────────────── */}
+      {/* ── Value prop + key features ──────────────────────────────────── */}
       <section id="features" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-20">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Everything in one place</p>
+          <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Everything in one place</p>
           <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
             One workspace. <span className="text-gradient">Every people task.</span>
           </h2>
@@ -392,10 +415,10 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
           {FEATURES.map((f) => (
             <div
               key={f.title}
-              className="card-surface group rounded-2xl p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/30 hover:shadow-[0_12px_40px_-16px_rgba(99,102,241,0.35)]"
+              className="card-surface group rounded-2xl border-white/20 bg-white/70 p-5 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_12px_40px_-16px_rgba(37,99,235,0.35)] motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-brand text-white shadow-[0_6px_20px_-6px_rgba(99,102,241,0.6)]">
-                <f.icon className="h-4.5 w-4.5" />
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-[0_6px_20px_-6px_rgba(37,99,235,0.6)]", ICON_TILE)}>
+                <f.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15.5px] font-bold tracking-tight">{f.title}</h3>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">{f.desc}</p>
@@ -407,8 +430,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       {/* ── Field force (route replay mockup) ───────────────────────────── */}
       <section id="field" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-20">
         <div className="grid items-center gap-12 lg:grid-cols-2">
-          <div>
-            <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Field force</p>
+          <div className="min-w-0">
+            <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Field force</p>
             <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
               Know your team is on site — <span className="text-gradient">not just “clocked in”</span>
             </h2>
@@ -423,8 +446,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                 "Expense claims filed from the field, approved from HQ",
               ].map((li) => (
                 <li key={li} className="flex items-center gap-2.5">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-                    <Check className="h-3 w-3" />
+                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", ICON_SOFT)}>
+                    <Check className="h-3 w-3" aria-hidden="true" />
                   </span>
                   {li}
                 </li>
@@ -432,17 +455,17 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             </ul>
           </div>
           {/* Route-replay mockup */}
-          <div className="relative">
-            <div className="absolute -inset-6 rounded-full bg-sky-500/10 blur-3xl" aria-hidden />
-            <div className="card-surface relative rounded-2xl p-5 shadow-2xl">
+          <div className="relative min-w-0">
+            <div className="absolute -inset-6 rounded-full bg-[#3B82F6]/10 blur-3xl" aria-hidden />
+            <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5">
               <div className="flex items-center justify-between border-b border-edge pb-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-brand text-white">
-                    <Route className="h-3.5 w-3.5" />
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white", ICON_TILE)}>
+                    <Route className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
-                  <span className="text-[13px] font-semibold">Journey · Rahul S.</span>
+                  <span className="truncate text-[13px] font-semibold">Journey · Rahul S.</span>
                 </div>
-                <span className="rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Replay</span>
+                <span className="shrink-0 rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Replay</span>
               </div>
               <div className="relative mt-4 h-56 overflow-hidden rounded-xl bg-grid">
                 <svg viewBox="0 0 400 220" className="absolute inset-0 h-full w-full" aria-hidden>
@@ -457,8 +480,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                   />
                   <defs>
                     <linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#6366f1" />
-                      <stop offset="100%" stopColor="#22d3ee" />
+                      <stop offset="0%" stopColor="#2563EB" />
+                      <stop offset="100%" stopColor="#3B82F6" />
                     </linearGradient>
                   </defs>
                 </svg>
@@ -469,14 +492,16 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                   { x: 330, y: 60, tag: "12:40" },
                 ].map((p) => (
                   <span key={p.tag} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${(p.x / 400) * 100}%`, top: `${(p.y / 220) * 100}%` }}>
-                    <span className="block h-3 w-3 rounded-full border-2 border-white bg-indigo-500 shadow-[0_0_0_4px_rgba(99,102,241,0.25)]" />
+                    <span className="block h-3 w-3 rounded-full border-2 border-white bg-primary shadow-[0_0_0_4px_rgba(37,99,235,0.25)]" />
                     <span className="mt-1 block rounded-md bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">{p.tag}</span>
                   </span>
                 ))}
               </div>
-              <div className="mt-3.5 flex items-center justify-between text-[12px] text-muted-foreground">
+              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
                 <span>12 stops · 34 km</span>
-                <span>Geofence verified ✓</span>
+                <span className="inline-flex items-center gap-1">
+                  <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Geofence verified
+                </span>
                 <span>Out 18:02</span>
               </div>
             </div>
@@ -488,20 +513,20 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       <section id="product" className="scroll-mt-20 border-y border-edge bg-tint/40">
         <div className="mx-auto max-w-6xl px-5 py-20">
           <div className="grid items-center gap-12 lg:grid-cols-2">
-            <div className="order-2 lg:order-1">
+            <div className="order-2 min-w-0 lg:order-1">
               {/* Chat mockup */}
-              <div className="card-surface rounded-2xl p-5 shadow-2xl">
+              <div className="card-surface rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5">
                 <div className="flex items-center gap-2.5 border-b border-edge pb-3.5">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-brand text-white">
-                    <Bot className="h-4 w-4" />
+                  <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+                    <Bot className="h-4 w-4" aria-hidden="true" />
                   </span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[13px] font-semibold">Ask AI</p>
                     <p className="text-[11px] text-muted-foreground">Answers over your live data</p>
                   </div>
                 </div>
                 <div className="mt-4 space-y-3">
-                  <div className="ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-indigo-500/15 px-4 py-2.5 text-[13px]">
+                  <div className="ml-auto max-w-[80%] rounded-2xl rounded-br-sm bg-primary/10 px-4 py-2.5 text-[13px]">
                     Who was late last week?
                   </div>
                   <div className="max-w-[92%] rounded-2xl rounded-bl-sm border border-edge bg-tint px-4 py-3 text-[13px] leading-relaxed">
@@ -513,14 +538,14 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                     impact for this month?
                   </div>
                   <div className="flex items-center gap-2 rounded-2xl border border-edge bg-card px-4 py-2.5 text-[12.5px] text-muted-foreground">
-                    <Sparkles className="h-3.5 w-3.5 text-indigo-300" />
+                    <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                     Try: “How many paid leaves did Sales take this quarter?”
                   </div>
                 </div>
               </div>
             </div>
-            <div className="order-1 lg:order-2">
-              <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Ask AI</p>
+            <div className="order-1 min-w-0 lg:order-2">
+              <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Ask AI</p>
               <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
                 Questions in plain language. <span className="text-gradient">Answers in seconds.</span>
               </h2>
@@ -535,8 +560,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                   "Available to admins and employees in their own language",
                 ].map((li) => (
                   <li key={li} className="flex items-center gap-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-300">
-                      <Check className="h-3 w-3" />
+                    <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", ICON_SOFT)}>
+                      <Check className="h-3 w-3" aria-hidden="true" />
                     </span>
                     {li}
                   </li>
@@ -550,14 +575,14 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       {/* ── Who it's for ────────────────────────────────────────────────── */}
       <section className="mx-auto max-w-6xl px-5 py-20">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Built for real teams</p>
+          <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Built for real teams</p>
           <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">One tool, every kind of workforce</h2>
         </div>
         <div className="mt-12 grid gap-5 md:grid-cols-3">
           {PERSONAS.map((p) => (
-            <div key={p.title} className="card-surface rounded-2xl p-6 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/30">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-brand text-white">
-                <p.icon className="h-4.5 w-4.5" />
+            <div key={p.title} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5">
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+                <p.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15.5px] font-bold tracking-tight">{p.title}</h3>
               <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">{p.desc}</p>
@@ -570,7 +595,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       <section className="scroll-mt-20 border-y border-edge bg-tint/40">
         <div className="mx-auto max-w-6xl px-5 py-20">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">How it works</p>
+            <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>How it works</p>
             <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">Live in 10 minutes</h2>
           </div>
           <div className="mt-12 grid gap-5 md:grid-cols-3">
@@ -588,8 +613,8 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       {/* ── About PeopleNexa (E-E-A-T trust content) ───────────────────── */}
       <section className="mx-auto max-w-6xl px-5 py-20">
         <div className="grid items-center gap-12 lg:grid-cols-2">
-          <div>
-            <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">About PeopleNexa</p>
+          <div className="min-w-0">
+            <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>About PeopleNexa</p>
             <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
               Built in India, <span className="text-gradient">for Indian teams</span>
             </h2>
@@ -601,39 +626,39 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
               re-typing a number.
             </p>
             <p className="mt-3 text-[15px] leading-relaxed text-muted-foreground">
-              It’s the same tool for a 6-person office and a 200-seat multi-branch company, in five
+              It’s the same tool for a 6-person office and a 200-seat multi-branch company, in 10+
               languages, with data hosted in India. If you run payroll for a team in this country,
               PeopleNexa was built for you.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <a
                 href="mailto:sales@peoplenexa.in"
-                className="inline-flex items-center gap-2 rounded-xl border border-edge-strong bg-card px-5 py-2.5 text-[13.5px] font-semibold transition-colors hover:bg-tint"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-edge-strong bg-card px-5 py-2.5 text-[13.5px] font-semibold transition-colors duration-200 hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
               >
-                <MessageSquareText className="h-4 w-4 text-indigo-300" /> sales@peoplenexa.in
+                <MessageSquareText className="h-4 w-4 text-primary" aria-hidden="true" /> sales@peoplenexa.in
               </a>
               <a
                 href="tel:+919100960692"
-                className="inline-flex items-center gap-2 rounded-xl border border-edge-strong bg-card px-5 py-2.5 text-[13.5px] font-semibold transition-colors hover:bg-tint"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-edge-strong bg-card px-5 py-2.5 text-[13.5px] font-semibold transition-colors duration-200 hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
               >
-                <PhoneCall className="h-4 w-4 text-indigo-300" /> +91 91009 60692
+                <PhoneCall className="h-4 w-4 text-primary" aria-hidden="true" /> +91 91009 60692
               </a>
             </div>
           </div>
-          <div className="card-surface rounded-2xl p-6 sm:p-7">
+          <div className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 backdrop-blur-xl dark:bg-white/5 sm:p-7">
             <p className="text-[12px] font-semibold uppercase tracking-widest text-muted-foreground/70">Company facts</p>
             <dl className="mt-4 space-y-4">
               {[
                 ["Headquarters", "Hyderabad, Telangana, India"],
                 ["Founded for", "Indian SMEs & field teams"],
                 ["Workspaces", "One platform for office, field & multi-branch teams"],
-                ["Languages", "English, Hindi, Gujarati, Marathi, Tamil"],
+                ["Languages", "10+ languages, incl. EN · हिं · ગુ · मरा · தமிழ்"],
                 ["Statutory coverage", "PF · ESIC · PT · TDS · LWF"],
                 ["Data hosting", "India"],
               ].map(([k, v]) => (
                 <div key={k} className="flex items-start justify-between gap-4 border-b border-edge pb-3.5 last:border-0 last:pb-0">
-                  <dt className="text-[13px] font-medium text-muted-foreground">{k}</dt>
-                  <dd className="text-right text-[13.5px] font-semibold">{v}</dd>
+                  <dt className="shrink-0 text-[13px] font-medium text-muted-foreground">{k}</dt>
+                  <dd className="min-w-0 text-right text-[13.5px] font-semibold">{v}</dd>
                 </div>
               ))}
             </dl>
@@ -644,14 +669,14 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       {/* ── Security & privacy ─────────────────────────────────────────── */}
       <section className="mx-auto max-w-6xl px-5 py-20">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Security & privacy</p>
+          <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Security & privacy</p>
           <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">Your data, and your team’s trust</h2>
         </div>
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {SECURITY.map((s) => (
-            <div key={s.title} className="card-surface rounded-2xl p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400/30">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-brand text-white">
-                <s.icon className="h-4.5 w-4.5" />
+            <div key={s.title} className="card-surface rounded-2xl border-white/20 bg-white/70 p-5 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5">
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+                <s.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15px] font-bold tracking-tight">{s.title}</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{s.desc}</p>
@@ -663,10 +688,10 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       <Pricing plans={plans} />
       <Faq />
 
-      {/* ── Final CTA ───────────────────────────────────────────────────── */}
+      {/* ── Final CTA (deep CTA) ────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0" aria-hidden>
-          <div className="absolute left-1/2 top-1/2 h-80 w-[min(700px,140vw)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-600/20 blur-[110px]" />
+          <div className="absolute left-1/2 top-1/2 h-80 w-[min(700px,140vw)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/20 blur-[110px] motion-reduce:transform-none" />
         </div>
         <div className="relative mx-auto max-w-3xl px-5 py-24 text-center">
           <h2 className="font-display text-3xl font-bold tracking-tight sm:text-5xl">
@@ -678,12 +703,15 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/register"
-              className="group inline-flex items-center gap-2 rounded-xl bg-gradient-brand px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_8px_32px_-8px_rgba(99,102,241,0.7)] transition-all hover:brightness-110 active:brightness-95"
+              className={cn("group inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-[15px] font-semibold transition-all duration-200 hover:brightness-100", CTA_PRIMARY, "shadow-[0_8px_32px_-8px_rgba(194,65,12,0.7)]")}
             >
               Create your workspace
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:transform-none" aria-hidden="true" />
             </Link>
-            <Link href="/login" className="inline-flex items-center gap-2 rounded-xl border border-edge-strong bg-card px-7 py-3.5 text-[15px] font-semibold transition-colors hover:bg-tint">
+            <Link
+              href="/login"
+              className={cn("inline-flex items-center gap-2 rounded-xl border bg-card px-7 py-3.5 text-[15px] font-semibold transition-colors duration-200", CTA_SECONDARY)}
+            >
               I already have an account
             </Link>
           </div>
@@ -698,15 +726,15 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             <img src="/logo.svg" alt="PeopleNexa logo" className="h-7 w-7" />
             <div>
               <p className="font-display text-[14px] font-bold tracking-tight">PeopleNexa</p>
-              <p className="text-[11.5px] text-muted-foreground">© {new Date().getFullYear()} PeopleNexa · Made in India 🇮🇳</p>
+              <p className="text-[11.5px] text-muted-foreground">© {new Date().getFullYear()} PeopleNexa · Made in India</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px] font-medium text-muted-foreground">
-            <a href="#features" className="transition-colors hover:text-foreground">Features</a>
-            <a href="#pricing" className="transition-colors hover:text-foreground">Pricing</a>
-            <a href="#faq" className="transition-colors hover:text-foreground">FAQ</a>
-            <Link href="/login" className="transition-colors hover:text-foreground">Log in</Link>
-            <Link href="/register" className="transition-colors hover:text-foreground">Start free trial</Link>
+            <a href="#features" className="cursor-pointer transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Features</a>
+            <a href="#pricing" className="cursor-pointer transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Pricing</a>
+            <a href="#faq" className="cursor-pointer transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">FAQ</a>
+            <Link href="/login" className="cursor-pointer transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Log in</Link>
+            <Link href="/register" className="cursor-pointer transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Start free trial</Link>
           </div>
         </div>
       </footer>
@@ -729,26 +757,30 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
   return (
     <section id="pricing" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-20">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">Pricing</p>
+        <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Pricing</p>
         <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">Simple per-seat pricing</h2>
         <p className="mt-4 text-[15px] text-muted-foreground">
           Start free, upgrade when you grow. Every paid plan includes everything you need to run payroll.
         </p>
 
-        <div className="mt-7 inline-flex items-center gap-1 rounded-xl border border-edge bg-tint p-1">
+        <div className="mt-7 inline-flex max-w-full items-center gap-1 rounded-xl border border-edge bg-tint p-1">
           <button
+            type="button"
             onClick={() => setAnnual(false)}
+            aria-pressed={!annual}
             className={cn(
-              "rounded-lg px-4 py-1.5 text-[13px] font-semibold transition-all",
+              "cursor-pointer rounded-lg px-4 py-1.5 text-[13px] font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
               !annual ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             )}
           >
             Monthly
           </button>
           <button
+            type="button"
             onClick={() => setAnnual(true)}
+            aria-pressed={annual}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-[13px] font-semibold transition-all",
+              "flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-1.5 text-[13px] font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
               annual ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -772,16 +804,16 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
             <div
               key={p.key}
               className={cn(
-                "card-surface relative flex flex-col rounded-2xl p-6 transition-all duration-200 hover:-translate-y-0.5",
-                isFeatured && "border-indigo-400/40 shadow-[0_16px_48px_-16px_rgba(99,102,241,0.5)]"
+                "card-surface relative flex min-w-0 flex-col rounded-2xl border-white/20 bg-white/70 p-6 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5",
+                isFeatured && "border-primary/40 shadow-[0_16px_48px_-16px_rgba(37,99,235,0.5)]"
               )}
             >
               {isFeatured && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-brand px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-white shadow-lg">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-white shadow-lg">
                   Most popular
                 </span>
               )}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <h3 className="font-display text-[15px] font-bold capitalize tracking-tight">{p.label}</h3>
                 {isTrial && <span className="rounded-md bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">Free</span>}
               </div>
@@ -814,21 +846,21 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
               <ul className="mt-5 space-y-2 border-t border-edge pt-4 text-[12.5px] text-muted-foreground">
                 {isTrial ? (
                   <>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> All {MODULES.length} modules enabled</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> {p.seats} seats for {p.trialDays} days</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> No credit card</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> All {MODULES.length} modules enabled</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> {p.seats} seats for {p.trialDays} days</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> No credit card</li>
                   </>
                 ) : isEnterprise ? (
                   <>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> Everything in Pro</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> Unlimited seats</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> Dedicated onboarding</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> Everything in Pro</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> Unlimited seats</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> Dedicated onboarding</li>
                   </>
                 ) : (
                   <>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> {p.seats.toLocaleString("en-IN")} seats</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> {p.modules.length} modules</li>
-                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" /> {p.trialDays > 0 ? `${p.trialDays}-day trial` : "No trial"}</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> {p.seats.toLocaleString("en-IN")} seats</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> {p.modules.length} modules</li>
+                    <li className="flex items-center gap-2"><Check className="h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden="true" /> {p.trialDays > 0 ? `${p.trialDays}-day trial` : "No trial"}</li>
                   </>
                 )}
               </ul>
@@ -838,19 +870,19 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
                   <a
                     href="mailto:sales@peoplenexa.in?subject=PeopleNexa Enterprise"
                     className={cn(
-                      "flex w-full items-center justify-center gap-1.5 rounded-xl border border-edge-strong px-4 py-2.5 text-[13.5px] font-semibold transition-colors",
-                      "hover:bg-tint"
+                      "flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-edge-strong px-4 py-2.5 text-[13.5px] font-semibold transition-colors duration-200",
+                      "hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                     )}
                   >
-                    <PhoneCall className="h-3.5 w-3.5" /> Contact sales
+                    <PhoneCall className="h-3.5 w-3.5" aria-hidden="true" /> Contact sales
                   </a>
                 ) : (
                   <Link
                     href="/register"
                     className={cn(
-                      "flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-[13.5px] font-semibold transition-all",
+                      "flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-[13.5px] font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none",
                       isFeatured
-                        ? "bg-gradient-brand text-white shadow-[0_8px_28px_-8px_rgba(99,102,241,0.7)] hover:brightness-110"
+                        ? "bg-accent text-white shadow-[0_8px_28px_-8px_rgba(194,65,12,0.7)] hover:bg-accent-hover"
                         : "border border-edge-strong hover:bg-tint"
                     )}
                   >
@@ -863,7 +895,7 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
         })}
       </div>
       <p className="mt-6 text-center text-[12.5px] text-muted-foreground">
-        All prices in INR, per seat per month. Need something custom? <a href="mailto:sales@peoplenexa.in" className="font-medium text-indigo-300 underline-offset-2 hover:underline">Talk to us</a>.
+        All prices in INR, per seat per month. Need something custom? <a href="mailto:sales@peoplenexa.in" className="cursor-pointer font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Talk to us</a>.
       </p>
     </section>
   );
@@ -877,19 +909,22 @@ function Faq() {
     <section id="faq" className="scroll-mt-20 border-t border-edge bg-tint/40">
       <div className="mx-auto max-w-3xl px-5 py-20">
         <div className="text-center">
-          <p className="text-[12px] font-semibold uppercase tracking-widest text-indigo-300">FAQ</p>
+          <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>FAQ</p>
           <h2 className="mt-3 font-display text-3xl font-bold tracking-tight">Questions, answered</h2>
         </div>
         <div className="mt-10 space-y-3">
           {FAQS.map((f, i) => (
-            <div key={f.q} className="card-surface overflow-hidden rounded-2xl">
+            <div key={f.q} className="card-surface overflow-hidden rounded-2xl border-white/20 bg-white/70 backdrop-blur-xl dark:bg-white/5">
               <button
+                type="button"
                 onClick={() => setOpen(open === i ? null : i)}
-                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left"
+                className="flex w-full cursor-pointer items-center justify-between gap-4 px-5 py-4 text-left transition-colors duration-200 hover:bg-tint/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
                 aria-expanded={open === i}
               >
                 <span className="text-[14.5px] font-semibold">{f.q}</span>
-                <span className={cn("text-muted-foreground transition-transform duration-200", open === i && "rotate-45")}>＋</span>
+                <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform duration-200 motion-reduce:transition-none dark:text-[#93C5FD]", open === i && "rotate-45")}>
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
               </button>
               {open === i && (
                 <p className="border-t border-edge px-5 py-4 text-[13.5px] leading-relaxed text-muted-foreground">{f.a}</p>

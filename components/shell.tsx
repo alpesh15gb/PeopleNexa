@@ -116,7 +116,7 @@ function employeeNav(lang: Lang): NavItem[] {
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-9 items-center rounded-[10px] bg-card px-2.5 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.18)] dark:bg-white">
+      <div className="flex h-9 items-center rounded-[10px] border border-primary/15 bg-primary/[0.06] px-2.5 shadow-[0_4px_16px_-8px_rgba(37,99,235,0.35)] backdrop-blur dark:bg-primary/[0.08]">
         <img src="/logo.png" alt="PeopleNexa logo" width={110} height={22} className="h-[22px] w-auto" />
       </div>
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Workspace</span>
@@ -198,7 +198,7 @@ function NavLinks({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter…"
-          className="h-9 w-full rounded-[10px] border border-input bg-card px-3 text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring/20"
+          className="h-9 w-full rounded-[10px] border border-input bg-card px-3 text-[13px] text-foreground transition-colors duration-200 placeholder:text-muted-foreground/60 hover:border-primary/30 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         />
       </div>
       <nav aria-label="Primary" className="space-y-3 pb-2">
@@ -216,7 +216,7 @@ function NavLinks({
                 type="button"
                 onClick={() => setCollapsed((prev) => ({ ...prev, [section.label]: !prev[section.label] }))}
                 aria-expanded={!isCollapsed}
-                className="mb-1 flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70 transition-colors hover:bg-tint hover:text-foreground"
+                className="mb-1 flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70 transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span className="truncate">
                   {section.label} <span className="ml-1 font-normal opacity-70">({section.items.length})</span>
@@ -238,15 +238,15 @@ function NavLinks({
                         onClick={onNavigate}
                         aria-current={active ? "page" : undefined}
                         className={cn(
-                          "group relative flex min-h-[44px] items-center gap-3 rounded-[10px] px-3 py-2.5 text-[13px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary sm:min-h-0",
+                          "group relative flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2.5 text-[13px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:min-h-0",
                           active
-                            ? "bg-primary text-primary-foreground shadow-[0_5px_16px_-8px_rgba(79,70,229,0.8)]"
-                            : "text-muted-foreground hover:bg-tint-strong hover:text-foreground"
+                            ? "bg-primary text-primary-foreground shadow-[0_5px_16px_-8px_rgba(37,99,235,0.7)]"
+                            : "text-muted-foreground hover:bg-primary/[0.06] hover:text-foreground"
                         )}
                       >
                         <span
                           aria-hidden="true"
-                          className={cn(active ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground")}
+                          className={cn(active ? "text-primary-foreground" : "text-muted-foreground group-hover:text-primary")}
                         >
                           {item.icon}
                         </span>
@@ -318,7 +318,7 @@ export function Shell({
         aria-label="Workspace navigation"
         tabIndex={0}
       >
-        <div className="mb-3 mt-3 rounded-xl border border-edge bg-tint px-3 py-2.5">
+        <div className="mb-3 mt-3 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
             {isAdmin ? "Admin workspace" : t(lang, "nav.employeePortal")}
           </p>
@@ -327,9 +327,9 @@ export function Shell({
         <NavLinks items={nav} onNavigate={() => setOpen(false)} />
       </div>
       <div className="shrink-0 border-t border-edge/60 p-3">
-        <div className="card-surface rounded-xl p-3">
+        <div className="card-surface rounded-xl border-primary/10 bg-card/70 p-3 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.4)] backdrop-blur-xl">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[12px] font-bold text-white">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_100%)] text-[12px] font-bold text-white shadow-[0_4px_12px_-4px_rgba(37,99,235,0.6)]">
               {initials(name.split(" ")[0], name.split(" ")[1])}
             </div>
             <div className="min-w-0 leading-tight">
@@ -358,7 +358,7 @@ export function Shell({
   return (
     <div className="min-h-screen">
       {/* Desktop sidebar — fixed full-height flex column so inner nav can scroll */}
-      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-sidebar/90 backdrop-blur-xl lg:flex">
+      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-sidebar backdrop-blur-xl lg:flex">
         {sidebar}
       </aside>
 
@@ -375,7 +375,7 @@ export function Shell({
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"
-              className="absolute right-3 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+              className="absolute right-3 top-5 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <X aria-hidden="true" className="h-4 w-4" />
             </button>
@@ -387,12 +387,12 @@ export function Shell({
       {/* Main column */}
       <div className="lg:pl-64">
         {/* Topbar — title is <p> on purpose: each page already renders a single <h1> via PageHeader */}
-        <header className="sticky top-0 z-20 flex h-[68px] items-center gap-2 border-b border-edge bg-background/80 px-4 backdrop-blur-xl sm:gap-3 sm:px-7">
+        <header className="sticky top-0 z-20 flex h-[68px] items-center gap-2 border-b border-edge bg-background/80 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 sm:gap-3 sm:px-7">
           <button
             onClick={() => setOpen(true)}
             aria-label="Open menu"
             aria-expanded={open}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground lg:hidden"
+            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
           >
             <Menu aria-hidden="true" className="h-5 w-5" />
           </button>
@@ -404,7 +404,7 @@ export function Shell({
 
           <NotificationsBell />
 
-          <div className="hidden items-center gap-2 rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] text-muted-foreground md:flex">
+          <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur md:flex">
             <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
             <span className="font-medium capitalize">{relativeDay(new Date())}</span>
             <span aria-hidden="true" className="text-muted-foreground/50">•</span>
@@ -422,9 +422,9 @@ export function Shell({
               aria-label="Account menu"
               aria-expanded={menuOpen}
               aria-haspopup="menu"
-              className="flex min-h-[44px] items-center gap-2 rounded-xl border border-edge bg-tint py-1.5 pl-1.5 pr-2.5 transition-colors hover:bg-tint-strong"
+              className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-edge bg-tint py-1.5 pl-1.5 pr-2.5 transition-colors duration-200 hover:border-primary/25 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_100%)] text-[11px] font-bold text-white">
                 {initials(name.split(" ")[0], name.split(" ")[1])}
               </span>
               <span className="hidden text-[13px] font-medium sm:block">{name.split(" ")[0]}</span>
@@ -441,14 +441,14 @@ export function Shell({
                   {!isAdmin && (
                     <Link
                       href="/employee/profile"
-                      className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                      className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                     >
                       <Users className="h-4 w-4" /> {t(lang, "nav.myProfile")}
                     </Link>
                   )}
                   <button
                     onClick={logout}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-rose-300 transition-colors hover:bg-rose-500/10"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-rose-300 transition-colors duration-200 hover:bg-rose-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     <LogOut className="h-4 w-4" /> {t(lang, "nav.signOut")}
                   </button>

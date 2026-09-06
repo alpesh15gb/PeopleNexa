@@ -1,4 +1,5 @@
 import { forwardRef, type SelectHTMLAttributes } from "react";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
@@ -7,8 +8,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
       <select
         ref={ref}
         className={cn(
-          "h-10 w-full appearance-none rounded-xl border border-input bg-tint px-3.5 pr-9 text-sm text-foreground transition-all duration-150",
-          "focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring/40",
+          "h-11 min-h-[44px] w-full cursor-pointer appearance-none rounded-xl border border-input bg-tint px-3.5 pr-9 text-sm text-foreground transition-all duration-150",
+          "focus:border-primary/60 focus:outline-none focus:ring-4 focus:ring-ring/15",
+          "aria-[invalid=true]:border-destructive/60 aria-[invalid=true]:ring-destructive/15",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
@@ -16,18 +18,10 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
       >
         {children}
       </select>
-      <svg
+      <ChevronDown
         aria-hidden="true"
         className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m6 9 6 6 6-6" />
-      </svg>
+      />
     </div>
   )
 );

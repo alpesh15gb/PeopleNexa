@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
+const BLUE_FOCUS = "focus:border-primary focus:ring-ring/25 focus-visible:ring-ring/40";
+
 const normalize = (s: string) =>
   s
     .toLowerCase()
@@ -108,14 +110,14 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
   }
 
   return (
-    <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
+    <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
-          <Input name="companyName" required placeholder="Acme Corp" className="h-11" />
+          <Input name="companyName" required placeholder="Acme Corp" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
 
         <Field label="Workspace subdomain" hint="This becomes your team's web address">
-          <div className="flex items-center overflow-hidden rounded-xl border border-input bg-card-2 focus-within:ring-2 focus-within:ring-ring/40">
+          <div className="flex items-center overflow-hidden rounded-xl border border-input bg-card-2 transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/40 motion-reduce:transition-none">
             <label htmlFor="register-slug" className="sr-only">
               Workspace subdomain
             </label>
@@ -127,13 +129,13 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
               autoComplete="off"
               spellCheck={false}
               aria-describedby="slug-availability"
-              className="h-11 w-2/5 min-w-0 flex-1 bg-transparent px-3.5 text-base text-foreground outline-none placeholder:text-muted-foreground/60 sm:text-sm"
+              className="h-11 w-2/5 min-w-0 flex-1 bg-transparent px-3.5 text-base text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm"
             />
-            <span aria-hidden="true" className="select-none whitespace-nowrap pr-3.5 text-[12.5px] text-muted-foreground">
+            <span aria-hidden="true" className="shrink-0 select-none whitespace-nowrap pr-3.5 text-[11px] text-muted-foreground sm:text-[12.5px]">
               .{baseDomain}
             </span>
             <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center border-l border-edge">
-              {slugState === "checking" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              {slugState === "checking" && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />}
               {slugState === "available" && <Check className="h-4 w-4 text-emerald-400" />}
               {slugState === "taken" && <X className="h-4 w-4 text-rose-400" />}
             </span>
@@ -154,13 +156,13 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         </Field>
 
         <Field label="Your full name">
-          <Input name="name" required placeholder="Admin" className="h-11" />
+          <Input name="name" required placeholder="Admin" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
         <Field label="Work email">
-          <Input name="email" type="email" required autoComplete="email" placeholder="admin@yourcompany.com" className="h-11" />
+          <Input name="email" type="email" required autoComplete="email" placeholder="admin@yourcompany.com" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
         <Field label="Password" hint="At least 6 characters">
-          <Input name="password" type="password" required autoComplete="new-password" placeholder="Create a password" className="h-11" />
+          <Input name="password" type="password" required autoComplete="new-password" placeholder="Create a password" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
       </div>
 
@@ -170,8 +172,13 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         </p>
       )}
 
-      <Button type="submit" size="lg" loading={loading} className="mt-6 w-full">
-        <Rocket className="h-4 w-4" />
+      <Button
+        type="submit"
+        size="lg"
+        loading={loading}
+        className="mt-6 w-full bg-accent text-white shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
+      >
+        <Rocket className="h-4 w-4" aria-hidden="true" />
         Create company
       </Button>
     </form>

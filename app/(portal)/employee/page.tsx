@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { startOfDay, addDays, toDateKey } from "@/lib/dates";
@@ -10,6 +11,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { StatusPill } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
+
+// Token-driven stat sizing: tabular numerals, truncated values, responsive sizes.
+// Applied via className passthrough since StatCard internals live in components/*.
+const statCardClass =
+  "min-w-0 tabular-nums [&_.font-display]:truncate [&_.font-display]:text-[24px] sm:[&_.font-display]:text-[28px] xl:[&_.font-display]:text-[30px]";
+
+// Inline loading shimmer (no Skeleton export in components/ui/stat).
+// Used as a Suspense fallback so the stack keeps layout while streaming.
+function StatsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading statistics" className="space-y-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="rounded-2xl border border-edge bg-card p-4 motion-safe:animate-pulse sm:p-5">
+          <div className="h-3 w-2/3 rounded-md bg-muted" />
+          <div className="mt-3 h-8 w-1/2 rounded-md bg-muted" />
+        </div>
+      ))}
+      <span className="sr-only">Loading statistics…</span>
+    </div>
+  );
+}
 
 export default async function EmployeeDashboardPage() {
   const session = await requireSession();
@@ -47,7 +69,7 @@ export default async function EmployeeDashboardPage() {
   return (
     <div className="animate-fade-up space-y-6">
       <div>
-        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Your workday</p>
+        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary">Your workday</p>
         <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">
           {t(lang, "dashboard.welcome", { name: employee.firstName })}
         </h1>
@@ -69,12 +91,14 @@ export default async function EmployeeDashboardPage() {
         </div>
 
         {/* Month stats */}
+        <Suspense fallback={<StatsSkeleton />}>
         <div className="space-y-4">
-          <StatCard label={t(lang, "dashboard.thisMonth")} value={t(lang, "dashboard.days", { n: present + late })} icon={<CalendarDays className="h-4.5 w-4.5" />} tone="indigo" sub={`${toDateKey(today).slice(0, 7)}`} />
-          <StatCard label={t(lang, "common.present")} value={present} icon={<CalendarCheck2 className="h-4.5 w-4.5" />} tone="emerald" />
-          <StatCard label={t(lang, "common.late")} value={late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" />
-          <StatCard label={t(lang, "common.onLeave")} value={monthLeaves.reduce((s, l) => s + l.days, 0)} icon={<TimerOff className="h-4.5 w-4.5" />} tone="violet" />
+          <StatCard label={t(lang, "dashboard.thisMonth")} value={t(lang, "dashboard.days", { n: present + late })} icon={<CalendarDays className="h-4.5 w-4.5" />} tone="indigo" sub={`${toDateKey(today).slice(0, 7)}`} className={statCardClass} />
+          <StatCard label={t(lang, "common.present")} value={present} icon={<CalendarCheck2 className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
+          <StatCard label={t(lang, "common.late")} value={late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
+          <StatCard label={t(lang, "common.onLeave")} value={monthLeaves.reduce((s, l) => s + l.days, 0)} icon={<TimerOff className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
         </div>
+        </Suspense>
       </div>
 
       {/* Pending requests */}

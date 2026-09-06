@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CheckCircle2, Info, AlertTriangle, XCircle, X } from "lucide-react";
+import { CheckCircle2, Info, XCircle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ToastKind = "success" | "error" | "info";
@@ -54,7 +54,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <button
               onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
               aria-label="Dismiss notification"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
             >
               <X aria-hidden="true" className="h-3.5 w-3.5" />
             </button>

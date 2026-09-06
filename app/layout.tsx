@@ -1,18 +1,15 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { Inter, Space_Grotesk } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import { getLang } from "@/lib/i18n-server";
 import { PWARegister } from "@/components/pwa-register";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
   subsets: ["latin"],
-});
-
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -32,7 +29,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f6f8" },
+    { media: "(prefers-color-scheme: light)", color: "#F8FAFC" },
     { media: "(prefers-color-scheme: dark)", color: "#0d1118" },
   ],
   viewportFit: "cover",
@@ -42,7 +39,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Screen readers need the correct lang for hi/gu/mr/ta pronunciation.
   const lang = await getLang().catch(() => "en" as const);
   return (
-    <html lang={lang} suppressHydrationWarning className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}>
+    <html lang={lang} suppressHydrationWarning className={`${jakarta.variable} h-full antialiased`}>
       <body className="min-h-full">
         <PWARegister />
         {children}

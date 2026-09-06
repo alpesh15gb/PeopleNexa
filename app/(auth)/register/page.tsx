@@ -14,9 +14,9 @@ export default async function RegisterPage() {
   if (session) redirect(session.role === "admin" ? "/admin" : "/employee");
 
   return (
-    <div className="animate-fade-up">
+    <div className="animate-fade-up motion-reduce:animate-none">
       <div className="mb-7">
-        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Start with the essentials</p>
+        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary dark:text-[#93C5FD]">Start with the essentials</p>
         <h2 className="font-display text-[30px] font-bold tracking-[-0.035em]">Create your workspace</h2>
         <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
           We&apos;ll set up the sensible defaults so you can invite your team and get moving in minutes.
@@ -25,7 +25,10 @@ export default async function RegisterPage() {
       <RegisterForm baseDomain={process.env.APP_BASE_DOMAIN ?? "peoplenexa.in"} />
       <p className="mt-7 text-center text-[13px] text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-indigo-300 transition-colors hover:text-indigo-200">
+        <Link
+          href="/login"
+          className="cursor-pointer rounded font-medium text-primary transition-colors duration-200 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none dark:text-[#93C5FD] dark:hover:text-[#BFDBFE]"
+        >
           Sign in
         </Link>
       </p>

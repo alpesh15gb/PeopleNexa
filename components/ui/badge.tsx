@@ -10,7 +10,7 @@ const tones: Record<Tone, string> = {
   warning: "bg-amber-500/10 text-amber-300 border-amber-400/20",
   danger: "bg-rose-500/10 text-rose-300 border-rose-400/20",
   info: "bg-sky-500/10 text-sky-300 border-sky-400/20",
-  violet: "bg-violet-500/10 text-violet-300 border-violet-400/20",
+  violet: "bg-primary/10 text-primary border-primary/25",
 };
 
 export function Badge({

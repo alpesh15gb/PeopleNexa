@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-space-grotesk), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -16,6 +16,9 @@
   --color-input: var(--input);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-hover: var(--accent-hover);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-success: var(--success);
@@ -42,37 +45,55 @@
 :root {
   color-scheme: light;
 
-  --background: #f5f6f8;
-  --foreground: #172033;
-  --card: #ffffff;
-  --card-2: #fbfcfd;
-  --muted: #edf0f4;
-  --muted-foreground: #667085;
-  --border: rgba(23, 32, 51, 0.10);
-  --border-strong: rgba(23, 32, 51, 0.18);
-  --tint: rgba(23, 32, 51, 0.035);
-  --tint-strong: rgba(23, 32, 51, 0.065);
-  --input: rgba(23, 32, 51, 0.15);
-  --primary: #4f46e5;
-  --primary-foreground: #ffffff;
-  --ring: rgba(79, 70, 229, 0.35);
-  --sidebar: #fafbfc;
+  /* Compat aliases: single Jakarta family backs both legacy variable names
+     so existing markup referencing --font-inter / --font-space-grotesk keeps working. */
+  --font-inter: var(--font-jakarta);
+  --font-space-grotesk: var(--font-jakarta);
+
+  --background: #F8FAFC;
+  --foreground: #1E293B;
+  --card: #FFFFFF;
+  --card-2: #F1F5F9;
+  --muted: #E9EFF8;
+  --muted-foreground: #475569;
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --tint: rgba(37, 99, 235, 0.04);
+  --tint-strong: rgba(37, 99, 235, 0.08);
+  --input: #CBD5E1;
+  --primary: #2563EB;
+  --primary-foreground: #FFFFFF;
+  /* CTA accent: #C2410C (not #EA580C) so white text clears 4.5:1 AA. */
+  --accent: #C2410C;
+  --accent-foreground: #FFFFFF;
+  --accent-hover: #9A3412;
+  --ring: rgba(37, 99, 235, 0.35);
+  --sidebar: #FFFFFF;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #f43f5e;
 
-  --indigo-200: #4338ca;
-  --indigo-300: #4f46e5;
+  /* Light-theme accent shades: blue family unified to the brand scale for
+     4.5:1+ contrast on light surfaces; emerald/rose/amber stay semantic. */
+  --indigo-200: #1D4ED8;
+  --indigo-300: #2563EB;
   --emerald-300: #059669;
   --emerald-400: #10b981;
   --rose-300: #e11d48;
   --rose-400: #f43f5e;
   --amber-300: #d97706;
   --amber-400: #f59e0b;
-  --sky-300: #0284c7;
-  --sky-400: #0ea5e9;
-  --violet-200: #6d28d9;
-  --violet-300: #7c3aed;
+  --sky-300: #1D4ED8;
+  --sky-400: #2563EB;
+  --violet-200: #1E40AF;
+  --violet-300: #1D4ED8;
+
+  /* Shadow depths (MASTER.md) + scrollbar */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb: rgba(37, 99, 235, 0.32);
 }
 
 /* ── Dark theme ────────────────────────────────────────────────────────── */
@@ -90,26 +111,32 @@
   --tint: rgba(255, 255, 255, 0.045);
   --tint-strong: rgba(255, 255, 255, 0.075);
   --input: rgba(255, 255, 255, 0.11);
-  --primary: #818cf8;
-  --primary-foreground: #111827;
-  --ring: rgba(129, 140, 248, 0.45);
+  --primary: #60A5FA;
+  --primary-foreground: #0B1220;
+  /* Dark CTA: lighter orange keeps 4.5:1 with dark text on dark surfaces. */
+  --accent: #FB923C;
+  --accent-foreground: #431407;
+  --accent-hover: #FDBA74;
+  --ring: rgba(96, 165, 250, 0.45);
   --sidebar: #101721;
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #fb7185;
 
-  --indigo-200: #c7d2fe;
-  --indigo-300: #a5b4fc;
+  /* Dark-theme accent shades remapped to the blue scale. */
+  --indigo-200: #BFDBFE;
+  --indigo-300: #93C5FD;
   --emerald-300: #6ee7b7;
   --emerald-400: #34d399;
   --rose-300: #fda4af;
   --rose-400: #fb7185;
   --amber-300: #fcd34d;
   --amber-400: #fbbf24;
-  --sky-300: #7dd3fc;
-  --sky-400: #38bdf8;
-  --violet-200: #ddd6fe;
-  --violet-300: #c4b5fd;
+  --sky-300: #93C5FD;
+  --sky-400: #60A5FA;
+  --violet-200: #BFDBFE;
+  --violet-300: #93C5FD;
+  --scrollbar-thumb: rgba(96, 165, 250, 0.32);
 }
 
 *,
@@ -137,20 +164,24 @@ body {
 }
 
 ::selection {
-  background: rgba(99, 102, 241, 0.35);
+  background: rgba(37, 99, 235, 0.25);
   color: #fff;
+}
+.dark ::selection {
+  background: rgba(96, 165, 250, 0.4);
+  color: #0B1220;
+}
+
+/* Global keyboard focus ring: 2px ring color offset from background. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-:root {
-  --scrollbar-thumb: rgba(15, 23, 42, 0.18);
-}
-.dark {
-  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
 }
 *::-webkit-scrollbar {
   width: 8px;
@@ -193,18 +224,18 @@ body {
   }
 }
 :root {
-  --gradient-soft-from: #4f46e5;
-  --gradient-soft-mid: #6366f1;
-  --gradient-soft-to: #7c3aed;
+  --gradient-soft-from: #1D4ED8;
+  --gradient-soft-mid: #2563EB;
+  --gradient-soft-to: #3B82F6;
 }
 .dark {
-  --gradient-soft-from: #a5b4fc;
-  --gradient-soft-mid: #818cf8;
-  --gradient-soft-to: #c084fc;
+  --gradient-soft-from: #93C5FD;
+  --gradient-soft-mid: #60A5FA;
+  --gradient-soft-to: #BFDBFE;
 }
 
 .bg-gradient-brand {
-  background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
 }
 
 .bg-grid {
@@ -221,7 +252,46 @@ body {
 }
 
 .glow-primary {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35), 0 8px 40px -8px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.35), 0 8px 40px -8px rgba(37, 99, 235, 0.45);
+}
+.dark .glow-primary {
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4), 0 8px 40px -8px rgba(96, 165, 250, 0.45);
+}
+
+/* ── Elevation scale (MASTER.md shadow depths) ─────────────────────────── */
+.elev-1 {
+  box-shadow: var(--shadow-sm);
+}
+.elev-2 {
+  box-shadow: var(--shadow-md);
+}
+.elev-3 {
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Numeric tabular helper (Tailwind also ships `tabular-nums` built-in) ─ */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Skeleton shimmer ──────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--muted) 25%, var(--tint-strong) 50%, var(--muted) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: 8px;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
 }
 
 .card-surface {
@@ -290,4 +360,24 @@ body {
 }
 .animate-pulse-soft {
   animation: pulse-soft 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-pulse-soft,
+  .skeleton {
+    animation: none;
+  }
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

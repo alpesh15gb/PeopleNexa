@@ -3,12 +3,12 @@ import { cn } from "@/lib/utils";
 import { Card } from "./card";
 
 const chipStyles: Record<string, string> = {
-  indigo: "bg-indigo-500/10 text-indigo-300 border-indigo-400/20",
+  indigo: "bg-primary/10 text-primary border-primary/20",
   emerald: "bg-emerald-500/10 text-emerald-300 border-emerald-400/20",
   amber: "bg-amber-500/10 text-amber-300 border-amber-400/20",
   rose: "bg-rose-500/10 text-rose-300 border-rose-400/20",
   sky: "bg-sky-500/10 text-sky-300 border-sky-400/20",
-  violet: "bg-violet-500/10 text-violet-300 border-violet-400/20",
+  violet: "bg-sky-500/10 text-sky-300 border-sky-400/20",
 };
 
 export function StatCard({
@@ -66,5 +66,30 @@ export function EmptyState({
       </div>
       {action}
     </div>
+  );
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      role="status"
+      aria-label="Loading"
+      className={cn("animate-pulse rounded-lg bg-primary/10", className)}
+    />
+  );
+}
+
+export function StatSkeleton({ className }: { className?: string }) {
+  return (
+    <Card className={cn("p-4.5 sm:p-5", className)}>
+      <div role="status" aria-label="Loading statistic" className="flex items-start justify-between">
+        <div className="min-w-0 flex-1 space-y-2.5">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-8 w-24" />
+          <Skeleton className="h-3 w-28" />
+        </div>
+        <Skeleton className="h-10 w-10 shrink-0 rounded-xl" />
+      </div>
+    </Card>
   );
 }

@@ -38,8 +38,8 @@ export function LanguageToggle({ lang }: { lang: Lang }) {
         aria-haspopup="listbox"
         title="Language / भाषा / ભાષા / भाषा / மொழி"
         className={cn(
-          "flex h-9 items-center gap-1.5 rounded-xl border border-edge bg-tint px-2.5 text-[12px] font-semibold transition-colors",
-          "text-muted-foreground hover:bg-tint-strong hover:text-foreground",
+          "flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-edge bg-tint px-2.5 text-[12px] font-semibold transition-colors duration-200",
+          "text-muted-foreground hover:border-primary/25 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           busy && "opacity-60"
         )}
       >
@@ -56,13 +56,13 @@ export function LanguageToggle({ lang }: { lang: Lang }) {
               <button
                 key={l.code}
                 onClick={() => setLang(l.code)}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+                className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-[12.5px] text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span>
                   <span className="font-medium text-foreground">{l.native}</span>
                   <span className="ml-1.5 text-[11px]">{l.label}</span>
                 </span>
-                {l.code === lang && <Check className="h-3.5 w-3.5 text-brand" />}
+                {l.code === lang && <Check className="h-3.5 w-3.5 text-primary" />}
               </button>
             ))}
           </div>

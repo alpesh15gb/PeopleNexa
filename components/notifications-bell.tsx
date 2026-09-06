@@ -15,7 +15,7 @@ interface Notif {
 }
 
 const icons = {
-  info: <Info className="h-3.5 w-3.5 text-sky-400" />,
+  info: <Info className="h-3.5 w-3.5 text-primary" />,
   success: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />,
   warning: <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />,
   danger: <XCircle className="h-3.5 w-3.5 text-rose-400" />,
@@ -77,11 +77,11 @@ export function NotificationsBell() {
         aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-edge bg-tint text-muted-foreground transition-colors hover:bg-tint-strong hover:text-foreground"
+        className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-edge bg-tint text-muted-foreground transition-colors duration-200 hover:border-primary/25 hover:bg-primary/[0.06] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         <Bell aria-hidden="true" className="h-4 w-4" />
         {unread > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-gradient-brand px-1 text-[10px] font-bold text-white shadow-[0_2px_8px_-2px_rgba(99,102,241,0.8)]">
+          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground shadow-[0_2px_8px_-2px_rgba(37,99,235,0.8)]">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -94,7 +94,7 @@ export function NotificationsBell() {
             <div className="flex items-center justify-between border-b border-edge px-4 py-3">
               <p className="font-display text-sm font-semibold">Notifications</p>
               {unread > 0 && (
-                <button onClick={markAll} className="flex items-center gap-1 text-[11.5px] font-medium text-indigo-300 transition-colors hover:text-indigo-200">
+                <button onClick={markAll} className="flex cursor-pointer items-center gap-1 rounded-md text-[11.5px] font-medium text-primary transition-colors duration-200 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                   <CheckCheck className="h-3.5 w-3.5" /> Mark all read
                 </button>
               )}
@@ -115,15 +115,15 @@ export function NotificationsBell() {
                   <div
                     key={n.id}
                     className={cn(
-                      "flex gap-3 border-b border-edge px-4 py-3 transition-colors hover:bg-tint",
-                      !n.isRead && "bg-indigo-500/[0.05]"
+                      "flex gap-3 border-b border-edge px-4 py-3 transition-colors duration-200 hover:bg-primary/[0.04]",
+                      !n.isRead && "bg-primary/[0.06]"
                     )}
                   >
                     <span className="mt-0.5 shrink-0">{icons[n.type as keyof typeof icons] ?? icons.info}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="truncate text-[13px] font-semibold">{n.title}</p>
-                        {!n.isRead && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400" />}
+                        {!n.isRead && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
                       </div>
                       <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">{n.message}</p>
                       <p className="mt-1 text-[10.5px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p>
@@ -135,7 +135,7 @@ export function NotificationsBell() {
             <Link
               href="/notifications"
               onClick={() => setOpen(false)}
-              className="block border-t border-edge px-4 py-2.5 text-center text-[12.5px] font-medium text-indigo-300 transition-colors hover:bg-tint"
+              className="block border-t border-edge px-4 py-2.5 text-center text-[12.5px] font-medium text-primary transition-colors duration-200 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             >
               View all notifications
             </Link>

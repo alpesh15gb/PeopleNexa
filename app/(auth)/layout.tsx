@@ -10,12 +10,23 @@ const proofPoints = [
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1.05fr]">
+    <div
+      className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1.05fr]"
+      style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif" }}
+    >
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+      <style>{`.font-display{font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif !important}@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
       <aside className="relative hidden overflow-hidden border-r border-edge bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-10 xl:p-14">
-        <div className="pointer-events-none absolute -left-32 -top-32 h-[440px] w-[440px] rounded-full bg-indigo-400/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-48 -right-24 h-[520px] w-[520px] rounded-full bg-sky-300/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-32 -top-32 h-[440px] w-[440px] rounded-full bg-primary/10 blur-3xl" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-48 -right-24 h-[520px] w-[520px] rounded-full bg-[#3B82F6]/10 blur-3xl" aria-hidden />
         <div className="relative flex items-center justify-between">
           <div className="flex h-11 items-center rounded-[11px] bg-white px-3 shadow-[0_8px_28px_-12px_rgba(16,24,40,0.35)]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.png" alt="PeopleNexa logo" className="h-6 w-auto" />
           </div>
           <span className="rounded-full border border-edge bg-tint px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -24,8 +35,8 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="relative max-w-xl py-16">
-          <p className="mb-5 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.15em] text-indigo-500 dark:text-indigo-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" /> People operations, made clear
+          <p className="mb-5 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.15em] text-primary dark:text-[#93C5FD]">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden /> People operations, made clear
           </p>
           <h1 className="max-w-lg font-display text-[clamp(2.6rem,4vw,4.5rem)] font-bold leading-[1.04] tracking-[-0.05em] text-foreground">
             Give every workday a better backbone.
@@ -36,21 +47,21 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
 
           <div className="mt-10 grid gap-3">
             {proofPoints.map(({ icon: Icon, title, text }) => (
-              <div key={title} className="flex items-start gap-3 rounded-2xl border border-edge bg-card/65 p-3.5 shadow-[0_10px_30px_-26px_rgba(16,24,40,0.35)]">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">
-                  <Icon className="h-4 w-4" />
+              <div key={title} className="flex items-start gap-3 rounded-2xl border border-white/20 bg-card/65 p-3.5 shadow-[0_10px_30px_-26px_rgba(16,24,40,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:bg-white/5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary dark:text-[#93C5FD]">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
-                <div>
+                <div className="min-w-0">
                   <p className="text-[13px] font-semibold text-foreground">{title}</p>
                   <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{text}</p>
                 </div>
-                <ArrowUpRight className="ml-auto mt-1 h-4 w-4 text-muted-foreground/50" />
+                <ArrowUpRight className="ml-auto mt-1 h-4 w-4 shrink-0 text-muted-foreground/50" aria-hidden="true" />
               </div>
             ))}
           </div>
 
           <div className="mt-8 flex items-center gap-3 text-[12px] text-muted-foreground">
-            <BarChart3 className="h-4 w-4 text-emerald-500" />
+            <BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
             <span>One view for the moments that need your attention.</span>
           </div>
         </div>

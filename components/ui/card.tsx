@@ -2,7 +2,15 @@ import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("card-surface rounded-[18px]", className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "card-surface rounded-[18px] shadow-[0_1px_2px_rgba(37,99,235,0.06),0_12px_32px_-24px_rgba(37,99,235,0.35)]",
+        className
+      )}
+      {...props}
+    />
+  );
 }
 
 export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {

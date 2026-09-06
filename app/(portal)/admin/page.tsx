@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -10,6 +11,31 @@ import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 
 export const dynamic = "force-dynamic";
+
+// Token-driven stat sizing: tabular numerals, truncated values, responsive sizes.
+// Applied via className passthrough since StatCard internals live in components/*.
+const statCardClass =
+  "min-w-0 tabular-nums [&_.font-display]:truncate [&_.font-display]:text-[24px] sm:[&_.font-display]:text-[28px] xl:[&_.font-display]:text-[30px]";
+
+// Inline loading shimmer (no Skeleton export in components/ui/stat).
+// Used as a Suspense fallback so the grid keeps layout while streaming.
+function StatsSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading statistics"
+      className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6"
+    >
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="rounded-2xl border border-edge bg-card p-4 motion-safe:animate-pulse sm:p-5">
+          <div className="h-3 w-2/3 rounded-md bg-muted" />
+          <div className="mt-3 h-8 w-1/2 rounded-md bg-muted" />
+        </div>
+      ))}
+      <span className="sr-only">Loading statistics…</span>
+    </div>
+  );
+}
 
 export default async function AdminDashboardPage() {
   const session = await requireSession();
@@ -66,7 +92,7 @@ export default async function AdminDashboardPage() {
     <div className="animate-fade-up space-y-6">
       {/* Greeting */}
       <div>
-        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-indigo-500 dark:text-indigo-300">Today at a glance</p>
+        <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary">Today at a glance</p>
         <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">Good day, Admin</h1>
         <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
           Here&apos;s what needs your attention on {formatDate(today)} ({relativeDay(today)}).
@@ -74,19 +100,22 @@ export default async function AdminDashboardPage() {
       </div>
 
       {/* Stats */}
+      <Suspense fallback={<StatsSkeleton />}>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Total employees" value={employees.length} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" />
-        <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" />
-        <StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" />
-        <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" />
-        <StatCard label="Absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" />
+        <StatCard label="Total employees" value={employees.length} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
+        <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
+        <StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
+        <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} />
+        <StatCard label="Absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
         <StatCard
           label="Pending leaves"
           value={pendingLeaveCount}
           icon={<CalendarCheck2 className="h-4.5 w-4.5" />}
           tone="violet"
+          className={statCardClass}
         />
       </div>
+      </Suspense>
 
       <div className="grid gap-6 xl:grid-cols-3">
         {/* Today's live list */}

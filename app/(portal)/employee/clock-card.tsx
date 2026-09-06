@@ -137,7 +137,7 @@ export function ClockCard({
     <div className="card-surface relative overflow-hidden rounded-2xl">
       <div
         className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full opacity-30 blur-3xl"
-        style={{ background: "radial-gradient(circle, #6366f1 0%, transparent 65%)" }}
+        style={{ background: "radial-gradient(circle, var(--primary) 0%, transparent 65%)" }}
       />
       <div className="relative p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -161,11 +161,11 @@ export function ClockCard({
             <div className="flex flex-col gap-2 rounded-xl border border-edge bg-tint p-4 text-center">
               <div>
                 <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t(lang, "clock.in")}</p>
-                <p className="font-display text-xl font-bold text-emerald-300">{formatTime(new Date(record.punchInTime!))}</p>
+                <p className="font-display text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{formatTime(new Date(record.punchInTime!))}</p>
               </div>
               <div>
                 <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t(lang, "clock.out")}</p>
-                <p className="font-display text-xl font-bold text-rose-300">{record.punchOutTime ? formatTime(new Date(record.punchOutTime)) : "—"}</p>
+                <p className="font-display text-xl font-bold tabular-nums text-rose-700 dark:text-rose-300">{record.punchOutTime ? formatTime(new Date(record.punchOutTime)) : "—"}</p>
               </div>
             </div>
           )}
@@ -179,14 +179,14 @@ export function ClockCard({
             </Button>
           )}
           {punchedIn && !punchedOut && (
-            <Button size="lg" variant="danger" loading={submitting || locating} onClick={() => punch("out")} className="min-w-44">
+            <Button size="lg" loading={submitting || locating} onClick={() => punch("out")} className="min-w-44">
               {!submitting && !locating && <LogOut className="h-4 w-4" />}
               {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingOut") : t(lang, "clock.clockOut")}
             </Button>
           )}
           {punchedOut && (
             <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" /> {t(lang, "clock.allSet")}
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> {t(lang, "clock.allSet")}
             </span>
           )}
 
@@ -195,7 +195,7 @@ export function ClockCard({
               <Camera className="h-4 w-4" /> {selfie ? t(lang, "clock.retakeSelfie") : t(lang, "clock.addSelfie")}
             </Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => router.refresh()} title="Refresh" aria-label="Refresh attendance status">
+          <Button variant="ghost" size="icon" onClick={() => router.refresh()} title="Refresh" aria-label="Refresh attendance status" className="min-h-11 min-w-11">
             <RefreshCw aria-hidden="true" className="h-4 w-4" />
           </Button>
         </div>
@@ -219,8 +219,8 @@ export function ClockCard({
               <video ref={videoRef} className="aspect-[4/3] w-full object-cover" playsInline muted />
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCameraOpen(false)}>{t(lang, "common.cancel")}</Button>
-              <Button onClick={captureSelfie}><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
+              <Button variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">{t(lang, "common.cancel")}</Button>
+              <Button onClick={captureSelfie} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
             </div>
           </div>
         </div>
@@ -230,7 +230,7 @@ export function ClockCard({
       {selfie && !cameraOpen && (
         <div className="absolute bottom-4 right-4 flex items-center gap-2">
           <img src={selfie} alt="Selfie preview" className="h-16 w-16 rounded-xl border border-edge-strong object-cover" />
-          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">{t(lang, "clock.attached")}</span>
+          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">{t(lang, "clock.attached")}</span>
         </div>
       )}
     </div>

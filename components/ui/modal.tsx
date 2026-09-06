@@ -36,14 +36,14 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in motion-reduce:animate-none" onClick={onClose} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descId : undefined}
         className={cn(
-          "card-surface relative flex max-h-[90vh] w-full animate-scale-in flex-col overflow-hidden rounded-2xl bg-card-2 shadow-2xl",
+          "card-surface relative flex max-h-[90vh] w-full animate-scale-in motion-reduce:animate-none flex-col overflow-hidden rounded-2xl bg-card-2 shadow-2xl",
           size === "sm" && "max-w-sm",
           size === "md" && "max-w-lg",
           size === "lg" && "max-w-2xl"
@@ -57,7 +57,7 @@ export function Modal({
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+            className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X aria-hidden="true" className="h-4 w-4" />
           </button>

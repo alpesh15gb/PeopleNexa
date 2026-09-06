@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
+const BLUE_FOCUS = "focus:border-primary focus:ring-ring/25 focus-visible:ring-ring/40";
+
 export function LoginForm() {
   const router = useRouter();
   const toast = useToast();
@@ -49,7 +51,7 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
+    <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
       <div className="space-y-4">
         <Field label="Workspace (optional)" hint="Your workspace subdomain, e.g. acme-corp">
           <Input
@@ -57,7 +59,7 @@ export function LoginForm() {
             autoComplete="off"
             spellCheck={false}
             placeholder="your-workspace"
-            className="h-11"
+            className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>
         <Field label="Email address">
@@ -67,7 +69,7 @@ export function LoginForm() {
             required
             autoComplete="email"
             placeholder="admin@yourcompany.com"
-            className="h-11"
+            className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>
         <Field label="Password">
@@ -78,14 +80,14 @@ export function LoginForm() {
               required
               autoComplete="current-password"
               placeholder="Enter your password"
-              className="h-11 pr-11"
+              className={`h-11 pr-11 ${BLUE_FOCUS}`}
             />
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               aria-label={showPassword ? "Hide password" : "Show password"}
               aria-pressed={showPassword}
-              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
+              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none"
             >
               {showPassword ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
             </button>
@@ -99,8 +101,13 @@ export function LoginForm() {
         </p>
       )}
 
-      <Button type="submit" size="lg" loading={loading} className="mt-6 w-full">
-        <LogIn className="h-4 w-4" />
+      <Button
+        type="submit"
+        size="lg"
+        loading={loading}
+        className="mt-6 w-full bg-accent text-white shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
+      >
+        <LogIn className="h-4 w-4" aria-hidden="true" />
         Sign in
       </Button>
     </form>
