@@ -1,6 +1,6 @@
 // Bump CACHE_VERSION (e.g. v1 -> v2) whenever the offline SHELL list or the
 // navigation-fallback mapping below changes. Old caches are purged on activate.
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const CACHE = "peoplenexa-" + CACHE_VERSION;
 const SHELL = ["/", "/login", "/admin", "/superadmin/login", "/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/profile"];
 
@@ -42,63 +42,72 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api")) return;
 
   // Navigations: network-first, fall back to last cached copy (offline shell).
-  // The chain MUST always resolve a Response — resolving undefined crashes
-  // the FetchEvent ("Failed to convert value to 'Response'").
+  // Fully async with a catch at EVERY level: a FetchEvent must never reject
+  // ("Failed to convert value to 'Response'"). Failures are logged so the
+  // underlying cause (abort, offline, cache error) is visible in console.
   const offlinePage = () =>
     new Response(
       "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Offline — PeopleNexa</title></head><body style='font-family:system-ui,sans-serif;padding:2rem;text-align:center'><h1>You are offline</h1><p>Reconnect and try again.</p></body></html>",
       { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }
     );
+  const shellFor = (pathname) =>
+    pathname.startsWith("/superadmin") ? "/superadmin/login" : pathname.startsWith("/admin") ? "/admin" : "/employee";
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
+      (async () => {
+        try {
+          const res = await fetch(req);
           // Only cache usable pages (skip redirects/errors so a login
           // redirect never poisons the offline shell).
           if (res.ok) {
-            const copy = res.clone();
-            caches
-              .open(CACHE)
-              .then((cache) => cache.put(req, copy))
-              .catch(() => {});
+            try {
+              const cache = await caches.open(CACHE);
+              await cache.put(req, res.clone());
+            } catch (_) {}
           }
           return res;
-        })
-        .catch(() =>
-          caches.match(req).then(
-            (cached) =>
-              cached ||
-              (url.pathname.startsWith("/superadmin")
-                ? caches
-                    .match("/superadmin/login")
-                    .then((s) => s || caches.match("/").then((r) => r || offlinePage()))
-                : url.pathname.startsWith("/admin")
-                  ? caches
-                      .match("/admin")
-                      .then((a) => a || caches.match("/").then((r) => r || offlinePage()))
-                  : caches.match("/employee").then((e) => e || caches.match("/").then((r) => r || offlinePage())))
-          )
-        )
+        } catch (err) {
+          console.error("[sw] nav fetch failed:", url.pathname, String(err && err.message ? err.message : err));
+          try {
+            const hit = await caches.match(req);
+            if (hit) return hit;
+            return (await caches.match(shellFor(url.pathname))) || (await caches.match("/")) || offlinePage();
+          } catch (err2) {
+            console.error("[sw] nav fallback failed:", String(err2 && err2.message ? err2.message : err2));
+            return offlinePage();
+          }
+        }
+      })()
     );
     return;
   }
 
-  // Static assets & API reads: stale-while-revalidate.
+  // Static assets: stale-while-revalidate, never rejects.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
+    (async () => {
+      try {
+        const cached = await caches.match(req).catch(() => undefined);
+        try {
+          const res = await fetch(req);
           if (res.ok) {
-            const copy = res.clone();
-            caches
-              .open(CACHE)
-              .then((cache) => cache.put(req, copy))
-              .catch(() => {});
+            try {
+              const cache = await caches.open(CACHE);
+              await cache.put(req, res.clone());
+            } catch (_) {}
           }
           return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+        } catch (err) {
+          if (cached) return cached;
+          // Documents get the offline shell; subresources rethrow as a clean
+          // network error (a wrong-MIME fallback would break parsing worse).
+          if (req.destination === "document") return offlinePage();
+          throw err;
+        }
+      } catch (err) {
+        console.error("[sw] asset fetch failed:", url.pathname, String(err && err.message ? err.message : err));
+        if (req.destination === "document") return offlinePage();
+        return new Response("", { status: 504, statusText: "Gateway Timeout" });
+      }
+    })()
   );
 });

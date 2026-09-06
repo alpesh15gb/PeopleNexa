@@ -343,7 +343,7 @@ export function EmployeesTable({
         title={editing ? `Edit ${editing.firstName}` : "Add employee"}
         description={editing ? `Employee ID: ${editing.employeeNumber}` : "They'll get a default password to sign in."}
       >
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form key={editing ? editing.id : "create"} onSubmit={onSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="First name">
               <Input name="firstName" required defaultValue={editing?.firstName ?? ""} />
