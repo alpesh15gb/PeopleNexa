@@ -320,6 +320,7 @@ export async function backfillDays(
   onProgress?: (day: number, date: string, records: number, ingested: number) => void
 ): Promise<{ ok: boolean; days: number; records: number; ingested: number; devices: number; skipped: number; message?: string }> {
   const summary = { ok: false, days: 0, records: 0, ingested: 0, devices: 0, skipped: 0, message: "" as string | undefined };
+  const touched = new Set<string>();
   try {
     const client = await createClient(profile);
 
@@ -387,12 +388,14 @@ export async function backfillDays(
         if (res.action === "in" || res.action === "out") {
           summary.ingested++;
           dayIngested++;
+          touched.add(device.id);
         }
       }
       summary.days++;
       onProgress?.(d, dateStr, records.length, dayIngested);
     }
 
+    await touchDevices(touched);
     summary.ok = true;
     return summary;
   } catch (err) {
@@ -401,7 +404,21 @@ export async function backfillDays(
   }
 }
 
-// ── Operations ─────────────────────────────────────────────────────────────
+// ── Operations ────────────────────────────────────────────────────────────
+
+/**
+ * Mark devices as seen after a pull/backfill actually ingested their punches.
+ * eBioserver-fed machines never hit /iclock directly, so without this their
+ * health cards sit at "Never"/STALE forever despite healthy data flow.
+ */
+async function touchDevices(ids: Set<string>): Promise<void> {
+  if (ids.size === 0) return;
+  try {
+    await prisma.device.updateMany({ where: { id: { in: [...ids] } }, data: { lastSeenAt: new Date() } });
+  } catch (err) {
+    console.warn("[eBioserver] touchDevices failed:", err instanceof Error ? err.message : err);
+  }
+}
 
 export async function testConnection(profile: EbioserverProfile): Promise<{ ok: boolean; message: string }> {
   if (!profile.url) return { ok: false, message: "Enter the eBioserver Web Service URL first." };
@@ -432,6 +449,7 @@ export async function pullTenant(
   profile: EbioserverProfile
 ): Promise<{ ok: boolean; pulled: number; ingested: number; devices: number; skipped: number; message?: string }> {
   const summary = { ok: false, pulled: 0, ingested: 0, devices: 0, skipped: 0, message: "" as string | undefined };
+  const touched = new Set<string>();
   try {
     const client = await createClient(profile);
 
@@ -537,6 +555,7 @@ export async function pullTenant(
       }
     }
 
+    await touchDevices(touched);
     summary.ok = true;
     return summary;
 
@@ -565,6 +584,7 @@ export async function pullTenant(
       const res = await handleDevicePunch(device, raw);
       if (res.action === "in" || res.action === "out") {
         summary.ingested++;
+        touched.add(device.id);
         return true;
       }
       return false;
