@@ -195,8 +195,18 @@ body {
   background: transparent;
 }
 
-/* ── Theme-aware edge & tint utilities ─────────────────────────────────── */
+/* Native <option> popups ignore inherited theme colors in dark mode
+   (white-on-white text). Pin explicit pairs per theme. */
+select option {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+.dark select option {
+  background-color: #1a2230;
+  color: #f4f6fb;
+}
 
+/* ── Theme-aware edge & tint utilities ─────────────────────────────────── */
 .border-edge {
   border-color: var(--border);
 }
