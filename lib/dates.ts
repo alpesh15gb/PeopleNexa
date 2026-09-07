@@ -1,6 +1,8 @@
 // Local-timezone date helpers. The whole app reasons in the server's local time
 // zone (all times stored as UTC instants but interpreted locally).
 
+import { istStartOfDay } from "./ist";
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 export function toDateKey(d: Date): string {
@@ -108,4 +110,20 @@ export function relativeDay(d: Date): string {
   if (diff === -1) return "Yesterday";
   if (diff === 1) return "Tomorrow";
   return toDateKey(d);
+}
+
+/**
+ * IST day window for a calendar key (YYYY-MM-DD).
+ * Canonical day-definition: [start, end) where start = IST midnight
+ * and end = start + 24h (exclusive upper bound for range queries).
+ */
+export function dayRangeIST(dateKey: string): { start: Date; end: Date } {
+  // Probe at noon UTC so the instant always falls inside the requested IST
+  // day regardless of the server host timezone (UTC midnight = 05:30 IST
+  // same day, noon UTC = 17:30 IST same day).
+  const probe = new Date(`${dateKey}T12:00:00Z`);
+  if (Number.isNaN(probe.getTime())) return { start: new Date(NaN), end: new Date(NaN) };
+  const start = istStartOfDay(probe);
+  const end = new Date(start.getTime() + 86400000);
+  return { start, end };
 }

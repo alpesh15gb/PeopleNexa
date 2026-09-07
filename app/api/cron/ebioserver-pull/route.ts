@@ -37,11 +37,12 @@ export async function POST(req: NextRequest) {
 
   const tenants = await prisma.tenant.findMany({
     where: { status: "active" },
-    select: { id: true, slug: true, config: true },
+    select: { id: true, slug: true, config: true, subscriptionExpiry: true },
   });
 
   const results: Array<Record<string, unknown>> = [];
   for (const tenant of tenants) {
+    if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) continue;
     const profile = getEbioserverConfig(tenant);
     if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) continue;
 

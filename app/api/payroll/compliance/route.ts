@@ -10,7 +10,7 @@ const csv = (rows: (string | number)[][]) =>
 
 /** GET /api/payroll/compliance?type=ecr|form16|form24q&month=2026-08 */
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -25,19 +25,22 @@ export async function GET(req: NextRequest) {
   if (type === "ecr") {
     const payslips = await prisma.payslip.findMany({
       where: { tenantId: session.tenantId, month },
-      include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, joiningDate: true } } },
+      include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, pan: true, joiningDate: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
     const rows: (string | number)[][] = [
       ["S.No", "Member ID", "Member Name", "UAN", "Date of Joining", "EPF Wages (Basic)", "EE EPF (12%)", "ER EPF (3.67%)", "ER EPS (8.33%)"],
       ...payslips.map((p, i) => {
-        // New payslips persist the computed basic wage. For legacy rows created
-        // before that field existed, derive the best available compatible base.
-        const wages = p.basicSalary > 0 ? p.basicSalary : p.pfEmployee > 0 ? p.pfEmployee / 0.12 : p.baseSalary * 0.5;
-        // EPS is capped at 8.33% of 15000 = 1250. ER PF = 12% - EPS.
-        const epsBase = Math.min(wages, 15000);
-        const eps = epsBase * 0.0833;
-        const erPpf = wages * 0.12 - eps;
+        // EPF wages are capped at the 15000 statutory ceiling. Prefer the
+        // persisted basic wage; fall back to the legacy derivation for old rows.
+        const rawBasic = p.basicSalary > 0 ? p.basicSalary : p.pfEmployee > 0 ? p.pfEmployee / 0.12 : p.baseSalary * 0.5;
+        const wages = Math.min(Math.max(rawBasic, 0), 15000);
+        // EPS = 8.33% of capped wages, capped at 1250. Prefer persisted PF
+        // splits; ER EPF = persisted employer share minus EPS.
+        const eps = Math.min(1250, Math.round(wages * 0.0833));
+        const ee = p.pfEmployee > 0 ? p.pfEmployee : Math.round(wages * 0.12 * 100) / 100;
+        const erTotal = p.pfEmployer > 0 ? p.pfEmployer : Math.round(wages * 0.12 * 100) / 100;
+        const erPpf = Math.max(0, Math.round((erTotal - eps) * 100) / 100);
         return [
           i + 1,
           p.employee.employeeNumber,
@@ -45,18 +48,22 @@ export async function GET(req: NextRequest) {
           p.employee.uan ?? "",
           p.employee.joiningDate ? p.employee.joiningDate.toISOString().slice(0, 10) : "",
           wages.toFixed(2),
-          (wages * 0.12).toFixed(2),
+          Number(ee).toFixed(2),
           erPpf.toFixed(2),
           eps.toFixed(2),
         ];
       }),
     ];
-    const res = new NextResponse(csv(rows), {
+    const missing = payslips.filter((p) => !p.employee.uan || !p.employee.pan).length;
+    let body = csv(rows);
+    if (missing > 0) body = `# WARNING: ${missing} row(s) missing UAN/PAN\n` + body;
+    const res = new NextResponse(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="pf-ecr-${month}.csv"`,
       },
     });
+    if (missing > 0) res.headers.set("X-Compliance-Warnings", String(missing));
     return res;
   }
 
@@ -89,12 +96,17 @@ export async function GET(req: NextRequest) {
         net.toFixed(2),
       ]),
     ];
-    return new NextResponse(csv(rows), {
+    const missingPan = [...byEmp.values()].filter(({ emp }) => !emp.pan).length;
+    let form16Body = csv(rows);
+    if (missingPan > 0) form16Body = `# WARNING: ${missingPan} row(s) missing UAN/PAN\n` + form16Body;
+    const form16Res = new NextResponse(form16Body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="form16-${fy}.csv"`,
       },
     });
+    if (missingPan > 0) form16Res.headers.set("X-Compliance-Warnings", String(missingPan));
+    return form16Res;
   }
 
   if (type === "form24q") {
@@ -121,12 +133,17 @@ export async function GET(req: NextRequest) {
         tds.toFixed(2),
       ]),
     ];
-    return new NextResponse(csv(rows), {
+    const missingPan24q = [...byEmp.values()].filter(({ emp }) => !emp.pan).length;
+    let form24qBody = csv(rows);
+    if (missingPan24q > 0) form24qBody = `# WARNING: ${missingPan24q} row(s) missing UAN/PAN\n` + form24qBody;
+    const form24qRes = new NextResponse(form24qBody, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="form24q-${month}.csv"`,
       },
     });
+    if (missingPan24q > 0) form24qRes.headers.set("X-Compliance-Warnings", String(missingPan24q));
+    return form24qRes;
   }
 
   return NextResponse.json({ error: "Unknown export type." }, { status: 400 });

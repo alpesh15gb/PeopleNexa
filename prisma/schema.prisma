@@ -553,6 +553,10 @@ model Payslip {
   tds            Float @default(0)
   lateFines      Float @default(0)
   loanDeduction  Float @default(0)
+  absentDeduction Float @default(0)
+  workingDays    Int   @default(0)
+  divisorUsed    Float @default(26)
+  onLeaveDays    Float @default(0)
   deductions     Float // total deducted (incl. statutory + fines + loans)
 
   // Manual adjustments (arrears / bonus / one-off deductions).

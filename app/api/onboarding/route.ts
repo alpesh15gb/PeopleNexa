@@ -34,38 +34,51 @@ const DEFAULT_TASKS = [
 
 /** POST — create onboarding tasks (admin only). */
 export async function POST(req: NextRequest) {
-  const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  try {
+    const session = await requireActiveSession().catch(() => null);
+    if (!session || session.role !== "admin") {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    const body = await req.json().catch(() => ({}));
+    const employeeId = String(body.employeeId ?? "");
+    const names: string[] = Array.isArray(body.names)
+      ? body.names.map((s: unknown) => String(s ?? "").trim()).filter(Boolean)
+      : typeof body.names === "string"
+        ? body.names.split("\n").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+    if (!employeeId) return NextResponse.json({ error: "Select an employee." }, { status: 400 });
+    if (names.length === 0) return NextResponse.json({ error: "Add at least one task." }, { status: 400 });
+    if (names.length > 50) return NextResponse.json({ error: "Maximum 50 tasks at once." }, { status: 400 });
+    if (names.some((n) => n.length > 200))
+      return NextResponse.json({ error: "Each task must be 200 characters or less." }, { status: 400 });
+
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, tenantId: session.tenantId },
+      select: { id: true, status: true },
+    });
+    if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+    if (employee.status !== "active")
+      return NextResponse.json({ error: "Cannot assign tasks to an inactive employee." }, { status: 400 });
+
+    let dueBy: Date | null = null;
+    if (body.dueBy) {
+      dueBy = fromDateKey(String(body.dueBy));
+      if (Number.isNaN(dueBy.getTime())) return NextResponse.json({ error: "Invalid due date." }, { status: 400 });
+    }
+    const created = await prisma.onboardingTask.createMany({
+      data: names.map((name) => ({
+        tenantId: session.tenantId,
+        employeeId,
+        name,
+        status: "pending",
+        dueBy,
+        createdBy: session.sub,
+      })),
+    });
+    return NextResponse.json({ success: true, created: created.count });
+  } catch {
+    return NextResponse.json({ error: "Failed to create tasks." }, { status: 500 });
   }
-  const body = await req.json().catch(() => ({}));
-  const employeeId = String(body.employeeId ?? "");
-  const names: string[] = Array.isArray(body.names)
-    ? body.names.map(String).filter(Boolean)
-    : typeof body.names === "string"
-      ? body.names.split("\n").map((s: string) => s.trim()).filter(Boolean)
-      : [];
-  if (!employeeId) return NextResponse.json({ error: "Select an employee." }, { status: 400 });
-  if (names.length === 0) return NextResponse.json({ error: "Add at least one task." }, { status: 400 });
-
-  const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, tenantId: session.tenantId },
-    select: { id: true },
-  });
-  if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
-
-  const dueBy = body.dueBy ? fromDateKey(String(body.dueBy)) : null;
-  const created = await prisma.onboardingTask.createMany({
-    data: names.map((name) => ({
-      tenantId: session.tenantId,
-      employeeId,
-      name,
-      status: "pending",
-      dueBy,
-      createdBy: session.sub,
-    })),
-  });
-  return NextResponse.json({ success: true, created: created.count });
 }
 
 /** Template helper for the UI. */

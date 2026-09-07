@@ -104,10 +104,10 @@ export function RegularizationPanel({ corrections }: { corrections: Correction[]
                     onChange={(e) => setReviewNote((v) => ({ ...v, [c.id]: e.target.value }))}
                     className="h-9 w-56"
                   />
-                  <Button size="sm" variant="success" loading={busy === c.id} onClick={() => review(c.id, "approved")}>
+                  <Button size="sm" variant="success" loading={busy === c.id} disabled={busy !== null} onClick={() => review(c.id, "approved")}>
                     <Check className="h-3.5 w-3.5" /> Approve
                   </Button>
-                  <Button size="sm" variant="danger" loading={busy === c.id} onClick={() => review(c.id, "rejected")}>
+                  <Button size="sm" variant="danger" loading={busy === c.id} disabled={busy !== null} onClick={() => review(c.id, "rejected")}>
                     <X className="h-3.5 w-3.5" /> Reject
                   </Button>
                 </div>

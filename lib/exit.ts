@@ -34,13 +34,16 @@ export function computeFandF(input: {
 }): FandFSummary {
   // grossMonthly already contains basic+HRA+allowances — do NOT add PF on top.
   const monthly = Math.max(0, input.grossMonthly);
-  const perDay = round2(monthly / 30);
 
   // Days worked in the final month: 1st of the LWD month → LWD inclusive.
   const lwd = startOfDay(input.lastWorkingDay);
   const monthStart = new Date(lwd.getFullYear(), lwd.getMonth(), 1);
+  // Per-day rate uses the actual calendar days in the LWD month (28–31), not a fixed 30.
+  const daysInMonth = new Date(lwd.getFullYear(), lwd.getMonth() + 1, 0).getDate();
+  const perDay = round2(monthly / daysInMonth);
+
   const earnedDays = daysBetween(monthStart, lwd);
-  // Cap earned salary at one full month (earnedDays/30 max 1).
+  // Cap earned salary at one full month.
   const earnedSalary = Math.min(round2(perDay * earnedDays), monthly);
 
   // daysBetween is inclusive, so same-day resign+LWD = 1. Notice served should be 0 in that case.

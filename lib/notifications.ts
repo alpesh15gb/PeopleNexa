@@ -5,7 +5,7 @@ type NotifType = "info" | "success" | "warning" | "danger";
 /** Notify all admins of a tenant. */
 export async function notifyAdmins(tenantId: string, type: NotifType, title: string, message: string) {
   const admins = await prisma.employee.findMany({
-    where: { tenantId, role: "admin" },
+    where: { tenantId, role: "admin", status: "active" },
     select: { id: true },
   });
   if (admins.length === 0) return;

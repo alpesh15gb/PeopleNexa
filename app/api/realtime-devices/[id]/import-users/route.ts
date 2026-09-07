@@ -26,28 +26,36 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   ].slice(0, 500) as string[];
   if (codes.length === 0) return NextResponse.json({ error: "codes[] is required" }, { status: 400 });
 
+  // Per-row identities need individual random credentials, so a single
+  // createMany is not trivially convertible — keep the loop with per-row
+  // try/catch so one bad code never aborts the whole import.
   let created = 0;
   let skipped = 0;
+  let failed = 0;
   for (const code of codes) {
-    const existing = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: code } });
-    if (existing) {
-      skipped++;
-      continue;
+    try {
+      const existing = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: code } });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      await prisma.employee.create({
+        data: {
+          tenantId: session.tenantId,
+          employeeNumber: code,
+          firstName: code,
+          lastName: "",
+          email: `${code.toLowerCase().replace(/[^a-z0-9]/g, "")}@device.local`,
+          password: await hashPassword(crypto.randomBytes(32).toString("hex")),
+          role: "employee",
+          status: "inactive",
+        },
+      });
+      created++;
+    } catch {
+      failed++;
     }
-    await prisma.employee.create({
-      data: {
-        tenantId: session.tenantId,
-        employeeNumber: code,
-        firstName: code,
-        lastName: "",
-        email: `${code.toLowerCase().replace(/[^a-z0-9]/g, "")}@device.local`,
-        password: await hashPassword(crypto.randomBytes(32).toString("hex")),
-        role: "employee",
-        status: "inactive",
-      },
-    });
-    created++;
   }
-  const reprocessed = await reprocessFailedRealtimeLogs(session.tenantId);
-  return NextResponse.json({ success: true, created, skipped, reprocessed });
+  const reprocessed = (await reprocessFailedRealtimeLogs(session.tenantId)).accepted;
+  return NextResponse.json({ success: true, created, skipped, failed, reprocessed });
 }

@@ -359,7 +359,7 @@ export function EmployeesTable({
             </Field>
             {!editing && (
               <Field label="Password" hint="Employee uses this to sign in">
-                <Input name="password" type="password" required minLength={6} placeholder="Min 6 characters" />
+                <Input name="password" type="password" required minLength={12} placeholder="Min 12 characters" />
               </Field>
             )}
             <Field label="Position">

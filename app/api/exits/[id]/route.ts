@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const [leaveTypes, leaveRequests] = await Promise.all([
       prisma.leaveType.findMany({ where: { tenantId: session.tenantId, encashable: true } }),
       prisma.leaveRequest.findMany({
-        where: { tenantId: session.tenantId, employeeId: request.employee.id, status: { in: ["approved", "pending"] } },
+        where: { tenantId: session.tenantId, employeeId: request.employee.id, status: "approved" },
         select: { leaveTypeId: true, days: true },
       }),
     ]);

@@ -51,6 +51,12 @@ export async function POST(req: NextRequest) {
         { status: 403 }
       );
     }
+    if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) {
+      return NextResponse.json(
+        { success: false, error: "License expired for this workspace. Contact support to renew." },
+        { status: 403 }
+      );
+    }
 
     const employee = await prisma.employee.findFirst({
       where: { tenantId: tenant.id, email },

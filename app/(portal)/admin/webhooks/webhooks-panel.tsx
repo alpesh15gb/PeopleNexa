@@ -14,7 +14,8 @@ interface Endpoint {
   name: string;
   url: string;
   events: string;
-  secret: string;
+  secret?: string;
+  hasSecret?: boolean;
   active: boolean;
   createdAt: Date;
 }
@@ -36,6 +37,9 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Copy-once flow: the API omits secrets on list, so the full secret is only
+  // available in local state right after creation.
+  const [justCreated, setJustCreated] = useState<{ id: string; secret: string } | null>(null);
 
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,6 +57,9 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
         return;
       }
       toast("success", "Webhook created — secret generated");
+      if (data.endpoint?.id && data.endpoint?.secret) {
+        setJustCreated({ id: data.endpoint.id, secret: data.endpoint.secret });
+      }
       setOpen(false);
       router.refresh();
     } catch {
@@ -115,9 +122,9 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
     }
   }
 
-  function copySecret(ep: Endpoint) {
-    navigator.clipboard.writeText(ep.secret).then(() => {
-      setCopied(ep.id);
+  function copySecret(secret: string, id: string) {
+    navigator.clipboard.writeText(secret).then(() => {
+      setCopied(id);
       toast("success", "Secret copied");
       setTimeout(() => setCopied(null), 1500);
     });
@@ -127,7 +134,8 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">
-          {endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"} · payloads signed with HMAC-SHA256
+          {endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"} · payloads signed with HMAC-SHA256 ·
+          secrets shown once at creation
         </p>
         <Button size="sm" onClick={() => setOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> New endpoint
@@ -165,14 +173,23 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
                   ))}
                 </div>
               </div>
-              <button
-                onClick={() => copySecret(ep)}
-                className="flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground hover:bg-tint"
-                title="Copy signing secret"
-              >
-                {copied === ep.id ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                {ep.secret.slice(0, 10)}…
-              </button>
+              {justCreated?.id === ep.id ? (
+                <button
+                  onClick={() => copySecret(justCreated.secret, ep.id)}
+                  className="flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground hover:bg-tint"
+                  title="Copy signing secret (shown once)"
+                >
+                  {copied === ep.id ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  {justCreated.secret.slice(0, 10)}…
+                </button>
+              ) : (
+                <span
+                  className="flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground/60"
+                  title="Secret is stored securely and never shown again"
+                >
+                  ••••
+                </span>
+              )}
               <div className="flex items-center gap-1.5">
                 <Button size="sm" variant="outline" loading={busy === ep.id} onClick={() => test(ep)}>
                   <Zap className="h-3.5 w-3.5" /> Test

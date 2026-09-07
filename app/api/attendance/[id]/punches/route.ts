@@ -25,6 +25,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!punchTime || isNaN(punchTime.getTime())) {
     return NextResponse.json({ error: "Invalid time. Use YYYY-MM-DD HH:mm:ss (IST)." }, { status: 400 });
   }
+  if (punchTime.getTime() > Date.now()) {
+    return NextResponse.json({ error: "Punch time cannot be in the future." }, { status: 400 });
+  }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employee = await prisma.employee.findUnique({
@@ -84,6 +87,17 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     where: { id: punchId, employeeId: attendance.employeeId, tenantId: session.tenantId },
   });
   if (!punch) return NextResponse.json({ error: "Punch not found" }, { status: 404 });
+
+  // The punch must belong to this attendance day's window — otherwise the
+  // :id in the URL doesn't own it (same check POST enforces on creation).
+  const ownerEmployee = await prisma.employee.findUnique({
+    where: { id: attendance.employeeId },
+    select: { id: true, shift: true },
+  });
+  const { start: ownerStart, end: ownerEnd } = shiftWindow(attendance.date, ownerEmployee?.shift ?? null);
+  if (punch.punchTime < ownerStart || punch.punchTime >= ownerEnd) {
+    return NextResponse.json({ error: "Punch does not belong to this day." }, { status: 404 });
+  }
 
   await prisma.punch.delete({ where: { id: punchId } });
   if (attendance.finalized) {

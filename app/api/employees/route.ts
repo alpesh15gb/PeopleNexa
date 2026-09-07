@@ -28,6 +28,40 @@ const select = {
   shift: { select: { id: true, name: true, startTime: true, endTime: true } },
 } as const;
 
+const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
+const PHONE_RE = /^\+?[0-9]{7,15}$/;
+const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const UAN_RE = /^\d{12}$/;
+const ACCOUNT_RE = /^[0-9]{6,20}$/;
+const MIN_JOINING_MS = Date.parse("1990-01-01T00:00:00Z");
+
+function joiningDateRangeError(d: Date): string | null {
+  if (d.getTime() < MIN_JOINING_MS) return "Joining date cannot be before 1990-01-01.";
+  if (d.getTime() > Date.now() + 90 * 24 * 60 * 60 * 1000) {
+    return "Joining date cannot be more than 90 days in the future.";
+  }
+  return null;
+}
+
+function salaryStructureError(v: unknown): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "object" || Array.isArray(v)) {
+    return "Salary structure must be an object of non-negative numbers.";
+  }
+  for (const n of Object.values(v as Record<string, unknown>)) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+      return "Salary structure must contain only non-negative numbers.";
+    }
+  }
+  return null;
+}
+
+function p2002Targets(err: unknown): string[] {
+  const t = (err as { meta?: { target?: unknown } })?.meta?.target;
+  return Array.isArray(t) ? t.map(String) : [];
+}
+
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
@@ -49,8 +83,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const email = String(body.email ?? "").toLowerCase().trim();
-    if (!body.firstName || !email || !body.password) {
+    const firstName = body.firstName != null ? String(body.firstName).trim() : "";
+    const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
+    const lastName = lastNameRaw.trim();
+    if (!firstName || !email || !body.password) {
       return NextResponse.json({ error: "First name, email and password are required." }, { status: 400 });
+    }
+    if (lastNameRaw !== "" && !lastName) {
+      return NextResponse.json({ error: "Last name cannot be empty." }, { status: 400 });
+    }
+    if (firstName.length > 100 || lastName.length > 100) {
+      return NextResponse.json({ error: "First name and last name must be at most 100 characters." }, { status: 400 });
+    }
+    if (body.position !== undefined && body.position !== null && body.position !== "" && String(body.position).length > 100) {
+      return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
     }
     if (String(body.password).length < 12) {
       return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
@@ -80,8 +126,40 @@ export async function POST(req: NextRequest) {
     if (body.joiningDate) {
       const d = new Date(body.joiningDate);
       if (Number.isNaN(d.getTime())) return NextResponse.json({ error: "Joining date is invalid." }, { status: 400 });
+      const rangeErr = joiningDateRangeError(d);
+      if (rangeErr) return NextResponse.json({ error: rangeErr }, { status: 400 });
       joiningDate = d;
     }
+
+    const payMode = body.payMode != null && String(body.payMode).trim() !== "" ? String(body.payMode).trim() : "monthly";
+    if (!PAY_MODES.has(payMode)) {
+      return NextResponse.json({ error: "Pay mode must be one of monthly, daily, weekly, hourly, work_basis." }, { status: 400 });
+    }
+    let phone: string | null = null;
+    if (body.phone != null && String(body.phone).trim() !== "") {
+      phone = String(body.phone).trim();
+      if (!PHONE_RE.test(phone.replace(/[\s-]/g, ""))) {
+        return NextResponse.json({ error: "Enter a valid phone number." }, { status: 400 });
+      }
+    }
+    const pan = body.pan != null && String(body.pan).trim() !== "" ? String(body.pan).trim().toUpperCase() : null;
+    if (pan != null && !PAN_RE.test(pan)) {
+      return NextResponse.json({ error: "Enter a valid PAN (e.g. ABCDE1234F)." }, { status: 400 });
+    }
+    const ifscCode = body.ifscCode != null && String(body.ifscCode).trim() !== "" ? String(body.ifscCode).trim().toUpperCase() : null;
+    if (ifscCode != null && !IFSC_RE.test(ifscCode)) {
+      return NextResponse.json({ error: "Enter a valid IFSC code (e.g. HDFC0001234)." }, { status: 400 });
+    }
+    const uan = body.uan != null && String(body.uan).trim() !== "" ? String(body.uan).trim() : null;
+    if (uan != null && !UAN_RE.test(uan)) {
+      return NextResponse.json({ error: "UAN must be a 12-digit number." }, { status: 400 });
+    }
+    const accountNumber = body.accountNumber != null && String(body.accountNumber).trim() !== "" ? String(body.accountNumber).trim() : null;
+    if (accountNumber != null && !ACCOUNT_RE.test(accountNumber)) {
+      return NextResponse.json({ error: "Account number must be 6–20 digits." }, { status: 400 });
+    }
+    const ssErr = salaryStructureError(body.salaryStructure);
+    if (ssErr) return NextResponse.json({ error: ssErr }, { status: 400 });
 
     // Cross-tenant FK guard: branch/department/shift/manager must belong to this tenant.
     const [branch, department, shift, manager] = await Promise.all([
@@ -112,10 +190,10 @@ export async function POST(req: NextRequest) {
         data: {
           tenantId: session.tenantId,
           employeeNumber: `EMP-${String(count + 1).padStart(3, "0")}`,
-          firstName: body.firstName,
-          lastName: body.lastName ?? "",
+          firstName,
+          lastName,
           email,
-          phone: body.phone ?? null,
+          phone,
           password: await hashPassword(String(body.password)),
           role: "employee",
           position: body.position ?? null,
@@ -125,11 +203,11 @@ export async function POST(req: NextRequest) {
           departmentId: body.departmentId || null,
           shiftId: body.shiftId || null,
           bankName: body.bankName || null,
-          accountNumber: body.accountNumber || null,
-          ifscCode: body.ifscCode || null,
-          pan: body.pan || null,
-          uan: body.uan || null,
-          payMode: body.payMode || "monthly",
+          accountNumber,
+          ifscCode,
+          pan,
+          uan,
+          payMode,
           workBasisRate,
           managerId: body.managerId || null,
           salaryStructure: body.salaryStructure || null,
@@ -139,6 +217,9 @@ export async function POST(req: NextRequest) {
     } catch (err: unknown) {
       // Concurrent creates can collide on EMP-NNN or exceed seats — surface 409 so the UI can retry.
       if (typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002") {
+        if (p2002Targets(err).includes("email")) {
+          return NextResponse.json({ error: "An employee with this email already exists." }, { status: 409 });
+        }
         return NextResponse.json({ error: "Employee number clash — please retry." }, { status: 409 });
       }
       throw err;

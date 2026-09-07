@@ -5,7 +5,7 @@ import { useTransition } from "react";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Download, RotateCcw } from "lucide-react";
 
 const TYPES = [
   { key: "daily", label: "Daily summary" },
@@ -35,6 +35,7 @@ export function ReportControls({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
+  const departmentId = searchParams.get("departmentId") ?? "";
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -43,6 +44,10 @@ export function ReportControls({
       else params.delete(k);
     }
     startTransition(() => router.push(`/admin/reports?${params.toString()}`));
+  }
+
+  function reset() {
+    startTransition(() => router.push("/admin/reports"));
   }
 
   function exportCsv() {
@@ -83,15 +88,15 @@ export function ReportControls({
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">From</label>
-          <Input type="date" defaultValue={from} onChange={(e) => update({ from: e.target.value })} className="w-40" />
+          <Input key={`from-${from}`} type="date" defaultValue={from} onChange={(e) => update({ from: e.target.value })} className="w-40" />
         </div>
         <div>
           <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">To</label>
-          <Input type="date" defaultValue={to} onChange={(e) => update({ to: e.target.value })} className="w-40" />
+          <Input key={`to-${to}`} type="date" defaultValue={to} onChange={(e) => update({ to: e.target.value })} className="w-40" />
         </div>
         <div>
           <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Department</label>
-          <Select defaultValue={searchParams.get("departmentId") ?? ""} onChange={(e) => update({ departmentId: e.target.value })} className="w-44">
+          <Select key={`dept-${departmentId}`} defaultValue={departmentId} onChange={(e) => update({ departmentId: e.target.value })} className="w-44">
             <option value="">All departments</option>
             {departments.map((d) => (
               <option key={d.id} value={d.id}>{d.name}</option>
@@ -100,6 +105,9 @@ export function ReportControls({
         </div>
         <Button variant="outline" onClick={exportCsv} disabled={pending}>
           <Download className="h-4 w-4" /> Export CSV
+        </Button>
+        <Button variant="ghost" onClick={reset} disabled={pending}>
+          <RotateCcw className="h-4 w-4" /> Reset
         </Button>
         {pending && <span className="text-[12px] text-muted-foreground animate-pulse-soft">Updating…</span>}
       </div>

@@ -67,7 +67,9 @@ export async function handleDevicePunch(device: Device, punch: RawPunch): Promis
     },
   });
   if (near) {
-    await markProcessed(log.id, "duplicate punch within 60s");
+    // Clean dedupe marker — a near-duplicate is expected device behaviour, not
+    // an error, so leave error null (no pollution of the retry queue).
+    await markProcessed(log.id);
     return { accepted: true, action: "duplicate", logId: log.id };
   }
 
@@ -107,54 +109,78 @@ function markProcessed(logId: string, error?: string) {
  * Re-attempt logs that were flagged because no employee matched at ingest time
  * (e.g. before an employee import). Idempotent — a log that still has no
  * employee stays flagged; one that now matches produces a Punch and clears.
+ *
+ * Retry selection covers both unprocessed rows AND errored rows, bounded to
+ * the last 7 days so the queue cannot grow without bound. Clean duplicates
+ * are marked processed:true error:null (no error pollution). Returns honest
+ * counters instead of a single inflated number.
  */
-export async function reprocessFailedLogs(tenantId: string, limit = 2000): Promise<number> {
+export async function reprocessFailedLogs(
+  tenantId: string,
+  limit = 2000
+): Promise<{ accepted: number; duplicate: number; failed: number }> {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
   const logs = await prisma.deviceLog.findMany({
-    where: { tenantId, processed: true, error: { not: null } },
+    where: {
+      tenantId,
+      createdAt: { gte: weekAgo },
+      OR: [{ processed: false }, { error: { not: null } }],
+    },
     select: { id: true, deviceId: true, userId: true, punchTime: true, rawData: true },
     take: limit,
   });
 
-  let reprocessed = 0;
+  const counters = { accepted: 0, duplicate: 0, failed: 0 };
   for (const log of logs) {
-    if (!log.userId || !log.punchTime) continue;
-    const employee = await prisma.employee.findFirst({
-      where: { tenantId, employeeNumber: log.userId },
-      select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-    });
-    if (!employee) continue; // still unmapped — stays flagged
+    try {
+      if (!log.userId || !log.punchTime) {
+        counters.failed++;
+        continue;
+      }
+      const employee = await prisma.employee.findFirst({
+        where: { tenantId, employeeNumber: log.userId },
+        select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
+      });
+      if (!employee) {
+        counters.failed++;
+        continue; // still unmapped — stays flagged
+      }
 
-    const near = await prisma.punch.findFirst({
-      where: {
-        employeeId: employee.id,
-        punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
-      },
-    });
-    if (near) {
-      await markProcessed(log.id); // punch exists — just clear the flag
-      continue;
+      const near = await prisma.punch.findFirst({
+        where: {
+          employeeId: employee.id,
+          punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
+        },
+      });
+      if (near) {
+        await markProcessed(log.id); // punch exists — just clear the flag, no error pollution
+        counters.duplicate++;
+        continue;
+      }
+
+      await prisma.punch.create({
+        data: {
+          tenantId,
+          employeeId: employee.id,
+          deviceId: log.deviceId,
+          source: "device",
+          punchTime: log.punchTime,
+          inOutHint: "unknown",
+        },
+      });
+
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      await reconcileEmployeeDay(
+        tenant ?? { id: tenantId, config: null },
+        { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
+        punchDayForShift(log.punchTime, employee.shift),
+        { finalize: false }
+      );
+      await markProcessed(log.id);
+      counters.accepted++;
+    } catch {
+      counters.failed++;
     }
-
-    await prisma.punch.create({
-      data: {
-        tenantId,
-        employeeId: employee.id,
-        deviceId: log.deviceId,
-        source: "device",
-        punchTime: log.punchTime,
-        inOutHint: "unknown",
-      },
-    });
-
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    await reconcileEmployeeDay(
-      tenant ?? { id: tenantId, config: null },
-      { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-      punchDayForShift(log.punchTime, employee.shift),
-      { finalize: false }
-    );
-    await markProcessed(log.id);
-    reprocessed++;
   }
-  return reprocessed;
+  return counters;
 }

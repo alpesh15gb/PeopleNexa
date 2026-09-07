@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale } from "lucide-react";
+import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -44,6 +44,8 @@ interface Payslip {
   tds: number;
   lateFines: number;
   loanDeduction: number;
+  absentDeduction?: number;
+  gratuity?: number;
   deductions: number;
   netSalary: number;
   status: string;
@@ -117,6 +119,7 @@ export function PayrollPanel({
   const [bulkVia, setBulkVia] = useState("bank");
   const [bulkRef, setBulkRef] = useState("");
   const [markExportedOpen, setMarkExportedOpen] = useState(false);
+  const [regenTarget, setRegenTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
 
   const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
   const draftSlips = rows.filter((r) => r.payslip && r.payslip.status !== "paid");
@@ -175,6 +178,25 @@ export function PayrollPanel({
     if (ok) {
       setPayTarget(null);
       setPayRef("");
+    }
+  }
+
+  async function confirmRegenerate() {
+    if (!regenTarget) return;
+    const id = regenTarget.payslip.id;
+    setBusy(`regen-${id}`);
+    try {
+      const res = await fetch(`/api/payroll/${id}/regenerate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to regenerate payslip");
+        return;
+      }
+      toast("success", `Payslip regenerated · net ${formatMoney(data.payslip?.netSalary ?? regenTarget.payslip.netSalary)}`);
+      setRegenTarget(null);
+      router.refresh();
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -368,7 +390,7 @@ export function PayrollPanel({
             <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Tally
           </Button>
           {draftSlips.length > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)} disabled={generated === 0}>
+            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)} disabled={generated === 0 || busy !== null}>
               <Banknote aria-hidden="true" className="h-3.5 w-3.5" /> Mark month paid ({draftSlips.length})
             </Button>
           )}
@@ -457,11 +479,22 @@ export function PayrollPanel({
                     <Button size="sm" variant="outline" onClick={() => setViewing({ employee, payslip })}>
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Regenerate payslip"
+                      loading={busy === `regen-${payslip.id}`}
+                      disabled={busy !== null && busy !== `regen-${payslip.id}`}
+                      onClick={() => setRegenTarget({ employee, payslip })}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
                     {payslip.status === "draft" ? (
                       <Button
                         size="sm"
                         variant="success"
                         loading={busy === payslip.id}
+                        disabled={busy === "bulk-paid"}
                         onClick={() => {
                           setPayTarget({ employee, payslip });
                           setPayVia("bank");
@@ -505,6 +538,11 @@ export function PayrollPanel({
               ))}
             </Select>
           </Field>
+          {payTarget && (payTarget.payslip.absentDeduction ?? 0) > 0 && (
+            <p className="rounded-lg bg-tint px-3 py-2 text-[12px] text-muted-foreground">
+              Includes absent deduction of {formatMoney(payTarget.payslip.absentDeduction as number)} ({payTarget.payslip.absentDays} day{payTarget.payslip.absentDays === 1 ? "" : "s"} absent).
+            </p>
+          )}
           <Field label="Payment ref (optional)" hint="UTR / batch id / receipt no.">
             <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="e.g. UTIB1234567890" maxLength={120} />
           </Field>
@@ -554,6 +592,16 @@ export function PayrollPanel({
         onCancel={() => setMarkExportedOpen(false)}
         onConfirm={confirmMarkExportedPaid}
       />
+
+      <ConfirmDialog
+        open={regenTarget !== null}
+        title={regenTarget ? `Regenerate payslip · ${regenTarget.employee.firstName} ${regenTarget.employee.lastName}` : "Regenerate payslip"}
+        description={regenTarget ? `Recompute ${regenTarget.payslip.month} from current attendance, adjustments and settings? The slip keeps its paid/draft status.` : undefined}
+        confirmLabel="Regenerate"
+        busy={regenTarget ? busy === `regen-${regenTarget.payslip.id}` : false}
+        onCancel={() => setRegenTarget(null)}
+        onConfirm={confirmRegenerate}
+      />
     </>
   );
 }
@@ -583,6 +631,9 @@ function PayslipModal({
     { label: "TDS (income tax)", value: p.tds },
     { label: `Late fines (${p.lateDays} late)`, value: p.lateFines },
     { label: "Loan / advance", value: p.loanDeduction },
+    ...((p.absentDeduction ?? 0) > 0
+      ? [{ label: `Absent deduction (${p.absentDays} day${p.absentDays === 1 ? "" : "s"})`, value: p.absentDeduction as number }]
+      : []),
     ...(p.adjustments?.filter((a) => a.amount < 0).map((a) => ({ label: a.label, value: Math.abs(a.amount) })) ?? []),
   ].filter((d) => d.value > 0);
 
@@ -725,6 +776,7 @@ function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }
             <Field label="OT multiplier">
               <Input type="number" step="0.1" value={cfg.otMultiplier} onChange={(e) => set("otMultiplier", Number(e.target.value))} />
             </Field>
+            <ToggleRow label="Deduct for absent days" checked={Boolean(cfg.deductAbsentDays)} onChange={(v) => set("deductAbsentDays", v)} />
           </div>
 
           <div className="space-y-3 rounded-xl border border-edge bg-tint p-4">
@@ -795,6 +847,8 @@ function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClo
   const [list, setList] = useState<any[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ employeeId: "", type: "arrears", label: "", amount: "", note: "" });
+  const [deleteAdjTarget, setDeleteAdjTarget] = useState<{ id: string; label: string } | null>(null);
+  const [deletingAdj, setDeletingAdj] = useState(false);
 
   const load = () => {
     fetch(`/api/payroll/adjustments?month=${month}`)
@@ -831,17 +885,28 @@ function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClo
     }
   }
 
-  async function remove(id: string) {
-    const res = await fetch(`/api/payroll/adjustments/${id}`, { method: "DELETE" });
-    if (!res.ok) return toast("error", "Failed to delete");
-    toast("success", "Adjustment removed");
-    load();
-    router.refresh();
+  async function confirmRemoveAdjustment() {
+    if (!deleteAdjTarget) return;
+    setDeletingAdj(true);
+    try {
+      const res = await fetch(`/api/payroll/adjustments/${deleteAdjTarget.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast("error", "Failed to delete");
+        return;
+      }
+      toast("success", "Adjustment removed");
+      setDeleteAdjTarget(null);
+      load();
+      router.refresh();
+    } finally {
+      setDeletingAdj(false);
+    }
   }
 
   const total = (list ?? []).reduce((s: number, a: any) => s + a.amount, 0);
 
   return (
+    <>
     <Modal open={open} onClose={onClose} title={`Adjustments · ${month}`} size="md">
       <div className="space-y-5">
         <div className="grid grid-cols-2 gap-3">
@@ -899,7 +964,7 @@ function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClo
                   <span className={`font-mono text-[13px] ${a.amount >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                     {a.amount >= 0 ? "+" : "−"}{formatMoney(Math.abs(a.amount))}
                   </span>
-                  <button onClick={() => remove(a.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-rose-300">
+                  <button onClick={() => setDeleteAdjTarget({ id: a.id, label: a.label })} className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-rose-300" aria-label={`Delete adjustment ${a.label}`}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -909,5 +974,15 @@ function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClo
         </div>
       </div>
     </Modal>
+    <ConfirmDialog
+      open={deleteAdjTarget !== null}
+      title="Delete adjustment?"
+      description={deleteAdjTarget ? `“${deleteAdjTarget.label}” will be removed. Regenerate payslips to apply.` : undefined}
+      confirmLabel="Delete"
+      busy={deletingAdj}
+      onCancel={() => setDeleteAdjTarget(null)}
+      onConfirm={confirmRemoveAdjustment}
+    />
+    </>
   );
 }

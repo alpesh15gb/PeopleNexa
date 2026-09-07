@@ -24,7 +24,7 @@ export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
   allowancesPercent: 12,
   lateFinePerLateDay: 50,
   otMultiplier: 1.5,
-  deductAbsentDays: false,
+  deductAbsentDays: true,
   pf: { enabled: true, wageCeiling: 15000 },
   esic: { enabled: true, grossCeiling: 21000 },
   pt: { enabled: true, state: "Gujarat" },
@@ -39,12 +39,18 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     const n = typeof v === "number" && Number.isFinite(v) ? v : fallback;
     return Math.min(100, Math.max(0, n));
   };
+  // basicPercent is clamped to min 10 so basic (PF/OT wage base) never
+  // silently zeroes out on a misconfigured tenant.
+  const clampBasicPct = (v: unknown, fallback: number) => {
+    const n = typeof v === "number" && Number.isFinite(v) ? v : fallback;
+    return Math.min(100, Math.max(10, n));
+  };
   const nonNeg = (v: unknown, fallback: number) => {
     const n = typeof v === "number" && Number.isFinite(v) ? v : fallback;
     return Math.max(0, n);
   };
   return {
-    basicPercent: clampPct(p.basicPercent, DEFAULT_PAYROLL_CONFIG.basicPercent),
+    basicPercent: clampBasicPct(p.basicPercent, DEFAULT_PAYROLL_CONFIG.basicPercent),
     // allowancesPercent is kept for display only; splitSalary derives allowances = base - basic
     // so the two always sum to 100%. Negative / >100 values are clamped.
     allowancesPercent: clampPct(p.allowancesPercent, DEFAULT_PAYROLL_CONFIG.allowancesPercent),
@@ -138,16 +144,42 @@ export async function attendanceSummary(
 
   const rosterByDay = new Map(rosters.map((r) => [istDayStartKey(r.date), r.shift]));
 
+  // Paid-hours (worked/overtime) are tracked separately from the
+  // workingDays denominator: punched hours count even on Sundays,
+  // holidays and on-leave days, while workingDays stays as-is.
+  const accumulateHours = (key: string, rec: { punchInTime: Date | null; punchOutTime: Date | null } | undefined) => {
+    if (!rec?.punchInTime || !rec?.punchOutTime) return;
+    const spanMin = (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000;
+    if (!Number.isFinite(spanMin) || spanMin < 0) return;
+    summary.workedHours += spanMin / 60;
+    const dayShift = rosterByDay.get(key) ?? shift;
+    const shiftSpanMin =
+      dayShift && dayShift.endTime
+        ? minutesOfDay(dayShift.endTime) - minutesOfDay(dayShift.startTime) + (dayShift.isNightShift ? 24 * 60 : 0)
+        : 8 * 60;
+    if (includeOvertime && dayShift && spanMin > shiftSpanMin) {
+      summary.overtimeHours += (spanMin - shiftSpanMin) / 60;
+    }
+  };
+
   for (let d = start; d < end; d = new Date(d.getTime() + 24 * 3600 * 1000)) {
     const istDay = new Date(d.getTime() + 5.5 * 3600 * 1000);
-    if (istDay.getUTCDay() === 0) continue; // Sunday in the IST wall clock
     const key = istDayStartKey(d);
     if (employee.joiningDate && key < istDayStartKey(employee.joiningDate)) continue;
-    if (holidaySet.has(key)) continue;
+    if (istDay.getUTCDay() === 0) {
+      // Sunday: not a working day, but punched hours still count.
+      accumulateHours(key, recordByDay.get(key));
+      continue; // Sunday in the IST wall clock
+    }
+    if (holidaySet.has(key)) {
+      accumulateHours(key, recordByDay.get(key));
+      continue;
+    }
 
     const onLeave = leaves.some((l) => istStartOfDay(l.fromDate).getTime() <= d.getTime() && istStartOfDay(l.toDate).getTime() >= d.getTime());
     if (onLeave) {
       summary.onLeaveDays++;
+      accumulateHours(key, recordByDay.get(key));
       continue;
     }
 
@@ -163,18 +195,7 @@ export async function attendanceSummary(
     else if (rec.status === "permission") summary.presentDays++;
     else summary.absentDays++;
 
-    if (rec.punchInTime && rec.punchOutTime) {
-      const spanMin = (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000;
-      summary.workedHours += spanMin / 60;
-      const dayShift = rosterByDay.get(key) ?? shift;
-      const shiftSpanMin =
-        dayShift && dayShift.endTime
-          ? minutesOfDay(dayShift.endTime) - minutesOfDay(dayShift.startTime) + (dayShift.isNightShift ? 24 * 60 : 0)
-          : 8 * 60;
-      if (includeOvertime && dayShift && spanMin > shiftSpanMin) {
-        summary.overtimeHours += (spanMin - shiftSpanMin) / 60;
-      }
-    }
+    accumulateHours(key, rec);
   }
 
   return summary;
@@ -200,8 +221,8 @@ export function calcESIC(gross: number, config: PayrollConfig) {
   return { employee: round2(gross * 0.0075), employer: round2(gross * 0.0325) };
 }
 
-/** Monthly professional tax by state slab (on monthly gross). */
-export function professionalTax(state: string, monthlyGross: number): number {
+/** Monthly professional tax by state slab (on monthly gross). month is YYYY-MM. */
+export function professionalTax(state: string, monthlyGross: number, month: string): number {
   const s = state.trim().toLowerCase();
   if (s === "gujarat") {
     if (monthlyGross <= 12000) return 0;
@@ -211,6 +232,9 @@ export function professionalTax(state: string, monthlyGross: number): number {
   if (s === "maharashtra") {
     if (monthlyGross <= 7500) return 0;
     if (monthlyGross <= 10000) return 175;
+    // Maharashtra: February is charged at ₹300, other months ₹200.
+    const mm = month.slice(5, 7);
+    if (mm === "02") return 300;
     return 200;
   }
   if (s === "karnataka" || s === "tamil nadu" || s === "telangana") {
@@ -222,8 +246,11 @@ export function professionalTax(state: string, monthlyGross: number): number {
   return 200;
 }
 
-/** Monthly LWF (Labour Welfare Fund) — employee share by state slab. */
-export function labourWelfareFund(state: string, monthlyGross: number): number {
+/** Monthly LWF (Labour Welfare Fund) — employee share by state slab.
+ *  Only payable in June and December; 0 in all other months. month is YYYY-MM. */
+export function labourWelfareFund(state: string, monthlyGross: number, month: string): number {
+  const mm = month.slice(5, 7);
+  if (mm !== "06" && mm !== "12") return 0;
   const s = state.trim().toLowerCase();
   if (s === "gujarat") {
     if (monthlyGross <= 2999) return 10;
@@ -280,7 +307,24 @@ export function calcTDS(monthlyGross: number, regime: "new" | "old", investments
     prev = threshold;
   }
   if (taxable <= rebateLimit) tax = 0; // 87A rebate
-  return round2(tax / 12);
+  else if (regime === "new" && taxable > 1200000) {
+    // New-regime 87A marginal relief: tax just above the ₹12L boundary is
+    // capped at the excess over ₹12L plus the (rebated) tax at the boundary.
+    // Tax at exactly ₹12L gets full rebate, so baseAtBoundary is 0.
+    let boundaryTax = 0;
+    let bPrev = 0;
+    for (const [threshold, rate] of slabs) {
+      if (1200000 > bPrev) {
+        boundaryTax += (Math.min(1200000, threshold) - bPrev) * rate;
+      }
+      bPrev = threshold;
+    }
+    const baseAtBoundary = 1200000 <= rebateLimit ? 0 : boundaryTax;
+    const cap = taxable - 1200000 + baseAtBoundary;
+    if (tax > cap) tax = cap;
+  }
+  // 4% health & education cess, converted to a monthly figure.
+  return round2((tax * 1.04) / 12);
 }
 
 export interface PayrollAdjustmentInput {
@@ -318,25 +362,39 @@ export interface LoanDeductionUpdate {
 
 export function loanDeductionForMonth(
   loans: Array<{ id: string; status: string; startMonth: string; lastDeductedMonth: string | null; outstanding: number; emiAmount: number }>,
-  month: string
+  month: string,
+  maxLoan?: number
 ): { total: number; updates: LoanDeductionUpdate[] } {
-  let total = 0;
-  const updates: LoanDeductionUpdate[] = [];
+  // Collect eligible loans in EMI order first (uncapped per-loan amounts).
+  const eligible: Array<{ loan: (typeof loans)[number]; ded: number }> = [];
   for (const loan of loans) {
     if (loan.status !== "active") continue;
     if (loan.startMonth > month) continue;
     if (loan.lastDeductedMonth && loan.lastDeductedMonth >= month) continue;
     if (loan.outstanding <= 0) continue;
     const ded = loan.emiAmount > 0 ? Math.min(loan.emiAmount, loan.outstanding) : loan.outstanding;
-    total += ded;
+    eligible.push({ loan, ded });
+  }
+  const uncapped = eligible.reduce((s, e) => s + e.ded, 0);
+  const cap = maxLoan === undefined ? uncapped : Math.max(0, Math.min(maxLoan, uncapped));
+  // Allocate the capped total in EMI order, rewriting per-loan updates.
+  let remaining = cap;
+  let total = 0;
+  const updates: LoanDeductionUpdate[] = [];
+  for (const { loan, ded } of eligible) {
+    if (remaining <= 0) break;
+    const alloc = Math.min(ded, remaining);
+    if (alloc <= 0) continue;
+    total += alloc;
+    remaining -= alloc;
     updates.push({
       id: loan.id,
-      newOutstanding: round2(loan.outstanding - ded),
+      newOutstanding: round2(loan.outstanding - alloc),
       lastDeductedMonth: month,
-      close: loan.outstanding - ded <= 0,
+      close: loan.outstanding - alloc <= 0,
     });
   }
-  return { total, updates };
+  return { total: round2(total), updates };
 }
 
 // ─── Payroll result ─────────────────────────────────────────────────────────
@@ -363,7 +421,8 @@ export function splitSalary(
   }
   // Fallback: basic is a % of base; allowances are the remainder so the
   // two always sum to 100% of base (no double-count downstream).
-  const pct = Math.min(100, Math.max(0, config.basicPercent));
+  // Clamped to min 10 so basic never silently zeroes (PF/OT guard).
+  const pct = Math.min(100, Math.max(10, config.basicPercent));
   const basic = round2(total * (pct / 100));
   return {
     basic,
@@ -398,6 +457,9 @@ export interface PayrollResult {
   absentDays: number;
   overtimeHours: number;
   workedHours: number;
+  workingDays: number;
+  onLeaveDays: number;
+  divisorUsed: number;
   adjustments: { label: string; amount: number }[];
 }
 
@@ -407,7 +469,9 @@ export function baseForPayMode(
   rate: number,
   summary: AttendanceSummary
 ): number {
-  const attended = summary.presentDays + summary.halfDays * 0.5;
+  // Late days count fully as worked (late = worked). Permission rows are
+  // already folded into presentDays by attendanceSummary — keep that.
+  const attended = summary.presentDays + summary.lateDays + summary.halfDays * 0.5;
   switch (mode) {
     case "daily":
       return round2(rate * attended);
@@ -427,6 +491,7 @@ export function computePayroll(
   employee: { salary: number; salaryStructure?: unknown; payMode?: string | null; workBasisRate?: number | null },
   summary: AttendanceSummary,
   loanDeduction: number,
+  month: string,
   adjustments: PayrollAdjustmentInput[] = [],
   investments = 0
 ): PayrollResult {
@@ -442,13 +507,29 @@ export function computePayroll(
     allowances = 0;
   }
 
-  // Use actual working days for the month when available; fall back to 26.
   // `base` already includes the basic+allowances split, so gross must NOT add
   // allowances again (that double-counted pay).
-  const divisor = summary.workingDays > 0 ? summary.workingDays : 26;
-  // Overtime pay at (basic / workingDays / 8) × multiplier.
-  const otRate = divisor > 0 && basic > 0 ? (basic / divisor / 8) * config.otMultiplier : 0;
-  const overtimePay = round2(summary.overtimeHours * otRate);
+  // Statutory divisor is FROZEN at 26 for monthly pay (no workingDays float).
+  const divisor = 26;
+  const divisorUsed = 26;
+  // Overtime branches by pay mode:
+  // - hourly: rate is the hourly rate → pay rate × multiplier × hours (no /26).
+  // - daily / work_basis: day rate is the daily rate → (rate/8) × multiplier.
+  // - weekly: weekly rate covers a 6-day week → (rate/6/8) × multiplier.
+  // - monthly: (basic/26/8) × multiplier with divisor frozen at 26.
+  let overtimePay: number;
+  if (mode === "hourly") {
+    overtimePay = round2(rate * config.otMultiplier * summary.overtimeHours);
+  } else if (mode === "daily" || mode === "work_basis") {
+    const otRate = (rate / 8) * config.otMultiplier;
+    overtimePay = round2(summary.overtimeHours * otRate);
+  } else if (mode === "weekly") {
+    const otRate = (rate / 6 / 8) * config.otMultiplier;
+    overtimePay = round2(summary.overtimeHours * otRate);
+  } else {
+    const otRate = divisorUsed > 0 && basic > 0 ? (basic / divisorUsed / 8) * config.otMultiplier : 0;
+    overtimePay = round2(summary.overtimeHours * otRate);
+  }
 
   const adj = splitAdjustments(adjustments);
   const gross = round2(base + overtimePay + adj.earnings);
@@ -458,8 +539,8 @@ export function computePayroll(
 
   const { employee: pfEmployee, employer: pfEmployer } = calcPF(basic, config);
   const { employee: esicEmployee, employer: esicEmployer } = calcESIC(gross, config);
-  const pt = config.pt.enabled ? professionalTax(config.pt.state, gross) : 0;
-  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, gross) : 0;
+  const pt = config.pt.enabled ? professionalTax(config.pt.state, gross, month) : 0;
+  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, gross, month) : 0;
   const tds = config.tds.enabled ? calcTDS(gross, config.tds.regime, investments) : 0;
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   // For daily/hourly/work-basis pay, `base` is already pro-rated by attendance —
@@ -472,7 +553,7 @@ export function computePayroll(
   // Cap loan deduction so net can never go negative because of loans alone.
   const statutoryAndOther = pfEmployee + esicEmployee + pt + lwf + tds + lateFines + absentDeduction + adj.deductions;
   const maxLoan = Math.max(0, gross - statutoryAndOther);
-  const cappedLoan = Math.min(Math.max(loanDeduction, 0), maxLoan);
+  const cappedLoan = round2(Math.min(Math.max(loanDeduction, 0), maxLoan));
 
   const deductions = round2(
     pfEmployee + esicEmployee + pt + lwf + tds + lateFines + cappedLoan + absentDeduction + adj.deductions
@@ -506,6 +587,9 @@ export function computePayroll(
     absentDays: summary.absentDays,
     overtimeHours: round2(summary.overtimeHours),
     workedHours: round2(summary.workedHours),
+    workingDays: summary.workingDays,
+    onLeaveDays: summary.onLeaveDays,
+    divisorUsed,
     adjustments: adj.list,
   };
 }
@@ -525,7 +609,34 @@ export async function generatePayslipForEmployee(
     joiningDate?: Date | null;
   },
   month: string
-): Promise<{ created: boolean; netSalary?: number; loanApplied?: number }> {
+): Promise<{ created: boolean; netSalary?: number; loanApplied?: number; skipped?: string }> {
+  // Skip employees who join on/after the month's exclusive end.
+  const { start: mStart, end: mEnd } = monthRange(month);
+  if (employee.joiningDate) {
+    const joinStart = istStartOfDay(new Date(employee.joiningDate));
+    if (joinStart.getTime() >= mEnd.getTime()) {
+      return { created: false, skipped: "not-joined" };
+    }
+  }
+  // Pro-rate the monthly base for mid-month joiners: employed days
+  // (joiningDate..monthEnd inclusive) over days in month. Daily/hourly
+  // paths stay attendance-driven via baseForPayMode.
+  let payEmployee = employee;
+  const empMode = employee.payMode ?? "monthly";
+  if (empMode === "monthly" && employee.joiningDate) {
+    const joinStart = istStartOfDay(new Date(employee.joiningDate));
+    if (joinStart.getTime() > mStart.getTime()) {
+      const msPerDay = 24 * 3600 * 1000;
+      const daysInMonth = Math.round((mEnd.getTime() - mStart.getTime()) / msPerDay);
+      const employedStart = joinStart.getTime() > mStart.getTime() ? joinStart : mStart;
+      const employedDays = Math.round((mEnd.getTime() - employedStart.getTime()) / msPerDay);
+      const clamped = Math.min(Math.max(employedDays, 0), daysInMonth);
+      if (daysInMonth > 0) {
+        payEmployee = { ...employee, salary: round2(employee.salary * (clamped / daysInMonth)) };
+      }
+    }
+  }
+
   const config = getPayrollConfig(tenantConfig);
   const summary = await attendanceSummary(tenantId, employee, month);
 
@@ -543,18 +654,21 @@ export async function generatePayslipForEmployee(
       select: { sections: true, status: true },
     }),
   ]);
-  const { total: loanDeduction, updates } = loanDeductionForMonth(loans, month);
+  const { total: loanDeduction } = loanDeductionForMonth(loans, month);
 
   const decl = (taxDecl?.sections ?? {}) as Record<string, number>;
   const investments = taxDecl?.status === "verified" ? Number(decl.total ?? 0) || 0 : 0;
 
-  const result = computePayroll(config, employee, summary, loanDeduction, adjustments, investments);
+  const result = computePayroll(config, payEmployee, summary, loanDeduction, month, adjustments, investments);
+  // Re-allocate the capped loan total across loans in EMI order so the
+  // persisted per-loan outstanding balances match the capped deduction.
+  const { total: cappedLoanTotal, updates: cappedUpdates } = loanDeductionForMonth(loans, month, result.loanDeduction);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.payslip.findUnique({
       where: { employeeId_month: { employeeId: employee.id, month } },
     });
-    if (existing) return { created: false, netSalary: existing.netSalary, loanApplied: loanDeduction };
+    if (existing) return { created: false, netSalary: existing.netSalary, loanApplied: cappedLoanTotal };
 
     try {
       await tx.payslip.create({
@@ -577,6 +691,10 @@ export async function generatePayslipForEmployee(
           tds: result.tds,
           lateFines: result.lateFines,
           loanDeduction: result.loanDeduction,
+          absentDeduction: result.absentDeduction,
+          workingDays: result.workingDays,
+          divisorUsed: result.divisorUsed,
+          onLeaveDays: result.onLeaveDays,
           deductions: result.deductions,
           adjustments: result.adjustments.length > 0 ? (result.adjustments as unknown as Prisma.InputJsonValue) : undefined,
           presentDays: result.presentDays,
@@ -595,18 +713,18 @@ export async function generatePayslipForEmployee(
         const dup = await tx.payslip.findUnique({
           where: { employeeId_month: { employeeId: employee.id, month } },
         });
-        return { created: false, netSalary: dup?.netSalary, loanApplied: loanDeduction };
+        return { created: false, netSalary: dup?.netSalary, loanApplied: cappedLoanTotal };
       }
       throw err;
     }
 
-    for (const u of updates) {
+    for (const u of cappedUpdates) {
       await tx.employeeLoan.update({
         where: { id: u.id },
         data: { outstanding: u.newOutstanding, lastDeductedMonth: u.lastDeductedMonth, status: u.close ? "closed" : "active" },
       });
     }
 
-    return { created: true, netSalary: result.netSalary, loanApplied: loanDeduction };
+    return { created: true, netSalary: result.netSalary, loanApplied: cappedLoanTotal };
   });
 }

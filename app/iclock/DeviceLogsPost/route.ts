@@ -18,6 +18,9 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(data) || data.length === 0) {
       return NextResponse.json({ Code: 200, Message: "OK" });
     }
+    if (data.length > 2000) {
+      return NextResponse.json({ Code: 400, Message: "Too many records (max 2000)" }, { status: 400 });
+    }
 
     let accepted = 0;
     for (const record of data as Record<string, unknown>[]) {
@@ -37,6 +40,11 @@ export async function POST(req: NextRequest) {
           // attribute the error to. Surface it in server logs for admins.
           // TODO: persist unknown-SN pushes to a global alert store for admin visibility.
           console.warn(`[iClock][AI] Unknown device: ${sn || "(missing SN)"}`);
+          continue;
+        }
+
+        if (device.status === "inactive") {
+          // Retired device: skip without touching lastSeenAt/status.
           continue;
         }
 

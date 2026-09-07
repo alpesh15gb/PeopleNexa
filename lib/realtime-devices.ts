@@ -91,7 +91,8 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
     },
   });
   if (near) {
-    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: "duplicate punch within 60s", processed: true } });
+    // Clean dedupe marker — expected device behaviour, not an error.
+    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
     return { accepted: true as const, action: "duplicate" as const, logId: log.id };
   }
 
@@ -131,51 +132,73 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
 }
 
 /** Re-attempt realtime logs flagged with no-employee (mirrors reprocessFailedLogs). */
-export async function reprocessFailedRealtimeLogs(tenantId: string, limit = 2000): Promise<number> {
+export async function reprocessFailedRealtimeLogs(
+  tenantId: string,
+  limit = 2000
+): Promise<{ accepted: number; duplicate: number; failed: number }> {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
   const logs = await prisma.realtimeLog.findMany({
-    where: { tenantId, processed: true, error: { not: null } },
+    where: {
+      tenantId,
+      createdAt: { gte: weekAgo },
+      OR: [{ processed: false }, { error: { not: null } }],
+    },
     select: { id: true, realtimeDeviceId: true, userId: true, punchTime: true },
     take: limit,
   });
-  let reprocessed = 0;
+  const counters = { accepted: 0, duplicate: 0, failed: 0 };
   for (const log of logs) {
-    if (!log.userId || !log.punchTime) continue;
-    const device = await prisma.realtimeDevice.findUnique({ where: { id: log.realtimeDeviceId } });
-    if (!device) continue;
-    const employee = await prisma.employee.findFirst({
-      where: { tenantId, employeeNumber: log.userId },
-      select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-    });
-    if (!employee) continue;
-    const near = await prisma.punch.findFirst({
-      where: {
-        employeeId: employee.id,
-        punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
-      },
-    });
-    if (near) {
-      await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null } });
-      continue;
+    try {
+      if (!log.userId || !log.punchTime) {
+        counters.failed++;
+        continue;
+      }
+      const device = await prisma.realtimeDevice.findUnique({ where: { id: log.realtimeDeviceId } });
+      if (!device) {
+        counters.failed++;
+        continue;
+      }
+      const employee = await prisma.employee.findFirst({
+        where: { tenantId, employeeNumber: log.userId },
+        select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
+      });
+      if (!employee) {
+        counters.failed++;
+        continue;
+      }
+      const near = await prisma.punch.findFirst({
+        where: {
+          employeeId: employee.id,
+          punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
+        },
+      });
+      if (near) {
+        await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+        counters.duplicate++;
+        continue;
+      }
+      await prisma.punch.create({
+        data: {
+          tenantId,
+          employeeId: employee.id,
+          realtimeDeviceId: device.id,
+          source: "realtime",
+          punchTime: log.punchTime,
+          inOutHint: "unknown",
+        },
+      });
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      await reconcileEmployeeDay(
+        tenant ?? { id: tenantId, config: null },
+        { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
+        punchDayForShift(log.punchTime, employee.shift),
+        { finalize: false }
+      );
+      await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+      counters.accepted++;
+    } catch {
+      counters.failed++;
     }
-    await prisma.punch.create({
-      data: {
-        tenantId,
-        employeeId: employee.id,
-        realtimeDeviceId: device.id,
-        source: "realtime",
-        punchTime: log.punchTime,
-        inOutHint: "unknown",
-      },
-    });
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    await reconcileEmployeeDay(
-      tenant ?? { id: tenantId, config: null },
-      { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-      punchDayForShift(log.punchTime, employee.shift),
-      { finalize: false }
-    );
-    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null } });
-    reprocessed++;
   }
-  return reprocessed;
+  return counters;
 }

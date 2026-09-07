@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const shifts = await prisma.shift.findMany({
     where: { tenantId: session.tenantId },
     include: { _count: { select: { employees: true } } },
@@ -30,6 +30,14 @@ export async function POST(req: NextRequest) {
     const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
     if (!timeRe.test(String(body.startTime)) || !timeRe.test(String(body.endTime))) {
       return NextResponse.json({ error: "Start/end time must use HH:MM (24h)." }, { status: 400 });
+    }
+    const startTime = String(body.startTime);
+    const endTime = String(body.endTime);
+    if (startTime === endTime) {
+      return NextResponse.json({ error: "Start and end time must be different." }, { status: 400 });
+    }
+    if (endTime < startTime && !body.isNightShift) {
+      return NextResponse.json({ error: "Overnight shift must be marked as night shift." }, { status: 400 });
     }
     const grace = Number(body.graceMinutes);
     const graceMinutes = Number.isFinite(grace) ? Math.min(120, Math.max(0, Math.round(grace))) : 0;

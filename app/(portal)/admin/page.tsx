@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { startOfDay, addDays, toDateKey, formatTime, formatDate, relativeDay } from "@/lib/dates";
+import { addDays, toDateKey, formatTime, formatDate, relativeDay } from "@/lib/dates";
+import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { StatCard } from "@/components/ui/stat";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/badge";
@@ -45,7 +46,7 @@ export default async function AdminDashboardPage({
 }) {
   const session = await requireSession();
   const { branch: branchParam } = await searchParams;
-  const today = startOfDay(new Date());
+  const today = istStartOfDay(new Date());
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = branchParam
@@ -94,14 +95,14 @@ export default async function AdminDashboardPage({
   let weekRows: WeekRow[];
   if (branchId) {
     const rows = await prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: { branchId } },
       select: { date: true, status: true },
     });
     weekRows = rows.map((r) => ({ date: r.date, status: r.status }));
   } else {
     const grouped = await prisma.attendance.groupBy({
       by: ["date", "status"],
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) } },
       _count: true,
     });
     weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
@@ -118,7 +119,7 @@ export default async function AdminDashboardPage({
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
   const tally = new Map<string, { present: number; late: number; absent: number }>();
   for (const r of weekRows as Array<{ date: Date; status: string; _count?: number }>) {
-    const key = toDateKey(r.date);
+    const key = istDateKey(r.date);
     const cur = tally.get(key) ?? { present: 0, late: 0, absent: 0 };
     const n = r._count ?? 1;
     if (r.status === "present" || r.status === "late" || r.status === "half_day") cur.present += n;
@@ -128,8 +129,8 @@ export default async function AdminDashboardPage({
   }
   for (let i = 6; i >= 0; i--) {
     const day = addDays(today, -i);
-    const t = tally.get(toDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
-    week.push({ day: toDateKey(day), label: toDateKey(day).slice(5), ...t });
+    const t = tally.get(istDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
+    week.push({ day: istDateKey(day), label: istDateKey(day).slice(5), ...t });
   }
 
   return (

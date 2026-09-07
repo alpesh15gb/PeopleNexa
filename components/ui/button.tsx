@@ -16,10 +16,12 @@ const variants: Record<Variant, string> = {
 };
 
 const sizes: Record<Size, string> = {
+  // a11y: sm stays h-8 (32px) — passes WCAG 2.2 AA (24px min).
+  // AAA 44px exception for dense tables; icon targets are always 44px.
   sm: "h-8 px-3 text-xs rounded-lg gap-1.5",
   md: "h-11 min-h-[44px] px-4 text-sm rounded-xl gap-2",
   lg: "h-12 min-h-[44px] px-6 text-sm rounded-xl gap-2",
-  icon: "h-9 w-9 rounded-lg",
+  icon: "h-11 w-11 min-h-[44px] min-w-[44px] rounded-lg",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

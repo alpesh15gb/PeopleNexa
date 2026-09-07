@@ -73,36 +73,67 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only active employees can request leave." }, { status: 403 });
     }
 
-    // Balance check against approved + pending requests.
-    const usedRows = await prisma.leaveRequest.findMany({
-      where: {
-        tenantId: session.tenantId,
-        employeeId,
-        leaveTypeId,
-        status: { in: ["approved", "pending"] },
-      },
-    });
-    const usedDays = usedRows.reduce((sum, r) => sum + r.days, 0);
-    if (usedDays + days > leaveType.maxDays) {
-      return NextResponse.json(
-        { error: `Insufficient balance — ${leaveType.maxDays - usedDays} day(s) remaining.` },
-        { status: 400 }
-      );
-    }
+    // Overlap + balance checks and the create run inside one transaction so
+    // concurrent submits for the same days can't both slip through.
+    let request;
+    try {
+      request = await prisma.$transaction(async (tx) => {
+        const overlap = await tx.leaveRequest.findFirst({
+          where: {
+            tenantId: session.tenantId,
+            employeeId,
+            status: { in: ["approved", "pending"] },
+            fromDate: { lte: to },
+            toDate: { gte: from },
+          },
+        });
+        if (overlap) {
+          const err = new Error(
+            `This range overlaps an existing ${overlap.status} request (${toDateKey(overlap.fromDate)} → ${toDateKey(overlap.toDate)}).`
+          ) as Error & { code?: string };
+          err.code = "OVERLAP";
+          throw err;
+        }
 
-    const request = await prisma.leaveRequest.create({
-      data: {
-        tenantId: session.tenantId,
-        employeeId,
-        leaveTypeId,
-        fromDate: from,
-        toDate: to,
-        days,
-        reason: reason || null,
-        status: leaveType.requiresApproval ? "pending" : "approved",
-      },
-      include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
-    });
+        // Balance check against approved + pending requests.
+        const usedRows = await tx.leaveRequest.findMany({
+          where: {
+            tenantId: session.tenantId,
+            employeeId,
+            leaveTypeId,
+            status: { in: ["approved", "pending"] },
+          },
+        });
+        const usedDays = usedRows.reduce((sum, r) => sum + r.days, 0);
+        if (usedDays + days > leaveType.maxDays) {
+          const err = new Error(
+            `Insufficient balance — ${leaveType.maxDays - usedDays} day(s) remaining.`
+          ) as Error & { code?: string };
+          err.code = "BALANCE";
+          throw err;
+        }
+
+        return tx.leaveRequest.create({
+          data: {
+            tenantId: session.tenantId,
+            employeeId,
+            leaveTypeId,
+            fromDate: from,
+            toDate: to,
+            days,
+            reason: reason || null,
+            status: leaveType.requiresApproval ? "pending" : "approved",
+          },
+          include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
+        });
+      });
+    } catch (e) {
+      const code = (e as { code?: string })?.code;
+      if (code === "OVERLAP" || code === "BALANCE") {
+        return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+      }
+      throw e;
+    }
 
     // Notify admins about the new request (or the employee when auto-approved).
     if (onBehalf) {

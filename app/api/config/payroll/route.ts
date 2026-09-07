@@ -22,6 +22,16 @@ export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const current = getPayrollConfig((await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }))?.config ?? null);
 
+  // Basic % below 10 would understate the PF wage base — reject outright.
+  if (body.basicPercent !== undefined && Number.isFinite(Number(body.basicPercent)) && Number(body.basicPercent) < 10) {
+    return NextResponse.json({ error: "basicPercent must be at least 10." }, { status: 400 });
+  }
+  // PT/LWF slabs only know these states — reject anything else.
+  const PAYROLL_STATES = ["Gujarat", "Maharashtra", "Karnataka", "Tamil Nadu", "Telangana", "Delhi", "West Bengal", "Andhra Pradesh", "Uttar Pradesh", "Rajasthan", "Other"];
+  if (body.pt?.state !== undefined && !PAYROLL_STATES.includes(String(body.pt.state))) {
+    return NextResponse.json({ error: `pt.state must be one of: ${PAYROLL_STATES.join(", ")}.` }, { status: 400 });
+  }
+
   const num = (v: unknown, d: number) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : d;

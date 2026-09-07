@@ -55,6 +55,23 @@ export async function POST(req: NextRequest) {
   }
 
   const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+  // Guard against pre-joining + excessive backdate.
+  const requester = await prisma.employee.findFirst({
+    where: { id: session.sub, tenantId: session.tenantId },
+    select: { id: true, joiningDate: true },
+  });
+  if (requester?.joiningDate) {
+    const joinStart = istStartOfDay(new Date(requester.joiningDate));
+    if (dayStart.getTime() < joinStart.getTime()) {
+      return NextResponse.json({ error: "Cannot request a correction before your joining date." }, { status: 400 });
+    }
+  }
+  if (session.role !== "admin" && session.role !== "supervisor") {
+    const backdateMs = istStartOfDay(now).getTime() - dayStart.getTime();
+    if (backdateMs > 60 * 24 * 3600 * 1000) {
+      return NextResponse.json({ error: "Corrections older than 60 days need admin assistance." }, { status: 400 });
+    }
+  }
   // Range lookup: Attendance.date may be normalized differently (shift-window
   // start for night shifts), so match the whole IST day instead of exact equality.
   const attendance = await prisma.attendance.findFirst({
@@ -64,26 +81,44 @@ export async function POST(req: NextRequest) {
   // nothing recorded yet — store date only with null current punches.
   // (PunchCorrection has no required attendanceId; date is the link.)
 
-  // Don't allow a second pending correction for the same day.
-  const existing = await prisma.punchCorrection.findFirst({
-    where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd }, status: "pending" },
-  });
-  if (existing) {
-    return NextResponse.json({ error: "You already have a pending correction for this day." }, { status: 400 });
+  // Don't allow a second pending correction for the same day. The
+  // check-then-create runs inside an interactive transaction so concurrent
+  // double-submits serialize; the P2002 catch is a backstop if a unique
+  // constraint (employeeId+date+pending) is added later.
+  let correction;
+  try {
+    correction = await prisma.$transaction(async (tx) => {
+      const existing = await tx.punchCorrection.findFirst({
+        where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd }, status: "pending" },
+      });
+      if (existing) {
+        const err = new Error("DUPLICATE_PENDING") as Error & { code?: string };
+        err.code = "DUPLICATE_PENDING";
+        throw err;
+      }
+      return tx.punchCorrection.create({
+        data: {
+          tenantId: session.tenantId,
+          employeeId: session.sub,
+          date: dayStart,
+          currentIn: attendance?.punchInTime ?? null,
+          currentOut: attendance?.punchOutTime ?? null,
+          requestedIn,
+          requestedOut,
+          reason,
+        },
+      });
+    });
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code === "DUPLICATE_PENDING") {
+      return NextResponse.json({ error: "You already have a pending correction for this day." }, { status: 409 });
+    }
+    if (code === "P2002") {
+      return NextResponse.json({ error: "You already have a pending correction for this day." }, { status: 409 });
+    }
+    throw e;
   }
-
-  const correction = await prisma.punchCorrection.create({
-    data: {
-      tenantId: session.tenantId,
-      employeeId: session.sub,
-      date: dayStart,
-      currentIn: attendance?.punchInTime ?? null,
-      currentOut: attendance?.punchOutTime ?? null,
-      requestedIn,
-      requestedOut,
-      reason,
-    },
-  });
 
   await notifyAdmins(
     session.tenantId,

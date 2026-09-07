@@ -147,7 +147,7 @@ The device sync endpoint runs on a schedule from the host:
 
 ```bash
 # every 5 minutes — replace CRON_SECRET with the value from .env.production
-*/5 * * * * curl -fsS -H "x-cron-secret: <CRON_SECRET>" https://peoplenexa.in/api/cron/ebioserver-pull
+*/5 * * * * curl -fsS -X POST -H "x-cron-secret: <CRON_SECRET>" https://peoplenexa.in/api/cron/ebioserver-pull
 ```
 
 ## Day-2 operations

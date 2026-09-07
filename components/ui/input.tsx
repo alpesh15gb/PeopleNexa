@@ -1,4 +1,4 @@
-import { forwardRef, useId, type InputHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from "react";
+import { cloneElement, forwardRef, isValidElement, useId, type InputHTMLAttributes, type ReactElement, type TextareaHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const base =
@@ -31,6 +31,17 @@ export function Field({
 }) {
   const autoId = useId();
   const fieldId = htmlFor ?? `field-${autoId}`;
+  let fieldChild = children;
+  try {
+    if (isValidElement(children)) {
+      const childProps = (children.props ?? {}) as { id?: unknown };
+      if (typeof childProps.id !== "string" || childProps.id.length === 0) {
+        fieldChild = cloneElement(children as ReactElement<Record<string, unknown>>, { id: fieldId });
+      }
+    }
+  } catch {
+    fieldChild = children;
+  }
   return (
     <div className={cn("space-y-1.5", className)}>
       {label && (
@@ -38,7 +49,7 @@ export function Field({
           {label}
         </label>
       )}
-      {children}
+      {fieldChild}
       {error ? (
         <p role="alert" className="text-xs text-destructive">{error}</p>
       ) : hint ? (

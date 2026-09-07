@@ -8,6 +8,10 @@ export async function GET(req: NextRequest) {
 
   const device = await prisma.device.findUnique({ where: { serialNumber: sn } });
   if (device) {
+    if (device.status === "inactive") {
+      // Retired device: empty OK without touching lastSeenAt/status.
+      return new NextResponse("OK\r\n", { headers: { "Content-Type": "text/plain" } });
+    }
     await prisma.device.update({
       where: { id: device.id },
       data: { lastSeenAt: new Date(), status: "active" },
@@ -18,11 +22,16 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "asc" },
     });
     if (cmd) {
-      const payload = `C:${cmd.id}:${cmd.command}\r\n`;
-      await prisma.deviceCommand.update({
-        where: { id: cmd.id },
+      // Race-safe claim: only the poller that flips pending→sent delivers it.
+      const claimed = await prisma.deviceCommand.updateMany({
+        where: { id: cmd.id, status: "pending" },
         data: { status: "sent" },
       });
+      if (claimed.count !== 1) {
+        // Lost the race — another poller already took it.
+        return new NextResponse("OK\r\n", { headers: { "Content-Type": "text/plain" } });
+      }
+      const payload = `C:${cmd.id}:${cmd.command}\r\n`;
       console.log(`[iClock] Sending command to ${sn}: ${payload.trim()}`);
       return new NextResponse(payload, { headers: { "Content-Type": "text/plain" } });
     }

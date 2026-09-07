@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { istDateKey } from "@/lib/ist";
 
 const ALLOWED = ["present", "late", "permission", "absent", "half_day"];
 
@@ -35,6 +36,18 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     where: { id, tenantId: session.tenantId },
   });
   if (!record) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // A paid payslip locks the month: edits must go through payroll regeneration.
+  const month = istDateKey(record.date).slice(0, 7);
+  const paidSlip = await prisma.payslip.findFirst({
+    where: { employeeId: record.employeeId, month, status: "paid" },
+  });
+  if (paidSlip) {
+    return NextResponse.json(
+      { error: `A paid payslip already exists for ${month}. Regenerate payroll for that month to pick up attendance changes.` },
+      { status: 403 }
+    );
+  }
 
   const data: Record<string, unknown> = {};
   if (body.status) {

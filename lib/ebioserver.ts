@@ -300,7 +300,7 @@ export async function importEmployeesFromEbioserver(
     result.ok = true;
     // Now that employees exist, reconcile punches that were flagged earlier
     // because their code had no match at ingest time.
-    result.reprocessed = await reprocessFailedLogs(tenantId);
+    result.reprocessed = (await reprocessFailedLogs(tenantId)).accepted;
     return result;
   } catch (err) {
     result.message = err instanceof Error ? err.message : "Import failed";
@@ -376,7 +376,14 @@ export async function backfillDays(
           inOutMode: rec.state === "OUT" ? "1" : rec.state === "IN" ? "5" : "0",
           rawLine: rec.userId,
         };
-        const res = await handleDevicePunch(device, raw);
+        let res;
+        try {
+          res = await handleDevicePunch(device, raw);
+        } catch (err) {
+          console.warn(`[eBioserver] Skipping punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
+          summary.skipped++;
+          continue;
+        }
         if (res.action === "in" || res.action === "out") {
           summary.ingested++;
           dayIngested++;
@@ -481,7 +488,13 @@ export async function pullTenant(
         });
         const dayRecords = parseLogRecords(resultString(dayResult));
         for (const rec of dayRecords) {
-          await ingestRecord(rec, deviceByDeviceName);
+          try {
+            await ingestRecord(rec, deviceByDeviceName);
+          } catch (err) {
+            console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
+            summary.skipped++;
+            continue;
+          }
         }
       }
     } else {
@@ -495,17 +508,29 @@ export async function pullTenant(
         const records = parseLogRecords(resultString(batchResult));
         if (records.length === 0) break;
 
-        let batchMax = 0;
+        // Cursor tracks the max successfully ingested logId (never cursor+len,
+        // which would skip over failures or over-count short batches).
+        let batchMax = cursor;
         for (const rec of records) {
-          if (rec.logId !== null) batchMax = Math.max(batchMax, rec.logId);
-          await ingestRecord(rec, deviceByDeviceName);
+          try {
+            await ingestRecord(rec, deviceByDeviceName);
+          } catch (err) {
+            console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
+            summary.skipped++;
+            continue;
+          }
+          if (rec.logId !== null && rec.logId > batchMax) batchMax = rec.logId;
         }
 
         // Persist the cursor so an interrupted run resumes rather than re-pulls.
-        const newCursor = batchMax > cursor ? batchMax : cursor + records.length;
-        if (newCursor > cursor) {
-          cursor = newCursor;
+        if (batchMax > cursor) {
+          cursor = batchMax;
           await updateEbioserverStatus(tenantId, { lastLogId: cursor });
+        } else {
+          // No forward progress (e.g. a poison record at the head keeps
+          // failing) — stop rather than re-pulling the same batch forever.
+          // The next scheduled pull retries from this cursor.
+          break;
         }
         // A short batch means the history is exhausted — done.
         if (records.length < LOG_BATCH) break;

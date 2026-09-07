@@ -29,7 +29,13 @@ export async function POST(req: NextRequest) {
     }
     const existing = await prisma.device.findUnique({ where: { serialNumber } });
     if (existing) {
-      return NextResponse.json({ error: "A device with this serial number already exists." }, { status: 400 });
+      return NextResponse.json({ error: "A device with this serial number already exists." }, { status: 409 });
+    }
+    // Serials are globally unique across both fleets — a realtime device with
+    // the same serial must also block creation.
+    const existingRealtime = await prisma.realtimeDevice.findUnique({ where: { serialNumber } });
+    if (existingRealtime) {
+      return NextResponse.json({ error: "A device with this serial number already exists." }, { status: 409 });
     }
     const device = await prisma.device.create({
       data: {

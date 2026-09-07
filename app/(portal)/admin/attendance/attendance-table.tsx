@@ -8,6 +8,7 @@ import { StatusPill, Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
@@ -58,6 +59,8 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
   const [quickBusy, setQuickBusy] = useState<string | null>(null);
   const [correction, setCorrection] = useState<Row["record"] | null>(null);
   const [newTime, setNewTime] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function save(recordId: string) {
     setSaving(true);
@@ -91,11 +94,33 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
 
   async function quickMark(employeeId: string, nextStatus: string) {
     const target = rows.find((r) => r.employeeId === employeeId);
+    const key = `${employeeId}:${nextStatus}`;
+    // No derived row yet (implicit absent): only an explicit absent mark can
+    // create the day via POST /api/attendance; other statuses need punches.
     if (!target?.record) {
-      toast("error", "No attendance record yet for this day");
+      if (nextStatus !== "absent") {
+        toast("error", "No attendance record yet for this day");
+        return;
+      }
+      setQuickBusy(key);
+      try {
+        const res = await fetch("/api/attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeId, date, status: "absent" }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast("error", data.error ?? "Failed to update");
+          return;
+        }
+        toast("success", "Marked absent");
+        router.refresh();
+      } finally {
+        setQuickBusy(null);
+      }
       return;
     }
-    const key = `${employeeId}:${nextStatus}`;
     setQuickBusy(key);
     try {
       const res = await fetch(`/api/attendance/${target.record.id}`, {
@@ -138,14 +163,20 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
 
   async function deletePunch(punchId: string) {
     if (!correction) return;
-    const res = await fetch(`/api/attendance/${correction.id}/punches?punchId=${punchId}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      toast("error", data.error ?? "Failed to delete punch");
-      return;
+    setDeleteBusy(true);
+    try {
+      const res = await fetch(`/api/attendance/${correction.id}/punches?punchId=${punchId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast("error", data.error ?? "Failed to delete punch");
+        return;
+      }
+      toast("success", "Punch removed — day re-derived");
+      setDeleteTarget(null);
+      await refreshRecord(correction.id);
+    } finally {
+      setDeleteBusy(false);
     }
-    toast("success", "Punch removed — day re-derived");
-    await refreshRecord(correction.id);
   }
 
   return (
@@ -225,7 +256,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                           <Button
                             size="sm"
                             variant="success"
-                            className="h-7 px-2 text-[11px]"
+                            className="min-h-[44px] px-2 text-[11px]"
                             loading={quickBusy === `${row.employeeId}:present`}
                             disabled={quickBusy !== null}
                             title={`Mark present for ${row.name}`}
@@ -237,7 +268,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                           <Button
                             size="sm"
                             variant="danger"
-                            className="h-7 px-2 text-[11px]"
+                            className="min-h-[44px] px-2 text-[11px]"
                             loading={quickBusy === `${row.employeeId}:absent`}
                             disabled={quickBusy !== null}
                             title={`Mark absent for ${row.name}`}
@@ -249,7 +280,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-[11px]"
+                            className="min-h-[44px] px-2 text-[11px]"
                             loading={quickBusy === `${row.employeeId}:late`}
                             disabled={quickBusy !== null}
                             title={`Mark late for ${row.name}`}
@@ -261,7 +292,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                           <Button
                             size="sm"
                             variant="secondary"
-                            className="h-7 px-2 text-[11px]"
+                            className="min-h-[44px] px-2 text-[11px]"
                             loading={quickBusy === `${row.employeeId}:half_day`}
                             disabled={quickBusy !== null}
                             title={`Mark half-day for ${row.name}`}
@@ -269,6 +300,22 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                             onClick={() => quickMark(row.employeeId, "half_day")}
                           >
                             Half-day
+                          </Button>
+                        </div>
+                      ) : null}
+                      {!row.record && !row.leave ? (
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            className="min-h-[44px] px-2 text-[11px]"
+                            loading={quickBusy === `${row.employeeId}:absent`}
+                            disabled={quickBusy !== null}
+                            title={`Mark absent for ${row.name}`}
+                            aria-label={`Mark absent for ${row.name}`}
+                            onClick={() => quickMark(row.employeeId, "absent")}
+                          >
+                            Absent
                           </Button>
                         </div>
                       ) : null}
@@ -325,7 +372,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
                 <span className="font-mono text-[13px]">{fmtISTFull(p.time)} IST</span>
                 <span className="text-[11px] capitalize text-muted-foreground">{p.source}{p.deviceSn ? ` · ${p.deviceSn}` : ""}</span>
                 <button
-                  onClick={() => deletePunch(p.id)}
+                  onClick={() => setDeleteTarget(p.id)}
                   aria-label={`Delete punch at ${fmtISTFull(p.time)}`}
                   className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
                   title="Delete punch"
@@ -355,6 +402,16 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
           )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete punch?"
+        description="This removes the punch and re-derives the day from the remaining punches."
+        confirmLabel="Delete"
+        busy={deleteBusy}
+        onCancel={() => { if (!deleteBusy) setDeleteTarget(null); }}
+        onConfirm={() => { if (deleteTarget) deletePunch(deleteTarget); }}
+      />
     </>
   );
 }

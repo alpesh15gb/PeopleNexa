@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma/client";
 import { randomBytes } from "crypto";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,34 @@ import { hashPassword } from "@/lib/auth";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ROWS = 500;
+const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
+const PHONE_RE = /^\+?[0-9]{7,15}$/;
+const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const UAN_RE = /^\d{12}$/;
+const ACCOUNT_RE = /^[0-9]{6,20}$/;
+const MIN_JOINING_MS = Date.parse("1990-01-01T00:00:00Z");
+
+function joiningDateRangeError(d: Date): string | null {
+  if (d.getTime() < MIN_JOINING_MS) return "Joining date cannot be before 1990-01-01.";
+  if (d.getTime() > Date.now() + 90 * 24 * 60 * 60 * 1000) {
+    return "Joining date cannot be more than 90 days in the future.";
+  }
+  return null;
+}
+
+function salaryStructureError(v: unknown): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "object" || Array.isArray(v)) {
+    return "Salary structure must be an object of non-negative numbers.";
+  }
+  for (const n of Object.values(v as Record<string, unknown>)) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+      return "Salary structure must contain only non-negative numbers.";
+    }
+  }
+  return null;
+}
 const TEMPLATE_HEADERS = [
   "firstName",
   "lastName",
@@ -110,6 +139,14 @@ export async function POST(req: NextRequest) {
     try {
       const firstName = String(raw?.firstName ?? "").trim();
       if (!firstName) throw new Error("First name is required.");
+      if (firstName.length > 100) throw new Error("First name must be at most 100 characters.");
+      const bulkLastRaw = raw?.lastName !== undefined && raw?.lastName !== null ? String(raw.lastName) : "";
+      const bulkLastName = bulkLastRaw.trim();
+      if (bulkLastRaw !== "" && !bulkLastName) throw new Error("Last name cannot be empty.");
+      if (bulkLastName.length > 100) throw new Error("Last name must be at most 100 characters.");
+      if (raw?.position != null && String(raw.position).length > 100) {
+        throw new Error("Position must be at most 100 characters.");
+      }
       if (!email || !EMAIL_RE.test(email)) throw new Error("Enter a valid email address.");
       if (seenInBatch.has(email)) throw new Error("Duplicate email in this file.");
       seenInBatch.add(email);
@@ -127,8 +164,30 @@ export async function POST(req: NextRequest) {
       if (raw?.joiningDate) {
         const d = new Date(String(raw.joiningDate));
         if (Number.isNaN(d.getTime())) throw new Error("Joining date is invalid.");
+        const rangeErr = joiningDateRangeError(d);
+        if (rangeErr) throw new Error(rangeErr);
         joiningDate = d;
       }
+
+      let bulkPhone: string | null = null;
+      if (raw?.phone != null && String(raw.phone).trim() !== "") {
+        bulkPhone = String(raw.phone).trim();
+        if (!PHONE_RE.test(bulkPhone.replace(/[\s-]/g, ""))) {
+          throw new Error("Enter a valid phone number.");
+        }
+      }
+
+      const extra = raw as Record<string, unknown>;
+      const bulkPan = extra.pan != null && String(extra.pan).trim() !== "" ? String(extra.pan).trim().toUpperCase() : null;
+      if (bulkPan != null && !PAN_RE.test(bulkPan)) throw new Error("Enter a valid PAN (e.g. ABCDE1234F).");
+      const bulkIfsc = extra.ifscCode != null && String(extra.ifscCode).trim() !== "" ? String(extra.ifscCode).trim().toUpperCase() : null;
+      if (bulkIfsc != null && !IFSC_RE.test(bulkIfsc)) throw new Error("Enter a valid IFSC code (e.g. HDFC0001234).");
+      const bulkUan = extra.uan != null && String(extra.uan).trim() !== "" ? String(extra.uan).trim() : null;
+      if (bulkUan != null && !UAN_RE.test(bulkUan)) throw new Error("UAN must be a 12-digit number.");
+      const bulkAccount = extra.accountNumber != null && String(extra.accountNumber).trim() !== "" ? String(extra.accountNumber).trim() : null;
+      if (bulkAccount != null && !ACCOUNT_RE.test(bulkAccount)) throw new Error("Account number must be 6–20 digits.");
+      const bulkSsErr = salaryStructureError(extra.salaryStructure);
+      if (bulkSsErr) throw new Error(bulkSsErr);
 
       const branchId = raw?.branchId ? String(raw.branchId).trim() : "";
       const departmentId = raw?.departmentId ? String(raw.departmentId).trim() : "";
@@ -166,15 +225,18 @@ export async function POST(req: NextRequest) {
       if (exists) throw new Error("An employee with this email already exists.");
 
       const payMode = raw?.payMode ? String(raw.payMode).trim() || "monthly" : "monthly";
+      if (!PAY_MODES.has(payMode)) {
+        throw new Error("Pay mode must be one of monthly, daily, weekly, hourly, work_basis.");
+      }
 
       await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
           employeeNumber: `EMP-${String(count + i + 1).padStart(3, "0")}`,
           firstName,
-          lastName: String(raw?.lastName ?? ""),
+          lastName: bulkLastName,
           email,
-          phone: raw?.phone ? String(raw.phone) : null,
+          phone: bulkPhone,
           password: await hashPassword(genPassword()),
           role: "employee",
           position: raw?.position ? String(raw.position) : null,
@@ -184,6 +246,14 @@ export async function POST(req: NextRequest) {
           departmentId: departmentId || null,
           shiftId: shiftId || null,
           payMode,
+          pan: bulkPan,
+          uan: bulkUan,
+          ifscCode: bulkIfsc,
+          accountNumber: bulkAccount,
+          salaryStructure:
+            extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== ""
+              ? (extra.salaryStructure as Prisma.InputJsonValue)
+              : undefined,
         },
       });
       created++;
@@ -194,7 +264,14 @@ export async function POST(req: NextRequest) {
         "code" in err &&
         (err as { code?: string }).code === "P2002"
       ) {
-        failed.push({ email: email || `(row ${i + 1})`, error: "Duplicate entry — please retry." });
+        const t = (err as { meta?: { target?: unknown } })?.meta?.target;
+        const targets = Array.isArray(t) ? t.map(String) : [];
+        failed.push({
+          email: email || `(row ${i + 1})`,
+          error: targets.includes("email")
+            ? "An employee with this email already exists."
+            : "Duplicate entry — please retry.",
+        });
         continue;
       }
       failed.push({

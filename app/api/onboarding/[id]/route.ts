@@ -19,6 +19,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 
   const done = body.status === "done";
+  if (body.status !== "pending" && body.status !== "done") {
+    return NextResponse.json({ error: "Invalid status. Must be pending or done." }, { status: 400 });
+  }
   const updated = await prisma.onboardingTask.update({
     where: { id },
     data: done ? { status: "done", completedAt: new Date() } : { status: "pending", completedAt: null },

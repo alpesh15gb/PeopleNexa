@@ -37,6 +37,21 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const body = (await req.json().catch(() => ({}))) as { setting_name?: unknown; value?: unknown };
   const settingName = String(body.setting_name ?? "").trim();
   if (!settingName) return NextResponse.json({ error: "setting_name is required" }, { status: 400 });
+  // Whitelist: arbitrary config keys would let callers scribble over the
+  // device config blob (and queue misleading SET commands).
+  const ALLOWED_SETTINGS = new Set([
+    "volume",
+    "brightness",
+    "sleep_timeout",
+    "door_delay",
+    "verify_mode",
+    "language",
+    "timezone",
+    "attendance_repeat_time",
+  ]);
+  if (!ALLOWED_SETTINGS.has(settingName)) {
+    return NextResponse.json({ error: `Unknown setting "${settingName}".` }, { status: 400 });
+  }
 
   const config = { ...((device.config ?? {}) as Record<string, unknown>), [settingName]: body.value };
   const updated = await prisma.realtimeDevice.update({ where: { id }, data: { config: config as object } });

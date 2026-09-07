@@ -1,7 +1,7 @@
 import { PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { fromDateKey, startOfDay, endOfDay, todayKey, formatTime, formatDate } from "@/lib/dates";
+import { dayRangeIST, todayKey, formatTime, formatDate } from "@/lib/dates";
 import { finalizeEligibleDays } from "@/lib/reconcile";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,7 +20,7 @@ export default async function AdminAttendancePage({
   const session = await requireSession();
   const { date: dateParam, branch: branchParam } = await searchParams;
   const dateKey = dateParam || todayKey();
-  const dayStart = startOfDay(fromDateKey(dateKey));
+  const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = branchParam
@@ -45,19 +45,19 @@ export default async function AdminAttendancePage({
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lte: endOfDay(dayStart) } },
+      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
       include: { branch: { select: { name: true } } },
     }),
     prisma.leaveRequest.findMany({
       where: {
         tenantId: session.tenantId,
         status: "approved",
-        fromDate: { lte: endOfDay(dayStart) },
+        fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
-    prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lte: endOfDay(dayStart) } } }),
+    prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
     prisma.branch.findMany({
       where: { tenantId: session.tenantId },
       select: { id: true, name: true },

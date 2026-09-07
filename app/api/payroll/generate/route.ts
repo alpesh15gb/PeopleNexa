@@ -41,23 +41,39 @@ export async function POST(req: NextRequest) {
     employees.map((e) => [e.id, e.phone ?? null] as const)
   );
 
+  type GenResult = { employeeId: string; created: boolean; netSalary?: number; error?: string };
+  const results: GenResult[] = [];
+
   for (const emp of withSalary) {
-    const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month);
-    if (res.created) created++;
-    totalLoanApplied += res.loanApplied ?? 0;
-    if (res.created && res.netSalary != null) {
-      await sendWhatsApp(session.tenantId, phones.get(emp.id), "payslip.generated", {
-        month,
-        amount: res.netSalary.toFixed(0),
-      });
+    try {
+      const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month);
+      if (res.created) created++;
+      totalLoanApplied += res.loanApplied ?? 0;
+      results.push({ employeeId: emp.id, created: res.created, ...(res.netSalary != null ? { netSalary: res.netSalary } : {}) });
+    } catch (e) {
+      results.push({ employeeId: emp.id, created: false, error: e instanceof Error ? e.message : "Failed to generate" });
     }
   }
 
+  // Notify outside the generation loop so a WhatsApp failure never fails the response.
+  const notifyTargets = results.filter((r) => r.created && r.netSalary != null);
+  await Promise.allSettled(
+    notifyTargets.map((r) =>
+      sendWhatsApp(session.tenantId, phones.get(r.employeeId), "payslip.generated", {
+        month,
+        amount: Number(r.netSalary).toFixed(0),
+      })
+    )
+  );
+
+  const failed = results.filter((r) => r.error).length;
   return NextResponse.json({
     success: true,
     month,
     created,
     skipped: employees.length - withSalary.length,
     loanApplied: totalLoanApplied,
+    results,
+    totals: { created, skipped: employees.length - withSalary.length, failed, total: employees.length },
   });
 }

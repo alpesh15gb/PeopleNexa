@@ -26,6 +26,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (startTime === endTime) {
       return NextResponse.json({ error: "Start and end time must be different." }, { status: 400 });
     }
+    const resolvedNightShift = body.isNightShift != null ? Boolean(body.isNightShift) : shift.isNightShift;
+    if (endTime < startTime && !resolvedNightShift) {
+      return NextResponse.json({ error: "Overnight shift must be marked as night shift." }, { status: 400 });
+    }
     const exists = await prisma.shift.findFirst({
       where: { tenantId: session.tenantId, name, id: { not: id } },
     });
@@ -42,7 +46,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         startTime,
         endTime,
         graceMinutes,
-        isNightShift: body.isNightShift != null ? Boolean(body.isNightShift) : shift.isNightShift,
+        isNightShift: resolvedNightShift,
       },
     });
     return NextResponse.json({ shift: updated });

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKey } from "@/lib/dates";
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

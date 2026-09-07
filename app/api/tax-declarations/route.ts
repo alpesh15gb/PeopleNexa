@@ -37,6 +37,15 @@ export async function POST(req: NextRequest) {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
+  // Documented per-section caps (simplified, non-senior): 80c 150000,
+  // 80d 50000, hra 300000, lta 50000, other 200000.
+  const CAPS: Record<string, number> = { "80c": 150000, "80d": 50000, hra: 300000, lta: 50000, other: 200000 };
+  for (const [key, cap] of Object.entries(CAPS)) {
+    const val = num(body.sections?.[key]);
+    if (val > cap) {
+      return NextResponse.json({ error: `${key} exceeds the maximum allowed ${cap}.` }, { status: 400 });
+    }
+  }
   const sections = {
     "80c": num(body.sections?.["80c"]),
     "80d": num(body.sections?.["80d"]),

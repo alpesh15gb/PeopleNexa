@@ -23,40 +23,125 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   });
   if (!request) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (request.status !== "pending") {
-    return NextResponse.json({ error: "This request has already been reviewed." }, { status: 400 });
+    return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });
   }
 
-  const updated = await prisma.leaveRequest.update({
+  const reviewNote = body.note || null;
+  const reviewedAt = new Date();
+
+  if (decision === "rejected") {
+    // Atomic claim: only a pending row can transition to rejected.
+    const claimed = await prisma.leaveRequest.updateMany({
+      where: { id, tenantId: session.tenantId, status: "pending" },
+      data: { status: "rejected", reviewedBy: session.sub, reviewedAt, reviewNote },
+    });
+    if (claimed.count === 0) {
+      return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });
+    }
+    const updated = await prisma.leaveRequest.findUnique({
+      where: { id },
+      include: { leaveType: true },
+    });
+    if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    await notifyEmployee(
+      session.tenantId,
+      request.employeeId,
+      "danger",
+      "Leave rejected",
+      `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was rejected.`
+    );
+
+    const employee = await prisma.employee.findUnique({
+      where: { id: request.employeeId },
+      select: { phone: true, firstName: true },
+    });
+    const admin = await prisma.employee.findUnique({ where: { id: session.sub }, select: { firstName: true } });
+    await sendWhatsApp(session.tenantId, employee?.phone, "leave.rejected", {
+      from: formatDate(updated.fromDate),
+      to: formatDate(updated.toDate),
+      admin: admin?.firstName ?? "HR",
+      reason: body.note || "—",
+    });
+
+    return NextResponse.json({ request: updated });
+  }
+
+  // Approve: claim the pending row first (count==0 → a concurrent reviewer
+  // won → 409), then re-check the balance including this request. Throwing
+  // on over-balance rolls the claim back so the request stays pending.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.leaveRequest.updateMany({
+        where: { id, tenantId: session.tenantId, status: "pending" },
+        data: { status: "approved", reviewedBy: session.sub, reviewedAt, reviewNote },
+      });
+      if (claimed.count === 0) {
+        const err = new Error("This request has already been reviewed.") as Error & { code?: string };
+        err.code = "CLAIM_CONFLICT";
+        throw err;
+      }
+      const [approvedRows, leaveType] = await Promise.all([
+        tx.leaveRequest.findMany({
+          where: {
+            tenantId: session.tenantId,
+            employeeId: request.employeeId,
+            leaveTypeId: request.leaveTypeId,
+            status: "approved",
+          },
+          select: { days: true },
+        }),
+        tx.leaveType.findUnique({ where: { id: request.leaveTypeId } }),
+      ]);
+      const total = approvedRows.reduce((sum, r) => sum + r.days, 0);
+      if (leaveType && total > leaveType.maxDays) {
+        const err = new Error(
+          `Approving this would exceed the ${leaveType.name} balance — ${leaveType.maxDays} day(s) allowed, ${total} day(s) would be approved.`
+        ) as Error & { code?: string };
+        err.code = "OVER_BALANCE";
+        throw err;
+      }
+    });
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    if (code === "CLAIM_CONFLICT") {
+      return NextResponse.json({ error: (e as Error).message }, { status: 409 });
+    }
+    if (code === "OVER_BALANCE") {
+      return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    }
+    throw e;
+  }
+
+  const updated = await prisma.leaveRequest.findUnique({
     where: { id },
-    data: { status: decision, reviewedBy: session.sub, reviewedAt: new Date(), reviewNote: body.note || null },
     include: { leaveType: true },
   });
+  if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await notifyEmployee(
     session.tenantId,
     request.employeeId,
-    decision === "approved" ? "success" : "danger",
-    decision === "approved" ? "Leave approved" : "Leave rejected",
-    `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was ${decision}.`
+    "success",
+    "Leave approved",
+    `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was approved.`
   );
 
-  if (decision === "approved") {
-    await dispatchWebhook(session.tenantId, "leave.approved", {
-      requestId: request.id,
-      employeeId: request.employeeId,
-      leaveType: updated.leaveType.name,
-      fromDate: formatDate(updated.fromDate),
-      toDate: formatDate(updated.toDate),
-      days: updated.days,
-    });
-  }
+  await dispatchWebhook(session.tenantId, "leave.approved", {
+    requestId: request.id,
+    employeeId: request.employeeId,
+    leaveType: updated.leaveType.name,
+    fromDate: formatDate(updated.fromDate),
+    toDate: formatDate(updated.toDate),
+    days: updated.days,
+  });
 
   const employee = await prisma.employee.findUnique({
     where: { id: request.employeeId },
     select: { phone: true, firstName: true },
   });
   const admin = await prisma.employee.findUnique({ where: { id: session.sub }, select: { firstName: true } });
-  await sendWhatsApp(session.tenantId, employee?.phone, decision === "approved" ? "leave.approved" : "leave.rejected", {
+  await sendWhatsApp(session.tenantId, employee?.phone, "leave.approved", {
     from: formatDate(updated.fromDate),
     to: formatDate(updated.toDate),
     admin: admin?.firstName ?? "HR",

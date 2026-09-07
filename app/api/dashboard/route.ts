@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { monthKey, addDays } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const today = istStartOfDay(new Date());
@@ -13,7 +13,32 @@ export async function GET() {
 
   if (session.role === "admin") {
     const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
-      prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active" } }),
+      prisma.employee.findMany({
+        where: { tenantId: session.tenantId, status: "active" },
+        select: {
+          id: true,
+          tenantId: true,
+          employeeNumber: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          role: true,
+          status: true,
+          position: true,
+          joiningDate: true,
+          profilePicture: true,
+          lastLoginAt: true,
+          createdAt: true,
+          updatedAt: true,
+          managerId: true,
+          payMode: true,
+          workBasisRate: true,
+          branchId: true,
+          departmentId: true,
+          shiftId: true,
+        },
+      }),
       prisma.attendance.findMany({
         where: { tenantId: session.tenantId, date: range },
         include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },

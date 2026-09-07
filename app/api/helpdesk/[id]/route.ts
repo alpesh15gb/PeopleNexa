@@ -51,7 +51,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     data.priority = body.priority;
   }
   if (body.assigneeId !== undefined) {
-    data.assigneeId = body.assigneeId || null;
+    const raw = body.assigneeId ? String(body.assigneeId) : "";
+    if (!raw) {
+      data.assigneeId = null;
+    } else {
+      const assignee = await prisma.employee.findFirst({
+        where: { id: raw, tenantId: session.tenantId },
+        select: { id: true },
+      });
+      if (!assignee) return NextResponse.json({ error: "Invalid assignee." }, { status: 400 });
+      data.assigneeId = raw;
+    }
   }
 
   const updated = await prisma.ticket.update({ where: { id }, data });

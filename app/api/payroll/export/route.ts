@@ -5,7 +5,7 @@ import { isMonthKey, monthKey } from "@/lib/dates";
 import { buildBankFile, bankFileName, type BankFormat } from "@/lib/bank-file";
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -18,8 +18,18 @@ export async function GET(req: NextRequest) {
   const bank: BankFormat = bankParam === "hdfc" || bankParam === "icici" ? bankParam : "generic";
   const debitAccount = req.nextUrl.searchParams.get("debitAccount") || "";
 
+  // Explicit ?status=paid|draft filter; default "all" returns every slip.
+  const statusParam = (req.nextUrl.searchParams.get("status") || "all").toLowerCase();
+  if (!["all", "paid", "draft"].includes(statusParam)) {
+    return NextResponse.json({ error: "status must be one of: all, paid, draft." }, { status: 400 });
+  }
+
   const payslips = await prisma.payslip.findMany({
-    where: { tenantId: session.tenantId, month },
+    where: {
+      tenantId: session.tenantId,
+      month,
+      ...(statusParam === "all" ? {} : { status: statusParam }),
+    },
     include: {
       employee: { select: { id: true, firstName: true, lastName: true, accountNumber: true, ifscCode: true } },
     },

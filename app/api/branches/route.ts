@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const branches = await prisma.branch.findMany({
     where: { tenantId: session.tenantId },
     include: { _count: { select: { employees: true } } },
@@ -20,10 +20,11 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    if (!body.name || !body.code) {
+    const name = String(body.name ?? "").trim();
+    const code = String(body.code ?? "").trim().toUpperCase();
+    if (!name || !code) {
       return NextResponse.json({ error: "Name and code are required." }, { status: 400 });
     }
-    const code = String(body.code).toUpperCase();
     const exists = await prisma.branch.findFirst({
       where: { tenantId: session.tenantId, code },
     });
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     const branch = await prisma.branch.create({
       data: {
         tenantId: session.tenantId,
-        name: body.name,
+        name,
         code,
         address: body.address ?? null,
         latitude:
@@ -52,8 +53,10 @@ export async function POST(req: NextRequest) {
               })()
             : null,
         geofenceRadius: (() => {
-          const n = Number(body.geofenceRadius);
-          if (!Number.isFinite(n)) return 200;
+          const raw = body.geofenceRadius;
+          if (raw === undefined || raw === null || raw === "") return 200;
+          const n = Number(raw);
+          if (!Number.isFinite(n)) throw new Error("invalid-radius");
           return Math.min(5000, Math.max(50, Math.round(n)));
         })(),
       },
@@ -62,6 +65,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof Error && (err.message === "invalid-lat" || err.message === "invalid-lng")) {
       return NextResponse.json({ error: "Latitude must be -90…90 and longitude -180…180." }, { status: 400 });
+    }
+    if (err instanceof Error && err.message === "invalid-radius") {
+      return NextResponse.json({ error: "Geofence radius must be a number." }, { status: 400 });
     }
     return NextResponse.json({ error: "Failed to create branch." }, { status: 500 });
   }

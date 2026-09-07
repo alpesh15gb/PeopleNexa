@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const logs = await prisma.realtimeLog.findMany({
     where: { realtimeDeviceId: id, punchTime: { gte: start, lte: end } },
     orderBy: { punchTime: "asc" },
-    take: 5000,
+    take: 500,
   });
   const cmd = await prisma.realtimeCommand.create({
     data: {

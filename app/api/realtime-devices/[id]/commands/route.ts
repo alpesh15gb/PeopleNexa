@@ -31,6 +31,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (action === "screen_message" && !String(body.message ?? "").trim()) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
+  // Queue cap: refuse new commands while 50 are still pending pickup.
+  const pendingCount = await prisma.realtimeCommand.count({ where: { realtimeDeviceId: id, status: "pending" } });
+  if (pendingCount >= 50) {
+    return NextResponse.json({ error: "Too many pending commands for this device." }, { status: 400 });
+  }
   const queued = await prisma.realtimeCommand.create({
     data: { realtimeDeviceId: id, command, status: "pending" },
   });

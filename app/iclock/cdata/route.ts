@@ -29,6 +29,11 @@ export async function GET(req: NextRequest) {
     return new NextResponse("OK", { headers: { "Content-Type": "text/plain" } });
   }
 
+  if (device.status === "inactive") {
+    // Retired device: refuse without touching lastSeenAt/status.
+    return new NextResponse("ERROR: disabled\r\n", { headers: { "Content-Type": "text/plain" } });
+  }
+
   await touch(device.id);
 
   if (req.nextUrl.searchParams.get("options") === "all") {
@@ -68,6 +73,11 @@ export async function POST(req: NextRequest) {
     return new NextResponse("OK: 0\r\n", { headers: { "Content-Type": "text/plain" } });
   }
 
+  if (device.status === "inactive") {
+    // Retired device: refuse without touching lastSeenAt/status.
+    return new NextResponse("ERROR: disabled\r\n", { headers: { "Content-Type": "text/plain" } });
+  }
+
   await touch(device.id);
 
   if (req.nextUrl.searchParams.get("table") === "OPERLOG") {
@@ -80,26 +90,43 @@ export async function POST(req: NextRequest) {
     return new NextResponse("OK: 0\r\n", { headers: { "Content-Type": "text/plain" } });
   }
 
+  // Abuse cap: reject oversized pushes before parsing.
+  if (rawBody.length > 256 * 1024) {
+    return new NextResponse("ERROR: too large\r\n", { headers: { "Content-Type": "text/plain" } });
+  }
+
   // Format per line: userId \t dateTime \t verifyMode \t inOutMode \t workCode
   const lines = rawBody.split("\n").filter((l) => l.trim());
-  let accepted = 0;
+  if (lines.length > 2000) {
+    return new NextResponse("ERROR: too large\r\n", { headers: { "Content-Type": "text/plain" } });
+  }
+  let ingested = 0;
+  let duplicate = 0;
+  let errors = 0;
 
   for (const line of lines) {
     try {
       let parts = line.split("\t");
       if (parts.length < 2) parts = line.split(/\s+/).filter((p) => p.trim());
-      if (parts.length < 2) continue;
+      if (parts.length < 2) {
+        errors++;
+        continue;
+      }
 
       const userId = parts[0].trim();
       const dateTimeStr = parts[1] + (parts[1].length < 11 && parts[2] ? " " + parts[2] : "");
       const verifyMode = parts[3]?.trim() || "0";
       const inOutMode = parts[4]?.trim() || "0";
 
-      if (!userId || !dateTimeStr) continue;
+      if (!userId || !dateTimeStr) {
+        errors++;
+        continue;
+      }
 
       const punchTime = parseIST(dateTimeStr);
       if (!punchTime) {
         console.log(`[iClock] Unparseable date: ${dateTimeStr}`);
+        errors++;
         continue;
       }
 
@@ -110,13 +137,18 @@ export async function POST(req: NextRequest) {
         inOutMode,
         rawLine: line,
       });
-      if (result.accepted) accepted++;
+      if (result.action === "in" || result.action === "out") ingested++;
+      else if (result.action === "duplicate") duplicate++;
+      else errors++;
       console.log(`[iClock] ${sn} emp=${userId} ${dateTimeStr} → ${result.action}`);
     } catch (err) {
+      errors++;
       console.error(`[iClock] Line error: ${line}`, err instanceof Error ? err.message : err);
     }
   }
 
-  console.log(`[iClock] Device ${sn}: accepted ${accepted}/${lines.length} records`);
-  return new NextResponse(`OK: ${accepted}\r\n`, { headers: { "Content-Type": "text/plain" } });
+  console.log(`[iClock] Device ${sn}: ingested ${ingested} duplicate ${duplicate} errors ${errors}/${lines.length} records`);
+  return new NextResponse(`OK: ingested=${ingested} duplicate=${duplicate} errors=${errors}\r\n`, {
+    headers: { "Content-Type": "text/plain" },
+  });
 }

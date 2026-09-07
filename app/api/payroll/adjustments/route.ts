@@ -42,6 +42,14 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(amount) || amount === 0) {
     return NextResponse.json({ error: "Amount must be a non-zero number (positive = earning, negative = deduction)." }, { status: 400 });
   }
+  // Sign-vs-type enforcement: arrears/bonus add to earnings (>0),
+  // deductions add to deductions (<0), other accepts any nonzero.
+  if ((type === "arrears" || type === "bonus") && amount <= 0) {
+    return NextResponse.json({ error: "Arrears and bonus adjustments must be a positive amount." }, { status: 400 });
+  }
+  if (type === "deduction" && amount >= 0) {
+    return NextResponse.json({ error: "Deduction adjustments must be a negative amount." }, { status: 400 });
+  }
   const employee = await prisma.employee.findFirst({
     where: { id: employeeId, tenantId: session.tenantId },
     select: { id: true },

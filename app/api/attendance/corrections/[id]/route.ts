@@ -27,8 +27,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 
   if (status === "rejected") {
-    const updated = await prisma.punchCorrection.update({
-      where: { id },
+    // Atomic claim: only a pending row can transition to rejected.
+    const claimed = await prisma.punchCorrection.updateMany({
+      where: { id, tenantId: session.tenantId, status: "pending" },
       data: {
         status: "rejected",
         reviewNote: body.reviewNote ? String(body.reviewNote).trim() : null,
@@ -36,6 +37,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         reviewedAt: new Date(),
       },
     });
+    if (claimed.count === 0) {
+      return NextResponse.json({ error: "This correction was already reviewed." }, { status: 409 });
+    }
+    const updated = await prisma.punchCorrection.findUnique({ where: { id } });
     await notifyEmployee(
       correction.tenantId,
       correction.employeeId,
@@ -86,9 +91,23 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const loneIsOut = punches.length === 1 && punches[0].inOutHint === "out";
 
   // Apply punch edits atomically so concurrent approvals can't interleave
-  // creates and leave duplicate out punches. Reconciliation runs after the
-  // transaction commits (it reads the committed punch ledger).
-  await prisma.$transaction(async (tx) => {
+  // creates and leave duplicate out punches. The correction row is claimed
+  // FIRST (pending → approved); count==0 means a concurrent reviewer won.
+  // Reconciliation runs after the transaction commits (it reads the
+  // committed punch ledger).
+  const reviewNote = body.reviewNote ? String(body.reviewNote).trim() : null;
+  const reviewedAt = new Date();
+  try {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.punchCorrection.updateMany({
+        where: { id, tenantId: session.tenantId, status: "pending" },
+        data: { status: "approved", reviewNote, reviewedBy: session.sub, reviewedAt },
+      });
+      if (claimed.count === 0) {
+        const err = new Error("CLAIM_CONFLICT") as Error & { code?: string };
+        err.code = "CLAIM_CONFLICT";
+        throw err;
+      }
     if (correction.requestedIn && correction.requestedOut && punches.length === 1) {
       if (loneIsOut) {
         // Lone out + both corrections → that punch is the "out"; the "in" is missing.
@@ -169,7 +188,39 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       },
       data: { finalized: false, reviewStatus: null },
     });
-  });
+
+    // Post-mutation guard: the resulting punch ledger must sort to a
+    // positive span (first < last). Throwing rolls the whole tx back.
+    const after = await tx.punch.findMany({
+      where: { employeeId: correction.employeeId, punchTime: { gte: windowStart, lt: windowEnd } },
+      orderBy: { punchTime: "asc" },
+      select: { punchTime: true },
+    });
+    if (after.length >= 2) {
+      const first = after[0].punchTime.getTime();
+      const last = after[after.length - 1].punchTime.getTime();
+      if (!(first < last) || !(last - first > 0)) {
+        const err = new Error("INVALID_SPAN") as Error & { code?: string };
+        err.code = "INVALID_SPAN";
+        throw err;
+      }
+    } else if (correction.requestedIn && correction.requestedOut) {
+      const err = new Error("INVALID_SPAN") as Error & { code?: string };
+      err.code = "INVALID_SPAN";
+      throw err;
+    }
+    });
+  } catch (e) {
+    const code = (e as { code?: string })?.code;
+    const message = e instanceof Error ? e.message : "";
+    if (code === "CLAIM_CONFLICT" || message === "CLAIM_CONFLICT") {
+      return NextResponse.json({ error: "This correction was already reviewed." }, { status: 409 });
+    }
+    if (code === "INVALID_SPAN" || message === "INVALID_SPAN") {
+      return NextResponse.json({ error: "Corrected punches result in an invalid span (in must be before out)." }, { status: 400 });
+    }
+    throw e;
+  }
 
   // Re-run reconciliation so status / late minutes / overtime reflect the
   // corrected times and the day locks at its corrected values.
@@ -181,15 +232,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     { finalize: isFinalizable(correction.date, undefined, employee.shift) }
   );
 
-  const updated = await prisma.punchCorrection.update({
-    where: { id },
-    data: {
-      status: "approved",
-      reviewNote: body.reviewNote ? String(body.reviewNote).trim() : null,
-      reviewedBy: session.sub,
-      reviewedAt: new Date(),
-    },
-  });
+  const updated = await prisma.punchCorrection.findUnique({ where: { id } });
+  if (!updated) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
 
   await notifyEmployee(
     correction.tenantId,

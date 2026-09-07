@@ -32,9 +32,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ code: stri
     return NextResponse.json({ status: false, message: "Missing or invalid Authorization header" }, { status: 401 });
   }
 
-  const punchTime = parseIST(tsRaw) ?? new Date(tsRaw);
-  if (Number.isNaN(punchTime.getTime())) {
+  // Strict timestamp: device wall-clock "YYYY-MM-DD HH:mm:ss" parsed as IST
+  // only — no Date() fallback (which would accept epoch/ISO garbage).
+  const punchTime = parseIST(tsRaw);
+  if (!punchTime) {
     return NextResponse.json({ status: false, message: "Unparseable timestamp" }, { status: 400 });
+  }
+  if (punchTime.getUTCFullYear() < 2000 || punchTime.getTime() > Date.now() + 24 * 3600 * 1000) {
+    return NextResponse.json({ status: false, message: "Timestamp out of range" }, { status: 400 });
   }
   const result = await handleRealtimePunch(device, {
     userId,

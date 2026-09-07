@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "supervisor")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const departments = await prisma.department.findMany({
     where: { tenantId: session.tenantId },
     include: { _count: { select: { employees: true } } },
@@ -20,9 +20,9 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    if (!body.name) return NextResponse.json({ error: "Department name is required." }, { status: 400 });
-    const name = String(body.name).trim();
-    const exists = await prisma.department.findFirst({ where: { tenantId: session.tenantId, name } });
+    const name = String(body.name ?? "").trim();
+    if (!name) return NextResponse.json({ error: "Department name is required." }, { status: 400 });
+    const exists = await prisma.department.findFirst({ where: { tenantId: session.tenantId, name: { equals: name, mode: "insensitive" } } });
     if (exists) return NextResponse.json({ error: "A department with this name already exists." }, { status: 400 });
 
     const department = await prisma.department.create({

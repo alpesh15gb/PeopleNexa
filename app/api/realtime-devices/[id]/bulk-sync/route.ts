@@ -27,7 +27,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     },
   });
   await prisma.realtimeDevice.update({ where: { id }, data: { lastSyncAt: new Date() } });
-  return NextResponse.json({ success: true, task: queued }, { status: 201 });
+  const pendingCount = await prisma.realtimeCommand.count({
+    where: { realtimeDeviceId: targetId ?? id, status: "pending" },
+  });
+  return NextResponse.json({ success: true, task: queued, pendingCount }, { status: 201 });
 }
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

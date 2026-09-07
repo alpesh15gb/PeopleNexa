@@ -14,10 +14,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   let name = department.name;
   if (body.name !== undefined) {
-    name = String(body.name).trim();
+    name = String(body.name ?? "").trim();
     if (!name) return NextResponse.json({ error: "Department name is required." }, { status: 400 });
     const exists = await prisma.department.findFirst({
-      where: { tenantId: session.tenantId, name, NOT: { id } },
+      where: { tenantId: session.tenantId, name: { equals: name, mode: "insensitive" }, NOT: { id } },
     });
     if (exists) return NextResponse.json({ error: "A department with this name already exists." }, { status: 400 });
   }
