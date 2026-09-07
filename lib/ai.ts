@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { toDateKey, startOfDay, endOfDay, todayKey, monthKey } from "./dates";
+import { toDateKey, startOfDay, endOfDay, todayKey, monthKeyIST } from "./dates";
 
 /**
  * "Ask AI" — a deterministic natural-language engine over the tenant's data.
@@ -67,7 +67,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     if (!emp) {
       return { tone: "warning", answer: `I couldn't find an employee matching "**${empMatch[2]}**". Try a first name.` };
     }
-    const month = monthKey(today);
+    const month = monthKeyIST(new Date());
     const [recs, punches] = await Promise.all([
       prisma.attendance.findMany({ where: { employeeId: emp.id, date: { gte: startOfDay(new Date(`${month}-01`)), lte: today } }, orderBy: { date: "desc" }, take: 30 }),
       prisma.punch.count({ where: { employeeId: emp.id, tenantId, punchTime: { gte: startOfDay(today), lte: endOfDay(today) } } }),
@@ -179,7 +179,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
 
   // ── Overtime ──────────────────────────────────────────────────────────
   if (firstMatch(OVERTIME, q)) {
-    const monthStart = startOfDay(new Date(`${monthKey(today)}-01`));
+    const monthStart = startOfDay(new Date(`${monthKeyIST(new Date())}-01`));
     const recs = await prisma.attendance.findMany({
       where: { tenantId, date: { gte: monthStart, lte: endOfDay(today) } },
       include: { employee: { select: { firstName: true, lastName: true } } },
@@ -213,7 +213,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
 
   // ── Payroll ───────────────────────────────────────────────────────────
   if (firstMatch(PAYROLL, q)) {
-    const month = monthKey(today);
+    const month = monthKeyIST(new Date());
     const slips = await prisma.payslip.findMany({ where: { tenantId, month }, include: { employee: { select: { firstName: true, lastName: true } } } });
     const total = slips.reduce((s, p) => s + p.netSalary, 0);
     return {
@@ -243,7 +243,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
 
   // ── Monthly attendance ────────────────────────────────────────────────
   if (firstMatch(ABSENT_MONTH, q) || /attendance.*month/.test(q)) {
-    const monthStart = startOfDay(new Date(`${monthKey(today)}-01`));
+    const monthStart = startOfDay(new Date(`${monthKeyIST(new Date())}-01`));
     const recs = await prisma.attendance.findMany({ where: { tenantId, date: { gte: monthStart, lte: endOfDay(today) } } });
     const byEmp = new Map<string, { present: number; late: number; absent: number }>();
     for (const r of recs) {
@@ -258,7 +258,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     const worst = [...rows].sort((a, b) => b.absent - a.absent)[0];
     return {
       tone: "info",
-      answer: `Attendance for ${monthKey(today)}: **${totalPresent} present/late days** across the team. ${worst && worst.absent > 0 ? `${worst.employee} has the most absences (${worst.absent}).` : ""}`,
+      answer: `Attendance for ${monthKeyIST(new Date())}: **${totalPresent} present/late days** across the team. ${worst && worst.absent > 0 ? `${worst.employee} has the most absences (${worst.absent}).` : ""}`,
       data: rows,
       columns: ["employee", "present", "late", "absent"],
     };

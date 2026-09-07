@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
     ...(departmentId ? { departmentId } : {}),
   };
 
-  const [employees, records, leaves] = await Promise.all([
+  const [employees, records, leaves, holidays] = await Promise.all([
     prisma.employee.findMany({
       where: employeeWhere,
       select: {
@@ -100,6 +100,15 @@ export async function GET(req: NextRequest) {
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
+    prisma.holiday.findMany({
+      where: {
+        tenantId: session.tenantId,
+        OR: [
+          { isRecurring: true },
+          { date: { gte: rangeStart, lt: rangeEndExclusive } },
+        ],
+      },
+    }),
   ]);
 
   // IST day keys for the selected range (inclusive).
@@ -107,6 +116,24 @@ export async function GET(req: NextRequest) {
   for (let n = 0; n < rangeDays; n++) {
     days.push(istDateKey(new Date(rangeStart.getTime() + n * 86400000)));
   }
+
+  const holidayKeys = new Set<string>();
+  for (const holiday of holidays) {
+    const holidayKey = istDateKey(holiday.date);
+    for (const day of days) {
+      if (holiday.isRecurring ? holidayKey.slice(5) === day.slice(5) : holidayKey === day) {
+        holidayKeys.add(day);
+      }
+    }
+  }
+
+  const nonWorkingReason = (day: string): string | null => {
+    if (holidayKeys.has(day)) return "Holiday";
+    return new Date(`${day}T12:00:00Z`).getUTCDay() === 0 ? "Sunday" : null;
+  };
+
+  const isWorkDayFor = (emp: (typeof employees)[number], day: string): boolean =>
+    (!emp.joiningDate || istDateKey(emp.joiningDate) <= day) && !nonWorkingReason(day);
 
   // Leave lookup clipped to the selected range (IST day granularity).
   const leaveByDate = new Map<string, Map<string, { type: string; color: string }>>();
@@ -126,7 +153,8 @@ export async function GET(req: NextRequest) {
   function clippedOnLeaveDays(empId: string): number {
     let count = 0;
     for (const day of days) {
-      if (leaveByDate.get(day)?.has(empId)) count++;
+      const employee = employees.find((emp) => emp.id === empId);
+      if (employee && isWorkDayFor(employee, day) && leaveByDate.get(day)?.has(empId)) count++;
     }
     return count;
   }
@@ -135,12 +163,14 @@ export async function GET(req: NextRequest) {
   if (type === "daily") {
     const rows = days.map((day) => {
       const dayLeaves = leaveByDate.get(day);
-      const onLeave = dayLeaves ? dayLeaves.size : 0;
+      const eligibleEmployees = employees.filter((emp) => isWorkDayFor(emp, day));
+      const eligibleIds = new Set(eligibleEmployees.map((emp) => emp.id));
+      const onLeave = [...(dayLeaves?.keys() ?? [])].filter((employeeId) => eligibleIds.has(employeeId)).length;
       const present = records.filter((r) => istDateKey(r.date) === day && r.status === "present").length;
       const late = records.filter((r) => istDateKey(r.date) === day && r.status === "late").length;
       const permission = records.filter((r) => istDateKey(r.date) === day && r.status === "permission").length;
       const halfDay = records.filter((r) => istDateKey(r.date) === day && r.status === "half_day").length;
-      const absent = Math.max(employees.length - onLeave - present - late - permission - halfDay, 0);
+      const absent = Math.max(eligibleEmployees.length - onLeave - present - late - permission - halfDay, 0);
       return { day, present, late, permission, halfDay, absent, onLeave };
     });
     return NextResponse.json({ type, days: rows, summary: rows[rows.length - 1] });
@@ -150,6 +180,7 @@ export async function GET(req: NextRequest) {
   if (type === "monthly") {
     const rows = employees.map((emp) => {
       const empRecords = records.filter((r) => r.employee.id === emp.id);
+      const workDays = days.filter((day) => isWorkDayFor(emp, day)).length;
       const totals = {
         present: empRecords.filter((r) => r.status === "present").length,
         late: empRecords.filter((r) => r.status === "late").length,
@@ -158,12 +189,12 @@ export async function GET(req: NextRequest) {
         onLeave: clippedOnLeaveDays(emp.id),
         lateMinutes: empRecords.reduce((s, r) => s + r.lateMinutes, 0),
       };
-      const absent = Math.max(days.length - totals.present - totals.late - totals.permission - totals.half_day - totals.onLeave, 0);
+      const absent = Math.max(workDays - totals.present - totals.late - totals.permission - totals.half_day - totals.onLeave, 0);
       return {
         employee: emp,
         ...totals,
         absent,
-        workDays: days.length,
+        workDays,
       };
     });
     return NextResponse.json({ type, from, to, days: days.length, rows });
@@ -201,6 +232,10 @@ export async function GET(req: NextRequest) {
   const matrix = employees.map((emp) => ({
     employee: emp,
     cells: days.map((day) => {
+      const unavailable = emp.joiningDate && istDateKey(emp.joiningDate) > day
+        ? "Not employed"
+        : nonWorkingReason(day);
+      if (unavailable) return { key: "-", color: "#94a3b8", tooltip: unavailable };
       const onLeave = leaveByDate.get(day)?.get(emp.id);
       if (onLeave) return { key: "L", color: onLeave.color, tooltip: onLeave.type };
       const status = recordIndex.get(day)?.get(emp.id);

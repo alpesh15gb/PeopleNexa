@@ -7,6 +7,7 @@ import {
   computePayroll,
   fyFromMonth,
   getPayrollConfig,
+  payrollEmployeeForMonth,
 } from "@/lib/payroll";
 import { appendAudit } from "@/lib/audit";
 
@@ -25,6 +26,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id, tenantId: session.tenantId },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (existing.status === "paid") {
+    return NextResponse.json({ error: "Paid payslips cannot be regenerated." }, { status: 409 });
+  }
 
   const [tenant, employee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
@@ -60,12 +64,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // would see lastDeductedMonth >= month and return 0, wiping the deduction.
   const result = computePayroll(
     config,
-    {
+    payrollEmployeeForMonth({
       salary: employee.salary,
       salaryStructure: employee.salaryStructure,
       payMode: employee.payMode,
       workBasisRate: employee.workBasisRate,
-    },
+      joiningDate: employee.joiningDate,
+    }, existing.month),
     summary,
     existing.loanDeduction,
     existing.month,
@@ -92,6 +97,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       tds: result.tds,
       lateFines: result.lateFines,
       loanDeduction: result.loanDeduction,
+      absentDeduction: result.absentDeduction,
+      workingDays: result.workingDays,
+      divisorUsed: result.divisorUsed,
+      onLeaveDays: result.onLeaveDays,
       deductions: result.deductions,
       netSalary: result.netSalary,
       adjustments: result.adjustments as unknown as Prisma.InputJsonValue,

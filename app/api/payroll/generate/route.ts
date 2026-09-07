@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
 import { sendWhatsApp } from "@/lib/whatsapp";
 
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const month = String(body.month ?? monthKey(new Date()));
+  const month = String(body.month ?? monthKeyIST());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }

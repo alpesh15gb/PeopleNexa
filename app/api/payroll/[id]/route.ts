@@ -25,8 +25,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   });
   if (!payslip) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  // Reverting to draft clears payout tracking (PagarBook parity: unpaid = no payout meta).
   if (status === "draft") {
+    if (payslip.status === "paid") {
+      return NextResponse.json({ error: "Paid payslips cannot be reverted to draft." }, { status: 409 });
+    }
     const updated = await prisma.payslip.update({
       where: { id },
       data: {
@@ -67,7 +69,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     data: {
       status: "paid",
       note: body.note ?? payslip.note,
-      paidAt: new Date(),
+      // A repeated paid request may update metadata, but not the original payout time.
+      paidAt: payslip.paidAt ?? new Date(),
       ...(paidVia !== undefined ? { paidVia } : {}),
       ...(paymentRef !== undefined ? { paymentRef } : {}),
     },

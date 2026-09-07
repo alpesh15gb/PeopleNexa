@@ -9,6 +9,7 @@
  */
 
 import path from "node:path";
+import { decode as decodeJpeg } from "jpeg-js";
 
 export interface FaceMatchConfig {
   /** Cosine-similarity accept threshold (0..1). Higher = stricter. */
@@ -169,21 +170,13 @@ let faceApiLoading: Promise<FaceApiModule> | null = null;
 
 /**
  * Load (once) the face-api nets needed for enrollment/punch descriptors.
- * Attempts the optional native `@tensorflow/tfjs-node` backend first when it
- * is installed (faster + gives tf.node.decodeImage for JPEG decode); falls
- * back to the pure-JS backend bundled with @vladmandic/face-api otherwise.
+ * Uses the pure-JS CPU backend bundled with @vladmandic/face-api. JPEG decode
+ * is handled separately so the production Alpine image needs no native
+ * TensorFlow binary.
  */
 export async function loadFaceBackend(): Promise<FaceApiModule> {
   if (!faceApiLoading) {
     const run = async (): Promise<FaceApiModule> => {
-      // Optional: indirect specifier (typed as string) so `tsc --noEmit`
-      // passes whether or not @tensorflow/tfjs-node is installed.
-      try {
-        const specifier: string = "@tensorflow/tfjs-node";
-        await import(specifier);
-      } catch {
-        // Pure-JS CPU backend fallback — decodeImage unavailable, callers degrade.
-      }
       const faceapi = await import("@vladmandic/face-api");
       const modelDir = getFaceModelDir();
       await faceapi.nets.tinyFaceDetector.loadFromDisk(modelDir);
@@ -232,14 +225,12 @@ export async function describeFace(jpegBuffer: Buffer | Uint8Array): Promise<num
     if (!jpegBuffer || jpegBuffer.length === 0) return null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const faceapi = (await loadFaceBackend()) as any;
-    const decodeImage = faceapi?.tf?.node?.decodeImage as
-      | ((bytes: Uint8Array, channels: number) => { dispose(): void })
-      | undefined;
-    // Without the native tfjs-node backend there is no JPEG decoder in Node.
-    if (typeof decodeImage !== "function") return null;
-
     const bytes = jpegBuffer instanceof Uint8Array ? jpegBuffer : new Uint8Array(jpegBuffer);
-    const imgTensor = decodeImage(bytes, 3) as unknown as { dispose(): void };
+    const image = decodeJpeg(Buffer.from(bytes), { useTArray: true, formatAsRGBA: true });
+    if (!image.width || !image.height || !image.data?.length) return null;
+    const rgba = faceapi.tf.tensor3d(image.data, [image.height, image.width, 4], "int32");
+    const imgTensor = faceapi.tf.slice(rgba, [0, 0, 0], [image.height, image.width, 3]) as { dispose(): void };
+    rgba.dispose();
     try {
       const batch = faceapi.tf.tidy(() =>
         faceapi.tf.cast(faceapi.tf.expandDims(imgTensor, 0), "float32"),

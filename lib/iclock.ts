@@ -17,6 +17,31 @@ export interface PunchResult {
   attendanceId?: string | null;
 }
 
+function prismaErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? (error as { code?: string }).code
+    : undefined;
+}
+
+function isReconciliationRace(error: unknown): boolean {
+  const code = prismaErrorCode(error);
+  return code === "P2002" || code === "P2034";
+}
+
+async function reconcileWithRetry(
+  tenant: Parameters<typeof reconcileEmployeeDay>[0],
+  employee: Parameters<typeof reconcileEmployeeDay>[1],
+  istDay: Date
+) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await reconcileEmployeeDay(tenant, employee, istDay, { finalize: false });
+    } catch (error) {
+      if (!isReconciliationRace(error) || attempt === 1) throw error;
+    }
+  }
+}
+
 /**
  * Ingest one device punch.
  *
@@ -34,27 +59,37 @@ export async function handleDevicePunch(device: Device, punch: RawPunch): Promis
     return { accepted: true, action: "duplicate", logId: existing.id };
   }
 
-  const log = await prisma.deviceLog.create({
-    data: {
-      tenantId: device.tenantId,
-      deviceId: device.id,
-      rawData: punch.rawLine,
-      userId: punch.userId,
-      punchTime: punch.punchTime,
-      processed: false,
-    },
-  });
+  let log;
+  try {
+    log = await prisma.deviceLog.create({
+      data: {
+        tenantId: device.tenantId,
+        deviceId: device.id,
+        rawData: punch.rawLine,
+        userId: punch.userId,
+        punchTime: punch.punchTime,
+        processed: false,
+      },
+    });
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+    const duplicate = await prisma.deviceLog.findFirst({
+      where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
+    });
+    if (duplicate) return { accepted: true, action: "duplicate", logId: duplicate.id };
+    throw error;
+  }
 
   // 2. Map the device user code to an employee in this tenant.
   const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, employeeNumber: punch.userId },
+    where: { tenantId: device.tenantId, employeeNumber: punch.userId, status: "active" },
     select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
   });
 
   if (!employee) {
     await prisma.deviceLog.update({
       where: { id: log.id },
-      data: { error: `No employee with code "${punch.userId}" in this workspace`, processed: true },
+      data: { error: `No active employee with code "${punch.userId}" in this workspace`, processed: true },
     });
     return { accepted: true, action: "no_employee", logId: log.id };
   }
@@ -87,11 +122,10 @@ export async function handleDevicePunch(device: Device, punch: RawPunch): Promis
 
   // 4. Re-derive the day.
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
-  const result = await reconcileEmployeeDay(
+  const result = await reconcileWithRetry(
     tenant ?? { id: device.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    punchDayForShift(punch.punchTime, employee.shift),
-    { finalize: false }
+    punchDayForShift(punch.punchTime, employee.shift)
   );
 
   await markProcessed(log.id);
@@ -138,7 +172,7 @@ export async function reprocessFailedLogs(
         continue;
       }
       const employee = await prisma.employee.findFirst({
-        where: { tenantId, employeeNumber: log.userId },
+        where: { tenantId, employeeNumber: log.userId, status: "active" },
         select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
       });
       if (!employee) {
@@ -170,11 +204,10 @@ export async function reprocessFailedLogs(
       });
 
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      await reconcileEmployeeDay(
+      await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
         { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        punchDayForShift(log.punchTime, employee.shift),
-        { finalize: false }
+        punchDayForShift(log.punchTime, employee.shift)
       );
       await markProcessed(log.id);
       counters.accepted++;

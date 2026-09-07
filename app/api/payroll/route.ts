@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }

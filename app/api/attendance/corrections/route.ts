@@ -81,40 +81,46 @@ export async function POST(req: NextRequest) {
   // nothing recorded yet — store date only with null current punches.
   // (PunchCorrection has no required attendanceId; date is the link.)
 
-  // Don't allow a second pending correction for the same day. The
-  // check-then-create runs inside an interactive transaction so concurrent
-  // double-submits serialize; the P2002 catch is a backstop if a unique
-  // constraint (employeeId+date+pending) is added later.
+  // The partial unique index is the final duplicate guard; serializable
+  // transactions make the check and create one conflict-aware operation.
   let correction;
   try {
-    correction = await prisma.$transaction(async (tx) => {
-      const existing = await tx.punchCorrection.findFirst({
-        where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd }, status: "pending" },
-      });
-      if (existing) {
-        const err = new Error("DUPLICATE_PENDING") as Error & { code?: string };
-        err.code = "DUPLICATE_PENDING";
-        throw err;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        correction = await prisma.$transaction(async (tx) => {
+          const existing = await tx.punchCorrection.findFirst({
+            where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd }, status: "pending" },
+          });
+          if (existing) {
+            const err = new Error("DUPLICATE_PENDING") as Error & { code?: string };
+            err.code = "DUPLICATE_PENDING";
+            throw err;
+          }
+          return tx.punchCorrection.create({
+            data: {
+              tenantId: session.tenantId,
+              employeeId: session.sub,
+              date: dayStart,
+              currentIn: attendance?.punchInTime ?? null,
+              currentOut: attendance?.punchOutTime ?? null,
+              requestedIn,
+              requestedOut,
+              reason,
+            },
+          });
+        }, { isolationLevel: "Serializable" });
+        break;
+      } catch (e) {
+        const code = (e as { code?: string })?.code;
+        if (code !== "P2034" || attempt === 2) throw e;
       }
-      return tx.punchCorrection.create({
-        data: {
-          tenantId: session.tenantId,
-          employeeId: session.sub,
-          date: dayStart,
-          currentIn: attendance?.punchInTime ?? null,
-          currentOut: attendance?.punchOutTime ?? null,
-          requestedIn,
-          requestedOut,
-          reason,
-        },
-      });
-    });
+    }
   } catch (e) {
     const code = (e as { code?: string })?.code;
     if (code === "DUPLICATE_PENDING") {
       return NextResponse.json({ error: "You already have a pending correction for this day." }, { status: 409 });
     }
-    if (code === "P2002") {
+    if (code === "P2002" || code === "P2034") {
       return NextResponse.json({ error: "You already have a pending correction for this day." }, { status: 409 });
     }
     throw e;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey, addDays } from "@/lib/dates";
+import { addDays, dayRangeIST, monthKeyIST } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 
 export async function GET() {
@@ -210,7 +210,7 @@ export async function GET() {
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const monthStart = istStartOfDay(new Date(today.getFullYear(), today.getMonth(), 1));
+  const monthStart = dayRangeIST(`${monthKeyIST(today)}-01`).start;
   const [todayRecord, monthRecords, balances, pendingRequests] = await Promise.all([
     prisma.attendance.findFirst({
       where: { employeeId: employee.id, tenantId: session.tenantId, date: range },
@@ -237,7 +237,7 @@ export async function GET() {
       record: todayRecord,
       shift: employee.shift,
       branch: employee.branch,
-      month: monthKey(today),
+      month: monthKeyIST(today),
       monthCount: monthRecords.length,
     },
     balances: balances.map((b) => ({ leaveTypeId: b.leaveTypeId, status: b.status, used: b._count })),

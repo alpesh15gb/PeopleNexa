@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey, isMonthKey } from "@/lib/dates";
+import { monthKeyIST, isMonthKey } from "@/lib/dates";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   const type = body.type === "loan" ? "loan" : "advance";
   const amount = Number(body.amount);
   const emiCount = Math.max(1, Math.min(Number(body.emiCount) || 1, 60));
-  const startMonth = String(body.startMonth ?? monthKey(new Date()));
+  const startMonth = String(body.startMonth ?? monthKeyIST(new Date()));
   const note = body.note ? String(body.note).slice(0, 200) : null;
 
   if (!employeeId || !Number.isFinite(amount) || amount <= 0) {

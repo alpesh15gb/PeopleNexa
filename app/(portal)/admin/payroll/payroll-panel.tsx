@@ -270,7 +270,7 @@ export function PayrollPanel({
     }
     setBusy("export");
     try {
-      const q = new URLSearchParams({ month, bank, ...(debitAccount ? { debitAccount } : {}) });
+      const q = new URLSearchParams({ month, bank, status: "draft", ...(debitAccount ? { debitAccount } : {}) });
       const res = await fetch(`/api/payroll/export?${q.toString()}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -482,9 +482,9 @@ export function PayrollPanel({
                     <Button
                       size="sm"
                       variant="ghost"
-                      title="Regenerate payslip"
+                      title={payslip.status === "paid" ? "Paid payslips cannot be regenerated" : "Regenerate payslip"}
                       loading={busy === `regen-${payslip.id}`}
-                      disabled={busy !== null && busy !== `regen-${payslip.id}`}
+                      disabled={payslip.status === "paid" || (busy !== null && busy !== `regen-${payslip.id}`)}
                       onClick={() => setRegenTarget({ employee, payslip })}
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
@@ -503,11 +503,7 @@ export function PayrollPanel({
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" /> Pay
                       </Button>
-                    ) : (
-                      <Button size="sm" variant="ghost" loading={busy === payslip.id} onClick={() => setStatus(payslip.id, "draft")}>
-                        Draft
-                      </Button>
-                    )}
+                    ) : null}
                   </div>
                 ) : (
                   <span className="text-[12px] text-muted-foreground/60">—</span>
@@ -596,7 +592,7 @@ export function PayrollPanel({
       <ConfirmDialog
         open={regenTarget !== null}
         title={regenTarget ? `Regenerate payslip · ${regenTarget.employee.firstName} ${regenTarget.employee.lastName}` : "Regenerate payslip"}
-        description={regenTarget ? `Recompute ${regenTarget.payslip.month} from current attendance, adjustments and settings? The slip keeps its paid/draft status.` : undefined}
+        description={regenTarget ? `Recompute ${regenTarget.payslip.month} from current attendance, adjustments and settings?` : undefined}
         confirmLabel="Regenerate"
         busy={regenTarget ? busy === `regen-${regenTarget.payslip.id}` : false}
         onCancel={() => setRegenTarget(null)}

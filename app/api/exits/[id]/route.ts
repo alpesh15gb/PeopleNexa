@@ -85,9 +85,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       encashmentDays: encashableDays,
     });
 
-    const updated = await prisma.exitRequest.update({
-      where: { id },
+    const claimed = await prisma.exitRequest.updateMany({
+      where: { id, tenantId: session.tenantId, status: "pending" },
       data: { status: "approved", note, reviewedBy: session.sub, reviewedAt: new Date(), fAndF: JSON.parse(JSON.stringify(fAndF)) },
+    });
+    if (claimed.count === 0) {
+      const latest = await prisma.exitRequest.findFirst({
+        where: { id, tenantId: session.tenantId },
+        include: { employee: { select: { firstName: true, lastName: true, salary: true, salaryStructure: true, phone: true } } },
+      });
+      if (latest?.status === "approved") return NextResponse.json({ request: latest, fAndF: latest.fAndF });
+      return NextResponse.json({ error: "Only pending requests can be approved." }, { status: 400 });
+    }
+    const updated = await prisma.exitRequest.findFirstOrThrow({
+      where: { id, tenantId: session.tenantId },
       include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
@@ -121,10 +132,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (request.status !== "pending") {
       return NextResponse.json({ error: "Only pending requests can be rejected." }, { status: 400 });
     }
-    const updated = await prisma.exitRequest.update({
-      where: { id },
+    const claimed = await prisma.exitRequest.updateMany({
+      where: { id, tenantId: session.tenantId, status: "pending" },
       data: { status: "rejected", note, reviewedBy: session.sub, reviewedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      return NextResponse.json({ error: "Only pending requests can be rejected." }, { status: 400 });
+    }
+    const updated = await prisma.exitRequest.findFirstOrThrow({ where: { id, tenantId: session.tenantId } });
     await notifyEmployee(
       session.tenantId,
       request.employeeId,
@@ -139,10 +154,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (request.status !== "approved") {
       return NextResponse.json({ error: "Only approved requests can be completed." }, { status: 400 });
     }
-    const updated = await prisma.exitRequest.update({
-      where: { id },
+    const claimed = await prisma.exitRequest.updateMany({
+      where: { id, tenantId: session.tenantId, status: "approved" },
       data: { status: "completed", note, reviewedBy: session.sub, reviewedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      return NextResponse.json({ error: "Only approved requests can be completed." }, { status: 400 });
+    }
+    const updated = await prisma.exitRequest.findFirstOrThrow({ where: { id, tenantId: session.tenantId } });
     await appendAudit({
       tenantId: session.tenantId,
       actorId: session.sub,

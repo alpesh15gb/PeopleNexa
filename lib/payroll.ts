@@ -486,6 +486,28 @@ export function baseForPayMode(
   }
 }
 
+/** Apply the joining-month salary proration used when a payslip is generated. */
+export function payrollEmployeeForMonth<T extends { salary: number; payMode?: string | null; joiningDate?: Date | null }>(
+  employee: T,
+  month: string
+): T {
+  const { start: mStart, end: mEnd } = monthRange(month);
+  const empMode = employee.payMode ?? "monthly";
+  if (empMode !== "monthly" || !employee.joiningDate) return employee;
+
+  const joinStart = istStartOfDay(new Date(employee.joiningDate));
+  if (joinStart.getTime() <= mStart.getTime()) return employee;
+
+  const msPerDay = 24 * 3600 * 1000;
+  const daysInMonth = Math.round((mEnd.getTime() - mStart.getTime()) / msPerDay);
+  const employedStart = joinStart.getTime() > mStart.getTime() ? joinStart : mStart;
+  const employedDays = Math.round((mEnd.getTime() - employedStart.getTime()) / msPerDay);
+  const clamped = Math.min(Math.max(employedDays, 0), daysInMonth);
+  return daysInMonth > 0
+    ? { ...employee, salary: round2(employee.salary * (clamped / daysInMonth)) }
+    : employee;
+}
+
 export function computePayroll(
   config: PayrollConfig,
   employee: { salary: number; salaryStructure?: unknown; payMode?: string | null; workBasisRate?: number | null },
@@ -618,24 +640,8 @@ export async function generatePayslipForEmployee(
       return { created: false, skipped: "not-joined" };
     }
   }
-  // Pro-rate the monthly base for mid-month joiners: employed days
-  // (joiningDate..monthEnd inclusive) over days in month. Daily/hourly
-  // paths stay attendance-driven via baseForPayMode.
-  let payEmployee = employee;
-  const empMode = employee.payMode ?? "monthly";
-  if (empMode === "monthly" && employee.joiningDate) {
-    const joinStart = istStartOfDay(new Date(employee.joiningDate));
-    if (joinStart.getTime() > mStart.getTime()) {
-      const msPerDay = 24 * 3600 * 1000;
-      const daysInMonth = Math.round((mEnd.getTime() - mStart.getTime()) / msPerDay);
-      const employedStart = joinStart.getTime() > mStart.getTime() ? joinStart : mStart;
-      const employedDays = Math.round((mEnd.getTime() - employedStart.getTime()) / msPerDay);
-      const clamped = Math.min(Math.max(employedDays, 0), daysInMonth);
-      if (daysInMonth > 0) {
-        payEmployee = { ...employee, salary: round2(employee.salary * (clamped / daysInMonth)) };
-      }
-    }
-  }
+  // Daily/hourly paths stay attendance-driven via baseForPayMode.
+  const payEmployee = payrollEmployeeForMonth(employee, month);
 
   const config = getPayrollConfig(tenantConfig);
   const summary = await attendanceSummary(tenantId, employee, month);

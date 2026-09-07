@@ -1,7 +1,7 @@
 // Local-timezone date helpers. The whole app reasons in the server's local time
 // zone (all times stored as UTC instants but interpreted locally).
 
-import { istStartOfDay } from "./ist";
+import { istDateKey, istStartOfDay } from "./ist";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -92,6 +92,11 @@ export function addDays(d: Date, n: number): Date {
 
 export function monthKey(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+
+/** Calendar month in IST, independent of the server's local timezone. */
+export function monthKeyIST(d: Date = new Date()): string {
+  return istDateKey(d).slice(0, 7);
 }
 
 /** True only for a canonical calendar month key such as 2026-08. */

@@ -198,6 +198,7 @@ model RealtimeLog {
 
   @@index([realtimeDeviceId, processed])
   @@index([tenantId, punchTime])
+  @@unique([realtimeDeviceId, userId, punchTime])
 }
 
 model DeviceLog {
@@ -214,6 +215,7 @@ model DeviceLog {
 
   @@index([deviceId, processed])
   @@index([tenantId, punchTime])
+  @@unique([deviceId, userId, punchTime])
 }
 
 // ─── Branches with GPS geofencing ──────────────────────────────────────────

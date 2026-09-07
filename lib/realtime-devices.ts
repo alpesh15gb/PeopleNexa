@@ -27,6 +27,27 @@ export interface RealtimePunch {
   rawLine: string;
 }
 
+function prismaErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? (error as { code?: string }).code
+    : undefined;
+}
+
+async function reconcileWithRetry(
+  tenant: Parameters<typeof reconcileEmployeeDay>[0],
+  employee: Parameters<typeof reconcileEmployeeDay>[1],
+  istDay: Date
+) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await reconcileEmployeeDay(tenant, employee, istDay, { finalize: false });
+    } catch (error) {
+      const code = prismaErrorCode(error);
+      if ((code !== "P2002" && code !== "P2034") || attempt === 1) throw error;
+    }
+  }
+}
+
 export function realtimeStatusOf(
   device: Pick<RealtimeDevice, "serialNumber" | "protocol" | "status" | "lastSeenAt" | "ipAddress">
 ) {
@@ -61,25 +82,35 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   });
   if (existing) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
 
-  const log = await prisma.realtimeLog.create({
-    data: {
-      tenantId: device.tenantId,
-      realtimeDeviceId: device.id,
-      rawData: punch.rawLine,
-      userId: punch.userId,
-      punchTime: punch.punchTime,
-      processed: false,
-    },
-  });
+  let log;
+  try {
+    log = await prisma.realtimeLog.create({
+      data: {
+        tenantId: device.tenantId,
+        realtimeDeviceId: device.id,
+        rawData: punch.rawLine,
+        userId: punch.userId,
+        punchTime: punch.punchTime,
+        processed: false,
+      },
+    });
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+    const duplicate = await prisma.realtimeLog.findFirst({
+      where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
+    });
+    if (duplicate) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
+    throw error;
+  }
 
   const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, employeeNumber: punch.userId },
+    where: { tenantId: device.tenantId, employeeNumber: punch.userId, status: "active" },
     select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
   });
   if (!employee) {
     await prisma.realtimeLog.update({
       where: { id: log.id },
-      data: { error: `No employee with code "${punch.userId}" in this workspace`, processed: true },
+      data: { error: `No active employee with code "${punch.userId}" in this workspace`, processed: true },
     });
     return { accepted: true as const, action: "no_employee" as const, logId: log.id };
   }
@@ -115,11 +146,10 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   void created;
 
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
-  const result = await reconcileEmployeeDay(
+  const result = await reconcileWithRetry(
     tenant ?? { id: device.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    punchDayForShift(punch.punchTime, employee.shift),
-    { finalize: false }
+    punchDayForShift(punch.punchTime, employee.shift)
   );
 
   await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
@@ -159,7 +189,7 @@ export async function reprocessFailedRealtimeLogs(
         continue;
       }
       const employee = await prisma.employee.findFirst({
-        where: { tenantId, employeeNumber: log.userId },
+        where: { tenantId, employeeNumber: log.userId, status: "active" },
         select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
       });
       if (!employee) {
@@ -188,11 +218,10 @@ export async function reprocessFailedRealtimeLogs(
         },
       });
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      await reconcileEmployeeDay(
+      await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
         { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        punchDayForShift(log.punchTime, employee.shift),
-        { finalize: false }
+        punchDayForShift(log.punchTime, employee.shift)
       );
       await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
       counters.accepted++;

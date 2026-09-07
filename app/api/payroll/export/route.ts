@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { buildBankFile, bankFileName, type BankFormat } from "@/lib/bank-file";
 
 export async function GET(req: NextRequest) {
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
@@ -21,8 +21,8 @@ export async function GET(req: NextRequest) {
   const bank: BankFormat = bankParam === "hdfc" || bankParam === "icici" ? bankParam : "generic";
   const debitAccount = req.nextUrl.searchParams.get("debitAccount") || "";
 
-  // Explicit ?status=paid|draft filter; default "all" returns every slip.
-  const statusParam = (req.nextUrl.searchParams.get("status") || "all").toLowerCase();
+  // Bank files are for unpaid slips unless a caller explicitly requests otherwise.
+  const statusParam = (req.nextUrl.searchParams.get("status") || "draft").toLowerCase();
   if (!["all", "paid", "draft"].includes(statusParam)) {
     return NextResponse.json({ error: "status must be one of: all, paid, draft." }, { status: 400 });
   }

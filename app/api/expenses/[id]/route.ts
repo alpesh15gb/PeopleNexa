@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { monthKey } from "@/lib/dates";
+import { monthKeyIST } from "@/lib/dates";
 import { notifyEmployee } from "@/lib/notifications";
 
 const FLOW = ["approved", "rejected", "settled"] as const;
@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   // Expense → payroll integration: on approve/settle, post a reimbursement
   // earning for the current month. Idempotent on (employeeId, month, label).
   if (status === "approved" || status === "settled") {
-    const month = monthKey(new Date());
+    const month = monthKeyIST(new Date());
     const label = `Expense reimbursement ${claim.id.slice(0, 8)}`;
     const existing = await prisma.payrollAdjustment.findFirst({
       where: { tenantId: claim.tenantId, employeeId: claim.employeeId, month, label },

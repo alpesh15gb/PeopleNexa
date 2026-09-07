@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
 import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
 
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   }
 
   const type = String(req.nextUrl.searchParams.get("type") ?? "ecr");
-  const month = req.nextUrl.searchParams.get("month") || monthKey(new Date());
+  const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
@@ -31,18 +31,18 @@ export async function GET(req: NextRequest) {
       include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, pan: true, joiningDate: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
+    const pfPayslips = payslips.filter((p) => p.pfEmployee > 0 || p.pfEmployer > 0);
     const rows: (string | number)[][] = [
       ["S.No", "Member ID", "Member Name", "UAN", "Date of Joining", "EPF Wages (Basic)", "EE EPF (12%)", "ER EPF (3.67%)", "ER EPS (8.33%)"],
-      ...payslips.map((p, i) => {
+      ...pfPayslips.map((p, i) => {
         // EPF wages are capped at the 15000 statutory ceiling. Prefer the
         // persisted basic wage; fall back to the legacy derivation for old rows.
         const rawBasic = p.basicSalary > 0 ? p.basicSalary : p.pfEmployee > 0 ? p.pfEmployee / 0.12 : p.baseSalary * 0.5;
         const wages = Math.min(Math.max(rawBasic, 0), 15000);
-        // EPS = 8.33% of capped wages, capped at 1250. Prefer persisted PF
-        // splits; ER EPF = persisted employer share minus EPS.
-        const eps = Math.min(1250, Math.round(wages * 0.0833));
-        const ee = p.pfEmployee > 0 ? p.pfEmployee : Math.round(wages * 0.12 * 100) / 100;
-        const erTotal = p.pfEmployer > 0 ? p.pfEmployer : Math.round(wages * 0.12 * 100) / 100;
+        // Allocate only the persisted employer contribution between EPS and EPF.
+        const erTotal = Math.max(0, p.pfEmployer);
+        const eps = Math.min(erTotal, 1250, Math.round(wages * 0.0833));
+        const ee = Math.max(0, p.pfEmployee);
         const erPpf = Math.max(0, Math.round((erTotal - eps) * 100) / 100);
         return [
           i + 1,
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
         ];
       }),
     ];
-    const missing = payslips.filter((p) => !p.employee.uan || !p.employee.pan).length;
+    const missing = pfPayslips.filter((p) => !p.employee.uan || !p.employee.pan).length;
     let body = csv(rows);
     if (missing > 0) body = `# WARNING: ${missing} row(s) missing UAN/PAN\n` + body;
     const res = new NextResponse(body, {
