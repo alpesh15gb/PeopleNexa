@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Portal } from "@/components/ui/portal";
 
 export function Modal({
   open,
@@ -73,7 +74,11 @@ export function Modal({
 
   if (!open) return null;
 
+  // Portaled to document.body: page wrappers carry entrance animations that
+  // leave a transform on an ancestor, which would otherwise trap this
+  // viewport-fixed overlay inside the content box.
   return (
+    <Portal>
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in motion-reduce:animate-none" onClick={onClose} aria-hidden="true" />
       <div
@@ -104,7 +109,8 @@ export function Modal({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        </div>
       </div>
-    </div>
+    </Portal>
   );
 }

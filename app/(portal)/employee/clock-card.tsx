@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogIn, LogOut, MapPin, Camera, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Portal } from "@/components/ui/portal";
 import { useToast } from "@/components/ui/toast";
 import { formatTime, toDateKey } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
@@ -327,8 +328,9 @@ export function ClockCard({
         </p>
       </div>
 
-      {/* Selfie capture modal */}
+      {/* Selfie capture modal (portaled: animated ancestors trap fixed) */}
       {cameraOpen && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setCameraOpen(false)} />
           <div className="card-surface relative w-full max-w-md animate-scale-in rounded-2xl bg-card-2 p-5">
@@ -348,6 +350,7 @@ export function ClockCard({
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       {/* Selfie preview */}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Portal } from "@/components/ui/portal";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -274,6 +275,7 @@ export function EnrollPanel({
       </Card>
 
       {cameraOpen && (
+        <Portal>
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setCameraOpen(false)} />
           <div className="card-surface relative w-full max-w-md animate-scale-in rounded-2xl bg-card-2 p-5">
@@ -294,6 +296,7 @@ export function EnrollPanel({
             </div>
           </div>
         </div>
+        </Portal>
       )}
 
       <ConfirmDialog
