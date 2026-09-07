@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 
@@ -22,12 +23,23 @@ interface Branch {
   _count: { employees: number };
 }
 
-export function BranchesManager({ branches }: { branches: Branch[] }) {
+interface Staff {
+  id: string;
+  firstName: string;
+  lastName: string;
+  employeeNumber: string;
+  role: string;
+  branchId: string | null;
+}
+
+export function BranchesManager({ branches, employees }: { branches: Branch[]; employees: Staff[] }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Branch | null>(null);
   const [loading, setLoading] = useState(false);
+  const [managingBranch, setManagingBranch] = useState<Branch | null>(null);
+  const [savingManager, setSavingManager] = useState(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -77,8 +89,42 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
     }
   }
 
-  async function useMyLocation() {
-    if (!navigator.geolocation) {
+  async function setManager(branchId: string, employeeId: string | null, currentManagerId?: string | null) {
+    setSavingManager(true);
+    try {
+      // Demote the outgoing manager first so a branch never ends up with two.
+      if (currentManagerId && currentManagerId !== employeeId) {
+        await fetch(`/api/employees/${currentManagerId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "employee" }),
+        });
+      }
+      if (employeeId) {
+        const res = await fetch(`/api/employees/${employeeId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "branch_manager", branchId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast("error", data.error ?? "Failed to assign manager");
+          return;
+        }
+        toast("success", "Branch manager assigned");
+      } else {
+        toast("success", "Branch manager removed");
+      }
+      setManagingBranch(null);
+      router.refresh();
+    } catch {
+      toast("error", "Something went wrong.");
+    } finally {
+      setSavingManager(false);
+    }
+  }
+
+  async function useMyLocation() {    if (!navigator.geolocation) {
       toast("error", "Geolocation is not supported in this browser");
       return;
     }
@@ -131,6 +177,23 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
               </span>
               <span className="rounded-md bg-tint px-2 py-1">{b.geofenceRadius}m</span>
             </div>
+            {(() => {
+              const manager = employees.find((e) => e.role === "branch_manager" && e.branchId === b.id);
+              return (
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-edge bg-tint px-2.5 py-1.5">
+                  <p className="min-w-0 truncate text-[12px] text-muted-foreground">
+                    {manager ? (
+                      <>Manager: <span className="font-semibold text-foreground">{manager.firstName} {manager.lastName}</span></>
+                    ) : (
+                      "No branch manager"
+                    )}
+                  </p>
+                  <Button size="sm" variant="ghost" onClick={() => setManagingBranch(b)}>
+                    {manager ? "Change" : "Assign"}
+                  </Button>
+                </div>
+              );
+            })()}
             <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
               <Button size="sm" variant="outline" onClick={() => setEditing(b)}>
                 <Pencil className="h-3 w-3" /> Edit
@@ -196,6 +259,43 @@ export function BranchesManager({ branches }: { branches: Branch[] }) {
         onCancel={() => setConfirmDelete(null)}
         onConfirm={() => confirmDelete && remove(confirmDelete)}
       />
+
+      <Modal
+        open={managingBranch !== null}
+        onClose={() => setManagingBranch(null)}
+        title={managingBranch ? `Manager — ${managingBranch.name}` : "Branch manager"}
+        description="They sign in with a scoped login: this branch's dashboard, attendance, employees and leaves."
+      >
+        {(() => {
+          const current = managingBranch
+            ? employees.find((e) => e.role === "branch_manager" && e.branchId === managingBranch.id)?.id ?? ""
+            : "";
+          return (
+            <div className="space-y-4">
+              <Field label="Branch manager">
+                <Select
+                  value={current}
+                  disabled={savingManager}
+                  onChange={(e) => managingBranch && setManager(managingBranch.id, e.target.value || null, current || null)}
+                >
+                  <option value="">None</option>
+                  {employees
+                    .filter((e) => e.role !== "admin")
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.firstName} {e.lastName} ({e.employeeNumber})
+                        {e.role === "branch_manager" && e.branchId !== managingBranch?.id ? " — manages elsewhere" : ""}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                Assigning sets their role to branch manager for this branch. Removing demotes them back to employee.
+              </p>
+            </div>
+          );
+        })()}
+      </Modal>
     </>
   );
 }

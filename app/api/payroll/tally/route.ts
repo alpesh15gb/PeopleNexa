@@ -12,6 +12,9 @@ import { round2 } from "@/lib/utils";
  */
 export async function GET(req: NextRequest) {
   const session = await getSession();
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

@@ -65,6 +65,9 @@ export async function GET(req: NextRequest) {
 /** POST — bulk-assign a shift to employees or a whole department for a date range. */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

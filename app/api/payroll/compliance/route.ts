@@ -11,6 +11,9 @@ const csv = (rows: (string | number)[][]) =>
 /** GET /api/payroll/compliance?type=ecr|form16|form24q&month=2026-08 */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

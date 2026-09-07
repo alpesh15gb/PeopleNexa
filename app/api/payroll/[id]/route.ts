@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { appendAudit } from "@/lib/audit";
 
 const PAID_VIA = ["cash", "upi", "bank", "other"] as const;
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -67,6 +71,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       ...(paidVia !== undefined ? { paidVia } : {}),
       ...(paymentRef !== undefined ? { paymentRef } : {}),
     },
+  });
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "payslip.paid",
+    entity: "Payslip",
+    entityId: id,
+    summary: `Payslip ${updated.month} marked paid`,
+    before: { status: payslip.status },
+    after: { status: updated.status, paidVia: updated.paidVia, paymentRef: updated.paymentRef },
   });
   return NextResponse.json({ payslip: updated });
 }

@@ -28,6 +28,24 @@ const select = {
   shift: { select: { id: true, name: true, startTime: true, endTime: true } },
 } as const;
 
+const safeSelect = {
+  id: true,
+  employeeNumber: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  role: true,
+  status: true,
+  position: true,
+  joiningDate: true,
+  payMode: true,
+  workBasisRate: true,
+  branch: { select: { id: true, name: true } },
+  department: { select: { id: true, name: true } },
+  shift: { select: { id: true, name: true, startTime: true, endTime: true } },
+} as const;
+
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
@@ -64,8 +82,23 @@ function p2002Targets(err: unknown): string[] {
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) {
+      return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
+    }
+    const employees = await prisma.employee.findMany({
+      where: { tenantId: session.tenantId, branchId: manager.branchId },
+      select: safeSelect,
+      orderBy: { createdAt: "asc" },
+    });
+    return NextResponse.json({ employees });
   }
   const employees = await prisma.employee.findMany({
     where: { tenantId: session.tenantId },
@@ -77,6 +110,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

@@ -7,6 +7,9 @@ import { fyFromMonth } from "@/lib/payroll";
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (session.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const fy = req.nextUrl.searchParams.get("fy");
   const declarations = await prisma.taxDeclaration.findMany({
@@ -28,6 +31,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (session.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const fy = String(body.fy ?? fyFromMonth(new Date().toISOString().slice(0, 7))).trim();

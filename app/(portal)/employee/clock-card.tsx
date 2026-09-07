@@ -43,6 +43,11 @@ export function ClockCard({
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [selfie, setSelfie] = useState<string | null>(null);
+  // On-device face gate (MediaPipe, lazy): Capture enabled only when exactly
+  // 1 face ≥15% frame. Any load/detect failure → basic mode (capture allowed).
+  const [faceOk, setFaceOk] = useState(false);
+  const [faceHint, setFaceHint] = useState<string | null>(null);
+  const [faceBasic, setFaceBasic] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -78,6 +83,113 @@ export function ClockCard({
       streamRef.current = null;
     };
   }, [cameraOpen, toast]);
+
+  // On-device MediaPipe gate: dynamic import inside the capture-modal flow
+  // only (never top-level, initial bundle unaffected). Single-shot VIDEO
+  // detect every ~800ms; interval cleared on close/unmount.
+  useEffect(() => {
+    if (!cameraOpen) return;
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let detector: any = null;
+    setFaceOk(false);
+    setFaceBasic(false);
+    setFaceHint("Checking camera…");
+    (async () => {
+      try {
+        const vision = await import("@mediapipe/tasks-vision");
+        if (cancelled) return;
+        const fileset = await vision.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm"
+        );
+        if (cancelled) return;
+        detector = await vision.FaceDetector.createFromOptions(fileset, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+          },
+          runningMode: "VIDEO",
+        });
+        if (cancelled) {
+          try {
+            detector?.close?.();
+          } catch {
+            /* noop */
+          }
+          return;
+        }
+        const tick = async () => {
+          const video = videoRef.current;
+          if (!video || video.videoWidth === 0 || video.readyState < 2) return;
+          try {
+            const raw = await detector?.detectForVideo?.(video, performance.now());
+            if (cancelled) return;
+            const res = raw as {
+              detections?: Array<{ boundingBox?: { width: number; height: number } | null } | null> | null;
+            } | null;
+            const dets = res?.detections ?? [];
+            if (dets.length === 0) {
+              setFaceOk(false);
+              setFaceHint("Move closer");
+            } else if (dets.length !== 1) {
+              setFaceOk(false);
+              setFaceHint("Only you in frame");
+            } else {
+              const box = dets[0]?.boundingBox;
+              const vw = video.videoWidth || 1;
+              const vh = video.videoHeight || 1;
+              let ratio = 0;
+              if (box) {
+                // tasks-vision reports pixels; handle normalized fallback.
+                if (box.width <= 1.5 && box.height <= 1.5) {
+                  ratio = box.width * box.height;
+                } else {
+                  ratio = (box.width * box.height) / (vw * vh);
+                }
+              }
+              if (ratio >= 0.15) {
+                setFaceOk(true);
+                setFaceHint(null);
+              } else {
+                setFaceOk(false);
+                setFaceHint("Move closer");
+              }
+            }
+          } catch {
+            if (!cancelled) {
+              setFaceBasic(true);
+              setFaceOk(true);
+              setFaceHint(null);
+              if (interval) clearInterval(interval);
+            }
+          }
+        };
+        await tick();
+        if (cancelled) return;
+        interval = setInterval(() => {
+          void tick();
+        }, 800);
+      } catch {
+        if (!cancelled) {
+          // Offline CDN / WASM / model failure → degrade to capture-allowed.
+          setFaceBasic(true);
+          setFaceOk(true);
+          setFaceHint(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+      try {
+        detector?.close?.();
+      } catch {
+        /* noop */
+      }
+      detector = null;
+    };
+  }, [cameraOpen]);
 
   const captureSelfie = () => {
     const video = videoRef.current;
@@ -225,9 +337,14 @@ export function ClockCard({
             <div className="relative mt-4 overflow-hidden rounded-xl border border-edge-strong bg-black">
               <video ref={videoRef} className="aspect-[4/3] w-full object-cover" playsInline muted />
             </div>
+            {faceBasic ? (
+              <p className="mt-2 text-[11px] text-muted-foreground">Basic mode — face check unavailable.</p>
+            ) : faceHint ? (
+              <p className="mt-2 text-[12px] text-muted-foreground">{faceHint}</p>
+            ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">{t(lang, "common.cancel")}</Button>
-              <Button onClick={captureSelfie} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
+              <Button onClick={captureSelfie} disabled={!faceOk} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
             </div>
           </div>
         </div>

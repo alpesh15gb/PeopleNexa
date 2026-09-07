@@ -77,6 +77,9 @@ function validateWebhookUrl(raw: string): string | null {
 /** POST — create an endpoint. */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -106,6 +109,9 @@ export async function POST(req: NextRequest) {
 /** PUT — update (toggle active / change URL or events). */
 export async function PUT(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -134,6 +140,9 @@ export async function PUT(req: NextRequest) {
 /** DELETE — remove an endpoint. */
 export async function DELETE(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

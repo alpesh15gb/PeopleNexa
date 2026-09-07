@@ -5,6 +5,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
 import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
+import { describeFace, verifyFace } from "@/lib/face";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -67,6 +68,92 @@ export async function POST(req: NextRequest) {
   if (near) {
     return NextResponse.json({ error: "A punch was already recorded in the last minute." }, { status: 400 });
   }
+
+  // ── Face VERIFY (additive, never blocks pay on ML failure) ──────────────
+  // Reads tenant.config.faceMatch {enabled, matchThreshold, reviewThreshold}
+  // with defaults enabled:true, 0.62/0.50 when absent. Kill-switch
+  // (enabled===false) skips all face logic. No enrollment → "none".
+  // describeFace null → "review". verifyFace below review → 400 rejected
+  // WITHOUT creating a punch. Geofence/dedupe/reconcile below untouched.
+  let faceStatus = "none";
+  let faceScore: number | null = null;
+  {
+    const tenantForFace = await prisma.tenant.findUnique({
+      where: { id: employee.tenantId },
+      select: { config: true },
+    });
+    const cfgRaw = (tenantForFace?.config ?? {}) as {
+      faceMatch?: Partial<{ enabled: boolean; matchThreshold: number; reviewThreshold: number }>;
+    };
+    const fm = cfgRaw.faceMatch ?? {};
+    const faceEnabled = fm.enabled ?? true;
+    const matchThreshold =
+      typeof fm.matchThreshold === "number" && Number.isFinite(fm.matchThreshold)
+        ? fm.matchThreshold
+        : 0.62;
+    const reviewThreshold =
+      typeof fm.reviewThreshold === "number" && Number.isFinite(fm.reviewThreshold)
+        ? fm.reviewThreshold
+        : 0.5;
+    if (faceEnabled) {
+      const enrollment = await prisma.faceEnrollment.findFirst({
+        where: { tenantId: employee.tenantId, employeeId: employee.id },
+      });
+      if (enrollment) {
+        let probe: number[] | null = null;
+        if (selfie) {
+          try {
+            const commaIdx = selfie.indexOf(",");
+            const b64 = commaIdx >= 0 ? selfie.slice(commaIdx + 1) : selfie;
+            const buf = Buffer.from(b64, "base64");
+            if (buf.length > 0) {
+              probe = await describeFace(buf);
+            }
+          } catch {
+            probe = null;
+          }
+        }
+        if (!probe) {
+          // ML failure / missing / undecodable selfie → human review, never block pay.
+          faceStatus = "review";
+          faceScore = null;
+        } else {
+          const raw = enrollment.embeddings as unknown;
+          const stored = Array.isArray(raw)
+            ? (raw as unknown[]).filter(
+                (s): s is number[] =>
+                  Array.isArray(s) &&
+                  s.length > 0 &&
+                  (s as unknown[]).every((n) => typeof n === "number" && Number.isFinite(n as number))
+              )
+            : [];
+          if (stored.length === 0) {
+            // Corrupt/empty enrollment → review, never block pay.
+            faceStatus = "review";
+            faceScore = null;
+          } else {
+            const verdict = await verifyFace(stored, probe, { matchThreshold, reviewThreshold });
+            const rounded = Number.isFinite(verdict.score)
+              ? Math.round(verdict.score * 10000) / 10000
+              : null;
+            if (verdict.status === "matched") {
+              faceStatus = "matched";
+              faceScore = rounded;
+            } else if (verdict.status === "review") {
+              faceStatus = "review";
+              faceScore = rounded;
+            } else {
+              return NextResponse.json(
+                { error: "Face did not match — retake your selfie", faceStatus: "rejected" },
+                { status: 400 }
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
   const punch = await prisma.punch.create({
     data: {
       tenantId: employee.tenantId,
@@ -77,6 +164,8 @@ export async function POST(req: NextRequest) {
       lat,
       lng,
       selfie,
+      faceScore,
+      faceStatus,
     },
   });
   await dispatchWebhook(employee.tenantId, "punch.created", {

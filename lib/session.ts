@@ -41,3 +41,28 @@ export async function requireActiveSession(): Promise<SessionPayload> {
   // Prefer the DB role so demotions take effect immediately.
   return { ...session, role: employee.role };
 }
+
+/**
+ * Branch scope for branch-wise logins.
+ * - Non-branch_manager roles (e.g. admin) are unscoped: branchId/branchName null.
+ * - branch_manager is scoped to their employee.branchId (+ branch name);
+ *   missing assignment → unauthorized.
+ */
+export async function requireBranchScope(): Promise<{
+  session: SessionPayload;
+  branchId: string | null;
+  branchName: string | null;
+}> {
+  const session = await requireActiveSession();
+  if (session.role !== "branch_manager") {
+    return { session, branchId: null, branchName: null };
+  }
+  const employee = await prisma.employee.findUnique({
+    where: { id: session.sub },
+    select: { branchId: true, branch: { select: { name: true } } },
+  });
+  if (!employee?.branchId) {
+    throw new Error("unauthorized");
+  }
+  return { session, branchId: employee.branchId, branchName: employee.branch?.name ?? null };
+}

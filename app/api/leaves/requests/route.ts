@@ -9,6 +9,28 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const status = req.nextUrl.searchParams.get("status");
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) {
+      return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
+    }
+    const requests = await prisma.leaveRequest.findMany({
+      where: {
+        tenantId: session.tenantId,
+        employee: { branchId: manager.branchId },
+        ...(status ? { status } : {}),
+      },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
+        leaveType: true,
+      },
+      orderBy: { appliedAt: "desc" },
+    });
+    return NextResponse.json({ requests });
+  }
   const requests = await prisma.leaveRequest.findMany({
     where: {
       tenantId: session.tenantId,
@@ -43,12 +65,21 @@ export async function POST(req: NextRequest) {
     // Admins may log leave on behalf of an employee; employees apply for themselves.
     let employeeId = session.sub;
     let onBehalf = false;
-    if (body.employeeId && session.role === "admin") {
+    if (body.employeeId && (session.role === "admin" || session.role === "branch_manager")) {
       const target = await prisma.employee.findFirst({
         where: { id: String(body.employeeId), tenantId: session.tenantId },
-        select: { id: true },
+        select: { id: true, branchId: true },
       });
       if (!target) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+      if (session.role === "branch_manager") {
+        const manager = await prisma.employee.findFirst({
+          where: { id: session.sub, tenantId: session.tenantId },
+          select: { branchId: true },
+        });
+        if (!manager?.branchId || target.branchId !== manager.branchId) {
+          return NextResponse.json({ error: "Employee not found in your branch." }, { status: 400 });
+        }
+      }
       employeeId = target.id;
       onBehalf = true;
     }

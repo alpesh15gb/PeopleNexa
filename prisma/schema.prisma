@@ -375,9 +375,30 @@ model Punch {
   lat        Float?
   lng        Float?
   selfie     String?
+  faceScore  Float?
+  faceStatus String   @default("none") // none | matched | review | rejected
   createdAt  DateTime @default(now())
 
   @@index([tenantId, employeeId, punchTime])
+}
+
+// ─── Face enrollments (server-side match foundations) ──────────────────────
+// One row per employee. `embeddings` is an array of 128-d descriptors
+// (number[][]). Punch selfies are purged after 90 days by
+// app/api/cron/face-purge; embeddings here are untouched by that job.
+
+model FaceEnrollment {
+  id             String    @id @default(cuid())
+  tenantId       String
+  employeeId     String    @unique
+  embeddings     Json // array of number[] (128-d face descriptors)
+  sampleCount    Int       @default(0)
+  consentVersion String    @default("")
+  consentedAt    DateTime?
+  enrolledAt     DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([tenantId])
 }
 
 // ─── Attendance ────────────────────────────────────────────────────────────
@@ -1011,4 +1032,26 @@ model PlanOverride {
   modules            String[]
   updatedBy          String?
   updatedAt          DateTime  @updatedAt
+}
+
+// ─── Audit log (branch-wise login + mutation trail) ────────────────────────
+// Delete-safe by design: tenantId/actorId/entityId are plain strings with no
+// FK (like Payslip.tenantId / CashbookEntry.tenantId), so old rows never
+// block tenant or employee deletes and reads stay tenant-scoped.
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorId   String
+  actorRole String   @default("")
+  action    String // e.g. "employee.update"
+  entity    String // e.g. "Employee"
+  entityId  String
+  summary   String   @default("")
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entity, entityId])
 }

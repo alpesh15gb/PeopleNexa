@@ -135,6 +135,27 @@ export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) {
+      return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
+    }
+    const corrections = await prisma.punchCorrection.findMany({
+      where: { tenantId: session.tenantId, employee: { branchId: manager.branchId } },
+      include: {
+        employee: {
+          select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return NextResponse.json({ corrections });
+  }
+
   const corrections = await prisma.punchCorrection.findMany({
     where:
       session.role === "admin" || session.role === "supervisor"

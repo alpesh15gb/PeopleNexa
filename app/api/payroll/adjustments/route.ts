@@ -25,6 +25,9 @@ export async function GET(req: NextRequest) {
 /** POST — create an adjustment (arrears / bonus / one-off deduction). */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

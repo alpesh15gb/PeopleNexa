@@ -17,6 +17,7 @@ import {
   HandCoins,
   Package,
   Fingerprint,
+  ScanFace,
   Settings,
   Wrench,
   Receipt,
@@ -93,12 +94,14 @@ const adminNav: NavItem[] = [
   { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" />, section: "Workspace" },
+  { href: "/admin/audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" />, section: "Workspace" },
 ];
 
 function employeeNav(lang: Lang): NavItem[] {
   return [
     { href: "/employee", label: t(lang, "nav.myDashboard"), icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
     { href: "/employee/attendance", label: t(lang, "nav.attendance"), icon: <CalendarClock className="h-4 w-4" />, module: "attendance" },
+    { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" /> },
     { href: "/employee/onboarding", label: t(lang, "nav.onboarding"), icon: <UserCheck className="h-4 w-4" />, module: "onboarding" },
     { href: "/employee/exits", label: t(lang, "nav.exits"), icon: <DoorOpen className="h-4 w-4" />, module: "exit" },
     { href: "/employee/leaves", label: t(lang, "nav.leaves"), icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves" },
@@ -319,7 +322,7 @@ export function Shell({
   const toast = useToast();
 
   const moduleSet = new Set(enabledModules ?? []);
-  const allNav = role === "admin" ? adminNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
+  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/leaves") : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
 

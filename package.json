@@ -9,8 +9,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
+    "@vladmandic/face-api": "^1.7.15",
     "bcryptjs": "3.0.3",
     "clsx": "2.1.1",
     "date-fns": "4.4.0",

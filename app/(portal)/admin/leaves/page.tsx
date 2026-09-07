@@ -7,9 +7,19 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminLeavesPage() {
   const session = await requireSession();
+
+  // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
+  const isBranchManager = session.role === "branch_manager";
+  const ownScope = isBranchManager
+    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
+    : null;
+  const ownBranchId = ownScope?.branchId ?? null;
+  const ownBranchName = ownScope?.branch?.name ?? "";
+  const branchId = isBranchManager ? ownBranchId : null;
+
   const [requests, types, employees] = await Promise.all([
     prisma.leaveRequest.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...(branchId ? { employee: { branchId } } : {}) },
       include: {
         employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
         leaveType: true,
@@ -18,7 +28,7 @@ export default async function AdminLeavesPage() {
     }),
     prisma.leaveType.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "asc" } }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: { employeeNumber: "asc" },
     }),
@@ -29,6 +39,13 @@ export default async function AdminLeavesPage() {
       <PageHeader
         title="Leave management"
         description="Review requests and configure leave policies"
+        actions={
+          isBranchManager ? (
+            <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
+              Branch: {ownBranchName}
+            </span>
+          ) : undefined
+        }
       />
       <Card>
         <CardContent className="p-0">

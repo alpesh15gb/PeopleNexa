@@ -5,10 +5,11 @@ import { notifyEmployee } from "@/lib/notifications";
 import { formatDate } from "@/lib/dates";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
+import { appendAudit } from "@/lib/audit";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -22,6 +23,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id, tenantId: session.tenantId },
   });
   if (!request) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: request.employeeId, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+  }
   if (request.status !== "pending") {
     return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });
   }
@@ -43,6 +58,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       include: { leaveType: true },
     });
     if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: "leave.review",
+      entity: "LeaveRequest",
+      entityId: id,
+      summary: `rejected ${updated.days}d ${updated.leaveType.name}`,
+      before: { status: "pending" },
+      after: { status: "rejected" },
+    });
 
     await notifyEmployee(
       session.tenantId,
@@ -118,6 +145,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     include: { leaveType: true },
   });
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "leave.review",
+    entity: "LeaveRequest",
+    entityId: id,
+    summary: `approved ${updated.days}d ${updated.leaveType.name}`,
+    before: { status: "pending" },
+    after: { status: "approved" },
+  });
 
   await notifyEmployee(
     session.tenantId,

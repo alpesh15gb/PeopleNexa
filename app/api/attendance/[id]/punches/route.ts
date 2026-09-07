@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
 import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
+import { appendAudit } from "@/lib/audit";
 
 async function loadOwned(id: string, tenantId: string) {
   return prisma.attendance.findFirst({ where: { id, tenantId } });
@@ -11,12 +12,26 @@ async function loadOwned(id: string, tenantId: string) {
 // POST /api/attendance/:id/punches  { time: "2026-08-12T09:05:00" } — add a punch (IST) and re-derive.
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const attendance = await loadOwned(id, session.tenantId);
   if (!attendance) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: attendance.employeeId, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+  }
 
   const body = await req.json().catch(() => ({}));
   const time = String(body.time ?? "");
@@ -44,7 +59,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Time is outside this day's window." }, { status: 400 });
   }
 
-  await prisma.punch.create({
+  const createdPunch = await prisma.punch.create({
     data: {
       tenantId: session.tenantId,
       employeeId: attendance.employeeId,
@@ -52,6 +67,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       punchTime,
       inOutHint: "unknown",
     },
+  });
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "punch.add",
+    entity: "Punch",
+    entityId: createdPunch.id,
+    summary: `Added punch ${punchTime.toISOString()} for ${attendance.employeeId}`,
+    after: { punchTime: punchTime.toISOString(), employeeId: attendance.employeeId },
   });
   if (attendance.finalized) {
     await prisma.attendance.update({
@@ -73,12 +98,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 // DELETE /api/attendance/:id/punches?punchId=... — remove a punch and re-derive.
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const attendance = await loadOwned(id, session.tenantId);
   if (!attendance) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: attendance.employeeId, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+  }
 
   const punchId = req.nextUrl.searchParams.get("punchId");
   if (!punchId) return NextResponse.json({ error: "punchId is required" }, { status: 400 });
@@ -100,6 +139,16 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   }
 
   await prisma.punch.delete({ where: { id: punchId } });
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "punch.delete",
+    entity: "Attendance",
+    entityId: attendance.id,
+    summary: `Deleted punch ${punch.punchTime.toISOString()} for ${attendance.employeeId}`,
+    before: { punchId, punchTime: punch.punchTime.toISOString(), employeeId: attendance.employeeId },
+  });
   if (attendance.finalized) {
     await prisma.attendance.update({
       where: { id: attendance.id },

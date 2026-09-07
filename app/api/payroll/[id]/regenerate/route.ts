@@ -8,10 +8,14 @@ import {
   fyFromMonth,
   getPayrollConfig,
 } from "@/lib/payroll";
+import { appendAudit } from "@/lib/audit";
 
 /** POST — recompute a single payslip from fresh attendance/adjustments/config (admin). */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -99,6 +103,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       workedHours: result.workedHours,
       note: existing.note ? `${existing.note} | regenerated ${iso}` : `regenerated ${iso}`,
     },
+  });
+
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "payslip.regenerate",
+    entity: "Payslip",
+    entityId: id,
+    summary: `Regenerated ${existing.month} net ${Number(existing.netSalary)} → ${Number(updated.netSalary)}`,
+    before: { netSalary: Number(existing.netSalary) },
+    after: { netSalary: Number(updated.netSalary) },
   });
 
   return NextResponse.json({ payslip: updated });

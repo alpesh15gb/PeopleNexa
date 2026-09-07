@@ -8,11 +8,18 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminBranchesPage() {
   const session = await requireSession();
-  const branches = await prisma.branch.findMany({
-    where: { tenantId: session.tenantId },
-    include: { _count: { select: { employees: true } } },
-    orderBy: { createdAt: "asc" },
-  });
+  const [branches, employees] = await Promise.all([
+    prisma.branch.findMany({
+      where: { tenantId: session.tenantId },
+      include: { _count: { select: { employees: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.employee.findMany({
+      where: { tenantId: session.tenantId, status: "active" },
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true, role: true, branchId: true },
+      orderBy: { firstName: "asc" },
+    }),
+  ]);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -25,7 +32,7 @@ export default async function AdminBranchesPage() {
           {branches.length === 0 ? (
             <EmptyState title="No branches yet" description="Create a branch with a geofence to secure attendance." />
           ) : (
-            <BranchesManager branches={branches} />
+            <BranchesManager branches={branches} employees={employees} />
           )}
         </CardContent>
       </Card>

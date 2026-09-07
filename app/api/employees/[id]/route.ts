@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { appendAudit } from "@/lib/audit";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -66,13 +67,41 @@ function p2002Targets(err: unknown): string[] {
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const body = await req.json();
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  let ownBranchId: string | null = null;
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId || employee.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    ownBranchId = manager.branchId;
+    for (const k of [
+      "salary",
+      "role",
+      "status",
+      "branchId",
+      "payMode",
+      "salaryStructure",
+      "workBasisRate",
+      "bankName",
+      "accountNumber",
+      "ifscCode",
+      "pan",
+      "uan",
+    ]) {
+      delete (body as Record<string, unknown>)[k];
+    }
+  }
 
   const email = body.email !== undefined ? String(body.email).toLowerCase().trim() : employee.email;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -210,12 +239,15 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     wantBranch ? prisma.branch.findFirst({ where: { id: String(wantBranch), tenantId: session.tenantId }, select: { id: true } }) : null,
     wantDept ? prisma.department.findFirst({ where: { id: String(wantDept), tenantId: session.tenantId }, select: { id: true } }) : null,
     wantShift ? prisma.shift.findFirst({ where: { id: String(wantShift), tenantId: session.tenantId }, select: { id: true } }) : null,
-    wantManager ? prisma.employee.findFirst({ where: { id: String(wantManager), tenantId: session.tenantId, status: "active" }, select: { id: true } }) : null,
+    wantManager ? prisma.employee.findFirst({ where: { id: String(wantManager), tenantId: session.tenantId, status: "active" }, select: { id: true, branchId: true } }) : null,
   ]);
   if (wantBranch && !branch) return NextResponse.json({ error: "Branch not found in this workspace." }, { status: 400 });
   if (wantDept && !department) return NextResponse.json({ error: "Department not found in this workspace." }, { status: 400 });
   if (wantShift && !shift) return NextResponse.json({ error: "Shift not found in this workspace." }, { status: 400 });
   if (wantManager && !manager) return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
+  if (session.role === "branch_manager" && wantManager && manager && manager.branchId !== ownBranchId) {
+    return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
+  }
   if (wantManager && String(wantManager) === id) {
     return NextResponse.json({ error: "An employee cannot be their own manager." }, { status: 400 });
   }
@@ -263,11 +295,38 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
     throw err;
   }
+  const pickAuditFields = (r: typeof employee) => ({
+    firstName: r.firstName,
+    lastName: r.lastName,
+    email: r.email,
+    phone: r.phone,
+    position: r.position,
+    departmentId: r.departmentId,
+    branchId: r.branchId,
+    shiftId: r.shiftId,
+    status: r.status,
+    role: r.role,
+    managerId: r.managerId,
+  });
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "employee.update",
+    entity: "Employee",
+    entityId: id,
+    summary: `${updated.firstName} ${updated.lastName} updated`,
+    before: pickAuditFields(employee),
+    after: pickAuditFields(updated),
+  });
   return NextResponse.json({ employee: updated });
 }
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
+  if (session?.role === "branch_manager") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }

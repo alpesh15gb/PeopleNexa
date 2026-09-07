@@ -9,8 +9,20 @@ const MANUAL_STATUSES = ["present", "late", "permission", "absent", "half_day"];
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let branchId: string | null = null;
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) {
+      return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
+    }
+    branchId = manager.branchId;
   }
 
   // Lazy finalization (Phase 4): once a day's window closes + grace, re-derive
@@ -24,7 +36,7 @@ export async function GET(req: NextRequest) {
 
   const [employees, records, leaves, holidays] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
@@ -36,7 +48,7 @@ export async function GET(req: NextRequest) {
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
+      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : {}) },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch: { select: { name: true } },
@@ -48,6 +60,7 @@ export async function GET(req: NextRequest) {
         status: "approved",
         fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
+        ...(branchId ? { employee: { branchId } } : {}),
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
@@ -88,7 +101,7 @@ export async function GET(req: NextRequest) {
  * (e.g. marking an absent day that has no derived record yet). */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -124,6 +137,15 @@ export async function POST(req: NextRequest) {
     select: { id: true, status: true, joiningDate: true, branchId: true, shiftId: true },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId || employee.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+    }
+  }
   if (employee.status !== "active") {
     return NextResponse.json({ error: "Only active employees can be marked." }, { status: 403 });
   }

@@ -5,6 +5,7 @@ import { computeFandF } from "@/lib/exit";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { startOfDay, toDateKey } from "@/lib/dates";
 import { sendWhatsApp } from "@/lib/whatsapp";
+import { appendAudit } from "@/lib/audit";
 
 /** PATCH — { action: "approve" | "reject" | "complete" | "cancel", note? } */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -90,6 +91,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: "exit.approve",
+      entity: "ExitRequest",
+      entityId: id,
+      summary: `${request.employee.firstName} ${request.employee.lastName} exit approved`,
+      before: { status: "pending" },
+      after: { status: "approved" },
+    });
+
     await notifyEmployee(
       session.tenantId,
       request.employeeId,
@@ -129,6 +142,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const updated = await prisma.exitRequest.update({
       where: { id },
       data: { status: "completed", note, reviewedBy: session.sub, reviewedAt: new Date() },
+    });
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: "exit.complete",
+      entity: "ExitRequest",
+      entityId: id,
+      summary: `${request.employee.firstName} ${request.employee.lastName} exit completed`,
+      before: { status: "approved" },
+      after: { status: "completed" },
     });
     const now = new Date();
     // Mark employee inactive (tenant-scoped).

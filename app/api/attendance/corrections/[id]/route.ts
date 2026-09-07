@@ -4,11 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
+import { appendAudit } from "@/lib/audit";
 
 /** PATCH — admin approves or rejects a pending correction. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -22,8 +23,44 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     where: { id, tenantId: session.tenantId },
   });
   if (!correction) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+  if (session.role === "branch_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!manager?.branchId) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: correction.employeeId, tenantId: session.tenantId },
+      select: { branchId: true },
+    });
+    if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+    }
+  }
   if (correction.status !== "pending") {
     return NextResponse.json({ error: "This correction was already reviewed." }, { status: 400 });
+  }
+
+  // Face gate (additive): approving a day that contains a face-rejected
+  // punch is an identity override, so only an explicit admin may do it.
+  // Reads Punch.faceStatus (real column) via the correction's IST day window.
+  if (status === "approved" && session.role !== "admin") {
+    const dayStart = istStartOfDay(correction.date);
+    const flagged = await prisma.punch.findFirst({
+      where: {
+        tenantId: session.tenantId,
+        employeeId: correction.employeeId,
+        faceStatus: "rejected",
+        punchTime: { gte: dayStart, lt: new Date(dayStart.getTime() + 86400000) },
+      },
+      select: { id: true },
+    });
+    if (flagged) {
+      return NextResponse.json(
+        { error: "Face-rejected punches require an admin to approve." },
+        { status: 403 }
+      );
+    }
   }
 
   if (status === "rejected") {
@@ -41,6 +78,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ error: "This correction was already reviewed." }, { status: 409 });
     }
     const updated = await prisma.punchCorrection.findUnique({ where: { id } });
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: "correction.review",
+      entity: "PunchCorrection",
+      entityId: id,
+      summary: `rejected correction for ${correction.employeeId}`,
+      before: { status: "pending" },
+      after: { status: "rejected" },
+    });
     await notifyEmployee(
       correction.tenantId,
       correction.employeeId,
@@ -234,6 +282,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
   const updated = await prisma.punchCorrection.findUnique({ where: { id } });
   if (!updated) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "correction.review",
+    entity: "PunchCorrection",
+    entityId: id,
+    summary: `approved correction for ${correction.employeeId}`,
+    before: { status: "pending" },
+    after: { status: "approved" },
+  });
 
   await notifyEmployee(
     correction.tenantId,

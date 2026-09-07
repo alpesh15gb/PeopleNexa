@@ -16,11 +16,21 @@ export default async function AdminEmployeesPage({
   const session = await requireSession();
   const { branch: branchParam } = await searchParams;
 
-  // Branch filter must belong to this tenant; unknown ids are ignored.
-  const branchFilter = branchParam
-    ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+  // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
+  const isBranchManager = session.role === "branch_manager";
+  const ownScope = isBranchManager
+    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
-  const branchId = branchFilter?.id ?? null;
+  const ownBranchId = ownScope?.branchId ?? null;
+  const ownBranchName = ownScope?.branch?.name ?? "";
+
+  // Branch filter must belong to this tenant; unknown ids are ignored.
+  const branchFilter = isBranchManager
+    ? (ownBranchId ? { id: ownBranchId, name: ownBranchName } : null)
+    : branchParam
+      ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+      : null;
+  const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
 
   const [employees, branches, departments, shifts, tenant, totalCount] = await Promise.all([
     prisma.employee.findMany({
@@ -72,7 +82,13 @@ export default async function AdminEmployeesPage({
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin/employees" />
+            {isBranchManager ? (
+              <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
+                Branch: {ownBranchName}
+              </span>
+            ) : (
+              <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin/employees" />
+            )}
             <span
               className={`rounded-xl border px-3 py-1.5 text-[12px] font-medium ${
                 seatsUsed >= seatsTotal

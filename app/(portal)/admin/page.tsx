@@ -48,11 +48,21 @@ export default async function AdminDashboardPage({
   const { branch: branchParam } = await searchParams;
   const today = istStartOfDay(new Date());
 
-  // Branch filter must belong to this tenant; unknown ids are ignored.
-  const branchFilter = branchParam
-    ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+  // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
+  const isBranchManager = session.role === "branch_manager";
+  const ownScope = isBranchManager
+    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
-  const branchId = branchFilter?.id ?? null;
+  const ownBranchId = ownScope?.branchId ?? null;
+  const ownBranchName = ownScope?.branch?.name ?? "";
+
+  // Branch filter must belong to this tenant; unknown ids are ignored.
+  const branchFilter = isBranchManager
+    ? (ownBranchId ? { id: ownBranchId, name: ownBranchName } : null)
+    : branchParam
+      ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+      : null;
+  const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
   const empScope = { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) };
 
   const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches] = await Promise.all([
@@ -145,7 +155,13 @@ export default async function AdminDashboardPage({
             {branchFilter ? ` · ${branchFilter.name}` : ""}.
           </p>
         </div>
-        <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
+        {isBranchManager ? (
+          <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
+            Branch: {ownBranchName}
+          </span>
+        ) : (
+          <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
+        )}
       </div>
 
       {/* Stats */}

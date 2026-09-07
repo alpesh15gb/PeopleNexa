@@ -67,6 +67,9 @@ export async function POST(req: NextRequest) {
     if (employee.status !== "active") {
       return NextResponse.json({ success: false, error: "Your account is inactive. Contact your admin." }, { status: 403 });
     }
+    if (employee.role === "branch_manager" && !employee.branchId) {
+      return NextResponse.json({ success: false, error: "No branch assigned. Contact your admin." }, { status: 403 });
+    }
 
     await prisma.employee.update({
       where: { id: employee.id },
