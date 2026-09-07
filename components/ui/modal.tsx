@@ -25,14 +25,19 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    // Locking body overflow must not move the page: record the position and
+    // restore it on close if anything (e.g. focus scrolling) shifted it.
+    const savedY = window.scrollY;
     const selector =
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const dialog = dialogRef.current;
-    // Focus first focusable on open (fallback: dialog itself).
+    // Focus first focusable on open (fallback: dialog itself). preventScroll
+    // is load-bearing: without it the browser scrolls the document to reveal
+    // the focused node (page jumps down on open, back up on close).
     const focusTimer = window.setTimeout(() => {
       if (!dialog) return;
       const focusables = dialog.querySelectorAll<HTMLElement>(selector);
-      (focusables[0] ?? dialog).focus();
+      (focusables[0] ?? dialog).focus({ preventScroll: true });
     }, 0);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -61,7 +66,8 @@ export function Modal({
       window.clearTimeout(focusTimer);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
-      previouslyFocused?.focus?.();
+      previouslyFocused?.focus?.({ preventScroll: true });
+      if (window.scrollY !== savedY) window.scrollTo(0, savedY);
     };
   }, [open, onClose]);
 
