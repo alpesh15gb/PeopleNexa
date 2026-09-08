@@ -21,6 +21,9 @@ const TYPES = [
   { key: "missing", label: "Missing punches" },
   { key: "device-daily", label: "Device daily" },
   { key: "device-monthly", label: "Device monthly" },
+  { key: "device-status-matrix", label: "Device status matrix" },
+  { key: "device-work-summary", label: "Device work summary" },
+  { key: "device-performance", label: "Device performance" },
 ];
 
 export function ReportControls({
@@ -43,7 +46,7 @@ export function ReportControls({
   const branchId = searchParams.get("branchId") ?? "";
   const deviceDate = searchParams.get("date") ?? "";
   const deviceMonth = searchParams.get("month") ?? "";
-  const isDevice = type === "device-daily" || type === "device-monthly";
+  const isDevice = type === "device-daily" || type === "device-monthly" || type === "device-status-matrix" || type === "device-work-summary" || type === "device-performance";
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -102,12 +105,12 @@ export function ReportControls({
                 <Input key={`devdate-${deviceDate}`} type="date" defaultValue={deviceDate} onChange={(e) => update({ date: e.target.value })} className="w-40" />
               </div>
             )}
-            {type === "device-monthly" && (
+            {type === "device-monthly" || type === "device-status-matrix" || type === "device-work-summary" || type === "device-performance" ? (
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Month</label>
                 <Input key={`devmonth-${deviceMonth}`} type="month" defaultValue={deviceMonth} onChange={(e) => update({ month: e.target.value })} className="w-40" />
               </div>
-            )}
+            ) : null}
             {branches && branches.length > 0 && (
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Branch</label>

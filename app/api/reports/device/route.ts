@@ -7,8 +7,14 @@ import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import {
   buildDeviceDaily,
   buildDeviceMonthly,
+  buildPerformance,
+  buildStatusMatrix,
+  buildWorkSummary,
   type DeviceDailyOutput,
   type DeviceMonthlyOutput,
+  type DevicePerformanceOutput,
+  type DeviceStatusMatrixOutput,
+  type DeviceWorkSummaryOutput,
   type SnapshotPunch,
 } from "@/lib/device-report";
 
@@ -52,8 +58,8 @@ export async function GET(req: NextRequest) {
 
   const params = req.nextUrl.searchParams;
   const kind = params.get("kind") || "daily";
-  if (kind !== "daily" && kind !== "monthly") {
-    return NextResponse.json({ error: "kind must be one of: daily, monthly." }, { status: 400 });
+  if (kind !== "daily" && kind !== "monthly" && kind !== "status-matrix" && kind !== "work-summary" && kind !== "performance") {
+    return NextResponse.json({ error: "kind must be one of: daily, monthly, status-matrix, work-summary, performance." }, { status: 400 });
   }
   const format = (params.get("format") || "json").toLowerCase();
   if (format !== "json" && format !== "xlsx") {
@@ -99,7 +105,7 @@ export async function GET(req: NextRequest) {
     ...(departmentId ? { departmentId } : {}),
   };
 
-  const [tenant, branch, employees, records, leaves, holidays, punches] = await Promise.all([
+  const [tenant, branch, employees, records, leaves, holidays, punches, department, runByEmployee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     branchId
       ? prisma.branch.findFirst({ where: { id: branchId, tenantId: session.tenantId }, select: { name: true } })
@@ -113,6 +119,7 @@ export async function GET(req: NextRequest) {
         lastName: true,
         position: true,
         shift: { select: { name: true, startTime: true, endTime: true } },
+        department: { select: { name: true } },
       },
       orderBy: { employeeNumber: "asc" },
     }),
@@ -161,6 +168,10 @@ export async function GET(req: NextRequest) {
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
     }),
+    departmentId
+      ? prisma.department.findFirst({ where: { id: departmentId, tenantId: session.tenantId }, select: { name: true } })
+      : Promise.resolve(null),
+    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { firstName: true, lastName: true } }),
   ]);
 
   // Tenant-holiday IST day keys (recurring holidays match on MM-DD).
@@ -196,6 +207,7 @@ export async function GET(req: NextRequest) {
 
   const tenantInfo = { name: tenant?.name ?? "Company" };
   const branchInfo = branch ? { name: branch.name } : null;
+  const departmentInfo = department ? { name: department.name } : null;
 
   if (kind === "daily") {
     const dailyLeaves = new Set<string>();
@@ -216,7 +228,65 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(output);
   }
 
-  const output: DeviceMonthlyOutput = buildDeviceMonthly({
+  if (kind === "monthly") {
+    const output: DeviceMonthlyOutput = buildDeviceMonthly({
+      tenant: tenantInfo,
+      branch: branchInfo,
+      month: monthKey,
+      employees,
+      records,
+      punchesByDay,
+      leaves: leaveKeys,
+      holidays: holidayKeys,
+    });
+    if (format === "xlsx") return monthlyXlsx(output, monthKey);
+    return NextResponse.json(output);
+  }
+
+  if (kind === "status-matrix") {
+    const output: DeviceStatusMatrixOutput = buildStatusMatrix({
+      tenant: tenantInfo,
+      branch: branchInfo,
+      department: departmentInfo,
+      month: monthKey,
+      employees,
+      records,
+      punchesByDay,
+      leaves: leaveKeys,
+      holidays: holidayKeys,
+    });
+    if (format === "xlsx") return statusMatrixXlsx(output, monthKey);
+    return NextResponse.json(output);
+  }
+
+  if (kind === "work-summary") {
+    const runBy = runByEmployee ? `${runByEmployee.firstName} ${runByEmployee.lastName}`.trim() : "Admin";
+    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Kolkata",
+    }).format(new Date());
+    const output: DeviceWorkSummaryOutput = buildWorkSummary({
+      tenant: tenantInfo,
+      branch: branchInfo,
+      month: monthKey,
+      employees,
+      records,
+      punchesByDay,
+      leaves: leaveKeys,
+      holidays: holidayKeys,
+      runBy,
+      generatedAt,
+    });
+    if (format === "xlsx") return workSummaryXlsx(output, monthKey);
+    return NextResponse.json(output);
+  }
+
+  const output: DevicePerformanceOutput = buildPerformance({
     tenant: tenantInfo,
     branch: branchInfo,
     month: monthKey,
@@ -226,7 +296,7 @@ export async function GET(req: NextRequest) {
     leaves: leaveKeys,
     holidays: holidayKeys,
   });
-  if (format === "xlsx") return monthlyXlsx(output, monthKey);
+  if (format === "xlsx") return performanceXlsx(output, monthKey);
   return NextResponse.json(output);
 }
 
@@ -324,6 +394,145 @@ function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string) {
         ws.addRow([d.day, d.status, d.shift, d.inTime, d.outTime, d.lateBy, d.earlyBy, d.duration, d.overTime]);
       }
       for (let n = headerRow.number; n <= ws.rowCount; n++) borderAll(ws, n, cols);
+    }
+  });
+}
+
+function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
+  return xlsxResponse(`status-matrix-${monthKey}.xlsx`, (wb) => {
+    const ws = wb.addWorksheet("Status Matrix");
+    const dayCount = output.blocks[0]?.days.length ?? 0;
+    const cols = dayCount + 1;
+    ws.getColumn(1).width = 10;
+    for (let d = 1; d <= dayCount; d++) ws.getColumn(d + 1).width = 7;
+    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+    ws.mergeCells(titleRow.number, 1, titleRow.number, Math.max(cols, 1));
+    styleTitleRow(titleRow);
+    borderAll(ws, titleRow.number, Math.max(cols, 1));
+    if (output.department) {
+      const depRow = ws.addRow([`Department | ${output.department}`]);
+      ws.mergeCells(depRow.number, 1, depRow.number, Math.max(cols, 1));
+      depRow.font = { bold: true };
+      borderAll(ws, depRow.number, Math.max(cols, 1));
+    }
+    let isFirst = true;
+    for (const block of output.blocks) {
+      if (!isFirst) ws.addRow([]);
+      isFirst = false;
+      const empRow = ws.addRow([`Emp. Code ${block.code} Emp. Name ${block.name}`]);
+      ws.mergeCells(empRow.number, 1, empRow.number, Math.max(cols, 1));
+      empRow.font = { bold: true };
+      borderAll(ws, empRow.number, Math.max(cols, 1));
+      const headRow = ws.addRow(["", ...block.days.map((d) => `${d.day} ${d.dow}`)]);
+      styleHeaderRow(headRow);
+      const statusRow = ws.addRow(["Status", ...block.days.map((d) => d.status)]);
+      const inRow = ws.addRow(["InTime", ...block.days.map((d) => d.inTime)]);
+      const outRow = ws.addRow(["OutTime", ...block.days.map((d) => d.outTime)]);
+      const totalRow = ws.addRow(["Total", ...block.days.map((d) => d.total)]);
+      for (let n = headRow.number; n <= totalRow.number; n++) borderAll(ws, n, Math.max(cols, 1));
+      // P green / A red fills on the status row.
+      statusRow.eachCell((cell, col) => {
+        if (col === 1) return;
+        const v = String(cell.value ?? "");
+        if (v === "P" || v === "½P") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
+        else if (v === "A") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+      });
+    }
+  });
+}
+
+const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
+
+function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string) {
+  return xlsxResponse(`work-summary-${monthKey}.xlsx`, (wb) => {
+    const ws = wb.addWorksheet("Work Summary");
+    const cols = WORK_SUMMARY_COLUMNS.length;
+    const widths = [13, 26, 9, 9, 9, 11, 9, 10, 9];
+    widths.forEach((w, i) => {
+      ws.getColumn(i + 1).width = w;
+    });
+    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+    ws.mergeCells(titleRow.number, 1, titleRow.number, cols);
+    styleTitleRow(titleRow);
+    borderAll(ws, titleRow.number, cols);
+    const runRow = ws.addRow([`Run by ${output.header.runBy}  |  Date/Time ${output.header.generatedAt}`]);
+    ws.mergeCells(runRow.number, 1, runRow.number, cols);
+    borderAll(ws, runRow.number, cols);
+    let isFirst = true;
+    for (const block of output.blocks) {
+      if (!isFirst) ws.addRow([]);
+      isFirst = false;
+      const empRow = ws.addRow([`${block.code} - ${block.name}`]);
+      ws.mergeCells(empRow.number, 1, empRow.number, cols);
+      empRow.font = { bold: true };
+      borderAll(ws, empRow.number, cols);
+      const headerRow = ws.addRow(WORK_SUMMARY_COLUMNS);
+      styleHeaderRow(headerRow);
+      for (const r of block.rows) {
+        ws.addRow([r.date, r.shift, r.firstIn, r.lastOut, r.gross, r.work, r.late, r.overtime, r.early]);
+      }
+      const totalRow = ws.addRow([
+        "Totals",
+        "",
+        "",
+        "",
+        block.totals.gross,
+        block.totals.work,
+        block.totals.late,
+        block.totals.overtime,
+        block.totals.early,
+      ]);
+      totalRow.font = { bold: true };
+      for (let n = headerRow.number; n <= ws.rowCount; n++) borderAll(ws, n, cols);
+    }
+  });
+}
+
+function performanceXlsx(output: DevicePerformanceOutput, monthKey: string) {
+  return xlsxResponse(`performance-${monthKey}.xlsx`, (wb) => {
+    const ws = wb.addWorksheet("Performance");
+    const dayCount = output.blocks[0]?.days.length ?? 0;
+    const cols = dayCount + 1;
+    ws.getColumn(1).width = 18;
+    for (let d = 1; d <= dayCount; d++) ws.getColumn(d + 1).width = 9;
+    let isFirst = true;
+    for (const block of output.blocks) {
+      if (!isFirst) ws.addRow([]);
+      isFirst = false;
+      const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+      ws.mergeCells(titleRow.number, 1, titleRow.number, Math.max(cols, 1));
+      styleTitleRow(titleRow);
+      borderAll(ws, titleRow.number, Math.max(cols, 1));
+      const metaRow = ws.addRow([
+        `Dep | ${block.department} | Name | ${block.name} | E.Code | ${block.code} | Desig | ${block.designation} | Shift | ${block.shiftHours}`,
+      ]);
+      ws.mergeCells(metaRow.number, 1, metaRow.number, Math.max(cols, 1));
+      metaRow.font = { bold: true };
+      metaRow.alignment = { wrapText: true };
+      borderAll(ws, metaRow.number, Math.max(cols, 1));
+      const headRow = ws.addRow(["", ...block.days.map((d) => d.day)]);
+      styleHeaderRow(headRow);
+      const rows: (string | number)[][] = [
+        ["Status", ...block.days.map((d) => d.status)],
+        ["IN", ...block.days.map((d) => d.inTime)],
+        ["OUT", ...block.days.map((d) => d.outTime)],
+        ["Shift", ...block.days.map((d) => d.shift)],
+        ["Late", ...block.days.map((d) => d.late)],
+        ["OT", ...block.days.map((d) => d.ot)],
+        ["Early", ...block.days.map((d) => d.early)],
+      ];
+      for (const r of rows) ws.addRow(r);
+      for (let n = headRow.number; n <= ws.rowCount; n++) borderAll(ws, n, Math.max(cols, 1));
+      const footers = [
+        `Total Working Hrs: ${block.totals.work} | Total OT Hrs: ${block.totals.ot}`,
+        `Present: ${block.totals.present} Absent: ${block.totals.absent} Paid Day: ${block.totals.paidDay}`,
+        `WO: ${block.totals.wo} HLD: ${block.totals.hld} Leave: ${block.totals.leave}`,
+      ];
+      for (const f of footers) {
+        const fr = ws.addRow([f]);
+        ws.mergeCells(fr.number, 1, fr.number, Math.max(cols, 1));
+        borderAll(ws, fr.number, Math.max(cols, 1));
+      }
     }
   });
 }

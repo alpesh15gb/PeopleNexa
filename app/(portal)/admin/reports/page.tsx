@@ -33,7 +33,18 @@ const KNOWN_TYPES = new Set([
   "missing",
   "device-daily",
   "device-monthly",
+  "device-status-matrix",
+  "device-work-summary",
+  "device-performance",
 ]);
+
+const DEVICE_KIND_BY_TYPE: Record<string, "daily" | "monthly" | "status-matrix" | "work-summary" | "performance"> = {
+  "device-daily": "daily",
+  "device-monthly": "monthly",
+  "device-status-matrix": "status-matrix",
+  "device-work-summary": "work-summary",
+  "device-performance": "performance",
+};
 
 function isValidDateKey(key: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
@@ -90,8 +101,9 @@ export default async function AdminReportsPage({
 
   // ── eBioserver-style device reports (data fetched client-side from
   // /api/reports/device; Excel + print handled by DeviceTables) ──────────
-  if (type === "device-daily" || type === "device-monthly") {
-    const isDaily = type === "device-daily";
+  if (type in DEVICE_KIND_BY_TYPE) {
+    const deviceKind = DEVICE_KIND_BY_TYPE[type];
+    const isDaily = deviceKind === "daily";
     const [departments, manager] = await Promise.all([
       prisma.department.findMany({
         where: { tenantId: session.tenantId },
@@ -110,7 +122,7 @@ export default async function AdminReportsPage({
     const month = params.month || monthKeyIST(new Date());
     const deviceBranchId = forcedBranchId ?? params.branchId ?? "";
     const deviceDepartmentId = params.departmentId ?? "";
-    const qs = new URLSearchParams({ kind: isDaily ? "daily" : "monthly" });
+    const qs = new URLSearchParams({ kind: deviceKind });
     if (isDaily) qs.set("date", date);
     else qs.set("month", month);
     if (deviceBranchId) qs.set("branchId", deviceBranchId);
@@ -124,7 +136,7 @@ export default async function AdminReportsPage({
             <ReportControls type={type} from={from} to={to} departments={departments} branches={visibleBranches} />
           </CardContent>
         </Card>
-        <DeviceTables kind={isDaily ? "daily" : "monthly"} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
+        <DeviceTables kind={deviceKind} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
       </div>
     );
   }
