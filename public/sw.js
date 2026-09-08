@@ -1,6 +1,8 @@
 // Bump CACHE_VERSION (e.g. v1 -> v2) whenever the offline SHELL list or the
 // navigation-fallback mapping below changes. Old caches are purged on activate.
-const CACHE_VERSION = "v4";
+// v5: hashed Next.js chunks are no longer cached (see fetch handler) — this
+// bump purges any pre-v5 chunk entries that could mismatch fresh HTML.
+const CACHE_VERSION = "v5";
 const CACHE = "peoplenexa-" + CACHE_VERSION;
 const SHELL = ["/", "/login", "/admin", "/superadmin/login", "/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/profile"];
 
@@ -83,6 +85,11 @@ self.addEventListener("fetch", (event) => {
   }
 
   // Static assets: stale-while-revalidate, never rejects.
+  // EXCEPT hashed Next.js build output (/_next/static): filenames already
+  // contain content hashes and carry immutable HTTP caching — letting the SW
+  // serve them risks running a stale shell against fresh HTML after a deploy
+  // (first-visit crash, works-on-reload). Always go to network for those.
+  if (url.pathname.startsWith("/_next/static/")) return;
   event.respondWith(
     (async () => {
       try {
