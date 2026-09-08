@@ -29,6 +29,21 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   // Inactive / deleted employees must not retain portal access (tokens live 30d).
   if (!employee || employee.status !== "active") redirect("/login");
 
+  // Location → branch tree for the left pane (oversight roles only; one
+  // small indexed query, skipped for employees and branch managers).
+  const locationTree =
+    employee.role === "admin" || employee.role === "supervisor"
+      ? await prisma.location.findMany({
+          where: { tenantId: session.tenantId },
+          select: {
+            id: true,
+            name: true,
+            branches: { select: { id: true, name: true }, orderBy: { createdAt: "asc" } },
+          },
+          orderBy: { createdAt: "asc" },
+        })
+      : [];
+
   const name = `${employee.firstName} ${employee.lastName}`.trim() || "User";
   const lang = await getLang();
   const enabledModules = tenantModules.map((m) => m.module);
@@ -36,7 +51,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   return (
     <ToastProvider>
       <PWARegister />
-      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules}>
+      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules} locationTree={locationTree}>
         {children}
       </Shell>
     </ToastProvider>

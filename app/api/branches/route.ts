@@ -30,11 +30,22 @@ export async function POST(req: NextRequest) {
     });
     if (exists) return NextResponse.json({ error: "A branch with this code already exists." }, { status: 400 });
 
+    let locationId: string | null = null;
+    if (body.locationId != null && body.locationId !== "") {
+      const loc = await prisma.location.findFirst({
+        where: { id: String(body.locationId), tenantId: session.tenantId },
+        select: { id: true },
+      });
+      if (!loc) return NextResponse.json({ error: "Location not found in this workspace." }, { status: 400 });
+      locationId = loc.id;
+    }
+
     const branch = await prisma.branch.create({
       data: {
         tenantId: session.tenantId,
         name,
         code,
+        locationId,
         address: body.address ?? null,
         latitude:
           body.latitude != null && body.latitude !== ""

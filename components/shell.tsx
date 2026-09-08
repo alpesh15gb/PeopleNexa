@@ -300,12 +300,83 @@ function NavLinks({
   );
 }
 
+export interface LocationTreeBranch {
+  id: string;
+  name: string;
+}
+
+export interface LocationTree {
+  id: string;
+  name: string;
+  branches: LocationTreeBranch[];
+}
+
+/**
+ * Locations → Branches hierarchy in the left pane (admin/supervisor only).
+ * Display + navigation into /admin/branches; filtering stays on the pages.
+ */
+function LocationTreeNav({ tree, onNavigate }: { tree: LocationTree[]; onNavigate: () => void }) {
+  const [expanded, setExpanded] = useState<string[]>(() => tree.map((l) => l.id));
+  const toggle = (id: string) =>
+    setExpanded((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  return (
+    <div className="mt-4">
+      <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+        Locations
+      </p>
+      <div className="mt-1 space-y-0.5">
+        {tree.map((loc) => {
+          const open = expanded.includes(loc.id);
+          return (
+            <div key={loc.id}>
+              <button
+                type="button"
+                onClick={() => toggle(loc.id)}
+                aria-expanded={open}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-primary/[0.06]"
+              >
+                <MapPin aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{loc.name}</span>
+                <span className="rounded-md bg-tint px-1.5 py-0.5 text-[10.5px] text-muted-foreground">
+                  {loc.branches.length}
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+                />
+              </button>
+              {open && (
+                <div className="ml-5 space-y-0.5 border-l border-edge pl-2">
+                  {loc.branches.length === 0 && (
+                    <p className="px-2 py-1 text-[12px] text-muted-foreground/70">No branches yet</p>
+                  )}
+                  {loc.branches.map((b) => (
+                    <Link
+                      key={b.id}
+                      href="/admin/branches"
+                      onClick={onNavigate}
+                      className="block truncate rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-primary/[0.06] hover:text-foreground"
+                    >
+                      {b.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Shell({
   role,
   name,
   companyName,
   lang = "en",
   enabledModules,
+  locationTree = [],
   children,
 }: {
   role: string;
@@ -313,6 +384,7 @@ export function Shell({
   companyName: string;
   lang?: Lang;
   enabledModules?: string[];
+  locationTree?: LocationTree[];
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -369,6 +441,9 @@ export function Shell({
           <p className="mt-1 truncate text-[13px] font-semibold text-foreground">{companyName}</p>
         </div>
         <NavLinks items={nav} onNavigate={() => setOpen(false)} />
+        {(role === "admin" || role === "supervisor") && locationTree.length > 0 && (
+          <LocationTreeNav tree={locationTree} onNavigate={() => setOpen(false)} />
+        )}
       </div>
       <div className="shrink-0 border-t border-edge/60 p-3">
         <div className="card-surface rounded-xl border-primary/10 bg-card/70 p-3 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.4)] backdrop-blur-xl">

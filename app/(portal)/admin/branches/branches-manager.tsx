@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, MapPin, LocateFixed } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, LocateFixed, X } from "lucide-react";
 import { Circle, GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -21,7 +21,14 @@ interface Branch {
   longitude: number | null;
   geofenceRadius: number;
   isDefault: boolean;
+  locationId: string | null;
   _count: { employees: number };
+}
+
+interface BranchLocation {
+  id: string;
+  name: string;
+  code: string;
 }
 
 interface Staff {
@@ -101,7 +108,15 @@ function BranchGeofenceMap({
   );
 }
 
-export function BranchesManager({ branches, employees }: { branches: Branch[]; employees: Staff[] }) {
+export function BranchesManager({
+  branches,
+  employees,
+  locations,
+}: {
+  branches: Branch[];
+  employees: Staff[];
+  locations: BranchLocation[];
+}) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
@@ -147,6 +162,7 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
       name: form.get("name"),
       code: form.get("code"),
       address: form.get("address"),
+      locationId: form.get("locationId"),
       latitude: form.get("latitude"),
       longitude: form.get("longitude"),
       geofenceRadius: form.get("geofenceRadius"),
@@ -285,6 +301,67 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
 
   const isNew = editing === "new";
 
+  // ── Locations (city level above branches) ─────────────────────────────
+  const [locName, setLocName] = useState("");
+  const [locCode, setLocCode] = useState("");
+  const [locBusy, setLocBusy] = useState(false);
+  const locationName = (id: string | null) => locations.find((l) => l.id === id)?.name ?? null;
+
+  async function addLocation() {
+    if (locBusy) return;
+    if (!locName.trim() || !locCode.trim()) {
+      toast("error", "Enter a location name and code (e.g. Hyderabad, HYD).");
+      return;
+    }
+    setLocBusy(true);
+    try {
+      const res = await fetch("/api/locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: locName.trim(), code: locCode.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to add location");
+        return;
+      }
+      setLocName("");
+      setLocCode("");
+      toast("success", "Location added");
+      router.refresh();
+    } catch {
+      toast("error", "Something went wrong.");
+    } finally {
+      setLocBusy(false);
+    }
+  }
+
+  async function deleteLocation(id: string) {
+    if (locBusy) return;
+    setLocBusy(true);
+    try {
+      const res = await fetch(`/api/locations/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to delete location");
+        return;
+      }
+      toast("success", "Location removed");
+      router.refresh();
+    } catch {
+      toast("error", "Something went wrong.");
+    } finally {
+      setLocBusy(false);
+    }
+  }
+
+  // Cards sorted by location, then name — the hierarchy reads top to bottom.
+  const sortedBranches = [...branches].sort((a, b) => {
+    const la = locationName(a.locationId) ?? "";
+    const lb = locationName(b.locationId) ?? "";
+    return la.localeCompare(lb) || a.name.localeCompare(b.name);
+  });
+
   return (
     <>
       <div className="flex items-center justify-between border-b border-edge px-5 py-3">
@@ -294,8 +371,43 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
         </Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 border-b border-edge px-5 py-3">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Locations</span>
+        {locations.map((l) => (
+          <span key={l.id} className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-tint px-2.5 py-1 text-[12px] font-medium">
+            {l.name} <span className="text-muted-foreground">({l.code})</span>
+            <button
+              type="button"
+              onClick={() => deleteLocation(l.id)}
+              disabled={locBusy}
+              aria-label={`Delete location ${l.name}`}
+              className="cursor-pointer text-muted-foreground transition-colors hover:text-rose-400 disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </span>
+        ))}
+        <input
+          value={locName}
+          onChange={(e) => setLocName(e.target.value)}
+          placeholder="New location, e.g. Hyderabad"
+          aria-label="New location name"
+          className="h-9 min-h-[36px] w-44 rounded-lg border border-input bg-tint px-3 text-[12.5px] outline-none focus:border-primary/60"
+        />
+        <input
+          value={locCode}
+          onChange={(e) => setLocCode(e.target.value)}
+          placeholder="Code, e.g. HYD"
+          aria-label="New location code"
+          className="h-9 min-h-[36px] w-28 rounded-lg border border-input bg-tint px-3 text-[12.5px] uppercase outline-none focus:border-primary/60"
+        />
+        <Button size="sm" variant="outline" onClick={addLocation} loading={locBusy}>
+          <Plus className="h-3.5 w-3.5" /> Add
+        </Button>
+      </div>
+
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-        {branches.map((b) => (
+        {sortedBranches.map((b) => (
           <div key={b.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -305,6 +417,7 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
                 </p>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">
                   {b.code} · {b._count.employees} employees
+                  {locationName(b.locationId) ? ` · ${locationName(b.locationId)}` : ""}
                 </p>
               </div>
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
@@ -374,6 +487,16 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
             </Field>
             <Field label="Address" className="sm:col-span-2">
               <Input name="address" defaultValue={editing && typeof editing === "object" ? editing.address ?? "" : ""} />
+            </Field>
+            <Field label="Location (city)">
+              <Select name="locationId" defaultValue={editing && typeof editing === "object" ? (editing.locationId ?? "") : ""}>
+                <option value="">No location</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name} ({l.code})
+                  </option>
+                ))}
+              </Select>
             </Field>
             <Field label="Latitude">
               <Input name="latitude" type="number" step="any" value={geoLat} onChange={(e) => setGeoLat(e.target.value)} />

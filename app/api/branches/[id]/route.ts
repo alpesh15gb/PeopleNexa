@@ -46,6 +46,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       geofenceRadius = Math.min(5000, Math.max(50, Math.round(n)));
     }
 
+    let locationId: string | null | undefined = undefined;
+    if (body.locationId !== undefined) {
+      if (body.locationId === null || body.locationId === "") {
+        locationId = null;
+      } else {
+        const loc = await prisma.location.findFirst({
+          where: { id: String(body.locationId), tenantId: session.tenantId },
+          select: { id: true },
+        });
+        if (!loc) return NextResponse.json({ error: "Location not found in this workspace." }, { status: 400 });
+        locationId = loc.id;
+      }
+    }
+
     const updated = await prisma.branch.update({
       where: { id },
       data: {
@@ -54,6 +68,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         address: body.address ?? branch.address,
         ...(latitude !== undefined ? { latitude } : {}),
         ...(longitude !== undefined ? { longitude } : {}),
+        ...(locationId !== undefined ? { locationId } : {}),
         geofenceRadius,
       },
     });
