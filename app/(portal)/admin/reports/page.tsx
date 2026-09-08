@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { istDateKey, istStartOfDay, parseIST } from "@/lib/ist";
+import { monthKeyIST } from "@/lib/dates";
 import { getPayrollConfig } from "@/lib/payroll";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/stat";
 import { ReportControls } from "./report-controls";
+import { DeviceTables } from "./device-tables";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +31,8 @@ const KNOWN_TYPES = new Set([
   "holiday",
   "attendance_pct",
   "missing",
+  "device-daily",
+  "device-monthly",
 ]);
 
 function isValidDateKey(key: string): boolean {
@@ -41,11 +45,17 @@ function isValidDateKey(key: string): boolean {
 export default async function AdminReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; from?: string; to?: string; departmentId?: string }>;
+  searchParams: Promise<{ type?: string; from?: string; to?: string; departmentId?: string; date?: string; month?: string; branchId?: string }>;
 }) {
   const session = await requireSession();
   const params = await searchParams;
   const type = params.type || "daily";
+
+  const branches = await prisma.branch.findMany({
+    where: { tenantId: session.tenantId },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
 
   const todayIST = istDateKey(new Date());
   const todayStart = parseIST(`${todayIST} 00:00:00`)!;
@@ -66,7 +76,7 @@ export default async function AdminReportsPage({
         <PageHeader title="Reports" description="Attendance analytics and exports" />
         <Card>
           <CardContent className="p-5">
-            <ReportControls type={type} from={from} to={to} departments={departments} />
+            <ReportControls type={type} from={from} to={to} departments={departments} branches={branches} />
           </CardContent>
         </Card>
         <Card>
@@ -74,6 +84,47 @@ export default async function AdminReportsPage({
             <EmptyState title="Unknown report type" description={`"${type}" is not a valid report. Choose a report above.`} />
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // ── eBioserver-style device reports (data fetched client-side from
+  // /api/reports/device; Excel + print handled by DeviceTables) ──────────
+  if (type === "device-daily" || type === "device-monthly") {
+    const isDaily = type === "device-daily";
+    const [departments, manager] = await Promise.all([
+      prisma.department.findMany({
+        where: { tenantId: session.tenantId },
+        select: { id: true, name: true },
+      }),
+      session.role === "branch_manager"
+        ? prisma.employee.findFirst({
+            where: { id: session.sub, tenantId: session.tenantId },
+            select: { branchId: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    const forcedBranchId = session.role === "branch_manager" ? (manager?.branchId ?? null) : null;
+    const visibleBranches = forcedBranchId ? branches.filter((b) => b.id === forcedBranchId) : branches;
+    const date = params.date || todayIST;
+    const month = params.month || monthKeyIST(new Date());
+    const deviceBranchId = forcedBranchId ?? params.branchId ?? "";
+    const deviceDepartmentId = params.departmentId ?? "";
+    const qs = new URLSearchParams({ kind: isDaily ? "daily" : "monthly" });
+    if (isDaily) qs.set("date", date);
+    else qs.set("month", month);
+    if (deviceBranchId) qs.set("branchId", deviceBranchId);
+    if (deviceDepartmentId) qs.set("departmentId", deviceDepartmentId);
+    const apiUrl = `/api/reports/device?${qs.toString()}`;
+    return (
+      <div className="animate-fade-up space-y-6">
+        <PageHeader title="Reports" description="Attendance analytics and exports" />
+        <Card>
+          <CardContent className="p-5">
+            <ReportControls type={type} from={from} to={to} departments={departments} branches={visibleBranches} />
+          </CardContent>
+        </Card>
+        <DeviceTables kind={isDaily ? "daily" : "monthly"} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
       </div>
     );
   }
@@ -102,7 +153,7 @@ export default async function AdminReportsPage({
         <PageHeader title="Reports" description="Attendance analytics and exports" />
         <Card>
           <CardContent className="p-5">
-            <ReportControls type={type} from={from} to={to} departments={departments} />
+            <ReportControls type={type} from={from} to={to} departments={departments} branches={branches} />
           </CardContent>
         </Card>
         <Card>
@@ -235,7 +286,7 @@ export default async function AdminReportsPage({
       <PageHeader title="Reports" description="Attendance analytics and exports" />
       <Card>
         <CardContent className="p-5">
-          <ReportControls type={type} from={from} to={to} departments={departments} />
+          <ReportControls type={type} from={from} to={to} departments={departments} branches={branches} />
         </CardContent>
       </Card>
 

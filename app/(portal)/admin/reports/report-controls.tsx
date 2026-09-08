@@ -19,6 +19,8 @@ const TYPES = [
   { key: "holiday", label: "Holiday-affected" },
   { key: "attendance_pct", label: "Attendance %" },
   { key: "missing", label: "Missing punches" },
+  { key: "device-daily", label: "Device daily" },
+  { key: "device-monthly", label: "Device monthly" },
 ];
 
 export function ReportControls({
@@ -26,16 +28,22 @@ export function ReportControls({
   from,
   to,
   departments,
+  branches,
 }: {
   type: string;
   from: string;
   to: string;
   departments: { id: string; name: string }[];
+  branches?: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const departmentId = searchParams.get("departmentId") ?? "";
+  const branchId = searchParams.get("branchId") ?? "";
+  const deviceDate = searchParams.get("date") ?? "";
+  const deviceMonth = searchParams.get("month") ?? "";
+  const isDevice = type === "device-daily" || type === "device-monthly";
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -86,14 +94,44 @@ export function ReportControls({
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">From</label>
-          <Input key={`from-${from}`} type="date" defaultValue={from} onChange={(e) => update({ from: e.target.value })} className="w-40" />
-        </div>
-        <div>
-          <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">To</label>
-          <Input key={`to-${to}`} type="date" defaultValue={to} onChange={(e) => update({ to: e.target.value })} className="w-40" />
-        </div>
+        {isDevice ? (
+          <>
+            {type === "device-daily" && (
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Date</label>
+                <Input key={`devdate-${deviceDate}`} type="date" defaultValue={deviceDate} onChange={(e) => update({ date: e.target.value })} className="w-40" />
+              </div>
+            )}
+            {type === "device-monthly" && (
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Month</label>
+                <Input key={`devmonth-${deviceMonth}`} type="month" defaultValue={deviceMonth} onChange={(e) => update({ month: e.target.value })} className="w-40" />
+              </div>
+            )}
+            {branches && branches.length > 0 && (
+              <div>
+                <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Branch</label>
+                <Select key={`branch-${branchId}`} defaultValue={branchId} onChange={(e) => update({ branchId: e.target.value })} className="w-44">
+                  <option value="">All branches</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">From</label>
+              <Input key={`from-${from}`} type="date" defaultValue={from} onChange={(e) => update({ from: e.target.value })} className="w-40" />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">To</label>
+              <Input key={`to-${to}`} type="date" defaultValue={to} onChange={(e) => update({ to: e.target.value })} className="w-40" />
+            </div>
+          </>
+        )}
         <div>
           <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Department</label>
           <Select key={`dept-${departmentId}`} defaultValue={departmentId} onChange={(e) => update({ departmentId: e.target.value })} className="w-44">
@@ -103,9 +141,11 @@ export function ReportControls({
             ))}
           </Select>
         </div>
-        <Button variant="outline" onClick={exportCsv} disabled={pending}>
-          <Download className="h-4 w-4" /> Export CSV
-        </Button>
+        {!isDevice && (
+          <Button variant="outline" onClick={exportCsv} disabled={pending}>
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+        )}
         <Button variant="ghost" onClick={reset} disabled={pending}>
           <RotateCcw className="h-4 w-4" /> Reset
         </Button>
