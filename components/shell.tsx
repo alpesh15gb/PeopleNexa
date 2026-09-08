@@ -322,7 +322,16 @@ export function Shell({
   const toast = useToast();
 
   const moduleSet = new Set(enabledModules ?? []);
-  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/leaves") : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
+  // Branch managers run the branch portal AND still punch as employees: they
+  // keep scoped admin pages plus their own clock + Face ID enrollment.
+  // (/employee routes pass the proxy for any active session; the clock and
+  // enrollment APIs are self-scoped by session.sub, so no privilege leaks.)
+  const branchManagerNav: NavItem[] = [
+    ...adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/leaves"),
+    { href: "/employee", label: "My Punch", icon: <Fingerprint className="h-4 w-4" />, module: "attendance", section: "Self service", exact: true },
+    { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, section: "Self service" },
+  ];
+  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
 
