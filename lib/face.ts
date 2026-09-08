@@ -332,7 +332,13 @@ export async function describeFaceDetailed(imageBuffer: Buffer | Uint8Array): Pr
   let faceapi: any;
   try {
     faceapi = await loadFaceBackend();
-  } catch {
+  } catch (err) {
+    // Log the real cause (missing dir, bad manifest, broken import) — the
+    // client only ever sees the generic 503, ops need this line.
+    console.error(
+      `[face] backend load failed (dir=${getFaceModelDir()}):`,
+      err instanceof Error ? err.message : String(err)
+    );
     return {
       ok: false,
       code: "backend_unavailable",
