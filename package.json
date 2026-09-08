@@ -12,6 +12,7 @@
     "@mediapipe/tasks-vision": "^1.0.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
+    "@react-google-maps/api": "^2.20.8",
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@types/jpeg-js": "^0.3.0",

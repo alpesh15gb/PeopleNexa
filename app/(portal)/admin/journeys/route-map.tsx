@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { GoogleMap, Marker, Polyline } from "@react-google-maps/api";
+import {
+  GOOGLE_MAPS_API_KEY,
+  GoogleMapsSkeleton,
+  useGoogleMapsLoader,
+} from "@/components/maps/google-maps";
 
 export type MapPoint = { lat: number; lng: number; at?: string; accuracy?: number | null };
 
@@ -12,18 +18,23 @@ function loadLeaflet(): Promise<LeafletModule> {
   return leafletPromise;
 }
 
+export type RouteInput = { label: string; points: MapPoint[]; color?: string };
+export type MarkerInput = { label: string; point: MapPoint };
+
 /**
  * Leaflet map that draws one or more routes (polylines) and/or markers.
  * Rendered client-side only (no SSR). The map initializes once and content
  * redraws whenever the routes/markers props change.
+ *
+ * Kept untouched as the fallback when no Google Maps key is configured.
  */
-export function RouteMap({
+function LeafletRouteMap({
   routes,
   markers,
   height = 420,
 }: {
-  routes?: { label: string; points: MapPoint[]; color?: string }[];
-  markers?: { label: string; point: MapPoint }[];
+  routes?: RouteInput[];
+  markers?: MarkerInput[];
   height?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,4 +112,121 @@ export function RouteMap({
   }, [L, routes, markers]);
 
   return <div ref={containerRef} className="z-0 w-full overflow-hidden rounded-xl border border-edge" style={{ height }} />;
+}
+
+const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
+
+/**
+ * Google Maps version — same props as the Leaflet component.
+ * Roadmap type, route polylines + markers, fit-bounds to content.
+ */
+function GoogleRouteMap({
+  routes,
+  markers,
+  height = 420,
+}: {
+  routes?: RouteInput[];
+  markers?: MarkerInput[];
+  height?: number;
+}) {
+  const { isLoaded, loadError } = useGoogleMapsLoader();
+  const [map, setMap] = useState<google.maps.Map | null>(null);
+
+  const onLoad = useCallback((m: google.maps.Map) => setMap(m), []);
+  const onUnmount = useCallback(() => setMap(null), []);
+
+  // Fit bounds whenever content (or the map instance) changes.
+  useEffect(() => {
+    if (!map) return;
+    const bounds = new google.maps.LatLngBounds();
+    let hasContent = false;
+    for (const r of routes ?? []) {
+      for (const p of r.points) {
+        bounds.extend({ lat: p.lat, lng: p.lng });
+        hasContent = true;
+      }
+    }
+    for (const m of markers ?? []) {
+      bounds.extend({ lat: m.point.lat, lng: m.point.lng });
+      hasContent = true;
+    }
+    if (hasContent) map.fitBounds(bounds, 40);
+    else {
+      map.setCenter(DEFAULT_CENTER);
+      map.setZoom(5);
+    }
+  }, [map, routes, markers]);
+
+  if (loadError) return <LeafletRouteMap routes={routes} markers={markers} height={height} />;
+  if (!isLoaded || !GOOGLE_MAPS_API_KEY) return <GoogleMapsSkeleton height={height} />;
+
+  return (
+    <GoogleMap
+      mapContainerStyle={{ height, width: "100%" }}
+      mapContainerClassName="z-0 w-full overflow-hidden rounded-xl border border-edge"
+      center={DEFAULT_CENTER}
+      zoom={5}
+      options={{ mapTypeId: "roadmap", streetViewControl: false, mapTypeControl: false }}
+      onLoad={onLoad}
+      onUnmount={onUnmount}
+    >
+      {(routes ?? []).map((r, i) =>
+        r.points.length > 0 ? (
+          <Polyline
+            key={`${r.label}-${i}`}
+            path={r.points.map((p) => ({ lat: p.lat, lng: p.lng }))}
+            options={{
+              strokeColor: r.color ?? "#6366f1",
+              strokeWeight: 4,
+              strokeOpacity: 0.85,
+            }}
+          />
+        ) : null
+      )}
+      {/* Start (green-ish first point) / end markers per route, mirroring Leaflet. */}
+      {(routes ?? []).flatMap((r, i) => {
+        if (r.points.length === 0) return [];
+        const first = r.points[0];
+        const last = r.points[r.points.length - 1];
+        return [
+          <Marker
+            key={`start-${r.label}-${i}`}
+            position={{ lat: first.lat, lng: first.lng }}
+            title={`Start: ${r.label}`}
+          />,
+          <Marker
+            key={`end-${r.label}-${i}`}
+            position={{ lat: last.lat, lng: last.lng }}
+            title={r.label}
+          />,
+        ];
+      })}
+      {(markers ?? []).map((m, i) => (
+        <Marker
+          key={`${m.label}-${i}`}
+          position={{ lat: m.point.lat, lng: m.point.lng }}
+          title={m.label}
+        />
+      ))}
+    </GoogleMap>
+  );
+}
+
+/**
+ * Journey Tracker map — Google Maps when NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is
+ * set, otherwise the existing Leaflet implementation (OSM, offline-friendly).
+ * Same props either way; no API changes. The key is read directly in this
+ * client component so page.tsx doesn't need to pass anything.
+ */
+export function RouteMap({
+  routes,
+  markers,
+  height = 420,
+}: {
+  routes?: RouteInput[];
+  markers?: MarkerInput[];
+  height?: number;
+}) {
+  if (!GOOGLE_MAPS_API_KEY) return <LeafletRouteMap routes={routes} markers={markers} height={height} />;
+  return <GoogleRouteMap routes={routes} markers={markers} height={height} />;
 }

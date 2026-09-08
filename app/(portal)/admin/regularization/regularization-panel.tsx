@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Clock3, FileQuestion } from "lucide-react";
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
@@ -41,6 +42,23 @@ type FaceReview = {
 
 const fmt = (iso: string | null) => (iso ? formatTime(new Date(iso)) : "—");
 
+// Tiny local loader for the punch-location mini maps. Renders nothing when the
+// API key is missing (callers fall back to the link-only UI).
+const FACE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+
+function PunchMiniMap({ lat, lng }: { lat: number; lng: number }) {
+  return (
+    <GoogleMap
+      mapContainerStyle={{ width: 208, height: 128 }}
+      center={{ lat, lng }}
+      zoom={16}
+      options={{ disableDefaultUI: true, gestureHandling: "none", clickableIcons: false }}
+    >
+      <Marker position={{ lat, lng }} />
+    </GoogleMap>
+  );
+}
+
 export function RegularizationPanel({
   corrections,
   faceReviews = [],
@@ -53,6 +71,12 @@ export function RegularizationPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [faceBusy, setFaceBusy] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
+  const { isLoaded: faceMapsLoaded } = useJsApiLoader({
+    id: "peoplenexa-face-review",
+    googleMapsApiKey: FACE_MAPS_API_KEY,
+  });
+  const showFaceMaps = FACE_MAPS_API_KEY.length > 0 && faceMapsLoaded;
+  const faceMapsPending = FACE_MAPS_API_KEY.length > 0 && !faceMapsLoaded;
 
   async function review(id: string, status: "approved" | "rejected") {
     setBusy(id);
@@ -150,17 +174,26 @@ export function RegularizationPanel({
                       </Badge>
                     </div>
                     {r.lat != null && r.lng != null && (
-                      <p className="mt-1.5 text-[12px] text-muted-foreground">
-                        Location {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)} ·{" "}
-                        <a
-                          href={`https://www.google.com/maps?q=${r.lat},${r.lng}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-medium text-primary underline-offset-2 hover:underline"
-                        >
-                          Open map
-                        </a>
-                      </p>
+                      <div className="mt-1.5">
+                        {showFaceMaps ? (
+                          <div className="mb-1.5 w-[208px] overflow-hidden rounded-lg border border-edge">
+                            <PunchMiniMap lat={Number(r.lat)} lng={Number(r.lng)} />
+                          </div>
+                        ) : faceMapsPending ? (
+                          <div className="mb-1.5 h-[128px] w-[208px] animate-pulse rounded-lg border border-edge bg-tint" aria-hidden="true" />
+                        ) : null}
+                        <p className="text-[12px] text-muted-foreground">
+                          Location {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)} ·{" "}
+                          <a
+                            href={`https://www.google.com/maps?q=${r.lat},${r.lng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            Open map
+                          </a>
+                        </p>
+                      </div>
                     )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button

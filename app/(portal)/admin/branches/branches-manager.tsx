@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, MapPin, LocateFixed } from "lucide-react";
+import { Circle, GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -32,6 +33,74 @@ interface Staff {
   branchId: string | null;
 }
 
+// Tiny local loader for the geofence picker. Returns null (keeping the manual
+// inputs) when the API key is missing.
+const BRANCH_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const BRANCH_MAP_FALLBACK = { lat: 28.6139, lng: 77.209 };
+
+function BranchGeofenceMap({
+  lat,
+  lng,
+  radius,
+  onPick,
+}: {
+  lat: string;
+  lng: string;
+  radius: string;
+  onPick: (lat: string, lng: string) => void;
+}) {
+  const { isLoaded } = useJsApiLoader({
+    id: "peoplenexa-branch-geofence",
+    googleMapsApiKey: BRANCH_MAPS_API_KEY,
+  });
+  if (!BRANCH_MAPS_API_KEY) return null;
+  if (!isLoaded) {
+    return <div className="h-[220px] w-full animate-pulse rounded-xl border border-edge bg-tint" aria-hidden="true" />;
+  }
+  const parsedLat = Number(lat);
+  const parsedLng = Number(lng);
+  const hasCenter =
+    lat.trim() !== "" && lng.trim() !== "" && Number.isFinite(parsedLat) && Number.isFinite(parsedLng);
+  const center = hasCenter ? { lat: parsedLat, lng: parsedLng } : BRANCH_MAP_FALLBACK;
+  const parsedRadius = Number(radius);
+  const circleRadius = Number.isFinite(parsedRadius) && parsedRadius > 0 ? parsedRadius : 0;
+  return (
+    <div className="overflow-hidden rounded-xl border border-edge">
+      <GoogleMap
+        mapContainerStyle={{ width: "100%", height: 220 }}
+        center={center}
+        zoom={hasCenter ? 15 : 5}
+        onClick={(e) => {
+          const ll = e.latLng;
+          if (!ll) return;
+          onPick(ll.lat().toFixed(6), ll.lng().toFixed(6));
+        }}
+      >
+        {hasCenter && <Marker position={center} />}
+        {hasCenter && circleRadius > 0 && (
+          <Circle
+            center={center}
+            radius={circleRadius}
+            options={{
+              fillColor: "#6366f1",
+              fillOpacity: 0.15,
+              strokeColor: "#6366f1",
+              strokeOpacity: 0.8,
+              strokeWeight: 2,
+              clickable: false,
+              editable: false,
+              draggable: false,
+            }}
+          />
+        )}
+      </GoogleMap>
+      <p className="border-t border-edge bg-tint px-3 py-1.5 text-[11.5px] text-muted-foreground">
+        Click the map to set the geofence center — the latitude/longitude fields update automatically.
+      </p>
+    </div>
+  );
+}
+
 export function BranchesManager({ branches, employees }: { branches: Branch[]; employees: Staff[] }) {
   const router = useRouter();
   const toast = useToast();
@@ -40,6 +109,22 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
   const [loading, setLoading] = useState(false);
   const [managingBranch, setManagingBranch] = useState<Branch | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  // Controlled geofence fields so map clicks and manual edits stay in sync.
+  const [geoLat, setGeoLat] = useState("");
+  const [geoLng, setGeoLng] = useState("");
+  const [geoRadius, setGeoRadius] = useState("200");
+
+  useEffect(() => {
+    if (editing && typeof editing === "object") {
+      setGeoLat(editing.latitude != null ? String(editing.latitude) : "");
+      setGeoLng(editing.longitude != null ? String(editing.longitude) : "");
+      setGeoRadius(String(editing.geofenceRadius ?? 200));
+    } else if (editing === "new") {
+      setGeoLat("");
+      setGeoLng("");
+      setGeoRadius("200");
+    }
+  }, [editing]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -130,12 +215,9 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const form = document.getElementById("branch-form") as HTMLFormElement | null;
-        if (form) {
-          (form.elements.namedItem("latitude") as HTMLInputElement).value = String(pos.coords.latitude.toFixed(6));
-          (form.elements.namedItem("longitude") as HTMLInputElement).value = String(pos.coords.longitude.toFixed(6));
-          toast("success", "Location captured — use it as the geofence center");
-        }
+        setGeoLat(pos.coords.latitude.toFixed(6));
+        setGeoLng(pos.coords.longitude.toFixed(6));
+        toast("success", "Location captured — use it as the geofence center");
       },
       () => toast("error", "Could not get your location"),
       { enableHighAccuracy: true }
@@ -215,6 +297,15 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
         description="Set coordinates and a geofence radius to verify employee clock-ins by location."
       >
         <form id="branch-form" onSubmit={onSubmit} className="space-y-4">
+          <BranchGeofenceMap
+            lat={geoLat}
+            lng={geoLng}
+            radius={geoRadius}
+            onPick={(la, ln) => {
+              setGeoLat(la);
+              setGeoLng(ln);
+            }}
+          />
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Branch name">
               <Input name="name" required defaultValue={editing && typeof editing === "object" ? editing.name : ""} />
@@ -226,13 +317,13 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
               <Input name="address" defaultValue={editing && typeof editing === "object" ? editing.address ?? "" : ""} />
             </Field>
             <Field label="Latitude">
-              <Input name="latitude" type="number" step="any" defaultValue={editing && typeof editing === "object" ? editing.latitude ?? "" : ""} />
+              <Input name="latitude" type="number" step="any" value={geoLat} onChange={(e) => setGeoLat(e.target.value)} />
             </Field>
             <Field label="Longitude">
-              <Input name="longitude" type="number" step="any" defaultValue={editing && typeof editing === "object" ? editing.longitude ?? "" : ""} />
+              <Input name="longitude" type="number" step="any" value={geoLng} onChange={(e) => setGeoLng(e.target.value)} />
             </Field>
             <Field label="Geofence radius (meters)">
-              <Input name="geofenceRadius" type="number" min={10} defaultValue={editing && typeof editing === "object" ? editing.geofenceRadius : 200} />
+              <Input name="geofenceRadius" type="number" min={10} value={geoRadius} onChange={(e) => setGeoRadius(e.target.value)} />
             </Field>
             <div className="flex items-end">
               <Button type="button" variant="outline" onClick={useMyLocation} className="w-full">
