@@ -384,6 +384,9 @@ model Punch {
   // (unenrolled employee while face-match is enabled); approved = admin-
   // authorized, reconciles normally. Device/eBioserver punches stay "auto".
   authStatus String   @default("auto") // auto | pending | approved
+  // Why a punch is held (pending): no_enrollment | location_mismatch |
+  // face_mismatch. Null for auto/approved rows and legacy rows.
+  holdReason String?
   createdAt  DateTime @default(now())
 
   @@index([tenantId, employeeId, punchTime])

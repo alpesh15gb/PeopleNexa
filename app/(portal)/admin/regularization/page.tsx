@@ -59,6 +59,7 @@ export default async function AdminRegularizationPage() {
       lat: true,
       lng: true,
       authStatus: true,
+      holdReason: true,
       employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
     },
     orderBy: { punchTime: "desc" },
@@ -109,6 +110,7 @@ export default async function AdminRegularizationPage() {
               lat: r.lat,
               lng: r.lng,
               authStatus: (r as { authStatus?: string }).authStatus ?? "auto",
+              holdReason: (r as { holdReason?: string | null }).holdReason ?? null,
               employee: {
                 id: r.employee.id,
                 firstName: r.employee.firstName,

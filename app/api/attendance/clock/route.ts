@@ -5,6 +5,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
 import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
+import { appendAudit } from "@/lib/audit";
 import { describeFace, verifyFace } from "@/lib/face";
 
 export async function POST(req: NextRequest) {
@@ -38,7 +39,27 @@ export async function POST(req: NextRequest) {
   if (branchHasCoords && (lat == null || lng == null)) {
     return NextResponse.json({ error: "Location is required to punch in/out." }, { status: 400 });
   }
-  // Location validation when a branch geofence is configured.
+  // Tenant face-match config (kill-switch + thresholds), read once: it drives
+  // the verify block, the hold-vs-reject policy, and the audit behavior.
+  const tenantForFace = await prisma.tenant.findUnique({
+    where: { id: employee.tenantId },
+    select: { config: true },
+  });
+  const cfgRaw = (tenantForFace?.config ?? {}) as {
+    faceMatch?: Partial<{ enabled: boolean; matchThreshold: number; reviewThreshold: number }>;
+  };
+  const fm = cfgRaw.faceMatch ?? {};
+  const faceEnabled = fm.enabled ?? true;
+  const matchThreshold =
+    typeof fm.matchThreshold === "number" && Number.isFinite(fm.matchThreshold) ? fm.matchThreshold : 0.62;
+  const reviewThreshold =
+    typeof fm.reviewThreshold === "number" && Number.isFinite(fm.reviewThreshold) ? fm.reviewThreshold : 0.5;
+
+  // Location validation when a branch geofence is configured. A mismatch no
+  // longer hard-blocks: with face-match enabled the punch is HELD for admin
+  // authorization (selfie + location reviewed); with the kill-switch off the
+  // legacy 403 stands so the bypass stays a true bypass.
+  let locationMismatch = false;
   if (lat != null && lng != null && employee.branch && branchHasCoords) {
     const inside = isInsideGeofence(
       employee.branch.latitude,
@@ -48,11 +69,14 @@ export async function POST(req: NextRequest) {
       lng
     );
     if (!inside) {
-      const dist = Math.round(distanceMeters(employee.branch.latitude!, employee.branch.longitude!, lat, lng));
-      return NextResponse.json(
-        { error: `You are ${dist}m away from the ${employee.branch.name} geofence (${employee.branch.geofenceRadius}m allowed).` },
-        { status: 403 }
-      );
+      if (!faceEnabled) {
+        const dist = Math.round(distanceMeters(employee.branch.latitude!, employee.branch.longitude!, lat, lng));
+        return NextResponse.json(
+          { error: `You are ${dist}m away from the ${employee.branch.name} geofence (${employee.branch.geofenceRadius}m allowed).` },
+          { status: 403 }
+        );
+      }
+      locationMismatch = true;
     }
   }
 
@@ -70,35 +94,19 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Face VERIFY (additive, never blocks pay on ML failure) ──────────────
-  // Reads tenant.config.faceMatch {enabled, matchThreshold, reviewThreshold}
-  // with defaults enabled:true, 0.62/0.50 when absent. Kill-switch
-  // (enabled===false) skips all face logic. No enrollment → "none".
-  // describeFace null → "review". verifyFace below review → 400 rejected
-  // WITHOUT creating a punch. Geofence/dedupe/reconcile below untouched.
+  // Kill-switch (enabled===false) skips all face logic. No enrollment →
+  // held for approval ("none"). describeFace null → "review" (counted, as
+  // before — a camera/ML failure must not dock pay). verifyFace below the
+  // review floor → "rejected" HELD for admin approval (no longer a 400:
+  // a wrong face must be seen by a human, not silently dropped).
+  // Auto-approval needs face matched AND location matched; everything else
+  // goes to the review queue. Geofence/dedupe below untouched.
   let faceStatus = "none";
   let faceScore: number | null = null;
-  let faceEnabled = true;
+  let faceRejected = false;
   let hasEnrollment = false;
   {
-    const tenantForFace = await prisma.tenant.findUnique({
-      where: { id: employee.tenantId },
-      select: { config: true },
-    });
-    const cfgRaw = (tenantForFace?.config ?? {}) as {
-      faceMatch?: Partial<{ enabled: boolean; matchThreshold: number; reviewThreshold: number }>;
-    };
-    const fm = cfgRaw.faceMatch ?? {};
-    const faceEnabledCfg = fm.enabled ?? true;
-    faceEnabled = faceEnabledCfg;
-    const matchThreshold =
-      typeof fm.matchThreshold === "number" && Number.isFinite(fm.matchThreshold)
-        ? fm.matchThreshold
-        : 0.62;
-    const reviewThreshold =
-      typeof fm.reviewThreshold === "number" && Number.isFinite(fm.reviewThreshold)
-        ? fm.reviewThreshold
-        : 0.5;
-    if (faceEnabledCfg) {
+    if (faceEnabled) {
       const enrollment = await prisma.faceEnrollment.findFirst({
         where: { tenantId: employee.tenantId, employeeId: employee.id },
       });
@@ -147,10 +155,11 @@ export async function POST(req: NextRequest) {
               faceStatus = "review";
               faceScore = rounded;
             } else {
-              return NextResponse.json(
-                { error: "Face did not match — retake your selfie", faceStatus: "rejected" },
-                { status: 400 }
-              );
+              // Face mismatch: record as rejected and hold for a human —
+              // silently dropping it would hide buddy-punching attempts.
+              faceStatus = "rejected";
+              faceScore = rounded;
+              faceRejected = true;
             }
           }
         }
@@ -158,12 +167,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Unenrolled self-service punch while face-match is enabled: hold for
-  // admin authorization instead of reconciling. The admin sees selfie +
-  // location in the review queue and accepts (reconciles) or declines
-  // (deletes). Enrolled + matched punches auto-accept below as before;
-  // geofence enforcement above already guarantees the location matched.
-  const needsApproval = faceEnabled && !hasEnrollment;
+  // Approval policy: auto-accept needs face matched AND location matched.
+  // Anything else (no enrollment, outside geofence, face mismatch) is held
+  // for admin authorization with a reason the queue displays.
+  // Precedence for the displayed reason: location > face > enrollment.
+  const needsApproval = faceEnabled && (!hasEnrollment || locationMismatch || faceRejected);
+  const holdReason = !needsApproval
+    ? null
+    : locationMismatch
+      ? "location_mismatch"
+      : faceRejected
+        ? "face_mismatch"
+        : "no_enrollment";
 
   const punch = await prisma.punch.create({
     data: {
@@ -178,6 +193,7 @@ export async function POST(req: NextRequest) {
       faceScore,
       faceStatus,
       authStatus: needsApproval ? "pending" : "auto",
+      holdReason,
     },
   });
   await dispatchWebhook(employee.tenantId, "punch.created", {
@@ -189,10 +205,21 @@ export async function POST(req: NextRequest) {
   });
 
   if (needsApproval) {
+    await appendAudit({
+      tenantId: employee.tenantId,
+      actorId: employee.id,
+      actorRole: employee.role,
+      action: "punch.held",
+      entity: "Punch",
+      entityId: punch.id,
+      summary: `held for admin approval (${holdReason})`,
+      after: { faceStatus, faceScore, holdReason },
+    });
     return NextResponse.json(
       {
         success: true,
         pendingApproval: true,
+        holdReason,
         punch: { id: punch.id, punchTime: punch.punchTime.toISOString() },
       },
       { status: 201 }
@@ -225,6 +252,22 @@ export async function POST(req: NextRequest) {
       "Marked late",
       `You clocked in ${result.lateMinutes} min late (${employee.shift?.name ?? "your shift"} starts at ${employee.shift?.startTime ?? "—"}).`
     );
+  }
+
+  // Auto-approval trail: face matched + location matched, counted without a
+  // human. (Gray-zone "review" punches are trailed on their review decision;
+  // held punches were trailed as punch.held above.)
+  if (faceStatus === "matched") {
+    await appendAudit({
+      tenantId: employee.tenantId,
+      actorId: employee.id,
+      actorRole: employee.role,
+      action: "punch.auto_accepted",
+      entity: "Punch",
+      entityId: punch.id,
+      summary: `auto-accepted (face ${faceScore ?? "—"}, location verified)`,
+      after: { faceStatus, faceScore },
+    });
   }
 
   return NextResponse.json({ success: true, action, record, status: result.status }, { status: 201 });

@@ -37,6 +37,7 @@ type FaceReview = {
   lat: number | null;
   lng: number | null;
   authStatus: string;
+  holdReason: string | null;
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
 };
 
@@ -167,9 +168,13 @@ export function RegularizationPanel({
                       <span className="font-mono text-[12px] text-muted-foreground">
                         {toDateKey(new Date(r.punchTime))} · {fmt(r.punchTime)}
                       </span>
-                      <Badge tone={r.faceStatus === "rejected" ? "danger" : "warning"}>
+                      <Badge tone={r.faceStatus === "rejected" && r.authStatus !== "pending" ? "danger" : "warning"}>
                         {r.authStatus === "pending"
-                          ? "Awaiting approval — no Face ID"
+                          ? r.holdReason === "location_mismatch"
+                            ? "Outside geofence — needs approval"
+                            : r.holdReason === "face_mismatch"
+                              ? "Face mismatch — needs approval"
+                              : "Awaiting approval — no Face ID"
                           : `Face ${score ?? "—"} — ${r.faceStatus}`}
                       </Badge>
                     </div>
