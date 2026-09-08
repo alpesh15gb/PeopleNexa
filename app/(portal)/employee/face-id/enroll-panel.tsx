@@ -19,6 +19,15 @@ export interface EnrollmentStatus {
 
 const TOTAL_STEPS = 3;
 
+// Apple-style guided poses: frontal reference, then opposite sides. The
+// server verifies the turn from landmarks (direction-agnostic, so mirrored
+// front cameras don't matter) — photos 2 and 3 must tilt opposite ways.
+const POSE_STEPS = [
+  { title: "Face front", hint: "Look straight into the camera." },
+  { title: "Turn to one side", hint: "Slowly turn your head left or right until your ear nears your shoulder." },
+  { title: "Turn to the other side", hint: "Now turn fully the opposite way." },
+];
+
 export function EnrollPanel({
   initial,
   consentVersion,
@@ -34,6 +43,7 @@ export function EnrollPanel({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [captureStep, setCaptureStep] = useState(0);
   const [consent, setConsent] = useState(false);
+  const [frontOnly, setFrontOnly] = useState(false);
   const [saving, setSaving] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
@@ -115,7 +125,7 @@ export function EnrollPanel({
       const res = await fetch("/api/face/enrollments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photos, consentVersion, consentedAt: new Date().toISOString() }),
+        body: JSON.stringify({ photos, consentVersion, consentedAt: new Date().toISOString(), frontOnly }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -193,7 +203,7 @@ export function EnrollPanel({
           <p className="text-[13px] leading-relaxed text-muted-foreground">
             {enrolled
               ? "Re-enrolling replaces your current face templates. Withdrawing deletes them permanently."
-              : "Capture three well-lit selfies, one per step. Face the camera directly and remove sunglasses or masks."}
+              : "Capture three selfies — front, one side, then the other — following each step's instruction."}
           </p>
           {enrolled && (
             <div className="mt-4">
@@ -209,7 +219,10 @@ export function EnrollPanel({
         <CardHeader>
           <div>
             <CardTitle>{enrolled ? "Re-enroll Face ID" : "Enroll Face ID"}</CardTitle>
-            <CardDescription>Step {Math.min(step + 1, TOTAL_STEPS)} of {TOTAL_STEPS} — capture one selfie per step.</CardDescription>
+            <CardDescription>
+              Step {Math.min(step + 1, TOTAL_STEPS)} of {TOTAL_STEPS} —{" "}
+              {frontOnly ? "capture a front-facing selfie." : POSE_STEPS[Math.min(step, TOTAL_STEPS - 1)].hint}
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -239,7 +252,8 @@ export function EnrollPanel({
                 )}
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <span className="text-[12px] font-medium text-muted-foreground">
-                    Photo {i + 1} {photos[i] ? "· captured" : step === i ? "· current" : ""}
+                    Photo {i + 1} · {frontOnly ? "front" : POSE_STEPS[i].title}
+                    {photos[i] ? " · captured" : step === i ? " · current" : ""}
                   </span>
                   <Button
                     type="button"
@@ -264,6 +278,23 @@ export function EnrollPanel({
               <li>Remove sunglasses/mask, tie hair back from the forehead, wipe a foggy front camera.</li>
               <li>Keep only yourself in frame and hold still for a second after tapping Capture.</li>
             </ul>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-xl border border-edge bg-tint p-4">
+            <input
+              id="face-frontonly"
+              type="checkbox"
+              checked={frontOnly}
+              onChange={(e) => setFrontOnly(e.target.checked)}
+              className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+            />
+            <label htmlFor="face-frontonly" className="cursor-pointer text-[13px] font-medium leading-relaxed">
+              I can&apos;t turn my head — use front-facing photos only.
+              <span className="mt-1 block font-normal text-muted-foreground">
+                For neck injury, stiffness, or any condition that prevents turning. Matching still works;
+                uncertain punches go to human review instead of auto-match.
+              </span>
+            </label>
           </div>
 
           <div className="flex items-start gap-3 rounded-xl border border-edge bg-tint p-4">

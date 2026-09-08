@@ -193,6 +193,45 @@ export async function loadFaceBackend(): Promise<FaceApiModule> {
   return faceApiLoading;
 }
 
+/**
+ * Head-yaw proxy from 68-point landmark positions (indices follow the
+ * standard 68-point scheme: 30 = nose tip, 36-41 = left eye, 42-47 = right).
+ * Returns null when landmarks are unusable. Scale: frontal ≈ 0 ± 0.03, a
+ * ~30° turn ≈ ±0.15-0.25. Sign is mirror-dependent — use spread only.
+ */
+export function yawFromLandmarks(positions: ArrayLike<{ x: number; y: number }>): number | null {
+  try {
+    if (!positions || positions.length < 48) return null;
+    let lx = 0;
+    let ly = 0;
+    for (let i = 36; i <= 41; i++) {
+      lx += positions[i].x;
+      ly += positions[i].y;
+    }
+    let rx = 0;
+    let ry = 0;
+    for (let i = 42; i <= 47; i++) {
+      rx += positions[i].x;
+      ry += positions[i].y;
+    }
+    lx /= 6;
+    ly /= 6;
+    rx /= 6;
+    ry /= 6;
+    const eyeDist = Math.hypot(rx - lx, ry - ly);
+    if (!Number.isFinite(eyeDist) || eyeDist < 20) return null;
+    const nose = positions[30];
+    if (!nose || !Number.isFinite(nose.x)) return null;
+    const yaw = (nose.x - (lx + rx) / 2) / eyeDist;
+    return Number.isFinite(yaw) ? yaw : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Minimum per-side yaw spread (vs the frontal sample) to count as "turned". */
+export const FACE_POSE_SPREAD_MIN = 0.1;
+
 /** Cosine similarity of two equal-length vectors. Returns 0 on bad input. */
 export function cosine(a: number[], b: number[]): number {
   if (!Array.isArray(a) || !Array.isArray(b)) return 0;
@@ -231,6 +270,13 @@ export interface FaceDescribeSuccess {
   quality: number;
   /** Detector pass that succeeded (for ops tuning). */
   pass: string;
+  /**
+   * Head-yaw proxy from 68-point landmarks: (nose.x − eyeMid.x) / eyeDist.
+   * ~0 frontal; sign depends on camera mirroring, so callers must only use
+   * SPREAD between samples (direction-agnostic), never absolute direction.
+   * Null when landmarks were unusable (pose gate must then reject).
+   */
+  yaw: number | null;
 }
 
 export interface FaceDescribeFailure {
@@ -376,7 +422,8 @@ export async function describeFaceDetailed(imageBuffer: Buffer | Uint8Array): Pr
       if (!descriptor || descriptor.length !== 128 || !descriptor.every((n: number) => Number.isFinite(n))) {
         return { ok: false, code: "descriptor_failed", hint: "Face found but unreadable — hold still and retake." };
       }
-      return { ok: true, descriptor, quality, pass: passName };
+      const yaw = single?.landmarks?.positions ? yawFromLandmarks(single.landmarks.positions) : null;
+      return { ok: true, descriptor, quality, pass: passName, yaw };
     } finally {
       batch.dispose();
     }

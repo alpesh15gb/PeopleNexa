@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { describeFaceDetailed, faceMatchConfig, isFaceEnrollmentValid } from "@/lib/face";
+import { describeFaceDetailed, faceMatchConfig, isFaceEnrollmentValid, FACE_POSE_SPREAD_MIN } from "@/lib/face";
 
 const MAX_PHOTO_BYTES = 500 * 1024;
 
@@ -50,6 +50,10 @@ export async function POST(req: NextRequest) {
     const photos: unknown = body?.photos;
     const consentVersion: unknown = body?.consentVersion;
     const consentedAt: unknown = body?.consentedAt;
+    // Accessibility escape hatch: users who cannot turn their head enroll
+    // with front-facing photos only (matching still works, gray-zone review
+    // covers the lower angular coverage).
+    const frontOnly = body?.frontOnly === true;
 
     if (!Array.isArray(photos) || photos.length !== faceMatchConfig.minEnrollmentImages) {
       return NextResponse.json(
@@ -70,6 +74,7 @@ export async function POST(req: NextRequest) {
 
     const embeddings: number[][] = [];
     const qualities: number[] = [];
+    const yaws: (number | null)[] = [];
     for (let i = 0; i < photos.length; i++) {
       const buffer = dataUrlToBuffer(photos[i]);
       if (!buffer) {
@@ -93,6 +98,34 @@ export async function POST(req: NextRequest) {
       }
       embeddings.push(result.descriptor);
       qualities.push(result.quality);
+      yaws.push(result.yaw);
+    }
+
+    // Apple-style rotation gate: photo 1 frontal, photos 2 and 3 turned to
+    // opposite sides. Direction-agnostic (front cameras mirror unpredictably):
+    // only the SPREAD vs the frontal sample is checked, never left-vs-right.
+    if (!frontOnly) {
+      const [y0, y1, y2] = yaws;
+      const d1 = y0 != null && y1 != null ? y1 - y0 : NaN;
+      const d2 = y0 != null && y2 != null ? y2 - y0 : NaN;
+      if (!Number.isFinite(d1) || Math.abs(d1) < FACE_POSE_SPREAD_MIN) {
+        return NextResponse.json(
+          { error: "Sample 2: turn your head fully to one side (ear toward shoulder) and retake." },
+          { status: 400 }
+        );
+      }
+      if (!Number.isFinite(d2) || Math.abs(d2) < FACE_POSE_SPREAD_MIN) {
+        return NextResponse.json(
+          { error: "Sample 3: turn your head fully to the other side and retake." },
+          { status: 400 }
+        );
+      }
+      if (d1 * d2 > 0) {
+        return NextResponse.json(
+          { error: "Sample 3: turn to the opposite side from photo 2 and retake." },
+          { status: 400 }
+        );
+      }
     }
 
     // Final invariant gate: count + consent version + freshness, via the same
@@ -145,6 +178,7 @@ export async function POST(req: NextRequest) {
       // Measured per-sample quality (informational; acceptance policy unchanged
       // pending calibration on real field photos).
       quality: qualities,
+      frontOnly,
     });
   } catch {
     return NextResponse.json({ error: "Failed to save enrollment." }, { status: 500 });
