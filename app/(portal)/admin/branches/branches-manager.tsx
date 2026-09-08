@@ -284,7 +284,7 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
                 </div>
               );
             })()}
-            <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
+            <div className="mt-3 flex gap-1.5">
               <Button size="sm" variant="outline" onClick={() => setEditing(b)}>
                 <Pencil className="h-3 w-3" /> Edit
               </Button>
