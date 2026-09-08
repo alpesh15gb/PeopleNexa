@@ -33,7 +33,6 @@ Thumbs.db
 # deployment archive (use git instead)
 peoplenexa-deploy.tar.gz
 
-# local media / recordings (never commit binaries)
-*.mp4
-*.mov
-*.webm
+# face model weights (large binaries, provisioned on server via FACE_MODEL_DIR)
+public/models/face/
+*.bin

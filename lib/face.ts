@@ -135,10 +135,14 @@ export interface FaceMatcher {
 }
 
 // ─── Face-match foundations (server-side verifier) ─────────────────────────
-// Lazy singleton around @vladmandic/face-api. The ML library is only ever
-// loaded via dynamic import() inside loadFaceBackend() so that `next build`
-// never bundles TensorFlow eagerly into route chunks; routes that never call
-// these helpers pay zero TF cost.
+// Node-WASM build of @vladmandic/face-api: pure JS + a .wasm SIMD backend,
+// so the Alpine production image needs no native TensorFlow binary (the
+// default node dist hard-requires @tensorflow/tfjs-node, which needs glibc
+// native bindings and breaks both the Docker build and Alpine runtime).
+// The library is only ever loaded via dynamic import() inside
+// loadFaceBackend() so that `next build` never bundles TensorFlow eagerly
+// into route chunks (see serverExternalPackages in next.config.ts); routes
+// that never call these helpers pay zero TF cost.
 //
 // Model weights are NOT in git. Place the .bin weights + manifests under:
 //   FACE_MODEL_DIR ?? "./public/models/face"   (resolved against process.cwd())
@@ -170,14 +174,25 @@ let faceApiLoading: Promise<FaceApiModule> | null = null;
 
 /**
  * Load (once) the face-api nets needed for enrollment/punch descriptors.
- * Uses the pure-JS CPU backend bundled with @vladmandic/face-api. JPEG decode
- * is handled separately so the production Alpine image needs no native
- * TensorFlow binary.
+ * Node-WASM build (no native binding) with the SIMD WASM backend; falls
+ * back to plain CPU if WASM init fails. JPEG decode is handled separately
+ * via jpeg-js so no canvas dependency is needed server-side.
  */
 export async function loadFaceBackend(): Promise<FaceApiModule> {
   if (!faceApiLoading) {
     const run = async (): Promise<FaceApiModule> => {
-      const faceapi = await import("@vladmandic/face-api");
+      // Explicit WASM dist: the package main targets tfjs-node (native).
+      const faceapi = (await import(
+        "@vladmandic/face-api/dist/face-api.node-wasm.js"
+      )) as unknown as FaceApiModule;
+      try {
+        const tf = (faceapi as unknown as { tf: { setBackend(b: string): Promise<void>; ready(): Promise<void> } }).tf;
+        await tf.setBackend("wasm");
+        await tf.ready();
+      } catch {
+        // WASM unavailable (rare) — the registered CPU backend still runs,
+        // just slower. Never fail enrollment on backend choice.
+      }
       const modelDir = getFaceModelDir();
       await faceapi.nets.tinyFaceDetector.loadFromDisk(modelDir);
       await faceapi.nets.faceLandmark68Net.loadFromDisk(modelDir);

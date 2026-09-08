@@ -12,6 +12,8 @@
     "@mediapipe/tasks-vision": "^1.0.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@types/jpeg-js": "^0.3.0",
     "@vladmandic/face-api": "^1.7.15",
     "bcryptjs": "3.0.3",
