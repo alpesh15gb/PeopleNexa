@@ -109,6 +109,11 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
   const [loading, setLoading] = useState(false);
   const [managingBranch, setManagingBranch] = useState<Branch | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  // New manager-login form (non-employee account: email + password only).
+  const [mgrName, setMgrName] = useState("");
+  const [mgrEmail, setMgrEmail] = useState("");
+  const [mgrPassword, setMgrPassword] = useState("");
+  const [creatingMgr, setCreatingMgr] = useState(false);
   // Controlled geofence fields so map clicks and manual edits stay in sync.
   const [geoLat, setGeoLat] = useState("");
   const [geoLng, setGeoLng] = useState("");
@@ -125,6 +130,14 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
       setGeoRadius("200");
     }
   }, [editing]);
+
+  useEffect(() => {
+    if (managingBranch) {
+      setMgrName("");
+      setMgrEmail("");
+      setMgrPassword("");
+    }
+  }, [managingBranch]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -217,7 +230,45 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
     }
   }
 
-  async function useMyLocation() {    if (!navigator.geolocation) {
+  async function createManagerLogin() {
+    if (!managingBranch || creatingMgr) return;
+    if (!mgrName.trim() || !mgrEmail.trim() || mgrPassword.length < 12) {
+      toast("error", "Enter a name, a valid email, and a password of at least 12 characters.");
+      return;
+    }
+    setCreatingMgr(true);
+    try {
+      const res = await fetch("/api/employees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: mgrName.trim(),
+          email: mgrEmail.trim(),
+          password: mgrPassword,
+          branchId: managingBranch.id,
+          loginOnly: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to create manager login");
+        return;
+      }
+      toast("success", `Manager login created (${data.employee?.employeeNumber ?? "MGR"}) — share the email + password with them.`);
+      setMgrName("");
+      setMgrEmail("");
+      setMgrPassword("");
+      setManagingBranch(null);
+      router.refresh();
+    } catch {
+      toast("error", "Something went wrong.");
+    } finally {
+      setCreatingMgr(false);
+    }
+  }
+
+  async function useMyLocation() {
+    if (!navigator.geolocation) {
       toast("error", "Geolocation is not supported in this browser");
       return;
     }
@@ -391,6 +442,35 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
               <p className="text-[12px] leading-relaxed text-muted-foreground">
                 Assigning sets their role to branch manager for this branch. Removing demotes them back to employee.
               </p>
+              <div className="rounded-xl border border-edge bg-tint p-3.5">
+                <p className="text-[13px] font-semibold">Or create a manager-only login</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                  For someone who is not staff — just email + password. They can run this branch but never
+                  appear in attendance, payroll, or seat counts.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Field label="Full name">
+                    <Input value={mgrName} onChange={(e) => setMgrName(e.target.value)} placeholder="e.g. Ramesh Gupta" />
+                  </Field>
+                  <Field label="Login email">
+                    <Input type="email" value={mgrEmail} onChange={(e) => setMgrEmail(e.target.value)} placeholder="manager@example.com" />
+                  </Field>
+                  <Field label="Password (min 12 characters)" className="sm:col-span-2">
+                    <Input
+                      type="password"
+                      value={mgrPassword}
+                      onChange={(e) => setMgrPassword(e.target.value)}
+                      placeholder="Share this with them privately"
+                      autoComplete="new-password"
+                    />
+                  </Field>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <Button size="sm" onClick={createManagerLogin} loading={creatingMgr}>
+                    Create manager login
+                  </Button>
+                </div>
+              </div>
             </div>
           );
         })()}

@@ -289,6 +289,10 @@ model Employee {
   password       String // bcrypt hash
   role           String    @default("employee") // admin | supervisor | employee
   status         String    @default("active") // active | inactive
+  // Login-only accounts (e.g. branch managers who are not staff): can sign
+  // in and use their scoped portal, but are excluded from attendance,
+  // leave, rosters, reports, payroll, and seat counts. Cannot punch.
+  loginOnly      Boolean   @default(false)
   position       String?
   salary         Float?
   joiningDate    DateTime?

@@ -44,6 +44,7 @@ export default async function AdminEmployeesPage({
         phone: true,
         role: true,
         status: true,
+        loginOnly: true,
         position: true,
         salary: true,
         joiningDate: true,
@@ -65,7 +66,7 @@ export default async function AdminEmployeesPage({
     prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true, plan: true } }),
-    prisma.employee.count({ where: { tenantId: session.tenantId } }),
+    prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }),
   ]);
 
   const seatsUsed = totalCount;

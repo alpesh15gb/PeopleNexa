@@ -97,8 +97,9 @@ export async function POST(req: NextRequest) {
   if (employeeIds.length === 0) return NextResponse.json({ error: "Select employees or a department." }, { status: 400 });
 
   // Validate that every employee belongs to this tenant (avoid FK errors).
+  // Login-only manager accounts work no shifts — filter them out.
   const validEmps = await prisma.employee.findMany({
-    where: { id: { in: employeeIds }, tenantId: session.tenantId },
+    where: { id: { in: employeeIds }, tenantId: session.tenantId, loginOnly: false },
     select: { id: true },
   });
   const validIds = new Set(validEmps.map((e) => e.id));

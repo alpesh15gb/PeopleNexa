@@ -9,7 +9,7 @@ export default async function AdminRostersPage() {
   const session = await requireSession();
   const [employees, shifts, departments] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", loginOnly: false },
       select: {
         id: true,
         firstName: true,

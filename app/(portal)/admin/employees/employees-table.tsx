@@ -26,6 +26,7 @@ interface Emp {
   phone: string | null;
   role: string;
   status: string;
+  loginOnly: boolean;
   position: string | null;
   salary: number | null;
   joiningDate: Date | null;
@@ -302,6 +303,7 @@ export function EmployeesTable({
                     <p className="text-[13.5px] font-medium">
                       {emp.firstName} {emp.lastName}
                       {emp.role === "admin" && <span className="ml-2 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">ADMIN</span>}
+                      {emp.loginOnly && <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300">MANAGER LOGIN</span>}
                     </p>
                     <p className="text-[11.5px] text-muted-foreground">
                       {emp.employeeNumber} · {emp.email}

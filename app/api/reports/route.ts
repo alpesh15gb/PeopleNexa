@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
   const employeeWhere = {
     tenantId: session.tenantId,
     status: "active",
+    loginOnly: false,
     ...(departmentId ? { departmentId } : {}),
   };
 

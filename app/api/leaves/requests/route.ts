@@ -98,10 +98,13 @@ export async function POST(req: NextRequest) {
     // Inactive employees can't accrue new leave.
     const applicant = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId: session.tenantId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, loginOnly: true },
     });
     if (!applicant || applicant.status !== "active") {
       return NextResponse.json({ error: "Only active employees can request leave." }, { status: 403 });
+    }
+    if (applicant.loginOnly) {
+      return NextResponse.json({ error: "Manager logins cannot request leave." }, { status: 403 });
     }
 
     // Overlap + balance checks and the create run inside one serializable

@@ -58,8 +58,11 @@ export async function POST(req: NextRequest) {
   // Guard against pre-joining + excessive backdate.
   const requester = await prisma.employee.findFirst({
     where: { id: session.sub, tenantId: session.tenantId },
-    select: { id: true, joiningDate: true },
+    select: { id: true, joiningDate: true, loginOnly: true },
   });
+  if (requester?.loginOnly) {
+    return NextResponse.json({ error: "Manager logins cannot request corrections." }, { status: 403 });
+  }
   if (requester?.joiningDate) {
     const joinStart = istStartOfDay(new Date(requester.joiningDate));
     if (dayStart.getTime() < joinStart.getTime()) {

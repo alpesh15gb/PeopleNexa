@@ -143,6 +143,14 @@ export async function POST(req: NextRequest) {
     const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } });
     if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
 
+    // Login-only accounts: sign-in credentials for non-staff (e.g. an outside
+    // branch manager). Just name + email + password + branch; forced to the
+    // branch_manager role, excluded from seats/payroll/attendance/leave.
+    const loginOnly = body.loginOnly === true;
+    if (loginOnly && !body.branchId) {
+      return NextResponse.json({ error: "A branch is required for a manager login." }, { status: 400 });
+    }
+
     // Numeric / date validation — reject NaN / Invalid Date with 400 instead of 500.
     const salary =
       body.salary != null && body.salary !== ""
@@ -210,11 +218,12 @@ export async function POST(req: NextRequest) {
     if (body.managerId && !manager) return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
 
     const [count, tenant] = await Promise.all([
-      prisma.employee.count({ where: { tenantId: session.tenantId } }),
+      prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }),
       prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true } }),
     ]);
     const seats = tenant?.seats ?? 0;
-    if (count >= seats) {
+    // Login-only manager accounts don't occupy employee seats.
+    if (!loginOnly && count >= seats) {
       return NextResponse.json(
         { error: `Seat limit reached (${seats} seats on your current plan). Please contact your account manager to upgrade.` },
         { status: 403 }
@@ -222,31 +231,36 @@ export async function POST(req: NextRequest) {
     }
     let employee;
     try {
+      const numberPrefix = loginOnly ? "MGR" : "EMP";
+      const numberBase = loginOnly
+        ? await prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: true } })
+        : count;
       employee = await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
-          employeeNumber: `EMP-${String(count + 1).padStart(3, "0")}`,
+          employeeNumber: `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}`,
           firstName,
           lastName,
           email,
           phone,
           password: await hashPassword(String(body.password)),
-          role: "employee",
-          position: body.position ?? null,
+          role: loginOnly ? "branch_manager" : "employee",
+          loginOnly,
+          position: loginOnly ? null : (body.position ?? null),
           salary,
           joiningDate,
           branchId: body.branchId || null,
-          departmentId: body.departmentId || null,
-          shiftId: body.shiftId || null,
-          bankName: body.bankName || null,
-          accountNumber,
-          ifscCode,
-          pan,
-          uan,
+          departmentId: loginOnly ? null : body.departmentId || null,
+          shiftId: loginOnly ? null : body.shiftId || null,
+          bankName: loginOnly ? null : body.bankName || null,
+          accountNumber: loginOnly ? null : accountNumber,
+          ifscCode: loginOnly ? null : ifscCode,
+          pan: loginOnly ? null : pan,
+          uan: loginOnly ? null : uan,
           payMode,
-          workBasisRate,
-          managerId: body.managerId || null,
-          salaryStructure: body.salaryStructure || null,
+          workBasisRate: loginOnly ? null : workBasisRate,
+          managerId: loginOnly ? null : body.managerId || null,
+          salaryStructure: loginOnly ? null : body.salaryStructure || null,
         },
         select,
       });

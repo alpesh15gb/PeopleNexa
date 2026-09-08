@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "active" },
+    where: { tenantId: session.tenantId, status: "active", loginOnly: false },
     select: { id: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, phone: true },
   });
 

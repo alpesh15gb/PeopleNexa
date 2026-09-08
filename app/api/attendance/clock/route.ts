@@ -28,6 +28,9 @@ export async function POST(req: NextRequest) {
   if (employee.status !== "active") {
     return NextResponse.json({ error: "Your account is inactive." }, { status: 403 });
   }
+  if ((employee as { loginOnly?: boolean }).loginOnly) {
+    return NextResponse.json({ error: "Manager logins cannot punch in/out." }, { status: 403 });
+  }
 
   // Location is required when the branch has a geofence; otherwise an
   // employee without a branch could punch from anywhere with no coordinates.
