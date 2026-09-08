@@ -27,13 +27,13 @@ function isValidDateKey(key: string): boolean {
 
 function monthRange(month: string): { start: Date; end: Date } {
   const start = parseIST(`${month}-01 00:00:00`)!;
-  const end = new Date(start.getTime());
-  // First day of next month (IST midnight) — safe across month lengths.
-  const next = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1, 0, 0, 0));
-  const probe = new Date(next.getTime() - 12 * 3600 * 1000);
-  const lastKey = istDateKey(probe);
-  const lastStart = parseIST(`${lastKey} 00:00:00`)!;
-  return { start, end: new Date(lastStart.getTime() + 86400000) };
+  // Days in month from the key itself (1-based): Date.UTC(y, m, 0) is the
+  // last day of month m. Never derive it from getUTCMonth() of an IST-midnight
+  // instant — that instant sits in the previous UTC month and produced an
+  // empty [start, end) range (every monthly report all-absent).
+  const [y, m] = month.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getDate();
+  return { start, end: new Date(start.getTime() + daysInMonth * 86400000) };
 }
 
 export async function GET(req: NextRequest) {
@@ -199,10 +199,6 @@ export async function GET(req: NextRequest) {
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
     }),
-    departmentId
-      ? prisma.department.findFirst({ where: { id: departmentId, tenantId: session.tenantId }, select: { name: true } })
-      : Promise.resolve(null),
-    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { firstName: true, lastName: true } }),
   ]);
 
   // Tenant-holiday IST day keys (recurring holidays match on MM-DD).
