@@ -76,7 +76,10 @@ export default async function AdminReportsPage({
           <ReportControls type={type} departments={departments} branches={visibleBranches} />
         </CardContent>
       </Card>
-      <DeviceTables kind={kind} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
+      {/* key remounts per URL: without it a kind switch renders one frame with
+          the previous kind's data shape (e.g. daily {rows} into a monthly
+          table expecting {blocks}) and crashes before the refetch clears it. */}
+      <DeviceTables key={apiUrl} kind={kind} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
     </div>
   );
 }

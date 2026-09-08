@@ -105,7 +105,13 @@ function ReportHeader({ left, center, right }: { left: string; center: string; r
 }
 
 function DailyTable({ output }: { output: DeviceDailyOutput }) {
-  if (output.rows.length === 0) {
+  const rows = Array.isArray((output as { rows?: unknown })?.rows)
+    ? (output as DeviceDailyOutput).rows
+    : [];
+  const columns = Array.isArray((output as { columns?: unknown })?.columns)
+    ? (output as DeviceDailyOutput).columns
+    : [];
+  if (rows.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -121,7 +127,7 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
         <table id="report-table" className="w-full border-collapse bg-white">
           <thead>
             <tr>
-              {output.columns.map((c) => (
+              {columns.map((c) => (
                 <th key={c} className={TH}>
                   {c}
                 </th>
@@ -129,7 +135,7 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
             </tr>
           </thead>
           <tbody>
-            {output.rows.map((r) => (
+            {rows.map((r) => (
               <tr key={r.code}>
                 <td className={TD}>{r.code}</td>
                 <td className={TD}>{r.name}</td>
@@ -153,6 +159,11 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
 }
 
 function MonthlyTables({ output }: { output: DeviceMonthlyOutput }) {
+  // Defensive: during a kind switch the previous tab's payload can arrive
+  // here for one frame — coerce to empty instead of crashing on .map.
+  const blocks = Array.isArray((output as { blocks?: unknown })?.blocks)
+    ? (output as DeviceMonthlyOutput).blocks
+    : [];
   // 467 employees × 30 days will not render at once (tab freezes) — search +
   // paginate on screen. Full-month artifacts come from Export Excel; Print
   // covers the current page.
@@ -161,14 +172,14 @@ function MonthlyTables({ output }: { output: DeviceMonthlyOutput }) {
   const PAGE_SIZE = 25;
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? output.blocks.filter(
+    ? blocks.filter(
         (b) => b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
       )
-    : output.blocks;
+    : blocks;
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  if (output.blocks.length === 0) {
+  if (blocks.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -268,19 +279,22 @@ function statusCellClass(status: string): string {
 }
 
 function StatusMatrixTables({ output }: { output: DeviceStatusMatrixOutput }) {
+  const blocks = Array.isArray((output as { blocks?: unknown })?.blocks)
+    ? (output as DeviceStatusMatrixOutput).blocks
+    : [];
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? output.blocks.filter(
+    ? blocks.filter(
         (b) => b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
       )
-    : output.blocks;
+    : blocks;
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  if (output.blocks.length === 0) {
+  if (blocks.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -390,19 +404,22 @@ function StatusMatrixTables({ output }: { output: DeviceStatusMatrixOutput }) {
 const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
 
 function WorkSummaryTables({ output }: { output: DeviceWorkSummaryOutput }) {
+  const blocks = Array.isArray((output as { blocks?: unknown })?.blocks)
+    ? (output as DeviceWorkSummaryOutput).blocks
+    : [];
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? output.blocks.filter(
+    ? blocks.filter(
         (b) => b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
       )
-    : output.blocks;
+    : blocks;
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  if (output.blocks.length === 0) {
+  if (blocks.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -509,19 +526,22 @@ function WorkSummaryTables({ output }: { output: DeviceWorkSummaryOutput }) {
 }
 
 function PerformanceTables({ output }: { output: DevicePerformanceOutput }) {
+  const blocks = Array.isArray((output as { blocks?: unknown })?.blocks)
+    ? (output as DevicePerformanceOutput).blocks
+    : [];
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? output.blocks.filter(
+    ? blocks.filter(
         (b) => b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
       )
-    : output.blocks;
+    : blocks;
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
-  if (output.blocks.length === 0) {
+  if (blocks.length === 0) {
     return (
       <Card>
         <CardContent>
