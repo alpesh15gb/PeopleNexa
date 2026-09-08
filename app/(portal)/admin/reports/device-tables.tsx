@@ -150,6 +150,21 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
 }
 
 function MonthlyTables({ output }: { output: DeviceMonthlyOutput }) {
+  // 467 employees × 30 days will not render at once (tab freezes) — search +
+  // paginate on screen. Full-month artifacts come from Export Excel; Print
+  // covers the current page.
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 25;
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? output.blocks.filter(
+        (b) => b.code.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
+      )
+    : output.blocks;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const visible = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
   if (output.blocks.length === 0) {
     return (
       <Card>
@@ -160,8 +175,48 @@ function MonthlyTables({ output }: { output: DeviceMonthlyOutput }) {
     );
   }
   return (
+    <div className="space-y-4">
+      <div className="no-print flex flex-wrap items-center gap-3">
+        <input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setPage(0);
+          }}
+          placeholder="Search code or name…"
+          aria-label="Search employees in this report"
+          className="h-9 min-h-[36px] w-56 rounded-lg border border-input bg-tint px-3 text-[12.5px] outline-none focus:border-primary/60"
+        />
+        <span className="text-[12px] text-muted-foreground">
+          Showing {filtered.length === 0 ? 0 : safePage * PAGE_SIZE + 1}–
+          {Math.min(filtered.length, safePage * PAGE_SIZE + PAGE_SIZE)} of {filtered.length}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            Prev
+          </Button>
+          <span className="text-[12px] text-muted-foreground">
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={safePage >= pageCount - 1}
+            onClick={() => setPage(safePage + 1)}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+      {filtered.length === 0 && (
+        <Card>
+          <CardContent>
+            <EmptyState title="No matches" description={`No employees match "${query.trim()}".`} />
+          </CardContent>
+        </Card>
+      )}
     <div className="print-report space-y-8 bg-white p-4 text-black">
-      {output.blocks.map((block) => (
+      {visible.map((block) => (
         <div key={block.code}>
           <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
           <p className="mb-1 bg-white text-[13px] font-semibold text-black">
@@ -198,6 +253,7 @@ function MonthlyTables({ output }: { output: DeviceMonthlyOutput }) {
           </div>
         </div>
       ))}
+    </div>
     </div>
   );
 }
