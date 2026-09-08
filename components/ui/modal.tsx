@@ -23,6 +23,12 @@ export function Modal({
   const titleId = useId();
   const descId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  // onClose is typically an inline arrow (new identity every parent render,
+  // e.g. each keystroke in a controlled input). The setup effect must NOT
+  // depend on it — otherwise every keystroke re-runs setup and steals focus
+  // back to the first field. Mirror it in a ref; depend only on `open`.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -42,7 +48,7 @@ export function Modal({
     }, 0);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !dialog) return;
@@ -70,7 +76,7 @@ export function Modal({
       previouslyFocused?.focus?.({ preventScroll: true });
       if (window.scrollY !== savedY) window.scrollTo(0, savedY);
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
