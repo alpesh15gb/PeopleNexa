@@ -45,7 +45,7 @@ export default async function EmployeeDashboardPage() {
   });
   if (!employee) return null;
 
-  const [todayRecord, monthRecords, monthLeaves, pending] = await Promise.all([
+  const [todayRecord, monthRecords, monthLeaves, pending, heldPunch] = await Promise.all([
     prisma.attendance.findFirst({
       where: { employeeId: employee.id, date: { gte: today, lt: addDays(today, 1) } },
     }),
@@ -60,6 +60,15 @@ export default async function EmployeeDashboardPage() {
       include: { leaveType: true },
       orderBy: { appliedAt: "desc" },
       take: 3,
+    }),
+    // Held unenrolled punch awaiting admin authorization (same day window).
+    prisma.punch.findFirst({
+      where: {
+        employeeId: employee.id,
+        authStatus: "pending",
+        punchTime: { gte: today, lt: addDays(today, 1) },
+      },
+      select: { id: true },
     }),
   ]);
 
@@ -87,6 +96,7 @@ export default async function EmployeeDashboardPage() {
             branch={employee.branch}
             employeeName={`${employee.firstName} ${employee.lastName}`.trim()}
             lang={lang}
+            pendingApproval={Boolean(heldPunch)}
           />
         </div>
 

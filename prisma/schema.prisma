@@ -378,7 +378,12 @@ model Punch {
   lng        Float?
   selfie     String?
   faceScore  Float?
-  faceStatus String   @default("none") // none | matched | review | rejected
+  faceStatus String   @default("none") // none | matched | review | rejected | approved
+  // Attendance authorization for self-service (mobile) punches:
+  // auto = reconciled normally; pending = held for admin accept/decline
+  // (unenrolled employee while face-match is enabled); approved = admin-
+  // authorized, reconciles normally. Device/eBioserver punches stay "auto".
+  authStatus String   @default("auto") // auto | pending | approved
   createdAt  DateTime @default(now())
 
   @@index([tenantId, employeeId, punchTime])

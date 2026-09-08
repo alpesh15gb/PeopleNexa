@@ -41,12 +41,13 @@ export default async function AdminRegularizationPage() {
   });
   const flaggedDays = new Set(flaggedPunches.map((p) => `${p.employeeId}|${istDateKey(p.punchTime)}`));
 
-  // Face review queue: recent gray-zone / rejected punches (≤50 rows, so
+  // Face review queue: recent gray-zone / rejected punches plus held
+  // unenrolled self-service punches awaiting authorization (≤50 rows, so
   // selecting the ~375KB selfie per row is acceptable).
   const faceReviews = await prisma.punch.findMany({
     where: {
       tenantId: session.tenantId,
-      faceStatus: { in: ["review", "rejected"] },
+      OR: [{ faceStatus: { in: ["review", "rejected"] } }, { authStatus: "pending" }],
       ...(branchId ? { employee: { branchId } } : {}),
     },
     select: {
@@ -55,6 +56,9 @@ export default async function AdminRegularizationPage() {
       faceStatus: true,
       faceScore: true,
       selfie: true,
+      lat: true,
+      lng: true,
+      authStatus: true,
       employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
     },
     orderBy: { punchTime: "desc" },
@@ -102,6 +106,9 @@ export default async function AdminRegularizationPage() {
               faceStatus: r.faceStatus,
               faceScore: r.faceScore,
               selfie: r.selfie,
+              lat: r.lat,
+              lng: r.lng,
+              authStatus: (r as { authStatus?: string }).authStatus ?? "auto",
               employee: {
                 id: r.employee.id,
                 firstName: r.employee.firstName,

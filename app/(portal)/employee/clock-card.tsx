@@ -29,12 +29,15 @@ export function ClockCard({
   branch,
   employeeName,
   lang = "en",
+  pendingApproval = false,
 }: {
   record: Record | null;
   shift: Shift | null;
   branch: Branch | null;
   employeeName: string;
   lang?: Lang;
+  /** A held (unenrolled) punch exists for today — attendance awaits admin. */
+  pendingApproval?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -230,6 +233,14 @@ export function ClockCard({
           toast("error", data.error ?? "Failed to clock " + action);
           return;
         }
+        if (data.pendingApproval) {
+          // Held for admin authorization (no Face ID enrolled): the punch is
+          // recorded with selfie + location but counts only after approval.
+          toast("info", t(lang, "clock.pendingMsg"));
+          setSelfie(null);
+          router.refresh();
+          return;
+        }
         toast("success", data.action === "in" ? t(lang, "clock.clockedInMsg") : t(lang, "clock.clockedOutMsg"));
         setSelfie(null);
         router.refresh();
@@ -245,6 +256,17 @@ export function ClockCard({
 
   const punchedIn = Boolean(record?.punchInTime);
   const punchedOut = Boolean(record?.punchOutTime);
+  // Held punch, no attendance yet: show the approval state instead of "not
+  // clocked in" so the employee knows their punch wasn't lost.
+  const awaitingApproval = pendingApproval && !punchedIn;
+  const statusTone = awaitingApproval ? "warning" : punchedOut ? "neutral" : punchedIn ? "success" : "warning";
+  const statusLabel = awaitingApproval
+    ? t(lang, "clock.pendingApproval")
+    : punchedOut
+      ? t(lang, "clock.dayComplete")
+      : punchedIn
+        ? t(lang, "clock.clockedIn")
+        : t(lang, "clock.notClockedIn");
   const geofenced = Boolean(branch?.latitude != null && branch?.longitude != null);
   // Ticking clock: server HTML and first client render must agree, so show a
   // static placeholder until mount (else React #418 every load).
@@ -267,9 +289,10 @@ export function ClockCard({
             </p>
             <p className="mt-2 font-display text-5xl font-bold tabular-nums tracking-tight sm:text-6xl">{time}</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge tone={punchedOut ? "neutral" : punchedIn ? "success" : "warning"}>
-                {punchedOut ? t(lang, "clock.dayComplete") : punchedIn ? t(lang, "clock.clockedIn") : t(lang, "clock.notClockedIn")}
-              </Badge>
+              <Badge tone={statusTone}>{statusLabel}</Badge>
+              {awaitingApproval && (
+                <span className="text-[12px] text-muted-foreground">{t(lang, "clock.enrollNudge")}</span>
+              )}
               {shift && <Badge tone="violet">{shift.name} · {shift.startTime}–{shift.endTime}</Badge>}
               {geofenced && (
                 <Badge tone="info"><MapPin className="h-3 w-3" /> {branch!.name} · {branch!.geofenceRadius}m</Badge>

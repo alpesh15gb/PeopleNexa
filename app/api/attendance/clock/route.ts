@@ -77,6 +77,8 @@ export async function POST(req: NextRequest) {
   // WITHOUT creating a punch. Geofence/dedupe/reconcile below untouched.
   let faceStatus = "none";
   let faceScore: number | null = null;
+  let faceEnabled = true;
+  let hasEnrollment = false;
   {
     const tenantForFace = await prisma.tenant.findUnique({
       where: { id: employee.tenantId },
@@ -86,7 +88,8 @@ export async function POST(req: NextRequest) {
       faceMatch?: Partial<{ enabled: boolean; matchThreshold: number; reviewThreshold: number }>;
     };
     const fm = cfgRaw.faceMatch ?? {};
-    const faceEnabled = fm.enabled ?? true;
+    const faceEnabledCfg = fm.enabled ?? true;
+    faceEnabled = faceEnabledCfg;
     const matchThreshold =
       typeof fm.matchThreshold === "number" && Number.isFinite(fm.matchThreshold)
         ? fm.matchThreshold
@@ -95,10 +98,11 @@ export async function POST(req: NextRequest) {
       typeof fm.reviewThreshold === "number" && Number.isFinite(fm.reviewThreshold)
         ? fm.reviewThreshold
         : 0.5;
-    if (faceEnabled) {
+    if (faceEnabledCfg) {
       const enrollment = await prisma.faceEnrollment.findFirst({
         where: { tenantId: employee.tenantId, employeeId: employee.id },
       });
+      hasEnrollment = Boolean(enrollment);
       if (enrollment) {
         let probe: number[] | null = null;
         if (selfie) {
@@ -154,6 +158,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Unenrolled self-service punch while face-match is enabled: hold for
+  // admin authorization instead of reconciling. The admin sees selfie +
+  // location in the review queue and accepts (reconciles) or declines
+  // (deletes). Enrolled + matched punches auto-accept below as before;
+  // geofence enforcement above already guarantees the location matched.
+  const needsApproval = faceEnabled && !hasEnrollment;
+
   const punch = await prisma.punch.create({
     data: {
       tenantId: employee.tenantId,
@@ -166,6 +177,7 @@ export async function POST(req: NextRequest) {
       selfie,
       faceScore,
       faceStatus,
+      authStatus: needsApproval ? "pending" : "auto",
     },
   });
   await dispatchWebhook(employee.tenantId, "punch.created", {
@@ -175,6 +187,17 @@ export async function POST(req: NextRequest) {
     lat,
     lng,
   });
+
+  if (needsApproval) {
+    return NextResponse.json(
+      {
+        success: true,
+        pendingApproval: true,
+        punch: { id: punch.id, punchTime: punch.punchTime.toISOString() },
+      },
+      { status: 201 }
+    );
+  }
 
   // 2. Re-derive the day's attendance from all punches (night-shift morning
   //    outs reconcile against the previous calendar day).

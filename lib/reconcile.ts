@@ -163,7 +163,9 @@ export async function reconcileEmployeeDay(
   const { start: dayStart, end: dayEnd } = shiftWindow(istDay, shift);
 
   const punches = await prisma.punch.findMany({
-    where: { employeeId: employee.id, punchTime: { gte: dayStart, lt: dayEnd } },
+    // Held-for-approval self-service punches must not leak into attendance
+    // via another punch's reconcile pass — only auto/approved rows count.
+    where: { employeeId: employee.id, authStatus: { not: "pending" }, punchTime: { gte: dayStart, lt: dayEnd } },
     orderBy: { punchTime: "asc" },
   });
 

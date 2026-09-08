@@ -217,6 +217,9 @@ const dict: Record<string, Partial<Record<Lang, string>>> = {
   "clock.locError": { en: "Could not get your location. Check permissions and try again.", hi: "आपकी लोकेशन नहीं मिल सकी। अनुमतियाँ जाँचें और फिर कोशिश करें।" },
   "clock.geofenceNote": { en: "Your location is verified against the {name} geofence before punching.", hi: "पंच से पहले आपकी लोकेशन {name} जियोफेंस के विरुद्ध सत्यापित की जाती है।" },
   "clock.noGeofenceNote": { en: "No geofence configured for your branch — location is still recorded.", hi: "आपकी ब्रांच के लिए कोई जियोफेंस कॉन्फ़िगर नहीं — लोकेशन फिर भी दर्ज की जाती है।" },
+  "clock.pendingApproval": { en: "Awaiting admin approval", hi: "एडमिन की मंज़ूरी का इंतज़ार" },
+  "clock.pendingMsg": { en: "Punch sent — an admin will review your selfie and location shortly.", hi: "पंच भेजा गया — एडमिन जल्द ही आपकी सेल्फ़ी और लोकेशन की समीक्षा करेंगे।" },
+  "clock.enrollNudge": { en: "Enroll Face ID to punch in instantly next time.", hi: "अगली बार तुरंत पंच करने के लिए फेस आईडी नामांकित करें।" },
 
   // ---- notifications ----
   "notifications.title": { en: "Notifications", hi: "सूचनाएँ" },

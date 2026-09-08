@@ -33,6 +33,9 @@ type FaceReview = {
   faceStatus: string;
   faceScore: number | null;
   selfie: string | null;
+  lat: number | null;
+  lng: number | null;
+  authStatus: string;
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
 };
 
@@ -141,9 +144,24 @@ export function RegularizationPanel({
                         {toDateKey(new Date(r.punchTime))} · {fmt(r.punchTime)}
                       </span>
                       <Badge tone={r.faceStatus === "rejected" ? "danger" : "warning"}>
-                        Face {score ?? "—"} — {r.faceStatus}
+                        {r.authStatus === "pending"
+                          ? "Awaiting approval — no Face ID"
+                          : `Face ${score ?? "—"} — ${r.faceStatus}`}
                       </Badge>
                     </div>
+                    {r.lat != null && r.lng != null && (
+                      <p className="mt-1.5 text-[12px] text-muted-foreground">
+                        Location {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)} ·{" "}
+                        <a
+                          href={`https://www.google.com/maps?q=${r.lat},${r.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                        >
+                          Open map
+                        </a>
+                      </p>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
                         size="sm"
