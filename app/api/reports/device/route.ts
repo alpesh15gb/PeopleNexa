@@ -73,6 +73,15 @@ export async function GET(req: NextRequest) {
   const branchId = scopedBranchId ?? branchParam ?? undefined;
   const departmentId = params.get("departmentId") || undefined;
 
+  // Server-side pagination for the heavy monthly kinds: screens fetch one
+  // page (25 staff) instead of building + shipping ~1.5MB per click, which
+  // piled onto the single Node thread under concurrent load until requests
+  // crossed the proxy timeout. Excel exports omit `page` and get everything.
+  const PAGE_SIZE = 25;
+  const pageParam = params.get("page");
+  const page = pageParam !== null ? Math.max(0, parseInt(pageParam, 10) || 0) : null;
+  const q = (params.get("q") || "").trim().slice(0, 60);
+
   let rangeStart: Date;
   let rangeEnd: Date;
   let dayKey = "";
@@ -103,31 +112,53 @@ export async function GET(req: NextRequest) {
     loginOnly: false,
     ...(branchId ? { branchId } : {}),
     ...(departmentId ? { departmentId } : {}),
+    ...(q
+      ? {
+          OR: [
+            { employeeNumber: { contains: q, mode: "insensitive" as const } },
+            { firstName: { contains: q, mode: "insensitive" as const } },
+            { lastName: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
   };
 
-  const [tenant, branch, employees, records, leaves, holidays, punches, department, runByEmployee] = await Promise.all([
+  const [total, tenant, branch] = await Promise.all([
+    prisma.employee.count({ where: employeeWhere }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     branchId
       ? prisma.branch.findFirst({ where: { id: branchId, tenantId: session.tenantId }, select: { name: true } })
       : Promise.resolve(null),
-    prisma.employee.findMany({
-      where: employeeWhere,
-      select: {
-        id: true,
-        employeeNumber: true,
-        firstName: true,
-        lastName: true,
-        position: true,
-        shift: { select: { name: true, startTime: true, endTime: true } },
-        department: { select: { name: true } },
-      },
-      orderBy: { employeeNumber: "asc" },
-    }),
+  ]);
+
+  const employees = await prisma.employee.findMany({
+    where: employeeWhere,
+    select: {
+      id: true,
+      employeeNumber: true,
+      firstName: true,
+      lastName: true,
+      position: true,
+      shift: { select: { name: true, startTime: true, endTime: true } },
+      department: { select: { name: true } },
+    },
+    orderBy: { employeeNumber: "asc" },
+    ...(page !== null ? { skip: page * PAGE_SIZE, take: PAGE_SIZE } : {}),
+  });
+  // Day-level queries are scoped to the page's employees so a screen fetch
+  // touches ~25 staff, not the whole company.
+  const pageIds = employees.map((e) => e.id);
+
+  const [department, runByEmployee, records, leaves, holidays, punches] = await Promise.all([
+    departmentId
+      ? prisma.department.findFirst({ where: { id: departmentId, tenantId: session.tenantId }, select: { name: true } })
+      : Promise.resolve(null),
+    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { firstName: true, lastName: true } }),
     prisma.attendance.findMany({
       where: {
         tenantId: session.tenantId,
+        employeeId: { in: pageIds },
         date: { gte: rangeStart, lt: rangeEnd },
-        employee: { status: "active", loginOnly: false, ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}) },
       },
       select: {
         employeeId: true,
@@ -145,10 +176,10 @@ export async function GET(req: NextRequest) {
     prisma.leaveRequest.findMany({
       where: {
         tenantId: session.tenantId,
+        employeeId: { in: pageIds },
         status: "approved",
         fromDate: { lt: rangeEnd },
         toDate: { gte: rangeStart },
-        employee: { status: "active", ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}) },
       },
       select: { employeeId: true, fromDate: true, toDate: true },
     }),
@@ -162,8 +193,8 @@ export async function GET(req: NextRequest) {
     prisma.punch.findMany({
       where: {
         tenantId: session.tenantId,
+        employeeId: { in: pageIds },
         punchTime: { gte: rangeStart, lt: rangeEnd },
-        employee: { status: "active", ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}) },
       },
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
@@ -225,7 +256,7 @@ export async function GET(req: NextRequest) {
       holidays: holidayKeys,
     });
     if (format === "xlsx") return dailyXlsx(output, dayKey);
-    return NextResponse.json(output);
+    return NextResponse.json(page !== null ? { ...output, total, page } : output);
   }
 
   if (kind === "monthly") {
@@ -240,7 +271,7 @@ export async function GET(req: NextRequest) {
       holidays: holidayKeys,
     });
     if (format === "xlsx") return monthlyXlsx(output, monthKey);
-    return NextResponse.json(output);
+    return NextResponse.json(page !== null ? { ...output, total, page } : output);
   }
 
   if (kind === "status-matrix") {
@@ -256,7 +287,7 @@ export async function GET(req: NextRequest) {
       holidays: holidayKeys,
     });
     if (format === "xlsx") return statusMatrixXlsx(output, monthKey);
-    return NextResponse.json(output);
+    return NextResponse.json(page !== null ? { ...output, total, page } : output);
   }
 
   if (kind === "work-summary") {
@@ -283,7 +314,7 @@ export async function GET(req: NextRequest) {
       generatedAt,
     });
     if (format === "xlsx") return workSummaryXlsx(output, monthKey);
-    return NextResponse.json(output);
+    return NextResponse.json(page !== null ? { ...output, total, page } : output);
   }
 
   const output: DevicePerformanceOutput = buildPerformance({
@@ -297,7 +328,7 @@ export async function GET(req: NextRequest) {
     holidays: holidayKeys,
   });
   if (format === "xlsx") return performanceXlsx(output, monthKey);
-  return NextResponse.json(output);
+  return NextResponse.json(page !== null ? { ...output, total, page } : output);
 }
 
 // ─── Excel export (same columns/blocks as the on-screen report) ────────────

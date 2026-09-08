@@ -5,6 +5,10 @@ import { finalizeEligibleDays } from "@/lib/reconcile";
 
 export const dynamic = "force-dynamic";
 
+// Single-process overlap guard: a slow pull must never stack with the next
+// 5-minute tick and saturate the pool + event loop behind itself.
+let pullRunning = false;
+
 /**
  * Poll every tenant's own eBioserver and feed punches into the shared pipeline.
  *
@@ -17,8 +21,7 @@ export const dynamic = "force-dynamic";
  * Trigger: POST with `x-cron-secret` matching CRON_SECRET (scheduler), or an
  * admin session for manual runs.
  */
-export async function POST(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
+export async function POST(req: NextRequest) {  const secret = process.env.CRON_SECRET;
   if (!secret && process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
   }
@@ -40,30 +43,38 @@ export async function POST(req: NextRequest) {
     select: { id: true, slug: true, config: true, subscriptionExpiry: true },
   });
 
-  const results: Array<Record<string, unknown>> = [];
-  for (const tenant of tenants) {
-    if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) continue;
-    const profile = getEbioserverConfig(tenant);
-    if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) continue;
-
-    try {
-      const res = await pullTenant(tenant.id, profile);
-      const now = new Date().toISOString();
-      // Drain the day-finalization backlog here (bounded), so read paths stay fast.
-      const finalized = await finalizeEligibleDays(tenant.id, 500);
-      if (res.ok) {
-        await updateEbioserverStatus(tenant.id, { lastPulledAt: now, lastError: null, lastErrorAt: null });
-        results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, finalized });
-      } else {
-        await updateEbioserverStatus(tenant.id, { lastError: res.message ?? "Pull failed", lastErrorAt: now });
-        results.push({ tenant: tenant.slug, ok: false, error: res.message });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Pull failed";
-      await updateEbioserverStatus(tenant.id, { lastError: message, lastErrorAt: new Date().toISOString() });
-      results.push({ tenant: tenant.slug, ok: false, error: message });
-    }
+  if (pullRunning) {
+    return NextResponse.json({ ran: false, reason: "previous pull still running" }, { status: 429 });
   }
+  pullRunning = true;
+  try {
+    const results: Array<Record<string, unknown>> = [];
+    for (const tenant of tenants) {
+      if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) continue;
+      const profile = getEbioserverConfig(tenant);
+      if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) continue;
 
-  return NextResponse.json({ ran: true, tenants: results });
+      try {
+        const res = await pullTenant(tenant.id, profile);
+        const now = new Date().toISOString();
+        // Drain the day-finalization backlog here (bounded), so read paths stay fast.
+        const finalized = await finalizeEligibleDays(tenant.id, 500);
+        if (res.ok) {
+          await updateEbioserverStatus(tenant.id, { lastPulledAt: now, lastError: null, lastErrorAt: null });
+          results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, finalized });
+        } else {
+          await updateEbioserverStatus(tenant.id, { lastError: res.message ?? "Pull failed", lastErrorAt: now });
+          results.push({ tenant: tenant.slug, ok: false, error: res.message });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Pull failed";
+        await updateEbioserverStatus(tenant.id, { lastError: message, lastErrorAt: new Date().toISOString() });
+        results.push({ tenant: tenant.slug, ok: false, error: message });
+      }
+    }
+
+    return NextResponse.json({ ran: true, tenants: results });
+  } finally {
+    pullRunning = false;
+  }
 }

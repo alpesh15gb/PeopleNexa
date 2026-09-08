@@ -38,7 +38,10 @@ services:
     env_file: .env.production
     environment:
       # Overrides env_file — built from .env so credentials live in one place.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-peoplenexa}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-peoplenexa}
+      # connection_limit=20: burst headroom for the 5-min device pull running
+      # alongside monthly reports/exports on one shared client (pg default 10
+      # starved page renders under concurrent load).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-peoplenexa}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-peoplenexa}?connection_limit=20
       NODE_ENV: production
       HOSTNAME: "0.0.0.0"     
     ports:
