@@ -177,14 +177,8 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
   async function setManager(branchId: string, employeeId: string | null, currentManagerId?: string | null) {
     setSavingManager(true);
     try {
-      // Demote the outgoing manager first so a branch never ends up with two.
-      if (currentManagerId && currentManagerId !== employeeId) {
-        await fetch(`/api/employees/${currentManagerId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "employee" }),
-        });
-      }
+      // Promote first, demote after: a failed second step leaves two managers
+      // (visible and fixable) instead of zero (silent loss of coverage).
       if (employeeId) {
         const res = await fetch(`/api/employees/${employeeId}`, {
           method: "PUT",
@@ -196,8 +190,22 @@ export function BranchesManager({ branches, employees }: { branches: Branch[]; e
           toast("error", data.error ?? "Failed to assign manager");
           return;
         }
+        if (currentManagerId && currentManagerId !== employeeId) {
+          await fetch(`/api/employees/${currentManagerId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role: "employee" }),
+          });
+        }
         toast("success", "Branch manager assigned");
       } else {
+        if (currentManagerId) {
+          await fetch(`/api/employees/${currentManagerId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role: "employee" }),
+          });
+        }
         toast("success", "Branch manager removed");
       }
       setManagingBranch(null);

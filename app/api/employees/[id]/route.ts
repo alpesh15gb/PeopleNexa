@@ -119,8 +119,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     return NextResponse.json({ error: "Status must be active or inactive." }, { status: 400 });
   }
   const requestedStatus = body.status ?? employee.status;
-  if (requestedStatus === "inactive" && employee.status === "active") {
-    if (session.sub === id) {
+  if (requestedStatus === "inactive" && employee.status === "active") {    if (session.sub === id) {
       return NextResponse.json({ error: "You cannot deactivate your own account." }, { status: 400 });
     }
     if (employee.role === "admin") {
@@ -129,6 +128,31 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
       if (activeAdmins <= 1) {
         return NextResponse.json({ error: "Cannot deactivate the last active admin." }, { status: 400 });
+      }
+    }
+  }
+  // Role changes (admin-only: branch_manager callers have "role" stripped
+  // above). The update below previously ignored body.role entirely, so branch
+  // manager assignment returned success without ever promoting anyone.
+  const VALID_ROLES = ["admin", "supervisor", "employee", "branch_manager"];
+  let nextRole = employee.role;
+  if (body.role !== undefined) {
+    if (session.role !== "admin") {
+      return NextResponse.json({ error: "Only admins can change roles." }, { status: 403 });
+    }
+    nextRole = String(body.role);
+    if (!VALID_ROLES.includes(nextRole)) {
+      return NextResponse.json({ error: "Role must be one of: admin, supervisor, employee, branch_manager." }, { status: 400 });
+    }
+    if (id === session.sub && nextRole !== employee.role) {
+      return NextResponse.json({ error: "You cannot change your own role." }, { status: 400 });
+    }
+    if (employee.role === "admin" && nextRole !== "admin") {
+      const activeAdmins = await prisma.employee.count({
+        where: { tenantId: session.tenantId, role: "admin", status: "active" },
+      });
+      if (activeAdmins <= 1) {
+        return NextResponse.json({ error: "Cannot demote the last active admin." }, { status: 400 });
       }
     }
   }
@@ -251,6 +275,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (wantManager && String(wantManager) === id) {
     return NextResponse.json({ error: "An employee cannot be their own manager." }, { status: 400 });
   }
+  // A branch manager must belong to a branch (login also blocks branch-less
+  // managers, so allowing it here would strand the account).
+  const nextBranchId = body.branchId !== undefined ? (body.branchId || null) : employee.branchId;
+  if (nextRole === "branch_manager" && !nextBranchId) {
+    return NextResponse.json({ error: "A branch manager must be assigned to a branch." }, { status: 400 });
+  }
   if (wantManager) {
     const cycle = await wouldCreateManagerCycle(id, String(wantManager), session.tenantId);
     if (cycle) {
@@ -269,6 +299,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       ...(password ? { password: await hashPassword(password) } : {}),
       phone: nextPhone,
       position: body.position ?? employee.position,
+      role: nextRole,
       salary: body.salary != null && body.salary !== "" ? Number(body.salary) : body.salary === "" ? null : employee.salary,
       status: requestedStatus,
       joiningDate: body.joiningDate ? new Date(body.joiningDate) : employee.joiningDate,
