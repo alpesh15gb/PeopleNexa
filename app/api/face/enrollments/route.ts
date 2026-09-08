@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { describeFace, faceMatchConfig, isFaceEnrollmentValid } from "@/lib/face";
+import { describeFaceDetailed, faceMatchConfig, isFaceEnrollmentValid } from "@/lib/face";
 
 const MAX_PHOTO_BYTES = 500 * 1024;
 
@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
     }
 
     const embeddings: number[][] = [];
+    const qualities: number[] = [];
     for (let i = 0; i < photos.length; i++) {
       const buffer = dataUrlToBuffer(photos[i]);
       if (!buffer) {
@@ -77,11 +78,21 @@ export async function POST(req: NextRequest) {
       if (buffer.length > MAX_PHOTO_BYTES) {
         return NextResponse.json({ error: `Sample ${i + 1}: photo exceeds 500KB, retake.` }, { status: 400 });
       }
-      const embedding = await describeFace(buffer);
-      if (!embedding) {
-        return NextResponse.json({ error: `Sample ${i + 1}: no usable face, retake.` }, { status: 400 });
+      const result = await describeFaceDetailed(buffer);
+      if (!result.ok) {
+        // Backend down is an ops problem, not a bad photo — 503 so the
+        // client says "try later" instead of blaming the user's face.
+        if (result.code === "backend_unavailable") {
+          console.error(`[face] enrollment backend unavailable for tenant ${session.tenantId}: model weights missing?`);
+          return NextResponse.json(
+            { error: "Face service is temporarily unavailable. Please try again later." },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json({ error: `Sample ${i + 1}: ${result.hint}` }, { status: 400 });
       }
-      embeddings.push(embedding);
+      embeddings.push(result.descriptor);
+      qualities.push(result.quality);
     }
 
     // Final invariant gate: count + consent version + freshness, via the same
@@ -127,7 +138,14 @@ export async function POST(req: NextRequest) {
         enrolledAt: now,
       },
     });
-    return NextResponse.json({ success: true, status: "enrolled", sampleCount: embeddings.length });
+    return NextResponse.json({
+      success: true,
+      status: "enrolled",
+      sampleCount: embeddings.length,
+      // Measured per-sample quality (informational; acceptance policy unchanged
+      // pending calibration on real field photos).
+      quality: qualities,
+    });
   } catch {
     return NextResponse.json({ error: "Failed to save enrollment." }, { status: 500 });
   }

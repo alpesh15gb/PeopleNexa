@@ -214,6 +214,177 @@ export function cosine(a: number[], b: number[]): number {
   return Math.max(-1, Math.min(1, score));
 }
 
+export type FaceDescribeErrorCode =
+  | "empty"
+  | "unsupported_format"
+  | "too_small"
+  | "backend_unavailable"
+  | "multiple_faces"
+  | "no_face"
+  | "too_dark"
+  | "descriptor_failed";
+
+export interface FaceDescribeSuccess {
+  ok: true;
+  descriptor: number[];
+  /** Measured quality 0..100 (lighting + contrast composite). */
+  quality: number;
+  /** Detector pass that succeeded (for ops tuning). */
+  pass: string;
+}
+
+export interface FaceDescribeFailure {
+  ok: false;
+  code: FaceDescribeErrorCode;
+  /** Operator/actionable hint for the UI. */
+  hint: string;
+}
+
+export type FaceDescribeResult = FaceDescribeSuccess | FaceDescribeFailure;
+
+/** Magic-byte sniff — jpeg-js only handles JPEG; anything else must be retaken, not misreported. */
+function sniffImageFormat(bytes: Uint8Array): "jpeg" | "png" | "gif" | "webp" | "unknown" {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47)
+    return "png";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "gif";
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  )
+    return "webp";
+  return "unknown";
+}
+
+/**
+ * Detect a single face in an image buffer and return its 128-d descriptor,
+ * with a machine-readable failure reason instead of a bare null.
+ *
+ * Worst-case hardening over the naive single-shot detector:
+ * - multi-pass detection (416px@0.50, then 512px@0.35) for dim/small faces;
+ * - largest-face selection when several people are in frame (enrollment then
+ *   rejects with `multiple_faces` rather than a mystery failure);
+ * - luminance diagnostics so dark frames report `too_dark`, not `no_face`;
+ * - backend load failures surface as `backend_unavailable` (ops signal:
+ *   model weights missing) instead of masquerading as a bad photo.
+ */
+export async function describeFaceDetailed(imageBuffer: Buffer | Uint8Array): Promise<FaceDescribeResult> {
+  if (!imageBuffer || imageBuffer.length === 0) {
+    return { ok: false, code: "empty", hint: "Photo is empty." };
+  }
+  const bytes = imageBuffer instanceof Uint8Array ? imageBuffer : new Uint8Array(imageBuffer);
+  const format = sniffImageFormat(bytes);
+  if (format !== "jpeg") {
+    return {
+      ok: false,
+      code: "unsupported_format",
+      hint: format === "unknown" ? "Photo is not a valid image." : `Photo is ${format.toUpperCase()}, JPEG is required.`,
+    };
+  }
+
+  let faceapi: any;
+  try {
+    faceapi = await loadFaceBackend();
+  } catch {
+    return {
+      ok: false,
+      code: "backend_unavailable",
+      hint: "Face service is not ready (model weights missing on the server).",
+    };
+  }
+
+  let image: { width: number; height: number; data: Uint8Array | Uint16Array | Float64Array };
+  try {
+    image = decodeJpeg(Buffer.from(bytes), { useTArray: true, formatAsRGBA: true });
+  } catch {
+    return { ok: false, code: "unsupported_format", hint: "Photo could not be decoded." };
+  }
+  if (!image.width || !image.height || !image.data?.length) {
+    return { ok: false, code: "unsupported_format", hint: "Photo could not be decoded." };
+  }
+  const minDim = Math.min(image.width, image.height);
+  if (minDim < 120) {
+    return { ok: false, code: "too_small", hint: "Photo is too small — move closer to the camera." };
+  }
+
+  const rgba = faceapi.tf.tensor3d(image.data, [image.height, image.width, 4], "int32");
+  const imgTensor = faceapi.tf.slice(rgba, [0, 0, 0], [image.height, image.width, 3]);
+  rgba.dispose();
+  try {
+    // Grayscale luminance stats for the darkness diagnostic (cheap, runs once).
+    const luminance = faceapi.tf.tidy(() => {
+      const f = faceapi.tf.cast(imgTensor, "float32");
+      const r = faceapi.tf.slice(f, [0, 0, 0], [image.height, image.width, 1]);
+      const g = faceapi.tf.slice(f, [0, 0, 1], [image.height, image.width, 1]);
+      const b = faceapi.tf.slice(f, [0, 0, 2], [image.height, image.width, 1]);
+      return faceapi.tf.add(faceapi.tf.add(faceapi.tf.mul(r, 0.299), faceapi.tf.mul(g, 0.587)), faceapi.tf.mul(b, 0.114));
+    });
+    const meanTensor = luminance.mean();
+    const mean = ((await meanTensor.data())[0] as number) ?? 0;
+    meanTensor.dispose();
+    const moments = faceapi.tf.moments(luminance);
+    const stdTensor = moments.variance.sqrt();
+    const stdVal = ((await stdTensor.data())[0] as number) ?? 0;
+    moments.mean.dispose();
+    moments.variance.dispose();
+    stdTensor.dispose();
+    luminance.dispose();
+    const quality = Math.max(0, Math.min(100, Math.round(((mean / 255) * 60 + Math.min(stdVal / 64, 1) * 40))));
+
+    const batch = faceapi.tf.tidy(() =>
+      faceapi.tf.cast(faceapi.tf.expandDims(imgTensor, 0), "float32"),
+    );
+    try {
+      // Two passes: strict first (fewer false positives), lenient fallback
+      // for dim rooms / budget phones / distant faces.
+      const passes = [
+        { inputSize: 416, scoreThreshold: 0.5 },
+        { inputSize: 512, scoreThreshold: 0.35 },
+      ];
+      let detections: any[] | null = null;
+      let passName = passes[0].inputSize + "@" + passes[0].scoreThreshold;
+      for (const p of passes) {
+        const options = new faceapi.TinyFaceDetectorOptions(p);
+        // eslint-disable-next-line no-await-in-loop
+        const found = (await faceapi.detectAllFaces(batch, options)) as any[];
+        if (Array.isArray(found) && found.length > 0) {
+          detections = found;
+          passName = `${p.inputSize}@${p.scoreThreshold}`;
+          break;
+        }
+      }
+      if (!detections || detections.length === 0) {
+        if (mean < 45) {
+          return { ok: false, code: "too_dark", hint: "Photo is too dark — add light in front of the face." };
+        }
+        return { ok: false, code: "no_face", hint: "No face found — move closer, face the camera directly." };
+      }
+      if (detections.length > 1) {
+        return { ok: false, code: "multiple_faces", hint: "More than one face — only you should be in frame." };
+      }
+      const box = detections[0]?.box ?? detections[0]?.detection?.box;
+      const boxW = typeof box?.width === "number" ? box.width : 0;
+      if (boxW > 0 && boxW < 60) {
+        return { ok: false, code: "too_small", hint: "Face is too small in frame — move closer to the camera." };
+      }
+      const single = await faceapi
+        .detectSingleFace(batch, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.35 }))
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+      const descriptor = single?.descriptor ? Array.from(single.descriptor as ArrayLike<number>) : null;
+      if (!descriptor || descriptor.length !== 128 || !descriptor.every((n: number) => Number.isFinite(n))) {
+        return { ok: false, code: "descriptor_failed", hint: "Face found but unreadable — hold still and retake." };
+      }
+      return { ok: true, descriptor, quality, pass: passName };
+    } finally {
+      batch.dispose();
+    }
+  } finally {
+    imgTensor.dispose();
+  }
+}
+
 /**
  * Detect a single face in a JPEG buffer and return its 128-d descriptor.
  * Never throws: returns null when there is no face, multiple faces, bad
@@ -222,35 +393,8 @@ export function cosine(a: number[], b: number[]): number {
  */
 export async function describeFace(jpegBuffer: Buffer | Uint8Array): Promise<number[] | null> {
   try {
-    if (!jpegBuffer || jpegBuffer.length === 0) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const faceapi = (await loadFaceBackend()) as any;
-    const bytes = jpegBuffer instanceof Uint8Array ? jpegBuffer : new Uint8Array(jpegBuffer);
-    const image = decodeJpeg(Buffer.from(bytes), { useTArray: true, formatAsRGBA: true });
-    if (!image.width || !image.height || !image.data?.length) return null;
-    const rgba = faceapi.tf.tensor3d(image.data, [image.height, image.width, 4], "int32");
-    const imgTensor = faceapi.tf.slice(rgba, [0, 0, 0], [image.height, image.width, 3]) as { dispose(): void };
-    rgba.dispose();
-    try {
-      const batch = faceapi.tf.tidy(() =>
-        faceapi.tf.cast(faceapi.tf.expandDims(imgTensor, 0), "float32"),
-      ) as { dispose(): void };
-      try {
-        const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
-        const result = (await faceapi
-          .detectSingleFace(batch, options)
-          .withFaceLandmarks()
-          .withFaceDescriptor()) as { descriptor?: ArrayLike<number> } | null;
-        if (!result?.descriptor) return null;
-        const descriptor = Array.from(result.descriptor);
-        if (descriptor.length !== 128 || !descriptor.every((n) => Number.isFinite(n))) return null;
-        return descriptor;
-      } finally {
-        batch.dispose();
-      }
-    } finally {
-      imgTensor.dispose();
-    }
+    const result = await describeFaceDetailed(jpegBuffer);
+    return result.ok ? result.descriptor : null;
   } catch {
     return null;
   }

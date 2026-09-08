@@ -95,6 +95,21 @@ export function EnrollPanel({
 
   const submit = async () => {
     if (!complete || !consent || saving) return;
+    // Worst-case guard: a near-black/empty frame (lens covered, capture fired
+    // before the sensor adjusted) can never yield a face — fail fast with a
+    // clear message instead of a round-trip and a cryptic server error.
+    const MIN_PHOTO_BYTES = 6 * 1024;
+    const badIndex = photos.findIndex((p) => {
+      if (!p) return false;
+      const comma = p.indexOf(",");
+      const approx = comma === -1 ? 0 : Math.floor(((p.length - comma - 1) * 3) / 4);
+      return approx < MIN_PHOTO_BYTES;
+    });
+    if (badIndex !== -1) {
+      toast("error", `Photo ${badIndex + 1} looks blank (lens covered or too dark). Retake it with light on your face.`);
+      setStep(badIndex);
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/face/enrollments", {
@@ -104,6 +119,12 @@ export function EnrollPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // 503 = server face backend down: retries won't help, say so plainly
+        // and keep the captured photos so nothing is lost.
+        if (res.status === 503) {
+          toast("error", "Face service is temporarily unavailable. Your photos are kept — try saving again later.");
+          return;
+        }
         toast("error", typeof data.error === "string" ? data.error : "Failed to save enrollment.");
         return;
       }
@@ -234,6 +255,16 @@ export function EnrollPanel({
               </li>
             ))}
           </ol>
+
+          <div className="rounded-xl border border-edge bg-tint p-4 text-[12.5px] leading-relaxed text-muted-foreground">
+            <p className="font-medium text-foreground">If a photo keeps getting rejected:</p>
+            <ul className="mt-1.5 list-disc space-y-1 pl-5">
+              <li>Face a window or tubelight — light must fall <span className="font-medium">on your face</span>, not behind you.</li>
+              <li>Hold the phone at arm&apos;s length, face filling half the frame; look straight into the camera.</li>
+              <li>Remove sunglasses/mask, tie hair back from the forehead, wipe a foggy front camera.</li>
+              <li>Keep only yourself in frame and hold still for a second after tapping Capture.</li>
+            </ul>
+          </div>
 
           <div className="flex items-start gap-3 rounded-xl border border-edge bg-tint p-4">
             <input
