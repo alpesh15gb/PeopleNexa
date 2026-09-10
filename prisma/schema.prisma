@@ -684,7 +684,6 @@ model EmployeeLoan {
   updatedAt        DateTime @updatedAt
 
   @@index([tenantId, employeeId])
-  @@unique([tenantId, employeeId, name])
 }
 
 // ─── Asset tracking ────────────────────────────────────────────────────────
@@ -971,6 +970,7 @@ model OnboardingTask {
   createdAt   DateTime  @default(now())
 
   @@index([tenantId, employeeId])
+  @@unique([tenantId, employeeId, name])
 }
 
 // ─── Exit management (resignation → full & final) ──────────────────────────
