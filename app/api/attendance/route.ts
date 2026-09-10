@@ -9,11 +9,12 @@ const MANUAL_STATUSES = ["present", "late", "permission", "absent", "half_day"];
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let branchId: string | null = null;
+  let locationId: string | null = null;
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -23,6 +24,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
     }
     branchId = manager.branchId;
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    locationId = manager.locationId;
   }
 
   // Lazy finalization (Phase 4): once a day's window closes + grace, re-derive
@@ -36,7 +42,7 @@ export async function GET(req: NextRequest) {
 
   const [employees, records, leaves, holidays] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) },
+       where: { tenantId: session.tenantId, status: "active", ...(locationId ? { branch: { locationId } } : {}), ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
@@ -48,7 +54,7 @@ export async function GET(req: NextRequest) {
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : {}) },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}) },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch: { select: { name: true } },
@@ -60,7 +66,7 @@ export async function GET(req: NextRequest) {
         status: "approved",
         fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
-        ...(branchId ? { employee: { branchId } } : {}),
+        ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}),
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
@@ -101,7 +107,7 @@ export async function GET(req: NextRequest) {
  * (e.g. marking an absent day that has no derived record yet). */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -134,7 +140,7 @@ export async function POST(req: NextRequest) {
 
   const employee = await prisma.employee.findFirst({
     where: { id: employeeId, tenantId: session.tenantId },
-    select: { id: true, status: true, joiningDate: true, branchId: true, shiftId: true },
+    select: { id: true, status: true, joiningDate: true, branchId: true, shiftId: true, branch: { select: { locationId: true } } },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
   if (session.role === "branch_manager") {
@@ -145,6 +151,10 @@ export async function POST(req: NextRequest) {
     if (!manager?.branchId || employee.branchId !== manager.branchId) {
       return NextResponse.json({ error: "Employee not found." }, { status: 404 });
     }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    if (!manager?.locationId || employee.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
   }
   if (employee.status !== "active") {
     return NextResponse.json({ error: "Only active employees can be marked." }, { status: 403 });

@@ -459,7 +459,7 @@ export function EmployeesTable({
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}
         title="Bulk import employees"
-        description="Upload a CSV file (max 500 rows). Passwords are auto-generated."
+        description="Upload a CSV file (max 500 rows). The template includes identity, assignment, pay, bank, statutory, and salary-component fields. Passwords are auto-generated."
       >
         <div className="space-y-4">
           <a
@@ -469,6 +469,9 @@ export function EmployeesTable({
           >
             <Download className="h-3.5 w-3.5" /> Download CSV template
           </a>
+          <p className="rounded-xl border border-edge bg-tint px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
+            Required: <span className="font-medium text-foreground">firstName, email</span>. Use workspace IDs for branchId, departmentId, shiftId, and managerId. Do not include passwords in CSV files.
+          </p>
           <Field label="CSV file (.csv)">
             <Input
               type="file"

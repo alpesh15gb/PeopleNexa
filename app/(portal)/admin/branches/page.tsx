@@ -30,7 +30,7 @@ export default async function AdminBranchesPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Branches"
-        description="Locations with GPS geofencing for verified clock-ins"
+        description="Manage office branches and their GPS geofences. Assign branches to a location from Locations."
       />
       <Card>
         <CardContent className="p-0">

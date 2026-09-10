@@ -37,7 +37,7 @@ export default async function AdminReportsPage({
 
   const branches = await prisma.branch.findMany({
     where: { tenantId: session.tenantId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, locationId: true },
     orderBy: { name: "asc" },
   });
 
@@ -46,19 +46,20 @@ export default async function AdminReportsPage({
       where: { tenantId: session.tenantId },
       select: { id: true, name: true },
     }),
-    session.role === "branch_manager"
+    session.role === "branch_manager" || session.role === "location_manager"
       ? prisma.employee.findFirst({
           where: { id: session.sub, tenantId: session.tenantId },
-          select: { branchId: true },
+          select: { branchId: true, locationId: true },
         })
       : Promise.resolve(null),
   ]);
   const forcedBranchId = session.role === "branch_manager" ? (manager?.branchId ?? null) : null;
-  const visibleBranches = forcedBranchId ? branches.filter((b) => b.id === forcedBranchId) : branches;
+  const forcedLocationId = session.role === "location_manager" ? (manager?.locationId ?? null) : null;
+  const visibleBranches = forcedBranchId ? branches.filter((b) => b.id === forcedBranchId) : forcedLocationId ? branches.filter((b) => b.locationId === forcedLocationId) : branches;
   const todayIST = istDateKey(new Date());
   const date = params.date || todayIST;
   const month = params.month || monthKeyIST(new Date());
-  const deviceBranchId = forcedBranchId ?? params.branchId ?? "";
+  const deviceBranchId = forcedBranchId ?? (forcedLocationId && !visibleBranches.some((branch) => branch.id === params.branchId) ? "" : params.branchId ?? "");
   const deviceDepartmentId = params.departmentId ?? "";
   const kind = DEVICE_KIND_BY_TYPE[type];
   const qs = new URLSearchParams({ kind });

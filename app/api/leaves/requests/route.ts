@@ -31,6 +31,16 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json({ requests });
   }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    const requests = await prisma.leaveRequest.findMany({
+      where: { tenantId: session.tenantId, employee: { branch: { locationId: manager.locationId } }, ...(status ? { status } : {}) },
+      include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } }, leaveType: true },
+      orderBy: { appliedAt: "desc" },
+    });
+    return NextResponse.json({ requests });
+  }
   const requests = await prisma.leaveRequest.findMany({
     where: {
       tenantId: session.tenantId,
@@ -65,10 +75,10 @@ export async function POST(req: NextRequest) {
     // Admins may log leave on behalf of an employee; employees apply for themselves.
     let employeeId = session.sub;
     let onBehalf = false;
-    if (body.employeeId && (session.role === "admin" || session.role === "branch_manager")) {
+    if (body.employeeId && (session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager")) {
       const target = await prisma.employee.findFirst({
         where: { id: String(body.employeeId), tenantId: session.tenantId },
-        select: { id: true, branchId: true },
+        select: { id: true, branchId: true, branch: { select: { locationId: true } } },
       });
       if (!target) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
       if (session.role === "branch_manager") {
@@ -79,6 +89,10 @@ export async function POST(req: NextRequest) {
         if (!manager?.branchId || target.branchId !== manager.branchId) {
           return NextResponse.json({ error: "Employee not found in your branch." }, { status: 400 });
         }
+      }
+      if (session.role === "location_manager") {
+        const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+        if (!manager?.locationId || target.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "Employee not found in your location." }, { status: 400 });
       }
       employeeId = target.id;
       onBehalf = true;

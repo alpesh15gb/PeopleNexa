@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale, RefreshCw } from "lucide-react";
+import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale, RefreshCw, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -120,12 +120,20 @@ export function PayrollPanel({
   const [bulkRef, setBulkRef] = useState("");
   const [markExportedOpen, setMarkExportedOpen] = useState(false);
   const [regenTarget, setRegenTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
+  const [selectedPayslips, setSelectedPayslips] = useState<Set<string>>(new Set());
 
   const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
   const draftSlips = rows.filter((r) => r.payslip && r.payslip.status !== "paid");
   const exportedDraftSlips = rows.filter(
     (r) => r.payslip && r.payslip.status !== "paid" && r.employee.accountNumber && r.employee.ifscCode
   );
+  const generatedRows = rows.filter((row) => row.payslip);
+
+  function downloadPayslips(employeeIds: string[]) {
+    if (!employeeIds.length) return;
+    const query = new URLSearchParams({ month, ...(employeeIds.length === generatedRows.length ? {} : { employeeIds: employeeIds.join(",") }) });
+    window.location.href = `/api/payroll/payslips?${query}`;
+  }
 
   async function generate() {
     setBusy("generate");
@@ -389,9 +397,17 @@ export function PayrollPanel({
           <Button size="sm" variant="outline" loading={busy === "compliance"} onClick={exportCompliance} disabled={generated === 0}>
             <FileSpreadsheet aria-hidden="true" className="h-3.5 w-3.5" /> Compliance
           </Button>
-          <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
+           <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
             <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Tally
-          </Button>
+           </Button>
+           <Button size="sm" variant="outline" onClick={() => downloadPayslips(generatedRows.map((row) => row.employee.id))} disabled={generated === 0}>
+             <FileArchive aria-hidden="true" className="h-3.5 w-3.5" /> Download all
+           </Button>
+           {selectedPayslips.size > 0 && (
+             <Button size="sm" variant="outline" onClick={() => downloadPayslips([...selectedPayslips])}>
+               <Download aria-hidden="true" className="h-3.5 w-3.5" /> Download selected ({selectedPayslips.size})
+             </Button>
+           )}
           {draftSlips.length > 0 && (
             <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)} disabled={generated === 0 || busy !== null}>
               <Banknote aria-hidden="true" className="h-3.5 w-3.5" /> Mark month paid ({draftSlips.length})
@@ -422,6 +438,7 @@ export function PayrollPanel({
       <Table>
         <THead>
           <TR>
+            <TH className="w-10"><input type="checkbox" aria-label="Select all generated payslips" checked={generatedRows.length > 0 && selectedPayslips.size === generatedRows.length} onChange={(e) => setSelectedPayslips(e.target.checked ? new Set(generatedRows.map((row) => row.employee.id)) : new Set())} /></TH>
             <TH>Employee</TH>
             <TH className="hidden md:table-cell">Department</TH>
             <TH className="text-right">Base salary</TH>
@@ -433,6 +450,7 @@ export function PayrollPanel({
         <TBody>
           {rows.map(({ employee, payslip }) => (
             <TR key={employee.id}>
+              <TD><input type="checkbox" aria-label={`Select payslip for ${employee.firstName} ${employee.lastName}`} disabled={!payslip} checked={selectedPayslips.has(employee.id)} onChange={(e) => setSelectedPayslips((current) => { const next = new Set(current); if (e.target.checked) next.add(employee.id); else next.delete(employee.id); return next; })} /></TD>
               <TD>
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
@@ -652,6 +670,11 @@ function PayslipModal({
         <div className="ml-auto">
           <StatusPill status={p.status} />
         </div>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/payroll/payslips?${new URLSearchParams({ month: p.month, employeeIds: emp.id })}`; }}>
+          <Download className="h-3.5 w-3.5" /> Download PDF
+        </Button>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-2 text-[11.5px] text-muted-foreground">

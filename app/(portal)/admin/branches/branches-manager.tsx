@@ -162,7 +162,6 @@ export function BranchesManager({
       name: form.get("name"),
       code: form.get("code"),
       address: form.get("address"),
-      locationId: form.get("locationId"),
       latitude: form.get("latitude"),
       longitude: form.get("longitude"),
       geofenceRadius: form.get("geofenceRadius"),
@@ -371,41 +370,6 @@ export function BranchesManager({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-edge px-5 py-3">
-        <span className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Locations</span>
-        {locations.map((l) => (
-          <span key={l.id} className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-tint px-2.5 py-1 text-[12px] font-medium">
-            {l.name} <span className="text-muted-foreground">({l.code})</span>
-            <button
-              type="button"
-              onClick={() => deleteLocation(l.id)}
-              disabled={locBusy}
-              aria-label={`Delete location ${l.name}`}
-              className="cursor-pointer text-muted-foreground transition-colors hover:text-rose-400 disabled:opacity-50"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </span>
-        ))}
-        <input
-          value={locName}
-          onChange={(e) => setLocName(e.target.value)}
-          placeholder="New location, e.g. Hyderabad"
-          aria-label="New location name"
-          className="h-9 min-h-[36px] w-44 rounded-lg border border-input bg-tint px-3 text-[12.5px] outline-none focus:border-primary/60"
-        />
-        <input
-          value={locCode}
-          onChange={(e) => setLocCode(e.target.value)}
-          placeholder="Code, e.g. HYD"
-          aria-label="New location code"
-          className="h-9 min-h-[36px] w-28 rounded-lg border border-input bg-tint px-3 text-[12.5px] uppercase outline-none focus:border-primary/60"
-        />
-        <Button size="sm" variant="outline" onClick={addLocation} loading={locBusy}>
-          <Plus className="h-3.5 w-3.5" /> Add
-        </Button>
-      </div>
-
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
         {sortedBranches.map((b) => (
           <div key={b.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
@@ -487,16 +451,6 @@ export function BranchesManager({
             </Field>
             <Field label="Address" className="sm:col-span-2">
               <Input name="address" defaultValue={editing && typeof editing === "object" ? editing.address ?? "" : ""} />
-            </Field>
-            <Field label="Location (city)">
-              <Select name="locationId" defaultValue={editing && typeof editing === "object" ? (editing.locationId ?? "") : ""}>
-                <option value="">No location</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name} ({l.code})
-                  </option>
-                ))}
-              </Select>
             </Field>
             <Field label="Latitude">
               <Input name="latitude" type="number" step="any" value={geoLat} onChange={(e) => setGeoLat(e.target.value)} />

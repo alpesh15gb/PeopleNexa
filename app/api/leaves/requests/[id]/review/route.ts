@@ -9,7 +9,7 @@ import { appendAudit } from "@/lib/audit";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -36,6 +36,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (!target || target.branchId !== manager.branchId) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    const target = await prisma.employee.findFirst({ where: { id: request.employeeId, tenantId: session.tenantId }, select: { branch: { select: { locationId: true } } } });
+    if (!manager?.locationId || target?.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (request.status !== "pending") {
     return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });

@@ -38,13 +38,14 @@ function monthRange(month: string): { start: Date; end: Date } {
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   // Branch scope: branch_manager is pinned to their own branch (same pattern
   // as the attendance route); admin/supervisor may filter via branchId.
   let scopedBranchId: string | null = null;
+  let scopedLocationId: string | null = null;
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -54,6 +55,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
     }
     scopedBranchId = manager.branchId;
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    scopedLocationId = manager.locationId;
   }
 
   const params = req.nextUrl.searchParams;
@@ -69,6 +75,10 @@ export async function GET(req: NextRequest) {
   const branchParam = params.get("branchId") || undefined;
   if (session.role === "branch_manager" && branchParam && branchParam !== scopedBranchId) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  if (scopedLocationId && branchParam) {
+    const inLocation = await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, locationId: scopedLocationId }, select: { id: true } });
+    if (!inLocation) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const branchId = scopedBranchId ?? branchParam ?? undefined;
   const departmentId = params.get("departmentId") || undefined;
@@ -109,6 +119,7 @@ export async function GET(req: NextRequest) {
   const employeeWhere = {
     tenantId: session.tenantId,
     loginOnly: false,
+    ...(scopedLocationId ? { branch: { locationId: scopedLocationId } } : {}),
     ...(branchId ? { branchId } : {}),
     ...(departmentId ? { departmentId } : {}),
     AND: [

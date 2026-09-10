@@ -73,6 +73,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding", section: "People & time" },
   { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit", section: "People & time" },
   { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches", section: "People & time" },
+  { href: "/admin/locations", label: "Locations", icon: <Building2 className="h-4 w-4" />, module: "branches", section: "People & time" },
   { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves", section: "Time off" },
   { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays", section: "Time off" },
   { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets", section: "Operations" },
@@ -403,7 +404,10 @@ export function Shell({
     { href: "/employee", label: "My Punch", icon: <Fingerprint className="h-4 w-4" />, module: "attendance", section: "Self service", exact: true },
     { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, section: "Self service" },
   ];
-  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
+  const locationManagerNav: NavItem[] = [
+    ...adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/leaves" || n.href === "/admin/reports"),
+  ];
+  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "location_manager" ? locationManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
 
@@ -441,7 +445,7 @@ export function Shell({
           <p className="mt-1 truncate text-[13px] font-semibold text-foreground">{companyName}</p>
         </div>
         <NavLinks items={nav} onNavigate={() => setOpen(false)} />
-        {(role === "admin" || role === "supervisor") && locationTree.length > 0 && (
+        {(role === "admin" || role === "supervisor" || role === "location_manager") && locationTree.length > 0 && (
           <LocationTreeNav tree={locationTree} onNavigate={() => setOpen(false)} />
         )}
       </div>

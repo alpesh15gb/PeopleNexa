@@ -36,6 +36,7 @@ function salaryStructureError(v: unknown): string | null {
   return null;
 }
 const TEMPLATE_HEADERS = [
+  "employeeNumber",
   "firstName",
   "lastName",
   "email",
@@ -47,6 +48,19 @@ const TEMPLATE_HEADERS = [
   "departmentId",
   "shiftId",
   "payMode",
+  "workBasisRate",
+  "managerId",
+  "status",
+  "bankName",
+  "accountNumber",
+  "ifscCode",
+  "pan",
+  "uan",
+  "basicSalary",
+  "hra",
+  "conveyance",
+  "medical",
+  "otherAllowance",
 ] as const;
 
 function genPassword(): string {
@@ -74,6 +88,7 @@ export async function GET() {
 }
 
 interface BulkRow {
+  employeeNumber?: unknown;
   firstName?: unknown;
   lastName?: unknown;
   email?: unknown;
@@ -85,6 +100,19 @@ interface BulkRow {
   departmentId?: unknown;
   shiftId?: unknown;
   payMode?: unknown;
+  workBasisRate?: unknown;
+  managerId?: unknown;
+  status?: unknown;
+  bankName?: unknown;
+  accountNumber?: unknown;
+  ifscCode?: unknown;
+  pan?: unknown;
+  uan?: unknown;
+  basicSalary?: unknown;
+  hra?: unknown;
+  conveyance?: unknown;
+  medical?: unknown;
+  otherAllowance?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -159,6 +187,8 @@ export async function POST(req: NextRequest) {
       ) {
         throw new Error("Salary must be a number between 0 and 10,00,00,000.");
       }
+      const workBasisRate = raw?.workBasisRate != null && raw.workBasisRate !== "" ? Number(raw.workBasisRate) : null;
+      if (workBasisRate != null && (!Number.isFinite(workBasisRate) || workBasisRate < 0)) throw new Error("Work-basis rate must be a non-negative number.");
 
       let joiningDate: Date | null = null;
       if (raw?.joiningDate) {
@@ -178,6 +208,8 @@ export async function POST(req: NextRequest) {
       }
 
       const extra = raw as Record<string, unknown>;
+      const bankName = extra.bankName != null && String(extra.bankName).trim() !== "" ? String(extra.bankName).trim() : null;
+      if (bankName && bankName.length > 100) throw new Error("Bank name must be at most 100 characters.");
       const bulkPan = extra.pan != null && String(extra.pan).trim() !== "" ? String(extra.pan).trim().toUpperCase() : null;
       if (bulkPan != null && !PAN_RE.test(bulkPan)) throw new Error("Enter a valid PAN (e.g. ABCDE1234F).");
       const bulkIfsc = extra.ifscCode != null && String(extra.ifscCode).trim() !== "" ? String(extra.ifscCode).trim().toUpperCase() : null;
@@ -188,12 +220,21 @@ export async function POST(req: NextRequest) {
       if (bulkAccount != null && !ACCOUNT_RE.test(bulkAccount)) throw new Error("Account number must be 6–20 digits.");
       const bulkSsErr = salaryStructureError(extra.salaryStructure);
       if (bulkSsErr) throw new Error(bulkSsErr);
+      const componentFields = [["basic", raw?.basicSalary], ["hra", raw?.hra], ["conveyance", raw?.conveyance], ["medical", raw?.medical], ["other", raw?.otherAllowance]] as const;
+      const salaryStructure: Record<string, number> = {};
+      for (const [key, value] of componentFields) {
+        if (value == null || value === "") continue;
+        const amount = Number(value);
+        if (!Number.isFinite(amount) || amount < 0) throw new Error(`${key} salary component must be a non-negative number.`);
+        salaryStructure[key] = amount;
+      }
 
       const branchId = raw?.branchId ? String(raw.branchId).trim() : "";
       const departmentId = raw?.departmentId ? String(raw.departmentId).trim() : "";
       const shiftId = raw?.shiftId ? String(raw.shiftId).trim() : "";
+      const managerId = raw?.managerId ? String(raw.managerId).trim() : "";
 
-      const [branch, department, shift] = await Promise.all([
+      const [branch, department, shift, manager] = await Promise.all([
         branchId
           ? prisma.branch.findFirst({
               where: { id: branchId, tenantId: session.tenantId },
@@ -212,11 +253,13 @@ export async function POST(req: NextRequest) {
               select: { id: true },
             })
           : null,
+        managerId ? prisma.employee.findFirst({ where: { id: managerId, tenantId: session.tenantId }, select: { id: true } }) : null,
       ]);
       if (branchId && !branch) throw new Error("Branch not found in this workspace.");
       if (departmentId && !department)
         throw new Error("Department not found in this workspace.");
       if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
+      if (managerId && !manager) throw new Error("Manager not found in this workspace.");
 
       const exists = await prisma.employee.findFirst({
         where: { tenantId: session.tenantId, email },
@@ -228,11 +271,15 @@ export async function POST(req: NextRequest) {
       if (!PAY_MODES.has(payMode)) {
         throw new Error("Pay mode must be one of monthly, daily, weekly, hourly, work_basis.");
       }
+      const status = raw?.status ? String(raw.status).trim().toLowerCase() : "active";
+      if (status !== "active" && status !== "inactive") throw new Error("Status must be active or inactive.");
+      const employeeNumber = raw?.employeeNumber ? String(raw.employeeNumber).trim() : `EMP-${String(count + i + 1).padStart(3, "0")}`;
+      if (!employeeNumber || employeeNumber.length > 100) throw new Error("Employee number must be 1–100 characters.");
 
       await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
-          employeeNumber: `EMP-${String(count + i + 1).padStart(3, "0")}`,
+          employeeNumber,
           firstName,
           lastName: bulkLastName,
           email,
@@ -246,14 +293,15 @@ export async function POST(req: NextRequest) {
           departmentId: departmentId || null,
           shiftId: shiftId || null,
           payMode,
+          workBasisRate,
+          managerId: managerId || null,
+          status,
+          bankName,
           pan: bulkPan,
           uan: bulkUan,
           ifscCode: bulkIfsc,
           accountNumber: bulkAccount,
-          salaryStructure:
-            extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== ""
-              ? (extra.salaryStructure as Prisma.InputJsonValue)
-              : undefined,
+          salaryStructure: Object.keys(salaryStructure).length ? (salaryStructure as Prisma.InputJsonValue) : extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== "" ? (extra.salaryStructure as Prisma.InputJsonValue) : undefined,
         },
       });
       created++;

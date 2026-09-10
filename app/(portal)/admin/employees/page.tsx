@@ -18,23 +18,25 @@ export default async function AdminEmployeesPage({
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
+  const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
     ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
+  const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = isBranchManager
     ? (ownBranchId ? { id: ownBranchId, name: ownBranchName } : null)
     : branchParam
-      ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
 
   const [employees, branches, departments, shifts, tenant, totalCount] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, ...(branchId ? { branchId } : {}) },
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
@@ -62,7 +64,7 @@ export default async function AdminEmployeesPage({
       },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.branch.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
+    prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true } }),
     prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true, plan: true } }),

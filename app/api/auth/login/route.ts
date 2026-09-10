@@ -70,6 +70,9 @@ export async function POST(req: NextRequest) {
     if (employee.role === "branch_manager" && !employee.branchId) {
       return NextResponse.json({ success: false, error: "No branch assigned. Contact your admin." }, { status: 403 });
     }
+    if (employee.role === "location_manager" && !employee.locationId) {
+      return NextResponse.json({ success: false, error: "No location assigned. Contact your admin." }, { status: 403 });
+    }
 
     await prisma.employee.update({
       where: { id: employee.id },

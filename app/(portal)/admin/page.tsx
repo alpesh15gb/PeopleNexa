@@ -50,20 +50,23 @@ export default async function AdminDashboardPage({
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
+  const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
     ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
+  const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = isBranchManager
     ? (ownBranchId ? { id: ownBranchId, name: ownBranchName } : null)
-    : branchParam
-      ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true, name: true } })
+      : branchParam
+       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
-  const empScope = { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) };
+  const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
+  const empScope = { tenantId: session.tenantId, status: "active", ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
 
   const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches] = await Promise.all([
     prisma.employee.findMany({
@@ -73,7 +76,7 @@ export default async function AdminDashboardPage({
     prisma.attendance.findMany({
       where: branchId
         ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
-        : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) } },
+        : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
       include: {
         employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } },
       },
@@ -86,7 +89,7 @@ export default async function AdminDashboardPage({
     prisma.leaveRequest.findMany({
       where: branchId
         ? { tenantId: session.tenantId, status: "pending", employee: { branchId } }
-        : { tenantId: session.tenantId, status: "pending" },
+        : { tenantId: session.tenantId, status: "pending", ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
       include: { employee: { select: { firstName: true, lastName: true } }, leaveType: true },
       orderBy: { appliedAt: "desc" },
       take: 6,
@@ -94,18 +97,18 @@ export default async function AdminDashboardPage({
     prisma.leaveRequest.count({
       where: branchId
         ? { tenantId: session.tenantId, status: "pending", employee: { branchId } }
-        : { tenantId: session.tenantId, status: "pending" },
+        : { tenantId: session.tenantId, status: "pending", ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
     }),
-    prisma.branch.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
 
   // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
   // rows in code when filtered; global path keeps the cheap groupBy).
   type WeekRow = { date: Date; status: string; _count?: number };
   let weekRows: WeekRow[];
-  if (branchId) {
+  if (branchId || ownLocationId) {
     const rows = await prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: { branchId } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: branchId ? { branchId } : { branch: { locationId: ownLocationId! } } },
       select: { date: true, status: true },
     });
     weekRows = rows.map((r) => ({ date: r.date, status: r.status }));

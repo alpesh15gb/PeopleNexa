@@ -5,11 +5,13 @@ import { prisma } from "@/lib/prisma";
 /** GET — list locations with their branches (admin, supervisor, branch_manager). */
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const manager = session.role === "location_manager" ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }) : null;
+  if (session.role === "location_manager" && !manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const locations = await prisma.location.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...(manager?.locationId ? { id: manager.locationId } : {}) },
     include: {
       branches: {
         select: { id: true, name: true, code: true, _count: { select: { employees: true } } },

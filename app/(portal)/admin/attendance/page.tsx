@@ -24,17 +24,19 @@ export default async function AdminAttendancePage({
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
+  const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
     ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
+  const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = isBranchManager
     ? null
     : branchParam
-      ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId }, select: { id: true } })
+       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
 
@@ -43,7 +45,7 @@ export default async function AdminAttendancePage({
 
   const [employees, records, leaves, holidays, branches] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : {}) },
+       where: { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
@@ -55,7 +57,7 @@ export default async function AdminAttendancePage({
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
       include: { branch: { select: { name: true } } },
     }),
     prisma.leaveRequest.findMany({
@@ -64,12 +66,13 @@ export default async function AdminAttendancePage({
         status: "approved",
         fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
+        ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}),
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
     prisma.branch.findMany({
-      where: { tenantId: session.tenantId },
+       where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),

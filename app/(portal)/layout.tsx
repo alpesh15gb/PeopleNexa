@@ -32,9 +32,9 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   // Location → branch tree for the left pane (oversight roles only; one
   // small indexed query, skipped for employees and branch managers).
   const locationTree =
-    employee.role === "admin" || employee.role === "supervisor"
+    employee.role === "admin" || employee.role === "supervisor" || employee.role === "location_manager"
       ? await prisma.location.findMany({
-          where: { tenantId: session.tenantId },
+          where: { tenantId: session.tenantId, ...(employee.role === "location_manager" ? { id: employee.locationId ?? "__none__" } : {}) },
           select: {
             id: true,
             name: true,

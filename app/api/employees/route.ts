@@ -82,7 +82,7 @@ function p2002Targets(err: unknown): string[] {
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   if (session.role === "branch_manager") {
@@ -95,6 +95,16 @@ export async function GET() {
     }
     const employees = await prisma.employee.findMany({
       where: { tenantId: session.tenantId, branchId: manager.branchId },
+      select: safeSelect,
+      orderBy: { createdAt: "asc" },
+    });
+    return NextResponse.json({ employees });
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
+    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    const employees = await prisma.employee.findMany({
+      where: { tenantId: session.tenantId, branch: { locationId: manager.locationId } },
       select: safeSelect,
       orderBy: { createdAt: "asc" },
     });

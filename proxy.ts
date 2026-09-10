@@ -157,7 +157,7 @@ async function proxy(request: NextRequest) {
 
   if (pathname === "/login" || pathname === "/register") {
     return NextResponse.redirect(
-      new URL(role === "admin" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee", request.url)
+       new URL(role === "admin" || role === "location_manager" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee", request.url)
     );
   }
   // Supervisor is admin-lite for their scope: attendance + regularization only.
@@ -177,7 +177,11 @@ async function proxy(request: NextRequest) {
       return NextResponse.redirect(new URL("/admin/attendance", request.url));
     }
   }
-  if (isAdminRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager") {
+  if (role === "location_manager" && isAdminRoute) {
+    const allowed = pathname === "/admin" || pathname.startsWith("/admin/attendance") || pathname.startsWith("/admin/regularization") || pathname.startsWith("/admin/employees") || pathname.startsWith("/admin/leaves") || pathname.startsWith("/admin/reports");
+    if (!allowed) return NextResponse.redirect(new URL("/admin", request.url));
+  }
+  if (isAdminRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
 
@@ -191,7 +195,7 @@ async function proxy(request: NextRequest) {
     }
     const mod = moduleForPath(pathname);
     if (mod && !access.modules.has(mod)) {
-      const target = role === "admin" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee";
+       const target = role === "admin" || role === "location_manager" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee";
       return NextResponse.redirect(
         new URL(`${target}/module-unavailable?m=${encodeURIComponent(mod)}`, request.url)
       );
