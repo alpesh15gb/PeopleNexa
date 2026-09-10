@@ -684,6 +684,7 @@ model EmployeeLoan {
   updatedAt        DateTime @updatedAt
 
   @@index([tenantId, employeeId])
+  @@unique([tenantId, employeeId, name])
 }
 
 // ─── Asset tracking ────────────────────────────────────────────────────────

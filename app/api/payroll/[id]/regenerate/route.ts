@@ -8,6 +8,7 @@ import {
   fyFromMonth,
   getPayrollConfig,
   payrollEmployeeForMonth,
+  loanDeductionForMonth,
 } from "@/lib/payroll";
 import { appendAudit } from "@/lib/audit";
 
@@ -47,7 +48,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     { id: employee.id, shiftId: employee.shiftId, joiningDate: employee.joiningDate },
     existing.month
   );
-  const [adjustments, taxDecl] = await Promise.all([
+  const [loans, adjustments, taxDecl] = await Promise.all([
+    prisma.employeeLoan.findMany({
+      where: { tenantId: session.tenantId, employeeId: employee.id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true, amount: true },
+    }),
     prisma.payrollAdjustment.findMany({
       where: { tenantId: session.tenantId, employeeId: employee.id, month: existing.month },
       select: { id: true, type: true, label: true, amount: true },
@@ -60,8 +66,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const decl = (taxDecl?.sections ?? {}) as Record<string, number>;
   const investments = taxDecl?.status === "verified" ? Number(decl.total ?? 0) || 0 : 0;
 
-  // Preserve the already-applied loan deduction: re-deriving it from loans
-  // would see lastDeductedMonth >= month and return 0, wiping the deduction.
+  // Roll back the prior month's allocation in memory first. Regeneration can
+  // reduce the loan cap, so the old deduction must be returned before the new
+  // allocation is calculated and persisted in the same transaction.
+  let restoreRemaining = Math.max(0, Number(existing.loanDeduction));
+  const restoredLoans = loans.map((loan) => {
+    if (loan.lastDeductedMonth !== existing.month || restoreRemaining <= 0) return loan;
+    const restore = Math.min(
+      restoreRemaining,
+      loan.emiAmount > 0 ? loan.emiAmount : restoreRemaining
+    );
+    restoreRemaining -= restore;
+    return {
+      ...loan,
+      outstanding: loan.outstanding + restore,
+      lastDeductedMonth: null,
+      status: "active",
+    };
+  });
+  const restoredLoanTotal = Number(existing.loanDeduction) - restoreRemaining;
+  const { total: loanDeduction } = loanDeductionForMonth(restoredLoans, existing.month);
   const result = computePayroll(
     config,
     payrollEmployeeForMonth({
@@ -72,16 +96,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       joiningDate: employee.joiningDate,
     }, existing.month),
     summary,
-    existing.loanDeduction,
+    loanDeduction,
     existing.month,
     adjustments,
     investments
   );
 
   const iso = new Date().toISOString();
-  const updated = await prisma.payslip.update({
-    where: { id },
-    data: {
+  const updated = await prisma.$transaction(async (tx) => {
+    for (const loan of loans) {
+      const restored = restoredLoans.find((candidate) => candidate.id === loan.id);
+      if (restored && restored.outstanding !== loan.outstanding) {
+        await tx.employeeLoan.update({
+          where: { id: loan.id },
+          data: { outstanding: restored.outstanding, lastDeductedMonth: null, status: "active" },
+        });
+      }
+    }
+    const updated = await tx.payslip.update({
+      where: { id },
+      data: {
       baseSalary: result.baseSalary,
       basicSalary: result.basic,
       allowances: result.allowances,
@@ -110,8 +144,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       absentDays: result.absentDays,
       overtimeHours: result.overtimeHours,
       workedHours: result.workedHours,
-      note: existing.note ? `${existing.note} | regenerated ${iso}` : `regenerated ${iso}`,
-    },
+        note: existing.note ? `${existing.note} | regenerated ${iso}` : `regenerated ${iso}`,
+      },
+    });
+    const allocations = loanDeductionForMonth(restoredLoans, existing.month, result.loanDeduction).updates;
+    for (const loan of allocations) {
+      await tx.employeeLoan.update({
+        where: { id: loan.id },
+        data: { outstanding: loan.newOutstanding, lastDeductedMonth: loan.lastDeductedMonth, status: loan.close ? "closed" : "active" },
+      });
+    }
+    return updated;
   });
 
   await appendAudit({
@@ -121,7 +164,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     action: "payslip.regenerate",
     entity: "Payslip",
     entityId: id,
-    summary: `Regenerated ${existing.month} net ${Number(existing.netSalary)} → ${Number(updated.netSalary)}`,
+    summary: `Regenerated ${existing.month} net ${Number(existing.netSalary)} -> ${Number(updated.netSalary)}; loan restored ${restoredLoanTotal}`,
     before: { netSalary: Number(existing.netSalary) },
     after: { netSalary: Number(updated.netSalary) },
   });

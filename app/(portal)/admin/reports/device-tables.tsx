@@ -18,6 +18,12 @@ export function DeviceTables({
   apiUrl: string;
   xlsxUrl: string;
 }) {
+  function exportExcel() {
+    const search = document.querySelector<HTMLInputElement>('[aria-label="Search employees in this report"]')?.value.trim();
+    const url = new URL(xlsxUrl, window.location.origin);
+    if (search) url.searchParams.set("q", search);
+    window.location.href = url.toString();
+  }
   return (
     <div className="space-y-4">
       <style>{`@media print {
@@ -28,11 +34,11 @@ export function DeviceTables({
 }`}</style>
 
       <div className="no-print flex flex-wrap items-center gap-3">
-        <Button variant="outline" onClick={() => (window.location.href = xlsxUrl)}>
+        <Button variant="outline" onClick={exportExcel}>
           <Download className="h-4 w-4" /> Export Excel
         </Button>
         <Button variant="outline" onClick={() => window.print()}>
-          <Printer className="h-4 w-4" /> Print
+          <Printer className="h-4 w-4" /> {kind === "daily" ? "Print" : "Print current page"}
         </Button>
       </div>
 

@@ -46,6 +46,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
   const [addOpen, setAddOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const byEmployee = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -57,7 +58,9 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
   }, [tasks]);
 
   const totals = useMemo(() => {
-    const assigned = new Set(tasks.map((t) => t.employee.id)).size;
+    const grouped = new Map<string, Task[]>();
+    for (const task of tasks) grouped.set(task.employee.id, [...(grouped.get(task.employee.id) ?? []), task]);
+    const assigned = [...grouped.values()].filter((list) => list.length > 0 && list.every((task) => task.status === "done")).length;
     const done = tasks.filter((t) => t.status === "done").length;
     return { assigned, done, total: tasks.length };
   }, [tasks]);
@@ -96,7 +99,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">
-          {totals.assigned} employees onboarded · {totals.done}/{totals.total} tasks done
+           {totals.assigned} employees with checklists · {totals.done}/{totals.total} tasks done
         </p>
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> Add tasks
@@ -195,7 +198,8 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
               .split("\n")
               .map((s) => s.trim())
               .filter(Boolean);
-            try {
+             setSubmitting(true);
+             try {
               const res = await fetch("/api/onboarding", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -210,11 +214,11 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
                 toast("error", data.error ?? "Failed to add tasks");
                 return;
               }
-              toast("success", `${data.created} tasks added`);
+               toast("success", `${data.created} tasks added${data.skipped ? ` · ${data.skipped} already existed` : ""}`);
               setAddOpen(false);
               router.refresh();
-            } finally {
-              /* noop */
+             } finally {
+               setSubmitting(false);
             }
           }}
           className="space-y-4"
@@ -249,7 +253,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button type="submit">Add tasks</Button>
+             <Button type="submit" loading={submitting} disabled={submitting}>Add tasks</Button>
           </div>
         </form>
       </Modal>

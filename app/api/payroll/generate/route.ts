@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employees = await prisma.employee.findMany({
     where: { tenantId: session.tenantId, status: "active", loginOnly: false },
-    select: { id: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, phone: true },
+    select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, phone: true },
   });
 
   const withSalary = employees
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     employees.map((e) => [e.id, e.phone ?? null] as const)
   );
 
-  type GenResult = { employeeId: string; created: boolean; netSalary?: number; error?: string };
+  type GenResult = { employeeId: string; employeeName: string; created: boolean; netSalary?: number; error?: string };
   const results: GenResult[] = [];
 
   for (const emp of withSalary) {
@@ -52,9 +52,11 @@ export async function POST(req: NextRequest) {
       const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month);
       if (res.created) created++;
       totalLoanApplied += res.loanApplied ?? 0;
-      results.push({ employeeId: emp.id, created: res.created, ...(res.netSalary != null ? { netSalary: res.netSalary } : {}) });
-    } catch (e) {
-      results.push({ employeeId: emp.id, created: false, error: e instanceof Error ? e.message : "Failed to generate" });
+        const source = employees.find((candidate) => candidate.id === emp.id);
+        results.push({ employeeId: emp.id, employeeName: source ? `${source.firstName} ${source.lastName}`.trim() : emp.id, created: res.created, ...(res.netSalary != null ? { netSalary: res.netSalary } : {}) });
+      } catch (e) {
+      const source = employees.find((candidate) => candidate.id === emp.id);
+      results.push({ employeeId: emp.id, employeeName: source ? `${source.firstName} ${source.lastName}`.trim() : emp.id, created: false, error: e instanceof Error ? e.message : "Failed to generate" });
     }
   }
 

@@ -65,8 +65,15 @@ export async function POST(req: NextRequest) {
       dueBy = fromDateKey(String(body.dueBy));
       if (Number.isNaN(dueBy.getTime())) return NextResponse.json({ error: "Invalid due date." }, { status: 400 });
     }
+    const existing = await prisma.onboardingTask.findMany({
+      where: { tenantId: session.tenantId, employeeId, name: { in: names } },
+      select: { name: true },
+    });
+    const existingNames = new Set(existing.map((task) => task.name));
+    const newNames = names.filter((name) => !existingNames.has(name));
+    if (newNames.length === 0) return NextResponse.json({ success: true, created: 0, skipped: names.length });
     const created = await prisma.onboardingTask.createMany({
-      data: names.map((name) => ({
+      data: newNames.map((name) => ({
         tenantId: session.tenantId,
         employeeId,
         name,
@@ -74,8 +81,9 @@ export async function POST(req: NextRequest) {
         dueBy,
         createdBy: session.sub,
       })),
+      skipDuplicates: true,
     });
-    return NextResponse.json({ success: true, created: created.count });
+    return NextResponse.json({ success: true, created: created.count, skipped: names.length - created.count });
   } catch {
     return NextResponse.json({ error: "Failed to create tasks." }, { status: 500 });
   }

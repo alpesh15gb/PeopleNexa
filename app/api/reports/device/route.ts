@@ -108,19 +108,26 @@ export async function GET(req: NextRequest) {
 
   const employeeWhere = {
     tenantId: session.tenantId,
-    status: "active",
     loginOnly: false,
     ...(branchId ? { branchId } : {}),
     ...(departmentId ? { departmentId } : {}),
-    ...(q
-      ? {
-          OR: [
-            { employeeNumber: { contains: q, mode: "insensitive" as const } },
-            { firstName: { contains: q, mode: "insensitive" as const } },
-            { lastName: { contains: q, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
+    AND: [
+      {
+        OR: [
+          { status: "active" },
+          { attendance: { some: { tenantId: session.tenantId, date: { gte: rangeStart, lt: rangeEnd } } } },
+        ],
+      },
+      ...(q
+        ? [{
+            OR: [
+              { employeeNumber: { contains: q, mode: "insensitive" as const } },
+              { firstName: { contains: q, mode: "insensitive" as const } },
+              { lastName: { contains: q, mode: "insensitive" as const } },
+            ],
+          }]
+        : []),
+    ],
   };
 
   const [total, tenant, branch] = await Promise.all([

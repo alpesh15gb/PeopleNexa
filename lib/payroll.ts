@@ -120,7 +120,10 @@ export async function attendanceSummary(
       where: { tenantId, employeeId: employee.id, status: "approved", fromDate: { lt: end }, toDate: { gte: start } },
       select: { fromDate: true, toDate: true },
     }),
-    prisma.holiday.findMany({ where: { tenantId, date: { gte: start, lt: end } }, select: { date: true } }),
+    prisma.holiday.findMany({
+      where: { tenantId, OR: [{ date: { gte: start, lt: end } }, { isRecurring: true }] },
+      select: { date: true, isRecurring: true },
+    }),
     employee.shiftId ? prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null,
     prisma.rosterAssignment.findMany({
       where: { tenantId, employeeId: employee.id, date: { gte: start, lt: end } },
@@ -130,6 +133,9 @@ export async function attendanceSummary(
 
   const recordByDay = new Map(records.map((r) => [istDayStartKey(r.date), r]));
   const holidaySet = new Set(holidays.map((h) => istDayStartKey(h.date)));
+  const recurringHolidaySet = new Set(
+    holidays.filter((h) => h.isRecurring).map((h) => istDayStartKey(h.date).slice(5))
+  );
 
   const summary: AttendanceSummary = {
     presentDays: 0,
@@ -171,7 +177,7 @@ export async function attendanceSummary(
       accumulateHours(key, recordByDay.get(key));
       continue; // Sunday in the IST wall clock
     }
-    if (holidaySet.has(key)) {
+    if (holidaySet.has(key) || recurringHolidaySet.has(key.slice(5))) {
       accumulateHours(key, recordByDay.get(key));
       continue;
     }
@@ -541,7 +547,9 @@ export function computePayroll(
   // - monthly: (basic/26/8) × multiplier with divisor frozen at 26.
   let overtimePay: number;
   if (mode === "hourly") {
-    overtimePay = round2(rate * config.otMultiplier * summary.overtimeHours);
+    // Worked hours already include overtime in the hourly base. Pay only the
+    // premium here, otherwise overtime hours are paid twice.
+    overtimePay = round2(rate * Math.max(config.otMultiplier - 1, 0) * summary.overtimeHours);
   } else if (mode === "daily" || mode === "work_basis") {
     const otRate = (rate / 8) * config.otMultiplier;
     overtimePay = round2(summary.overtimeHours * otRate);
@@ -567,9 +575,10 @@ export function computePayroll(
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   // For daily/hourly/work-basis pay, `base` is already pro-rated by attendance —
   // applying an extra absent deduction would deduct twice.
+  const unpaidDayFractions = summary.absentDays + summary.halfDays * 0.5;
   const absentDeduction =
     config.deductAbsentDays && mode === "monthly" && divisor > 0
-      ? round2((base / divisor) * summary.absentDays)
+      ? round2((base / divisor) * unpaidDayFractions)
       : 0;
 
   // Cap loan deduction so net can never go negative because of loans alone.

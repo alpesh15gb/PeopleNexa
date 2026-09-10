@@ -73,7 +73,15 @@ export default async function AdminReportsPage({
       <PageHeader title="Reports" description="Attendance reports with Excel and print" />
       <Card>
         <CardContent className="p-5">
-          <ReportControls type={type} departments={departments} branches={visibleBranches} />
+          <ReportControls
+            type={type}
+            departments={departments}
+            branches={visibleBranches}
+            effectiveDate={date}
+            effectiveMonth={month}
+            effectiveBranchId={deviceBranchId}
+            effectiveDepartmentId={deviceDepartmentId}
+          />
         </CardContent>
       </Card>
       {/* key remounts per URL: without it a kind switch renders one frame with

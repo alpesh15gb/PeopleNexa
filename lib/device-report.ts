@@ -288,7 +288,7 @@ export function buildDeviceDaily(args: {
     const record = byEmployee.get(emp.id);
     const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${day}`));
     let status = "A";
-    if (record) status = record.status === "half_day" ? "½P" : "P";
+    if (record && PRESENT_STATUSES.has(record.status)) status = record.status === "half_day" ? "½P" : "P";
     else if (leaves.has(emp.id)) status = "L";
     const { earlyMinutes: _e, durationMinutes: _d, ...rest } = cells;
     return {

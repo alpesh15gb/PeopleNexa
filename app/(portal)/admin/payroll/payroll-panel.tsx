@@ -140,7 +140,10 @@ export function PayrollPanel({
         toast("error", data.error ?? "Failed to generate payslips");
         return;
       }
-      toast("success", `Generated ${data.created} payslips for ${month}${data.loanApplied ? ` · ${formatMoney(data.loanApplied)} deducted for loans` : ""}`);
+       const totals = data.totals ?? { created: data.created ?? 0, skipped: data.skipped ?? 0, failed: 0 };
+       const detail = `${totals.created} created · ${totals.skipped} skipped · ${totals.failed} failed`;
+       const failedNames = (data.results ?? []).filter((result: { error?: string }) => result.error).slice(0, 3).map((result: { employeeName?: string; error?: string }) => `${result.employeeName ?? "Employee"}: ${result.error}`).join("; ");
+       toast(totals.failed > 0 ? "error" : "success", `Payroll ${month}: ${detail}${failedNames ? ` · ${failedNames}` : ""}${data.loanApplied ? ` · ${formatMoney(data.loanApplied)} deducted for loans` : ""}`);
       router.refresh();
     } finally {
       setBusy(null);

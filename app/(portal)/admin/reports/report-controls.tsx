@@ -19,18 +19,26 @@ export function ReportControls({
   type,
   departments,
   branches,
+  effectiveDate,
+  effectiveMonth,
+  effectiveBranchId,
+  effectiveDepartmentId,
 }: {
   type: string;
   departments: { id: string; name: string }[];
   branches?: { id: string; name: string }[];
+  effectiveDate: string;
+  effectiveMonth: string;
+  effectiveBranchId: string;
+  effectiveDepartmentId: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
-  const departmentId = searchParams.get("departmentId") ?? "";
-  const branchId = searchParams.get("branchId") ?? "";
-  const deviceDate = searchParams.get("date") ?? "";
-  const deviceMonth = searchParams.get("month") ?? "";
+  const departmentId = searchParams.get("departmentId") ?? effectiveDepartmentId;
+  const branchId = searchParams.get("branchId") ?? effectiveBranchId;
+  const deviceDate = searchParams.get("date") ?? effectiveDate;
+  const deviceMonth = searchParams.get("month") ?? effectiveMonth;
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
