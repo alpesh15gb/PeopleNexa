@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { dayRangeIST, todayKey } from "@/lib/dates";
+import { dayRangeIST, isDateKey, todayKey } from "@/lib/dates";
 import { istStartOfDay, parseIST } from "@/lib/ist";
 import { finalizeEligibleDays } from "@/lib/reconcile";
 
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
   await finalizeEligibleDays(session.tenantId, 100);
 
   const dateKey = req.nextUrl.searchParams.get("date") || todayKey();
+  if (!isDateKey(dateKey)) return NextResponse.json({ error: "date must use a real YYYY-MM-DD calendar date." }, { status: 400 });
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
   const [employees, records, leaves, holidays] = await Promise.all([

@@ -305,6 +305,9 @@ model Employee {
   tenantId       String
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employeeNumber String // e.g. EMP-001
+  // Immutable eBio/device enrollment code used to match punches. Employee Code
+  // above remains the editable HR-facing code.
+  deviceCode     String?
   firstName      String
   lastName       String
   email          String
@@ -384,6 +387,7 @@ model Employee {
   exitRequests      ExitRequest[]
 
   @@unique([tenantId, employeeNumber])
+  @@unique([tenantId, deviceCode])
   @@unique([tenantId, email])
   @@index([tenantId, locationId])
 }

@@ -21,9 +21,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const codes = flagged.map((f) => f.userId as string);
   if (codes.length === 0) return NextResponse.json({ status: true, data: [] });
   const existing = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, employeeNumber: { in: codes } },
-    select: { employeeNumber: true },
+    where: { tenantId: session.tenantId, OR: [{ deviceCode: { in: codes } }, { deviceCode: null, employeeNumber: { in: codes } }] },
+    select: { deviceCode: true, employeeNumber: true },
   });
-  const known = new Set(existing.map((e) => e.employeeNumber));
+  const known = new Set(existing.map((e) => e.deviceCode ?? e.employeeNumber));
   return NextResponse.json({ status: true, data: codes.filter((c) => !known.has(c)).map((code) => ({ code })) });
 }

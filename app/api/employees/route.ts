@@ -7,6 +7,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 const select = {
   id: true,
   employeeNumber: true,
+  deviceCode: true,
   firstName: true,
   lastName: true,
   email: true,
@@ -31,6 +32,7 @@ const select = {
 const safeSelect = {
   id: true,
   employeeNumber: true,
+  deviceCode: true,
   firstName: true,
   lastName: true,
   email: true,
@@ -150,8 +152,20 @@ export async function POST(req: NextRequest) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
     }
+    const deviceCode = body.deviceCode != null && String(body.deviceCode).trim() !== "" ? String(body.deviceCode).trim() : null;
+    if (deviceCode && deviceCode.length > 100) return NextResponse.json({ error: "Device Code must be at most 100 characters." }, { status: 400 });
+    const requestedEmployeeCode = body.employeeNumber != null && String(body.employeeNumber).trim() !== "" ? String(body.employeeNumber).trim() : null;
+    if (requestedEmployeeCode && requestedEmployeeCode.length > 100) return NextResponse.json({ error: "Employee Code must be at most 100 characters." }, { status: 400 });
     const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } });
     if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
+    if (deviceCode) {
+      const deviceCodeExists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode }, select: { id: true } });
+      if (deviceCodeExists) return NextResponse.json({ error: "An employee with this Device Code already exists." }, { status: 409 });
+    }
+    if (requestedEmployeeCode) {
+      const employeeCodeExists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: requestedEmployeeCode }, select: { id: true } });
+      if (employeeCodeExists) return NextResponse.json({ error: "An employee with this Employee Code already exists." }, { status: 409 });
+    }
 
     // Login-only accounts: sign-in credentials for non-staff (e.g. an outside
     // branch manager). Just name + email + password + branch; forced to the
@@ -248,7 +262,8 @@ export async function POST(req: NextRequest) {
       employee = await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
-          employeeNumber: `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}`,
+          employeeNumber: requestedEmployeeCode ?? (loginOnly ? `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}` : deviceCode ?? `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}`),
+          deviceCode: loginOnly ? null : deviceCode,
           firstName,
           lastName,
           email,

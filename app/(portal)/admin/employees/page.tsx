@@ -40,6 +40,7 @@ export default async function AdminEmployeesPage({
       select: {
         id: true,
         employeeNumber: true,
+        deviceCode: true,
         firstName: true,
         lastName: true,
         email: true,

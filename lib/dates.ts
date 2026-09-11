@@ -1,5 +1,5 @@
-// Local-timezone date helpers. The whole app reasons in the server's local time
-// zone (all times stored as UTC instants but interpreted locally).
+// Calendar dates used for workforce operations are always IST, regardless of
+// the container's host timezone.
 
 import { istDateKey, istStartOfDay } from "./ist";
 
@@ -80,8 +80,8 @@ export function formatDate(d: Date | null | undefined): string {
   return toDateKey(d);
 }
 
-export function todayKey(): string {
-  return toDateKey(new Date());
+export function todayKey(now: Date = new Date()): string {
+  return istDateKey(now);
 }
 
 export function addDays(d: Date, n: number): Date {
@@ -123,12 +123,16 @@ export function relativeDay(d: Date): string {
  * and end = start + 24h (exclusive upper bound for range queries).
  */
 export function dayRangeIST(dateKey: string): { start: Date; end: Date } {
-  // Probe at noon UTC so the instant always falls inside the requested IST
-  // day regardless of the server host timezone (UTC midnight = 05:30 IST
-  // same day, noon UTC = 17:30 IST same day).
-  const probe = new Date(`${dateKey}T12:00:00Z`);
-  if (Number.isNaN(probe.getTime())) return { start: new Date(NaN), end: new Date(NaN) };
-  const start = istStartOfDay(probe);
+  // Validate the calendar key before Date can normalize an impossible date
+  // (for example, 2026-02-30) into a later real day.
+  if (!isDateKey(dateKey)) return { start: new Date(NaN), end: new Date(NaN) };
+  const start = istStartOfDay(new Date(`${dateKey}T12:00:00Z`));
   const end = new Date(start.getTime() + 86400000);
   return { start, end };
+}
+
+/** True only for a real, canonical Gregorian calendar day (YYYY-MM-DD). */
+export function isDateKey(value: string): boolean {
+  const parsed = fromDateKey(value);
+  return !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === value;
 }

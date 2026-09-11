@@ -80,16 +80,17 @@ export async function handleDevicePunch(device: Device, punch: RawPunch): Promis
     throw error;
   }
 
-  // 2. Map the device user code to an employee in this tenant.
+  // 2. Match the immutable device enrollment code first. Employee Code is a
+  // legacy fallback only for records not yet assigned a Device Code.
   const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, employeeNumber: punch.userId, status: "active" },
+    where: { tenantId: device.tenantId, status: "active", OR: [{ deviceCode: punch.userId }, { deviceCode: null, employeeNumber: punch.userId }] },
     select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
   });
 
   if (!employee) {
     await prisma.deviceLog.update({
       where: { id: log.id },
-      data: { error: `No active employee with code "${punch.userId}" in this workspace`, processed: true },
+       data: { error: `No active employee with device code "${punch.userId}" in this workspace`, processed: true },
     });
     return { accepted: true, action: "no_employee", logId: log.id };
   }
@@ -172,7 +173,7 @@ export async function reprocessFailedLogs(
         continue;
       }
       const employee = await prisma.employee.findFirst({
-        where: { tenantId, employeeNumber: log.userId, status: "active" },
+        where: { tenantId, status: "active", OR: [{ deviceCode: log.userId }, { deviceCode: null, employeeNumber: log.userId }] },
         select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
       });
       if (!employee) {

@@ -1,7 +1,7 @@
 import { PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { dayRangeIST, todayKey, formatTime, formatDate } from "@/lib/dates";
+import { dayRangeIST, todayKey, isDateKey, formatTime, formatDate } from "@/lib/dates";
 import { finalizeEligibleDays } from "@/lib/reconcile";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,7 +19,9 @@ export default async function AdminAttendancePage({
 }) {
   const session = await requireSession();
   const { date: dateParam, branch: branchParam } = await searchParams;
-  const dateKey = dateParam || todayKey();
+  // UI routes fall back to today for a malformed URL instead of rendering a
+  // normalized-but-wrong day. APIs reject malformed dates with HTTP 400.
+  const dateKey = dateParam && isDateKey(dateParam) ? dateParam : todayKey();
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.

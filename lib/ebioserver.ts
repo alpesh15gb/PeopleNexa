@@ -254,7 +254,7 @@ export async function importEmployeesFromEbioserver(
     result.total = codes.length;
 
     for (const code of codes) {
-      const existing = await prisma.employee.findFirst({ where: { tenantId, employeeNumber: code } });
+      const existing = await prisma.employee.findFirst({ where: { tenantId, OR: [{ deviceCode: code }, { employeeNumber: code }] } });
       if (existing) {
         result.skipped++;
         continue;
@@ -280,6 +280,7 @@ export async function importEmployeesFromEbioserver(
           data: {
             tenantId,
             employeeNumber: code,
+            deviceCode: code,
             firstName,
             lastName,
             email: `${code.toLowerCase()}@device.local`,

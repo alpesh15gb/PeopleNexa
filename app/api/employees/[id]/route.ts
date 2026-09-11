@@ -87,6 +87,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     ownBranchId = manager.branchId;
     for (const k of [
       "salary",
+      "employeeNumber",
+      "deviceCode",
       "role",
       "status",
       "branchId",
@@ -185,6 +187,18 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   if (body.position !== undefined && body.position !== null && body.position !== "" && String(body.position).length > 100) {
     return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
+  }
+  const nextEmployeeNumber = body.employeeNumber !== undefined ? String(body.employeeNumber).trim() : employee.employeeNumber;
+  const nextDeviceCode = body.deviceCode !== undefined ? String(body.deviceCode).trim() || null : employee.deviceCode;
+  if (!nextEmployeeNumber || nextEmployeeNumber.length > 100) return NextResponse.json({ error: "Employee Code must be 1–100 characters." }, { status: 400 });
+  if (nextDeviceCode && nextDeviceCode.length > 100) return NextResponse.json({ error: "Device Code must be at most 100 characters." }, { status: 400 });
+  if (nextEmployeeNumber !== employee.employeeNumber) {
+    const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: nextEmployeeNumber, NOT: { id } }, select: { id: true } });
+    if (duplicate) return NextResponse.json({ error: "An employee with this Employee Code already exists." }, { status: 409 });
+  }
+  if (nextDeviceCode && nextDeviceCode !== employee.deviceCode) {
+    const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode: nextDeviceCode, NOT: { id } }, select: { id: true } });
+    if (duplicate) return NextResponse.json({ error: "An employee with this Device Code already exists." }, { status: 409 });
   }
   if (body.salary != null && body.salary !== "") {
     const n = Number(body.salary);
@@ -293,7 +307,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     updated = await prisma.employee.update({
     where: { id },
     data: {
-      firstName: nextFirstName,
+       employeeNumber: nextEmployeeNumber,
+       deviceCode: nextDeviceCode,
+       firstName: nextFirstName,
       lastName: nextLastName,
       email,
       ...(password ? { password: await hashPassword(password) } : {}),
@@ -322,12 +338,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       if (p2002Targets(err).includes("email")) {
         return NextResponse.json({ error: "An employee with this email already exists." }, { status: 409 });
       }
-      return NextResponse.json({ error: "Employee number clash — please retry." }, { status: 409 });
+       return NextResponse.json({ error: "Employee Code or Device Code already exists — please retry." }, { status: 409 });
     }
     throw err;
   }
   const pickAuditFields = (r: typeof employee) => ({
     firstName: r.firstName,
+    employeeNumber: r.employeeNumber,
+    deviceCode: r.deviceCode,
     lastName: r.lastName,
     email: r.email,
     phone: r.phone,

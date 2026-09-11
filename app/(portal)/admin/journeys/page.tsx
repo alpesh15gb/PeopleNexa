@@ -1,6 +1,6 @@
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey, endOfDay, todayKey } from "@/lib/dates";
+import { dayRangeIST, todayKey } from "@/lib/dates";
 import { pathDistanceKm } from "@/lib/geo";
 import { shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
@@ -15,12 +15,11 @@ export default async function JourneysPage() {
   if (!session || session.role !== "admin") redirect("/login");
 
   const dateKey = todayKey();
-  const dayStart = fromDateKey(dateKey);
-  const dayEnd = endOfDay(dayStart);
+  const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
   const [pings, employees, latestPings, attendanceRows] = await Promise.all([
     prisma.locationPing.findMany({
-      where: { tenantId: session.tenantId, at: { gte: dayStart, lte: dayEnd } },
+       where: { tenantId: session.tenantId, at: { gte: dayStart, lt: dayEnd } },
       orderBy: { at: "asc" },
       include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true, shift: true } } },
     }),
@@ -36,7 +35,7 @@ export default async function JourneysPage() {
       take: 500,
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lte: dayEnd } },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
       select: { employeeId: true, punchInTime: true, punchOutTime: true },
     }),
   ]);

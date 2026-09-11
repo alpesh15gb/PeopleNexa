@@ -7,7 +7,7 @@ type Adjustment = { label: string; amount: number };
 export type PayslipDocumentData = {
   companyName: string;
   month: string;
-  employee: { employeeNumber: string; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null };
+  employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null };
   payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null };
 };
 
@@ -30,11 +30,11 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   const label = (x: number, top: number, key: string, value: string) => { doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#111827").text(key, x, top); doc.font("Helvetica").text(value || "-", x + 86, top, { width: 145 }); };
   box(y, 104); doc.font("Helvetica-Bold").fontSize(8).text("EMPLOYEE DETAILS", left, y + 4, { width, align: "center" }); doc.moveTo(left, y + 17).lineTo(right, y + 17).stroke();
   const e = data.employee;
-  label(left + 8, y + 26, "Employee name:", `${e.firstName} ${e.lastName}`.trim()); label(left + 285, y + 26, "Employee ID:", e.employeeNumber);
+  label(left + 8, y + 26, "Employee name:", `${e.firstName} ${e.lastName}`.trim()); label(left + 285, y + 26, "Employee ID:", e.deviceCode ?? e.employeeNumber);
   label(left + 8, y + 43, "Designation:", e.position ?? "-"); label(left + 285, y + 43, "Date of joining:", e.joiningDate ? new Intl.DateTimeFormat("en-IN").format(e.joiningDate) : "-");
-  label(left + 8, y + 60, "Department:", e.department?.name ?? "-"); label(left + 285, y + 60, "Bank name:", e.bankName ?? "-");
+  label(left + 8, y + 60, "Department:", e.department?.name ?? "-"); label(left + 285, y + 60, "Employee Code:", e.employeeNumber);
   label(left + 8, y + 77, "UAN:", e.uan ?? "-"); label(left + 285, y + 77, "A/C no.:", e.accountNumber ?? "-");
-  label(left + 285, y + 94, "PAN:", e.pan ?? "-"); y += 112;
+  label(left + 8, y + 94, "Bank name:", e.bankName ?? "-"); label(left + 285, y + 94, "PAN:", e.pan ?? "-"); y += 112;
   box(y, 28); const paidDays = data.payslip.presentDays + data.payslip.lateDays + data.payslip.halfDays * 0.5;
   doc.font("Helvetica-Bold").fontSize(8).text(`Payable days: ${data.payslip.workingDays}`, left + 28, y + 10).text(`Paid days: ${paidDays}`, left + 225, y + 10).text(`LOPs: ${data.payslip.absentDays + data.payslip.halfDays * 0.5}`, left + 400, y + 10);
   y += 42;

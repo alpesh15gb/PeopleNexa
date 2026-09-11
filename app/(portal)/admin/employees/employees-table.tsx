@@ -20,6 +20,7 @@ interface Option {
 interface Emp {
   id: string;
   employeeNumber: string;
+  deviceCode: string | null;
   firstName: string;
   lastName: string;
   email: string;
@@ -103,6 +104,8 @@ export function EmployeesTable({
     const editing = modal && modal !== "create" ? modal : null;
     const payload: Record<string, unknown> = {
       firstName: form.get("firstName"),
+      employeeNumber: form.get("employeeNumber"),
+      deviceCode: form.get("deviceCode"),
       lastName: form.get("lastName"),
       email: form.get("email"),
       phone: form.get("phone"),
@@ -306,7 +309,7 @@ export function EmployeesTable({
                       {emp.loginOnly && <span className="ml-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300">MANAGER LOGIN</span>}
                     </p>
                     <p className="text-[11.5px] text-muted-foreground">
-                      {emp.employeeNumber} · {emp.email}
+                      Code: {emp.employeeNumber}{emp.deviceCode ? ` · Device: ${emp.deviceCode}` : ""} · {emp.email}
                     </p>
                   </div>
                 </div>
@@ -352,6 +355,12 @@ export function EmployeesTable({
             </Field>
             <Field label="Last name">
               <Input name="lastName" defaultValue={editing?.lastName ?? ""} />
+            </Field>
+            <Field label="Employee Code" hint={editing ? "HR/company code; editable" : "Leave blank to use Device Code or auto-generate"}>
+              <Input name="employeeNumber" required={Boolean(editing)} defaultValue={editing?.employeeNumber ?? ""} placeholder="e.g. MNP0675" />
+            </Field>
+            <Field label="Device Code" hint="eBio enrollment ID used for attendance matching">
+              <Input name="deviceCode" defaultValue={editing?.deviceCode ?? ""} placeholder="e.g. 8767" />
             </Field>
             <Field label="Email">
               <Input name="email" type="email" required defaultValue={editing?.email ?? ""} />

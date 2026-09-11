@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey, endOfDay, todayKey } from "@/lib/dates";
+import { dayRangeIST, isDateKey, todayKey } from "@/lib/dates";
 import { pathDistanceKm } from "@/lib/geo";
 import { shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
@@ -15,14 +15,14 @@ export async function GET(req: NextRequest) {
   }
 
   const dateKey = req.nextUrl.searchParams.get("date") || todayKey();
-  const dayStart = fromDateKey(dateKey);
-  const dayEnd = endOfDay(dayStart);
+  if (!isDateKey(dateKey)) return NextResponse.json({ error: "date must use a real YYYY-MM-DD calendar date." }, { status: 400 });
+  const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
   const employeeId = req.nextUrl.searchParams.get("employeeId") || undefined;
   const where = {
     tenantId: session.tenantId,
     ...(employeeId ? { employeeId } : {}),
-    at: { gte: dayStart, lte: dayEnd },
+    at: { gte: dayStart, lt: dayEnd },
   };
 
   const [pings, employees, attendanceRows] = await Promise.all([
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lte: dayEnd } },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
       select: { employeeId: true, punchInTime: true, punchOutTime: true },
     }),
   ]);

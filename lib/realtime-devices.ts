@@ -104,13 +104,13 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   }
 
   const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, employeeNumber: punch.userId, status: "active" },
+    where: { tenantId: device.tenantId, status: "active", OR: [{ deviceCode: punch.userId }, { deviceCode: null, employeeNumber: punch.userId }] },
     select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
   });
   if (!employee) {
     await prisma.realtimeLog.update({
       where: { id: log.id },
-      data: { error: `No active employee with code "${punch.userId}" in this workspace`, processed: true },
+      data: { error: `No active employee with device code "${punch.userId}" in this workspace`, processed: true },
     });
     return { accepted: true as const, action: "no_employee" as const, logId: log.id };
   }
@@ -189,7 +189,7 @@ export async function reprocessFailedRealtimeLogs(
         continue;
       }
       const employee = await prisma.employee.findFirst({
-        where: { tenantId, employeeNumber: log.userId, status: "active" },
+        where: { tenantId, status: "active", OR: [{ deviceCode: log.userId }, { deviceCode: null, employeeNumber: log.userId }] },
         select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
       });
       if (!employee) {

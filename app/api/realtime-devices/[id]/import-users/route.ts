@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   let failed = 0;
   for (const code of codes) {
     try {
-      const existing = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: code } });
+      const existing = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, OR: [{ deviceCode: code }, { employeeNumber: code }] } });
       if (existing) {
         skipped++;
         continue;
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         data: {
           tenantId: session.tenantId,
           employeeNumber: code,
+          deviceCode: code,
           firstName: code,
           lastName: "",
           email: `${code.toLowerCase().replace(/[^a-z0-9]/g, "")}@device.local`,

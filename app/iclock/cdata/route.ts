@@ -3,6 +3,22 @@ import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
 import { handleDevicePunch } from "@/lib/iclock";
 
+export function parseIClockPunchLine(line: string): { userId: string; dateTimeStr: string; verifyMode: string; inOutMode: string } | null {
+  const tabParts = line.split("\t").map((part) => part.trim());
+  const isTabbed = tabParts.length >= 4;
+  const parts = isTabbed ? tabParts : line.trim().split(/\s+/).filter(Boolean);
+  if ((isTabbed && parts.length < 4) || (!isTabbed && parts.length < 5)) return null;
+  const userId = parts[0].trim();
+  const dateTimeStr = isTabbed ? parts[1] : `${parts[1]} ${parts[2]}`;
+  if (!userId || !dateTimeStr) return null;
+  return {
+    userId,
+    dateTimeStr,
+    verifyMode: (isTabbed ? parts[2] : parts[3]) || "0",
+    inOutMode: (isTabbed ? parts[3] : parts[4]) || "0",
+  };
+}
+
 async function findDevice(sn: string) {
   return prisma.device.findUnique({ where: { serialNumber: sn } });
 }
@@ -106,17 +122,12 @@ export async function POST(req: NextRequest) {
 
   for (const line of lines) {
     try {
-      let parts = line.split("\t");
-      if (parts.length < 2) parts = line.split(/\s+/).filter((p) => p.trim());
-      if (parts.length < 2) {
+      const parsed = parseIClockPunchLine(line);
+      if (!parsed) {
         errors++;
         continue;
       }
-
-      const userId = parts[0].trim();
-      const dateTimeStr = parts[1] + (parts[1].length < 11 && parts[2] ? " " + parts[2] : "");
-      const verifyMode = parts[3]?.trim() || "0";
-      const inOutMode = parts[4]?.trim() || "0";
+      const { userId, dateTimeStr, verifyMode, inOutMode } = parsed;
 
       if (!userId || !dateTimeStr) {
         errors++;

@@ -37,6 +37,7 @@ function salaryStructureError(v: unknown): string | null {
 }
 const TEMPLATE_HEADERS = [
   "employeeNumber",
+  "deviceCode",
   "firstName",
   "lastName",
   "email",
@@ -89,6 +90,7 @@ export async function GET() {
 
 interface BulkRow {
   employeeNumber?: unknown;
+  deviceCode?: unknown;
   firstName?: unknown;
   lastName?: unknown;
   email?: unknown;
@@ -275,11 +277,14 @@ export async function POST(req: NextRequest) {
       if (status !== "active" && status !== "inactive") throw new Error("Status must be active or inactive.");
       const employeeNumber = raw?.employeeNumber ? String(raw.employeeNumber).trim() : `EMP-${String(count + i + 1).padStart(3, "0")}`;
       if (!employeeNumber || employeeNumber.length > 100) throw new Error("Employee number must be 1–100 characters.");
+      const deviceCode = raw?.deviceCode ? String(raw.deviceCode).trim() : null;
+      if (deviceCode && deviceCode.length > 100) throw new Error("Device Code must be at most 100 characters.");
 
       await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
           employeeNumber,
+          deviceCode,
           firstName,
           lastName: bulkLastName,
           email,

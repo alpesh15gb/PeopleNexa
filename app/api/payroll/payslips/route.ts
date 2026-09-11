@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     prisma.payslip.findMany({
       where: { tenantId: session.tenantId, month, ...(ids.length ? { employeeId: { in: ids } } : {}) },
-      include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true } } },
+      include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     }),
   ]);
