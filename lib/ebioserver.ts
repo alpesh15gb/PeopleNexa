@@ -210,29 +210,30 @@ async function availableBranchCode(tenantId: string, locationCode: string, name:
 
 /**
  * Map eBio topology into PeopleNexa without touching employees, punches, or
- * the incremental pull cursor. Each eBio location becomes a Location and each
- * physical device/worksite becomes a Branch beneath it.
+ * the incremental pull cursor. eBio's device/group code (e.g. MNP) becomes a
+ * Location; its worksite LocationName becomes a Branch beneath that group.
  */
-export async function syncEbioWorksites(tenantId: string, profile: EbioserverProfile): Promise<{ locations: number; branches: number; devices: number; skipped: number }> {
+export async function syncEbioWorksites(tenantId: string, profile: EbioserverProfile): Promise<{ locations: number; branches: number; devices: number; skipped: number; cleanedBranches: number; cleanedLocations: number }> {
   const client = await createClient(profile);
   const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
   const discovered = parseDeviceListResult(resultString(deviceResult));
   const locationByName = new Map<string, { id: string; code: string }>();
   const branchByWorksite = new Map<string, string>();
-  const summary = { locations: 0, branches: 0, devices: 0, skipped: 0 };
+  const summary = { locations: 0, branches: 0, devices: 0, skipped: 0, cleanedBranches: 0, cleanedLocations: 0 };
+  const legacyBranchIds = new Set<string>();
 
   for (const item of discovered) {
-    const sourceLocation = item.location.trim();
-    const worksiteName = item.deviceName.trim();
-    if (!sourceLocation || !worksiteName) { summary.skipped++; continue; }
-    const locationKey = sourceLocation.toLowerCase();
+    const worksiteName = item.location.trim();
+    const locationName = item.deviceName.trim();
+    if (!locationName || !worksiteName) { summary.skipped++; continue; }
+    const locationKey = locationName.toLowerCase();
     let location = locationByName.get(locationKey);
     if (!location) {
-      const existing = await prisma.location.findFirst({ where: { tenantId, name: { equals: sourceLocation, mode: "insensitive" } }, select: { id: true, code: true } });
+      const existing = await prisma.location.findFirst({ where: { tenantId, OR: [{ name: { equals: locationName, mode: "insensitive" } }, { code: { equals: locationName, mode: "insensitive" } }] }, select: { id: true, code: true } });
       if (existing) location = existing;
       else {
-        const code = await availableLocationCode(tenantId, sourceLocation);
-        const created = await prisma.location.create({ data: { tenantId, name: sourceLocation, code }, select: { id: true, code: true } });
+        const code = await availableLocationCode(tenantId, locationName);
+        const created = await prisma.location.create({ data: { tenantId, name: locationName, code }, select: { id: true, code: true } });
         location = created;
         summary.locations++;
       }
@@ -253,11 +254,29 @@ export async function syncEbioWorksites(tenantId: string, profile: EbioserverPro
     const device = await prisma.device.findUnique({ where: { serialNumber: item.serialNumber } });
     if (device && device.tenantId !== tenantId) { summary.skipped++; continue; }
     if (device) {
-      await prisma.device.update({ where: { id: device.id }, data: { ebioLocation: sourceLocation, branchId } });
+      if (device.branchId && device.branchId !== branchId) legacyBranchIds.add(device.branchId);
+      await prisma.device.update({ where: { id: device.id }, data: { ebioLocation: worksiteName, branchId } });
     } else {
-      await prisma.device.create({ data: { tenantId, name: worksiteName, serialNumber: item.serialNumber, type: "biometric", protocol: "json", ebioLocation: sourceLocation, branchId, config: { ebioserver: true, location: sourceLocation } } });
+      await prisma.device.create({ data: { tenantId, name: `${locationName} (${worksiteName})`, serialNumber: item.serialNumber, type: "biometric", protocol: "json", ebioLocation: worksiteName, branchId, config: { ebioserver: true, location: worksiteName } } });
     }
     summary.devices++;
+  }
+  // Remove only the empty mapping rows created by the previous reversed sync.
+  // Existing user-managed branches, employees, attendance, and the generic MNP
+  // branch are retained because they fail one of these strict emptiness checks.
+  const legacyLocationIds = new Set<string>();
+  for (const id of legacyBranchIds) {
+    const branch = await prisma.branch.findFirst({ where: { id, tenantId }, include: { _count: { select: { employees: true, attendance: true, devices: true } } } });
+    if (!branch || branch._count.employees || branch._count.attendance || branch._count.devices) continue;
+    if (branch.locationId) legacyLocationIds.add(branch.locationId);
+    await prisma.branch.delete({ where: { id } });
+    summary.cleanedBranches++;
+  }
+  for (const id of legacyLocationIds) {
+    const location = await prisma.location.findFirst({ where: { id, tenantId }, include: { _count: { select: { branches: true, managers: true } } } });
+    if (!location || location._count.branches || location._count.managers) continue;
+    await prisma.location.delete({ where: { id } });
+    summary.cleanedLocations++;
   }
   return summary;
 }

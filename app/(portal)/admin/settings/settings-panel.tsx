@@ -38,7 +38,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number } | null>(null);
   const [syncingTopology, setSyncingTopology] = useState(false);
-  const [topologyResult, setTopologyResult] = useState<{ locations: number; branches: number; devices: number; skipped: number } | null>(null);
+  const [topologyResult, setTopologyResult] = useState<{ locations: number; branches: number; devices: number; skipped: number; cleanedBranches: number; cleanedLocations: number } | null>(null);
 
   async function save() {
     setSaving(true);
@@ -225,7 +225,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <Link2 className="h-4 w-4 text-brand" /> eBio locations and worksites
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Maps every eBio location to a PeopleNexa Location and every physical machine to its own Branch. This does not move employees, change punches, or reset live sync.
+            Maps each eBio device group (for example MNP) to a PeopleNexa Location and each eBio worksite to its own Branch. This does not move employees, change punches, or reset live sync.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
@@ -235,6 +235,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
               <p className="text-[12.5px] text-muted-foreground">
                 {topologyResult.locations} location(s) created · {topologyResult.branches} branch(es) created · {topologyResult.devices} machine(s) mapped
                 {topologyResult.skipped > 0 && ` · ${topologyResult.skipped} skipped`}
+                {(topologyResult.cleanedBranches > 0 || topologyResult.cleanedLocations > 0) && ` · removed ${topologyResult.cleanedBranches} empty old branch(es) and ${topologyResult.cleanedLocations} empty old location(s)`}
               </p>
             )}
           </div>
