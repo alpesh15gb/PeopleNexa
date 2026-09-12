@@ -243,8 +243,8 @@ function splitName(name: string): [string, string] {
 export async function importEmployeesFromEbioserver(
   tenantId: string,
   profile: EbioserverProfile
-): Promise<{ ok: boolean; total: number; created: number; skipped: number; failed: number; reprocessed: number; message?: string }> {
-  const result = { ok: false, total: 0, created: 0, skipped: 0, failed: 0, reprocessed: 0, message: "" as string | undefined };
+): Promise<{ ok: boolean; total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number; message?: string }> {
+  const result = { ok: false, total: 0, created: 0, activated: 0, skipped: 0, failed: 0, reprocessed: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
     const codesResult = await call<unknown>(client, "GetEmployeeCodes", { ...authArgs(profile), EmployeeLocation: "" });
@@ -260,6 +260,13 @@ export async function importEmployeesFromEbioserver(
     const known = new Set(existing.flatMap((employee) => [employee.deviceCode, employee.employeeNumber]).filter(Boolean));
     const newCodes = codes.filter((code) => !known.has(code));
     result.skipped = codes.length - newCodes.length;
+    // eBio is the source of the active workforce roster for this workspace.
+    // Re-importing also activates identities created by an earlier partial import.
+    const activated = await prisma.employee.updateMany({
+      where: { tenantId, deviceCode: { in: codes }, status: "inactive", loginOnly: false },
+      data: { status: "active" },
+    });
+    result.activated = activated.count;
     // All imported accounts are inactive and have no usable shared password.
     // One opaque hash is sufficient until each account is provisioned.
     const inactivePassword = await hashPassword(crypto.randomBytes(32).toString("hex"));
@@ -275,7 +282,7 @@ export async function importEmployeesFromEbioserver(
           email: `device-${Buffer.from(code).toString("hex")}@device.local`,
           password: inactivePassword,
           role: "employee",
-          status: "inactive",
+          status: "active",
         })),
         skipDuplicates: true,
       });

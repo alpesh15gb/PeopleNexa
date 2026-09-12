@@ -36,7 +36,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
     lastErrorAt: initial.lastErrorAt,
   });
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ total: number; created: number; skipped: number; failed: number; reprocessed: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number } | null>(null);
 
   async function save() {
     setSaving(true);
@@ -71,8 +71,8 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         toast("error", data.error ?? data.message ?? "Import failed");
         return;
       }
-      setImportResult({ total: data.total, created: data.created, skipped: data.skipped, failed: data.failed, reprocessed: data.reprocessed ?? 0 });
-      toast("success", `Imported ${data.created} employees — ${data.reprocessed ?? 0} punches reconciled`);
+      setImportResult({ total: data.total, created: data.created, activated: data.activated ?? 0, skipped: data.skipped, failed: data.failed, reprocessed: data.reprocessed ?? 0 });
+      toast("success", `Imported ${data.created} · activated ${data.activated ?? 0} · ${data.reprocessed ?? 0} punches reconciled`);
     } catch {
       toast("error", "Something went wrong.");
     } finally {
@@ -221,7 +221,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
                 <span className="font-semibold text-emerald-400">{importResult.created} created</span>
                 <span className="text-muted-foreground">
                   {" · "}
-                  {importResult.skipped} already present · {importResult.failed} failed · of {importResult.total} codes
+                  {importResult.activated} activated · {importResult.skipped} already present · {importResult.failed} failed · of {importResult.total} codes
                   {importResult.reprocessed > 0 && ` · ${importResult.reprocessed} flagged punches reconciled`}
                 </span>
               </p>
