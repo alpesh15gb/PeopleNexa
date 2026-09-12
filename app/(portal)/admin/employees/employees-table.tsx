@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus, Upload, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,6 +96,7 @@ export function EmployeesTable({
   const [bulkRows, setBulkRows] = useState<Record<string, string>[]>([]);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [search, setSearch] = useState("");
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -269,11 +270,26 @@ export function EmployeesTable({
   }
 
   const editing = modal && modal !== "create" ? modal : null;
+  const searchTerm = search.trim().toLowerCase();
+  const visibleEmployees = searchTerm
+    ? employees.filter((employee) => [
+        employee.firstName,
+        employee.lastName,
+        employee.employeeNumber,
+        employee.deviceCode,
+        employee.email,
+        employee.phone,
+        employee.branch?.name,
+      ].some((value) => value?.toLowerCase().includes(searchTerm)))
+    : employees;
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-edge px-5 py-3">
-        <p className="text-[13px] text-muted-foreground">Manage your team members</p>
+      <div className="flex flex-col gap-3 border-b border-edge px-5 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative w-full lg:max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Search name, Employee Code, or Device Code" aria-label="Search employees" />
+        </div>
         <div className="flex items-center gap-2">
           <a href="/api/employees/export" download="employees-export.csv">
             <Button size="sm" variant="outline">
@@ -301,7 +317,7 @@ export function EmployeesTable({
           </TR>
         </THead>
         <TBody>
-          {employees.map((emp) => (
+          {visibleEmployees.map((emp) => (
             <TR key={emp.id}>
               <TD>
                 <div className="flex items-center gap-3">
@@ -344,6 +360,11 @@ export function EmployeesTable({
               </TD>
             </TR>
           ))}
+          {visibleEmployees.length === 0 && (
+            <TR>
+              <TD colSpan={6} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
+            </TR>
+          )}
         </TBody>
       </Table>
 
