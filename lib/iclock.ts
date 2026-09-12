@@ -162,6 +162,10 @@ export async function reprocessFailedLogs(
       OR: [{ processed: false }, { error: { not: null } }],
     },
     select: { id: true, deviceId: true, userId: true, punchTime: true, rawData: true },
+    // Always heal the newest device activity first. Without an explicit order,
+    // PostgreSQL may fill this bounded queue with arbitrary old failures and
+    // leave today's newly mapped punches unreconciled.
+    orderBy: { punchTime: "desc" },
     take: limit,
   });
 

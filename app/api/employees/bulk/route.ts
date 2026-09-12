@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_ROWS = 500;
+const MAX_ROWS = 2500;
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
@@ -150,25 +150,34 @@ export async function POST(req: NextRequest) {
     }),
   ]);
   const seats = tenant?.seats ?? 0;
-  if (count + rows.length > seats) {
-    return NextResponse.json(
-      {
-        error: `Seat limit exceeded (${seats} seats, ${count} used, ${rows.length} to import). Please upgrade to add more employees.`,
-      },
-      { status: 403 }
-    );
-  }
-
   let created = 0;
+  let updated = 0;
   const failed: { email: string; error: string }[] = [];
   const seenInBatch = new Set<string>();
+  const importPassword = await hashPassword(genPassword());
 
   for (let i = 0; i < rows.length; i++) {
     const raw = rows[i] as BulkRow;
     const email = String(raw?.email ?? "").toLowerCase().trim();
     try {
+      const employeeNumberInput = raw?.employeeNumber ? String(raw.employeeNumber).trim() : "";
+      const deviceCodeInput = raw?.deviceCode ? String(raw.deviceCode).trim() : "";
+      const rowKey = deviceCodeInput || employeeNumberInput || email;
+      if (!rowKey) throw new Error("Provide Device Code or Employee Code to identify the employee.");
+      if (seenInBatch.has(rowKey)) throw new Error("Duplicate Device Code or Employee Code in this file.");
+      seenInBatch.add(rowKey);
+      const existingForRow = await prisma.employee.findFirst({
+        where: {
+          tenantId: session.tenantId,
+          OR: [
+            ...(deviceCodeInput ? [{ deviceCode: deviceCodeInput }] : []),
+            ...(employeeNumberInput ? [{ employeeNumber: employeeNumberInput }] : []),
+            ...(email ? [{ email }] : []),
+          ],
+        },
+      });
       const firstName = String(raw?.firstName ?? "").trim();
-      if (!firstName) throw new Error("First name is required.");
+      if (!firstName && !existingForRow) throw new Error("First name is required for a new employee.");
       if (firstName.length > 100) throw new Error("First name must be at most 100 characters.");
       const bulkLastRaw = raw?.lastName !== undefined && raw?.lastName !== null ? String(raw.lastName) : "";
       const bulkLastName = bulkLastRaw.trim();
@@ -177,9 +186,7 @@ export async function POST(req: NextRequest) {
       if (raw?.position != null && String(raw.position).length > 100) {
         throw new Error("Position must be at most 100 characters.");
       }
-      if (!email || !EMAIL_RE.test(email)) throw new Error("Enter a valid email address.");
-      if (seenInBatch.has(email)) throw new Error("Duplicate email in this file.");
-      seenInBatch.add(email);
+      if (email && !EMAIL_RE.test(email)) throw new Error("Enter a valid email address.");
 
       const salary =
         raw?.salary != null && raw.salary !== "" ? Number(raw.salary) : null;
@@ -263,22 +270,44 @@ export async function POST(req: NextRequest) {
       if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
       if (managerId && !manager) throw new Error("Manager not found in this workspace.");
 
-      const exists = await prisma.employee.findFirst({
-        where: { tenantId: session.tenantId, email },
-        select: { id: true },
-      });
-      if (exists) throw new Error("An employee with this email already exists.");
-
       const payMode = raw?.payMode ? String(raw.payMode).trim() || "monthly" : "monthly";
       if (!PAY_MODES.has(payMode)) {
         throw new Error("Pay mode must be one of monthly, daily, weekly, hourly, work_basis.");
       }
       const status = raw?.status ? String(raw.status).trim().toLowerCase() : "active";
       if (status !== "active" && status !== "inactive") throw new Error("Status must be active or inactive.");
-      const employeeNumber = raw?.employeeNumber ? String(raw.employeeNumber).trim() : `EMP-${String(count + i + 1).padStart(3, "0")}`;
+      const employeeNumber = employeeNumberInput || deviceCodeInput || `EMP-${String(count + i + 1).padStart(3, "0")}`;
       if (!employeeNumber || employeeNumber.length > 100) throw new Error("Employee number must be 1–100 characters.");
-      const deviceCode = raw?.deviceCode ? String(raw.deviceCode).trim() : null;
+      const deviceCode = deviceCodeInput || null;
       if (deviceCode && deviceCode.length > 100) throw new Error("Device Code must be at most 100 characters.");
+
+      if (existingForRow) {
+        const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
+          ? existingForRow.salaryStructure as Record<string, unknown>
+          : {};
+        await prisma.employee.update({
+          where: { id: existingForRow.id },
+          data: {
+            employeeNumber: employeeNumberInput || existingForRow.employeeNumber,
+            deviceCode: deviceCodeInput || existingForRow.deviceCode,
+            ...(firstName ? { firstName } : {}),
+            ...(bulkLastRaw !== "" && bulkLastName ? { lastName: bulkLastName } : {}),
+            ...(email ? { email } : {}),
+            ...(raw?.phone != null && String(raw.phone).trim() !== "" ? { phone: bulkPhone } : {}),
+            ...(raw?.position != null && String(raw.position).trim() !== "" ? { position: String(raw.position).trim() } : {}),
+            ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
+            ...(joiningDate ? { joiningDate } : {}),
+            ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
+            ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(raw?.status ? { status } : {}),
+            ...(bankName ? { bankName } : {}), ...(bulkPan ? { pan: bulkPan } : {}), ...(bulkUan ? { uan: bulkUan } : {}), ...(bulkIfsc ? { ifscCode: bulkIfsc } : {}), ...(bulkAccount ? { accountNumber: bulkAccount } : {}),
+            ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
+          },
+        });
+        updated++;
+        continue;
+      }
+      if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
+      const newEmail = email || `import-${Buffer.from(employeeNumber).toString("hex")}@device.local`;
 
       await prisma.employee.create({
         data: {
@@ -287,9 +316,9 @@ export async function POST(req: NextRequest) {
           deviceCode,
           firstName,
           lastName: bulkLastName,
-          email,
+          email: newEmail,
           phone: bulkPhone,
-          password: await hashPassword(genPassword()),
+          password: importPassword,
           role: "employee",
           position: raw?.position ? String(raw.position) : null,
           salary,
@@ -334,5 +363,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ created, failed });
+  return NextResponse.json({ created, updated, failed });
 }

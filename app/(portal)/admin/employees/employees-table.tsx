@@ -45,7 +45,7 @@ interface Emp {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const BULK_MAX = 500;
+const BULK_MAX = 2500;
 
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];
@@ -173,8 +173,8 @@ export function EmployeesTable({
       return;
     }
     const headers = splitCsvLine(lines[0]).map((h) => h.trim());
-    const required = ["firstName", "email"];
-    const missing = required.filter((r) => !headers.includes(r));
+    const hasIdentifier = headers.includes("deviceCode") || headers.includes("employeeNumber") || headers.includes("email");
+    const missing = hasIdentifier ? [] : ["deviceCode or employeeNumber"];
     if (missing.length > 0) {
       setBulkRows([]);
       setBulkErrors([`Missing required column(s): ${missing.join(", ")}`]);
@@ -190,16 +190,16 @@ export function EmployeesTable({
       headers.forEach((h, i) => {
         row[h] = (cols[i] ?? "").trim();
       });
-      const label = row.email || `row ${idx + 2}`;
-      if (!row.firstName) {
-        errs.push(`Row ${idx + 2} (${label}): first name is required.`);
+      const label = row.deviceCode || row.employeeNumber || row.email || `row ${idx + 2}`;
+      if (!row.deviceCode && !row.employeeNumber && !row.email) {
+        errs.push(`Row ${idx + 2}: Device Code or Employee Code is required.`);
         return;
       }
-      if (!row.email || !EMAIL_RE.test(row.email.toLowerCase())) {
+      if (row.email && !EMAIL_RE.test(row.email.toLowerCase())) {
         errs.push(`Row ${idx + 2} (${label}): invalid email.`);
         return;
       }
-      const key = row.email.toLowerCase();
+      const key = row.deviceCode || row.employeeNumber || row.email.toLowerCase();
       if (seen.has(key)) {
         errs.push(`Row ${idx + 2} (${label}): duplicate email in file.`);
         return;
@@ -243,6 +243,7 @@ export function EmployeesTable({
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         created?: number;
+        updated?: number;
         failed?: { email: string; error: string }[];
       };
       if (!res.ok) {
@@ -253,9 +254,9 @@ export function EmployeesTable({
       const failed = data.failed ?? [];
       if (failed.length > 0) {
         setBulkErrors(failed.map((f) => `${f.email}: ${f.error}`));
-        toast("info", `Imported ${created}, ${failed.length} failed.`);
+        toast("info", `Created ${created}, updated ${data.updated ?? 0}, ${failed.length} failed.`);
       } else {
-        toast("success", `Imported ${created} employee${created === 1 ? "" : "s"}.`);
+        toast("success", `Created ${created} · updated ${data.updated ?? 0}.`);
         setBulkOpen(false);
         setBulkRows([]);
         setBulkErrors([]);
@@ -468,7 +469,7 @@ export function EmployeesTable({
         open={bulkOpen}
         onClose={() => setBulkOpen(false)}
         title="Bulk import employees"
-        description="Upload a CSV file (max 500 rows). The template includes identity, assignment, pay, bank, statutory, and salary-component fields. Passwords are auto-generated."
+        description="Upload up to 2,500 CSV rows. Existing employees are updated by Device Code first, then Employee Code; blank fields are left unchanged."
       >
         <div className="space-y-4">
           <a
@@ -479,7 +480,7 @@ export function EmployeesTable({
             <Download className="h-3.5 w-3.5" /> Download CSV template
           </a>
           <p className="rounded-xl border border-edge bg-tint px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
-            Required: <span className="font-medium text-foreground">firstName, email</span>. Use workspace IDs for branchId, departmentId, shiftId, and managerId. Do not include passwords in CSV files.
+            Required: <span className="font-medium text-foreground">Device Code or Employee Code</span>. Email is optional. Use workspace IDs for branchId, departmentId, shiftId, and managerId. Do not include passwords in CSV files.
           </p>
           <Field label="CSV file (.csv)">
             <Input
