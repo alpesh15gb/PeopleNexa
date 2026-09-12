@@ -275,6 +275,11 @@ export function EmployeesTable({
       <div className="flex items-center justify-between border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">Manage your team members</p>
         <div className="flex items-center gap-2">
+          <a href="/api/employees/export" download="employees-export.csv">
+            <Button size="sm" variant="outline">
+              <Download className="h-3.5 w-3.5" /> Export employees
+            </Button>
+          </a>
           <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
             <Upload className="h-3.5 w-3.5" /> Bulk import
           </Button>
