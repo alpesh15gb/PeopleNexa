@@ -184,6 +184,84 @@ export function parseDeviceListResult(result: string): EbioDevice[] {
   return devices;
 }
 
+function mappingCode(value: string, fallback: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20) || fallback;
+}
+
+async function availableLocationCode(tenantId: string, name: string): Promise<string> {
+  const base = mappingCode(name, "LOCATION");
+  let code = base;
+  for (let suffix = 2; ; suffix++) {
+    const clash = await prisma.location.findFirst({ where: { tenantId, code }, select: { id: true } });
+    if (!clash) return code;
+    code = `${base.slice(0, 16)}${suffix}`.slice(0, 20);
+  }
+}
+
+async function availableBranchCode(tenantId: string, locationCode: string, name: string): Promise<string> {
+  const base = mappingCode(`${locationCode}-${name}`, "BRANCH");
+  let code = base;
+  for (let suffix = 2; ; suffix++) {
+    const clash = await prisma.branch.findFirst({ where: { tenantId, code }, select: { id: true } });
+    if (!clash) return code;
+    code = `${base.slice(0, 16)}${suffix}`.slice(0, 20);
+  }
+}
+
+/**
+ * Map eBio topology into PeopleNexa without touching employees, punches, or
+ * the incremental pull cursor. Each eBio location becomes a Location and each
+ * physical device/worksite becomes a Branch beneath it.
+ */
+export async function syncEbioWorksites(tenantId: string, profile: EbioserverProfile): Promise<{ locations: number; branches: number; devices: number; skipped: number }> {
+  const client = await createClient(profile);
+  const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
+  const discovered = parseDeviceListResult(resultString(deviceResult));
+  const locationByName = new Map<string, { id: string; code: string }>();
+  const branchByWorksite = new Map<string, string>();
+  const summary = { locations: 0, branches: 0, devices: 0, skipped: 0 };
+
+  for (const item of discovered) {
+    const sourceLocation = item.location.trim();
+    const worksiteName = item.deviceName.trim();
+    if (!sourceLocation || !worksiteName) { summary.skipped++; continue; }
+    const locationKey = sourceLocation.toLowerCase();
+    let location = locationByName.get(locationKey);
+    if (!location) {
+      const existing = await prisma.location.findFirst({ where: { tenantId, name: { equals: sourceLocation, mode: "insensitive" } }, select: { id: true, code: true } });
+      if (existing) location = existing;
+      else {
+        const code = await availableLocationCode(tenantId, sourceLocation);
+        const created = await prisma.location.create({ data: { tenantId, name: sourceLocation, code }, select: { id: true, code: true } });
+        location = created;
+        summary.locations++;
+      }
+      locationByName.set(locationKey, location);
+    }
+    const branchKey = `${location.id}|${worksiteName.toLowerCase()}`;
+    let branchId = branchByWorksite.get(branchKey);
+    if (!branchId) {
+      const existing = await prisma.branch.findFirst({ where: { tenantId, locationId: location.id, name: { equals: worksiteName, mode: "insensitive" } }, select: { id: true } });
+      if (existing) branchId = existing.id;
+      else {
+        const code = await availableBranchCode(tenantId, location.code, worksiteName);
+        branchId = (await prisma.branch.create({ data: { tenantId, locationId: location.id, name: worksiteName, code }, select: { id: true } })).id;
+        summary.branches++;
+      }
+      branchByWorksite.set(branchKey, branchId);
+    }
+    const device = await prisma.device.findUnique({ where: { serialNumber: item.serialNumber } });
+    if (device && device.tenantId !== tenantId) { summary.skipped++; continue; }
+    if (device) {
+      await prisma.device.update({ where: { id: device.id }, data: { ebioLocation: sourceLocation, branchId } });
+    } else {
+      await prisma.device.create({ data: { tenantId, name: worksiteName, serialNumber: item.serialNumber, type: "biometric", protocol: "json", ebioLocation: sourceLocation, branchId, config: { ebioserver: true, location: sourceLocation } } });
+    }
+    summary.devices++;
+  }
+  return summary;
+}
+
 export function parseLogRecords(result: string): EbioLogRecord[] {
   const records: EbioLogRecord[] = [];
   for (const rec of splitRecords(result)) {
@@ -329,6 +407,7 @@ export async function backfillDays(
             serialNumber: d.serialNumber,
             type: "biometric",
             protocol: "json",
+            ebioLocation: d.location,
             config: { ebioserver: true, location: d.location },
           },
         });
@@ -463,6 +542,7 @@ export async function pullTenant(
             serialNumber: d.serialNumber,
             type: "biometric",
             protocol: "json",
+            ebioLocation: d.location,
             config: { ebioserver: true, location: d.location },
           },
         });

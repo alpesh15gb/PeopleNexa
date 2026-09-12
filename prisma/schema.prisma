@@ -118,6 +118,10 @@ model Device {
   status       String   @default("active") // active | inactive | offline
   lastSeenAt   DateTime?
   config       Json?    @default("{}")
+  // eBio source location and the PeopleNexa worksite branch it maps to.
+  ebioLocation String?
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -126,6 +130,8 @@ model Device {
   punches  Punch[]
 
   @@index([tenantId])
+  @@index([tenantId, ebioLocation])
+  @@index([tenantId, branchId])
 }
 
 model DeviceCommand {
@@ -258,6 +264,7 @@ model Branch {
 
   employees  Employee[]
   attendance Attendance[]
+  devices    Device[]
 
   @@unique([tenantId, code])
   @@index([tenantId, locationId])

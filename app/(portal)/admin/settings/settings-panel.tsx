@@ -37,6 +37,8 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   });
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number } | null>(null);
+  const [syncingTopology, setSyncingTopology] = useState(false);
+  const [topologyResult, setTopologyResult] = useState<{ locations: number; branches: number; devices: number; skipped: number } | null>(null);
 
   async function save() {
     setSaving(true);
@@ -77,6 +79,22 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
       toast("error", "Something went wrong.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function syncTopology() {
+    setSyncingTopology(true);
+    setTopologyResult(null);
+    try {
+      const res = await fetch("/api/settings/ebioserver/topology", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return toast("error", data.error ?? "Could not sync eBio worksite mapping.");
+      setTopologyResult(data);
+      toast("success", `Mapped ${data.devices} machine${data.devices === 1 ? "" : "s"} to worksites.`);
+    } catch {
+      toast("error", "Could not sync eBio worksite mapping.");
+    } finally {
+      setSyncingTopology(false);
     }
   }
 
@@ -201,6 +219,26 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             {testResult.message}
           </p>
         )}
+
+        <div className="mt-6 rounded-xl border border-edge bg-tint p-4">
+          <div className="flex items-center gap-2 text-[13px] font-semibold">
+            <Link2 className="h-4 w-4 text-brand" /> eBio locations and worksites
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+            Maps every eBio location to a PeopleNexa Location and every physical machine to its own Branch. This does not move employees, change punches, or reset live sync.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
+              <Link2 className="h-4 w-4" /> Sync worksite mapping
+            </Button>
+            {topologyResult && (
+              <p className="text-[12.5px] text-muted-foreground">
+                {topologyResult.locations} location(s) created · {topologyResult.branches} branch(es) created · {topologyResult.devices} machine(s) mapped
+                {topologyResult.skipped > 0 && ` · ${topologyResult.skipped} skipped`}
+              </p>
+            )}
+          </div>
+        </div>
 
         <div className="mt-6 rounded-xl border border-edge bg-tint p-4">
           <div className="flex items-center gap-2 text-[13px] font-semibold">
