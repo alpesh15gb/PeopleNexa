@@ -97,6 +97,15 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
             </div>
           </div>
         ))}
+        {departments.length === 0 && (
+          <div className="col-span-full rounded-xl border border-dashed border-edge bg-tint/40 px-5 py-10 text-center">
+            <p className="font-display text-sm font-semibold">No departments yet</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">Create your first department to organize employees into teams.</p>
+            <Button size="sm" className="mt-4" onClick={() => setEditing("new")}>
+              <Plus className="h-3.5 w-3.5" /> New department
+            </Button>
+          </div>
+        )}
       </div>
 
       <Modal

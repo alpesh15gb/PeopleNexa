@@ -480,7 +480,7 @@ export function EmployeesTable({
             <Download className="h-3.5 w-3.5" /> Download CSV template
           </a>
           <p className="rounded-xl border border-edge bg-tint px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
-            Required: <span className="font-medium text-foreground">Device Code or Employee Code</span>. Email is optional. Use workspace IDs for branchId, departmentId, shiftId, and managerId. Do not include passwords in CSV files.
+            Required: <span className="font-medium text-foreground">Device Code or Employee Code</span>. Email, Branch, and Department are optional. Enter Branch and Department names; missing names are created automatically. Use workspace IDs only for shiftId and managerId. Do not include passwords in CSV files.
           </p>
           <Field label="CSV file (.csv)">
             <Input

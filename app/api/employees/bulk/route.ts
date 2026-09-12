@@ -45,8 +45,8 @@ const TEMPLATE_HEADERS = [
   "position",
   "salary",
   "joiningDate",
-  "branchId",
-  "departmentId",
+  "branch",
+  "department",
   "shiftId",
   "payMode",
   "workBasisRate",
@@ -99,7 +99,9 @@ interface BulkRow {
   salary?: unknown;
   joiningDate?: unknown;
   branchId?: unknown;
+  branch?: unknown;
   departmentId?: unknown;
+  department?: unknown;
   shiftId?: unknown;
   payMode?: unknown;
   workBasisRate?: unknown;
@@ -115,6 +117,37 @@ interface BulkRow {
   conveyance?: unknown;
   medical?: unknown;
   otherAllowance?: unknown;
+}
+
+function assignmentName(value: unknown): string {
+  return value != null ? String(value).trim() : "";
+}
+
+async function resolveBranch(tenantId: string, value: string): Promise<string | null> {
+  if (!value) return null;
+  const existing = await prisma.branch.findFirst({
+    where: { tenantId, OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  const base = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16) || "BRANCH";
+  let code = base;
+  for (let suffix = 2; ; suffix++) {
+    const clash = await prisma.branch.findFirst({ where: { tenantId, code }, select: { id: true } });
+    if (!clash) break;
+    code = `${base.slice(0, 16)}${suffix}`.slice(0, 20);
+  }
+  return (await prisma.branch.create({ data: { tenantId, name: value, code } })).id;
+}
+
+async function resolveDepartment(tenantId: string, value: string): Promise<string | null> {
+  if (!value) return null;
+  const existing = await prisma.department.findFirst({
+    where: { tenantId, OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  return (await prisma.department.create({ data: { tenantId, name: value } })).id;
 }
 
 export async function POST(req: NextRequest) {
@@ -238,24 +271,16 @@ export async function POST(req: NextRequest) {
         salaryStructure[key] = amount;
       }
 
-      const branchId = raw?.branchId ? String(raw.branchId).trim() : "";
-      const departmentId = raw?.departmentId ? String(raw.departmentId).trim() : "";
+      // Preferred CSV columns are human-readable branch/department names.
+      // Legacy branchId/departmentId values work too, as either IDs or names.
+      const branchValue = assignmentName(raw?.branch) || assignmentName(raw?.branchId);
+      const departmentValue = assignmentName(raw?.department) || assignmentName(raw?.departmentId);
       const shiftId = raw?.shiftId ? String(raw.shiftId).trim() : "";
       const managerId = raw?.managerId ? String(raw.managerId).trim() : "";
 
-      const [branch, department, shift, manager] = await Promise.all([
-        branchId
-          ? prisma.branch.findFirst({
-              where: { id: branchId, tenantId: session.tenantId },
-              select: { id: true },
-            })
-          : null,
-        departmentId
-          ? prisma.department.findFirst({
-              where: { id: departmentId, tenantId: session.tenantId },
-              select: { id: true },
-            })
-          : null,
+      const [branchId, departmentId, shift, manager] = await Promise.all([
+        resolveBranch(session.tenantId, branchValue),
+        resolveDepartment(session.tenantId, departmentValue),
         shiftId
           ? prisma.shift.findFirst({
               where: { id: shiftId, tenantId: session.tenantId },
@@ -264,9 +289,6 @@ export async function POST(req: NextRequest) {
           : null,
         managerId ? prisma.employee.findFirst({ where: { id: managerId, tenantId: session.tenantId }, select: { id: true } }) : null,
       ]);
-      if (branchId && !branch) throw new Error("Branch not found in this workspace.");
-      if (departmentId && !department)
-        throw new Error("Department not found in this workspace.");
       if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
       if (managerId && !manager) throw new Error("Manager not found in this workspace.");
 

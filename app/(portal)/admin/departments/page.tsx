@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/stat";
 import { DepartmentsManager } from "./departments-manager";
 
 export const dynamic = "force-dynamic";
@@ -22,11 +21,7 @@ export default async function AdminDepartmentsPage() {
       />
       <Card>
         <CardContent className="p-0">
-          {departments.length === 0 ? (
-            <EmptyState title="No departments yet" description="Create your first department to organize your team." />
-          ) : (
-            <DepartmentsManager departments={departments} />
-          )}
+          <DepartmentsManager departments={departments} />
         </CardContent>
       </Card>
     </div>
