@@ -234,10 +234,11 @@ function splitName(name: string): [string, string] {
 }
 
 /**
- * Pull the employee master from eBioserver and create matching employees in
- * this tenant. Idempotent: codes already present are skipped, so re-running
- * only adds what's new. Imported identities are inactive until an admin provisions
- * a real email, password, and account activation.
+ * Pull the device employee-code master and create matching employees in this
+ * tenant. This intentionally does not call GetEmployeeDetails once per code:
+ * a 1,700-person device roster would otherwise make 1,700 serial SOAP calls
+ * and exceed the reverse-proxy timeout. Imported identities are inactive until
+ * an admin provisions their real profile and login details.
  */
 export async function importEmployeesFromEbioserver(
   tenantId: string,
@@ -247,56 +248,39 @@ export async function importEmployeesFromEbioserver(
   try {
     const client = await createClient(profile);
     const codesResult = await call<unknown>(client, "GetEmployeeCodes", { ...authArgs(profile), EmployeeLocation: "" });
-    const codes = String(resultString(codesResult))
+    const codes = [...new Set(String(resultString(codesResult))
       .split(",")
       .map((c) => c.trim())
-      .filter(Boolean);
+      .filter(Boolean))];
     result.total = codes.length;
-
-    for (const code of codes) {
-      const existing = await prisma.employee.findFirst({ where: { tenantId, OR: [{ deviceCode: code }, { employeeNumber: code }] } });
-      if (existing) {
-        result.skipped++;
-        continue;
-      }
-      try {
-        const detail = await call<unknown>(client, "GetEmployeeDetails", { ...authArgs(profile), EmployeeCode: code });
-        const fields = parseEmployeeDetails(resultString(detail));
-        const name = fields.EmployeeName || code;
-        const [firstName, lastName] = splitName(name);
-        const location = fields.EmployeeLocation || "";
-
-        let branchId: string | null = null;
-        if (location) {
-          const branchCode = location.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 20) || "UNKNOWN";
-          let branch = await prisma.branch.findFirst({ where: { tenantId, code: branchCode } });
-          if (!branch) {
-            branch = await prisma.branch.create({ data: { tenantId, name: location, code: branchCode } });
-          }
-          branchId = branch.id;
-        }
-
-        await prisma.employee.create({
-          data: {
-            tenantId,
-            employeeNumber: code,
-            deviceCode: code,
-            firstName,
-            lastName,
-            email: `${code.toLowerCase()}@device.local`,
-            // Device identities must never be born with a shared predictable
-            // credential. Keep them inactive until an admin provisions access.
-            password: await hashPassword(crypto.randomBytes(32).toString("hex")),
-            role: "employee",
-            status: "inactive",
-            position: fields.EmployeeRole || null,
-            branchId,
-          },
-        });
-        result.created++;
-      } catch {
-        result.failed++;
-      }
+    const existing = await prisma.employee.findMany({
+      where: { tenantId, OR: [{ deviceCode: { in: codes } }, { employeeNumber: { in: codes } }] },
+      select: { deviceCode: true, employeeNumber: true },
+    });
+    const known = new Set(existing.flatMap((employee) => [employee.deviceCode, employee.employeeNumber]).filter(Boolean));
+    const newCodes = codes.filter((code) => !known.has(code));
+    result.skipped = codes.length - newCodes.length;
+    // All imported accounts are inactive and have no usable shared password.
+    // One opaque hash is sufficient until each account is provisioned.
+    const inactivePassword = await hashPassword(crypto.randomBytes(32).toString("hex"));
+    for (let offset = 0; offset < newCodes.length; offset += 250) {
+      const batch = newCodes.slice(offset, offset + 250);
+      const created = await prisma.employee.createMany({
+        data: batch.map((code) => ({
+          tenantId,
+          employeeNumber: code,
+          deviceCode: code,
+          firstName: code,
+          lastName: "",
+          email: `device-${Buffer.from(code).toString("hex")}@device.local`,
+          password: inactivePassword,
+          role: "employee",
+          status: "inactive",
+        })),
+        skipDuplicates: true,
+      });
+      result.created += created.count;
+      result.failed += batch.length - created.count;
     }
     result.ok = true;
     // Now that employees exist, reconcile punches that were flagged earlier
