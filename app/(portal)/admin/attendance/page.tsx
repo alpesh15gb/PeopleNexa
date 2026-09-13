@@ -2,7 +2,6 @@ import { PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { dayRangeIST, todayKey, isDateKey, formatTime, formatDate } from "@/lib/dates";
-import { finalizeEligibleDays } from "@/lib/reconcile";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
 import { AttendanceTable } from "./attendance-table";
@@ -46,9 +45,6 @@ export default async function AdminAttendancePage({
   const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
   const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
   const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
-
-  // Lazy finalization of past days (Phase 4 reconciliation).
-  await finalizeEligibleDays(session.tenantId);
 
   const employeeScope = { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) };
   const employeeWhere = query
