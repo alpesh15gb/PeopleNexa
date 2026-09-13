@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ interface Emp {
   department: { id: string; name: string } | null;
   shift: { id: string; name: string; startTime: string; endTime: string } | null;
   managerId: string | null;
+  profilePicture: string | null;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -97,6 +98,45 @@ export function EmployeesTable({
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoBulkOpen, setPhotoBulkOpen] = useState(false);
+  const [photoBulkLoading, setPhotoBulkLoading] = useState(false);
+  const [photoBulkResult, setPhotoBulkResult] = useState<string[]>([]);
+
+  async function readPhoto(file: File): Promise<string> {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
+    if (file.size > 300 * 1024) throw new Error("Photo must be 300 KB or smaller.");
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read photo."));
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadBulkPhotos(files: FileList) {
+    setPhotoBulkLoading(true);
+    const outcomes: string[] = [];
+    try {
+      const items: Array<{ code: string; profilePicture: string }> = [];
+      for (const file of Array.from(files)) {
+        const code = file.name.replace(/\.[^.]+$/, "").trim();
+        try { items.push({ code, profilePicture: await readPhoto(file) }); }
+        catch (error) { outcomes.push(`${file.name}: ${error instanceof Error ? error.message : "Invalid photo."}`); }
+      }
+      for (let index = 0; index < items.length; index += 10) {
+        const res = await fetch("/api/employees/photos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ photos: items.slice(index, index + 10) }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Photo upload failed.");
+        outcomes.push(...data.results.filter((result: { error?: string }) => result.error).map((result: { code: string; error: string }) => `${result.code}: ${result.error}`));
+      }
+      setPhotoBulkResult(outcomes);
+      toast(outcomes.length ? "info" : "success", outcomes.length ? "Some photos could not be uploaded." : `${items.length} employee photo(s) uploaded.`);
+      router.refresh();
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Photo upload failed.");
+    } finally { setPhotoBulkLoading(false); }
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -124,6 +164,7 @@ export function EmployeesTable({
       uan: form.get("uan") || null,
       payMode: form.get("payMode") || "monthly",
       workBasisRate: form.get("workBasisRate") || null,
+      profilePicture: photo ?? editing?.profilePicture ?? null,
     };
     if (!editing) payload.password = form.get("password");
     if (editing) payload.status = form.get("status");
@@ -299,7 +340,10 @@ export function EmployeesTable({
           <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
             <Upload className="h-3.5 w-3.5" /> Bulk import
           </Button>
-          <Button size="sm" onClick={() => setModal("create")}>
+          <Button size="sm" variant="outline" onClick={() => { setPhotoBulkResult([]); setPhotoBulkOpen(true); }}>
+            <ImageUp className="h-3.5 w-3.5" /> Bulk photos
+          </Button>
+          <Button size="sm" onClick={() => { setPhoto(null); setModal("create"); }}>
             <Plus className="h-3.5 w-3.5" /> Add employee
           </Button>
         </div>
@@ -321,9 +365,7 @@ export function EmployeesTable({
             <TR key={emp.id}>
               <TD>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
-                    {(emp.firstName[0] ?? "") + (emp.lastName[0] ?? "")}
-                  </div>
+                  {emp.profilePicture ? <img src={emp.profilePicture} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">{(emp.firstName[0] ?? "") + (emp.lastName[0] ?? "")}</div>}
                   <div>
                     <p className="text-[13.5px] font-medium">
                       {emp.firstName} {emp.lastName}
@@ -348,7 +390,7 @@ export function EmployeesTable({
               <TD><StatusPill status={emp.status} /></TD>
               <TD>
                 <div className="flex items-center justify-end gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => setModal(emp)}>
+                  <Button size="icon" variant="ghost" onClick={() => { setPhoto(null); setModal(emp); }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   {emp.role !== "admin" && (
@@ -377,6 +419,12 @@ export function EmployeesTable({
       >
         <form key={editing ? editing.id : "create"} onSubmit={onSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Employee photo" hint="JPEG, PNG, or WebP up to 300 KB">
+              <div className="flex items-center gap-3">
+                {(photo ?? editing?.profilePicture) ? <img src={photo ?? editing?.profilePicture ?? ""} alt="" className="h-12 w-12 rounded-lg object-cover" /> : <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-tint text-xs text-muted-foreground">Photo</div>}
+                <Input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readPhoto(file).then(setPhoto).catch((error) => toast("error", error.message)); }} />
+              </div>
+            </Field>
             <Field label="First name">
               <Input name="firstName" required defaultValue={editing?.firstName ?? ""} />
             </Field>
@@ -488,6 +536,16 @@ export function EmployeesTable({
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={photoBulkOpen} onClose={() => setPhotoBulkOpen(false)} title="Bulk upload employee photos" description="Select multiple JPEG, PNG, or WebP files. Each filename must match a Device Code or Employee Code, for example 3947.jpg or MN3947.png.">
+        <div className="space-y-4">
+          <Field label="Employee photo files" hint="Up to 300 KB per image; photos are matched by filename">
+            <Input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={photoBulkLoading} onChange={(event) => { const files = event.target.files; if (files?.length) void uploadBulkPhotos(files); }} />
+          </Field>
+          {photoBulkResult.length > 0 && <ul className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-edge bg-card p-3 text-[12.5px] text-rose-300">{photoBulkResult.map((result) => <li key={result}>{result}</li>)}</ul>}
+          <div className="flex justify-end"><Button variant="ghost" onClick={() => setPhotoBulkOpen(false)}>Close</Button></div>
+        </div>
       </Modal>
 
       {/* Bulk import modal */}

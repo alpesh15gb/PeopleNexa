@@ -59,6 +59,7 @@ export default async function AdminEmployeesPage({
         payMode: true,
         workBasisRate: true,
         managerId: true,
+        profilePicture: true,
         branch: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },

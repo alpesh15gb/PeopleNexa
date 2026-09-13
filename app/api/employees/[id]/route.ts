@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
+import { profilePictureValue } from "@/lib/profile-picture";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -72,6 +73,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const { id } = await ctx.params;
   const body = await req.json();
+  const photo = body.profilePicture === undefined ? null : profilePictureValue(body.profilePicture);
+  if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -330,7 +333,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       pan: nextPan,
       uan: nextUan,
       payMode: nextPayMode,
-      workBasisRate: body.workBasisRate !== undefined ? (body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null) : employee.workBasisRate,
+       workBasisRate: body.workBasisRate !== undefined ? (body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null) : employee.workBasisRate,
+       profilePicture: photo ? photo.value : employee.profilePicture,
     },
     });
   } catch (err: unknown) {

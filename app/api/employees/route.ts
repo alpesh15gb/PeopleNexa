@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 import { dispatchWebhook } from "@/lib/webhooks";
+import { profilePictureValue } from "@/lib/profile-picture";
 
 const select = {
   id: true,
@@ -130,6 +131,8 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
+    const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
+    if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
     const email = String(body.email ?? "").toLowerCase().trim();
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
@@ -285,7 +288,8 @@ export async function POST(req: NextRequest) {
           payMode,
           workBasisRate: loginOnly ? null : workBasisRate,
           managerId: loginOnly ? null : body.managerId || null,
-          salaryStructure: loginOnly ? null : body.salaryStructure || null,
+           salaryStructure: loginOnly ? null : body.salaryStructure || null,
+           profilePicture: photo.value,
         },
         select,
       });
