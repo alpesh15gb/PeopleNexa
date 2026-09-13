@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 export default async function LoginPage() {
   const session = await getSession();
-  if (session) redirect(session.role === "admin" ? "/admin" : "/employee");
+  if (session) redirect(session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager" ? "/admin" : session.role === "supervisor" ? "/admin/attendance" : "/employee");
 
   return (
     <div className="animate-fade-up motion-reduce:animate-none">

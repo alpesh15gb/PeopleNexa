@@ -157,7 +157,7 @@ async function proxy(request: NextRequest) {
 
   if (pathname === "/login" || pathname === "/register") {
     return NextResponse.redirect(
-       new URL(role === "admin" || role === "location_manager" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee", request.url)
+        new URL(role === "admin" || role === "branch_manager" || role === "location_manager" ? "/admin" : role === "supervisor" ? "/admin/attendance" : "/employee", request.url)
     );
   }
   // Supervisor is admin-lite for their scope: attendance + regularization only.

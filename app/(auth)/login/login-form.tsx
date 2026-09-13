@@ -41,7 +41,7 @@ export function LoginForm() {
         return;
       }
       toast("success", "Login successful — welcome back!");
-      router.push(data.role === "admin" ? "/admin" : "/employee");
+      router.push(data.role === "admin" || data.role === "branch_manager" || data.role === "location_manager" ? "/admin" : data.role === "supervisor" ? "/admin/attendance" : "/employee");
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
