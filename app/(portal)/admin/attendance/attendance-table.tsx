@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { ListChecks, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill, Badge } from "@/components/ui/badge";
@@ -50,7 +51,7 @@ const fmtISTFull = (iso: string) => {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 };
 
-export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
+export function AttendanceTable({ rows, date, branchId, query, page, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; page: number; totalEmployees: number; totalPages: number }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
@@ -61,7 +62,6 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
   const [newTime, setNewTime] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [search, setSearch] = useState("");
 
   async function save(recordId: string) {
     setSaving(true);
@@ -180,18 +180,26 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
     }
   }
 
-  const searchTerm = search.trim().toLowerCase();
-  const visibleRows = searchTerm
-    ? rows.filter((row) => `${row.name} ${row.employeeNumber}`.toLowerCase().includes(searchTerm))
-    : rows;
+  const pageUrl = (nextPage: number) => {
+    const params = new URLSearchParams({ date, page: String(nextPage) });
+    if (branchId) params.set("branch", branchId);
+    if (query) params.set("q", query);
+    return `/admin/attendance?${params.toString()}`;
+  };
 
   return (
     <>
       <div className="border-b border-edge px-5 py-3">
-        <div className="relative max-w-sm">
+        <form action="/admin/attendance" className="flex max-w-xl gap-2">
+          <input type="hidden" name="date" value={date} />
+          {branchId && <input type="hidden" name="branch" value={branchId} />}
+          <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
-        </div>
+            <Input name="q" defaultValue={query} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
+          </div>
+          <Button type="submit" size="sm">Search</Button>
+        </form>
+        <p className="mt-2 text-[12px] text-muted-foreground">Showing {(page - 1) * 50 + 1}–{Math.min(page * 50, totalEmployees)} of {totalEmployees} employees</p>
       </div>
       <Table>
         <THead>
@@ -206,7 +214,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
           </TR>
         </THead>
         <TBody>
-          {visibleRows.map((row) => {
+          {rows.map((row) => {
             const statusNow = row.leave ? "on_leave" : row.record?.status ?? "absent";
             return (
               <TR key={row.employeeId}>
@@ -353,13 +361,20 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
               </TR>
             );
           })}
-          {visibleRows.length === 0 && (
+          {rows.length === 0 && (
             <TR>
               <TD colSpan={7} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
             </TR>
           )}
         </TBody>
       </Table>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-edge px-5 py-3 text-[13px]">
+          {page > 1 ? <Link href={pageUrl(page - 1)} className="inline-flex h-8 items-center rounded-lg border border-edge-strong bg-card px-3 text-xs font-medium text-foreground hover:bg-tint">Previous</Link> : <span />}
+          <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+          {page < totalPages ? <Link href={pageUrl(page + 1)} className="inline-flex h-8 items-center rounded-lg border border-edge-strong bg-card px-3 text-xs font-medium text-foreground hover:bg-tint">Next</Link> : <span />}
+        </div>
+      )}
 
       {/* Punch correction modal */}
       <Modal

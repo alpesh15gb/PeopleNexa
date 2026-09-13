@@ -11,14 +11,15 @@ import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 
 export const dynamic = "force-dynamic";
+const PAGE_SIZE = 50;
 
 export default async function AdminAttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; branch?: string }>;
+  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string }>;
 }) {
   const session = await requireSession();
-  const { date: dateParam, branch: branchParam } = await searchParams;
+  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam } = await searchParams;
   // UI routes fall back to today for a malformed URL instead of rendering a
   // normalized-but-wrong day. APIs reject malformed dates with HTTP 400.
   const dateKey = dateParam && isDateKey(dateParam) ? dateParam : todayKey();
@@ -41,13 +42,23 @@ export default async function AdminAttendancePage({
        ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
+  const query = queryParam?.trim().slice(0, 100) ?? "";
+  const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
 
   // Lazy finalization of past days (Phase 4 reconciliation).
   await finalizeEligibleDays(session.tenantId);
 
-  const [employees, records, leaves, holidays, branches] = await Promise.all([
+  const employeeScope = { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) };
+  const employeeWhere = query
+    ? { ...employeeScope, AND: query.split(/\s+/).filter(Boolean).map((term) => ({ OR: [{ firstName: { contains: term, mode: "insensitive" as const } }, { lastName: { contains: term, mode: "insensitive" as const } }, { employeeNumber: { contains: term, mode: "insensitive" as const } }] })) }
+    : employeeScope;
+  const totalEmployees = await prisma.employee.count({ where: employeeWhere });
+  const totalPages = Math.max(1, Math.ceil(totalEmployees / PAGE_SIZE));
+  const page = Math.min(requestedPage, totalPages);
+
+  const [employees, holidays, branches, attendanceCounts, leaveCount] = await Promise.all([
     prisma.employee.findMany({
-       where: { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) },
+       where: employeeWhere,
       select: {
         id: true,
         employeeNumber: true,
@@ -56,28 +67,30 @@ export default async function AdminAttendancePage({
         department: { select: { name: true } },
         shift: { select: { name: true, startTime: true } },
       },
-      orderBy: { employeeNumber: "asc" },
-    }),
-    prisma.attendance.findMany({
-       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
-      include: { branch: { select: { name: true } } },
-    }),
-    prisma.leaveRequest.findMany({
-      where: {
-        tenantId: session.tenantId,
-        status: "approved",
-        fromDate: { lt: dayEnd },
-        toDate: { gte: dayStart },
-        ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}),
-      },
-      include: { employee: { select: { id: true } }, leaveType: true },
-    }),
+       orderBy: { employeeNumber: "asc" },
+       skip: (page - 1) * PAGE_SIZE,
+       take: PAGE_SIZE,
+     }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
     prisma.branch.findMany({
        where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       select: { id: true, name: true },
-      orderBy: { name: "asc" },
+       orderBy: { name: "asc" },
     }),
+    prisma.attendance.groupBy({
+      by: ["status"],
+      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
+      _count: true,
+    }),
+    prisma.leaveRequest.count({
+      where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
+    }),
+  ]);
+
+  const employeeIds = employees.map((employee) => employee.id);
+  const [records, leaves] = await Promise.all([
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } } } }),
+    prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, }, include: { employee: { select: { id: true } }, leaveType: true } }),
   ]);
 
   const leaveByEmp = new Map(leaves.map((l) => [l.employee.id, l]));
@@ -108,11 +121,10 @@ export default async function AdminAttendancePage({
     };
   });
 
-  const counts = rows.reduce<Record<string, number>>((acc, r) => {
-    const key = r.leave ? "on_leave" : r.record ? r.record.status : "absent";
-    acc[key] = (acc[key] ?? 0) + 1;
-    return acc;
-  }, {});
+  const counts = Object.fromEntries(attendanceCounts.map((count) => [count.status, count._count])) as Record<string, number>;
+  const marked = attendanceCounts.reduce((total, count) => total + count._count, 0);
+  counts.on_leave = leaveCount;
+  counts.absent = Math.max(totalEmployees - marked - leaveCount, 0);
 
   const statCards = [
     { label: "Present", value: counts.present ?? 0, cls: "text-emerald-300" },
@@ -167,13 +179,13 @@ export default async function AdminAttendancePage({
 
       <Card>
         <CardContent className="p-0 pt-0">
-          {rows.length === 0 ? (
+          {totalEmployees === 0 ? (
             <EmptyState
               title={branchId ? "No employees in this branch" : "No employees yet"}
               description={branchId ? "Try another branch or date." : "Add employees to start tracking attendance."}
             />
           ) : (
-            <AttendanceTable rows={rows} date={dateKey} />
+            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} page={page} totalEmployees={totalEmployees} totalPages={totalPages} />
           )}
         </CardContent>
       </Card>
