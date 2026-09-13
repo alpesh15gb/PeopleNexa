@@ -4,7 +4,7 @@ import * as soapNs from "soap";
 const soap = (soapNs as { default?: typeof soapNs }).default ?? soapNs;
 import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
-import { parseIST } from "./ist";
+import { istDateKey, parseIST } from "./ist";
 import { hashPassword } from "./auth";
 import crypto from "node:crypto";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
@@ -445,7 +445,7 @@ export async function backfillDays(
 
     for (let d = days - 1; d >= 0; d--) {
       const day = new Date(Date.now() - d * 86400000);
-      const dateStr = day.toISOString().slice(0, 10);
+      const dateStr = istDateKey(day);
       const dayResult = await call<unknown>(client, "GetDeviceLogs", {
         ...authArgs(profile),
         Location: "",
@@ -591,7 +591,7 @@ export async function pullTenant(
       // Backfill recent days (all devices at once via empty Location).
       for (let d = 0; d < BACKFILL_DAYS; d++) {
         const day = new Date(Date.now() - d * 24 * 3600 * 1000);
-        const dateStr = day.toISOString().slice(0, 10);
+        const dateStr = istDateKey(day);
         const dayResult = await call<unknown>(client, "GetDeviceLogs", {
           ...authArgs(profile),
           Location: "",
