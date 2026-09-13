@@ -51,7 +51,7 @@ const fmtISTFull = (iso: string) => {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 };
 
-export function AttendanceTable({ rows, date, branchId, query, page, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; page: number; totalEmployees: number; totalPages: number }) {
+export function AttendanceTable({ rows, date, branchId, query, page, pageSize, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; page: number; pageSize: number; totalEmployees: number; totalPages: number }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
@@ -181,7 +181,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, totalEmploy
   }
 
   const pageUrl = (nextPage: number) => {
-    const params = new URLSearchParams({ date, page: String(nextPage) });
+    const params = new URLSearchParams({ date, page: String(nextPage), size: String(pageSize) });
     if (branchId) params.set("branch", branchId);
     if (query) params.set("q", query);
     return `/admin/attendance?${params.toString()}`;
@@ -197,9 +197,12 @@ export function AttendanceTable({ rows, date, branchId, query, page, totalEmploy
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input name="q" defaultValue={query} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
           </div>
+          <Select name="size" defaultValue={String(pageSize)} className="w-20">
+            {[50, 100, 200, 500].map((size) => <option key={size} value={size}>{size}</option>)}
+          </Select>
           <Button type="submit" size="sm">Search</Button>
         </form>
-        <p className="mt-2 text-[12px] text-muted-foreground">Showing {(page - 1) * 50 + 1}–{Math.min(page * 50, totalEmployees)} of {totalEmployees} employees</p>
+        <p className="mt-2 text-[12px] text-muted-foreground">Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalEmployees)} of {totalEmployees} employees</p>
       </div>
       <Table>
         <THead>

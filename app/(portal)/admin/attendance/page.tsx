@@ -11,15 +11,15 @@ import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 
 export const dynamic = "force-dynamic";
-const PAGE_SIZE = 50;
+const PAGE_SIZES = [50, 100, 200, 500] as const;
 
 export default async function AdminAttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string; size?: string }>;
 }) {
   const session = await requireSession();
-  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam } = await searchParams;
+  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam, size: sizeParam } = await searchParams;
   // UI routes fall back to today for a malformed URL instead of rendering a
   // normalized-but-wrong day. APIs reject malformed dates with HTTP 400.
   const dateKey = dateParam && isDateKey(dateParam) ? dateParam : todayKey();
@@ -44,6 +44,8 @@ export default async function AdminAttendancePage({
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
   const query = queryParam?.trim().slice(0, 100) ?? "";
   const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
+  const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
 
   // Lazy finalization of past days (Phase 4 reconciliation).
   await finalizeEligibleDays(session.tenantId);
@@ -53,7 +55,7 @@ export default async function AdminAttendancePage({
     ? { ...employeeScope, AND: query.split(/\s+/).filter(Boolean).map((term) => ({ OR: [{ firstName: { contains: term, mode: "insensitive" as const } }, { lastName: { contains: term, mode: "insensitive" as const } }, { employeeNumber: { contains: term, mode: "insensitive" as const } }] })) }
     : employeeScope;
   const totalEmployees = await prisma.employee.count({ where: employeeWhere });
-  const totalPages = Math.max(1, Math.ceil(totalEmployees / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalEmployees / pageSize));
   const page = Math.min(requestedPage, totalPages);
 
   const [employees, holidays, branches, attendanceCounts, leaveCount] = await Promise.all([
@@ -68,8 +70,8 @@ export default async function AdminAttendancePage({
         shift: { select: { name: true, startTime: true } },
       },
        orderBy: { employeeNumber: "asc" },
-       skip: (page - 1) * PAGE_SIZE,
-       take: PAGE_SIZE,
+       skip: (page - 1) * pageSize,
+       take: pageSize,
      }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
     prisma.branch.findMany({
@@ -185,7 +187,7 @@ export default async function AdminAttendancePage({
               description={branchId ? "Try another branch or date." : "Add employees to start tracking attendance."}
             />
           ) : (
-            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} page={page} totalEmployees={totalEmployees} totalPages={totalPages} />
+            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} />
           )}
         </CardContent>
       </Card>
