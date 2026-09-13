@@ -389,7 +389,9 @@ export async function importEmployeesFromEbioserver(
     result.ok = true;
     // Now that employees exist, reconcile punches that were flagged earlier
     // because their code had no match at ingest time.
-    result.reprocessed = (await reprocessFailedLogs(tenantId)).accepted;
+    // A first-time employee import can unlock thousands of recently received
+    // eBio logs, so recover a full practical workday backlog in one action.
+    result.reprocessed = (await reprocessFailedLogs(tenantId, 5000)).accepted;
     return result;
   } catch (err) {
     result.message = err instanceof Error ? err.message : "Import failed";
