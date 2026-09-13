@@ -4,7 +4,7 @@ import * as soapNs from "soap";
 const soap = (soapNs as { default?: typeof soapNs }).default ?? soapNs;
 import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
-import { istDateKey, parseIST } from "./ist";
+import { istDateKey, istStartOfDay, parseIST } from "./ist";
 import { hashPassword } from "./auth";
 import crypto from "node:crypto";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
@@ -609,6 +609,7 @@ export async function pullTenant(
         }
       }
     } else {
+      let receivedIncrementalRecords = false;
       while (true) {
         const batchResult = await call<unknown>(client, "GetDeviceLogsByLogId", {
           ...authArgs(profile),
@@ -618,6 +619,7 @@ export async function pullTenant(
         });
         const records = parseLogRecords(resultString(batchResult));
         if (records.length === 0) break;
+        receivedIncrementalRecords = true;
 
         // Cursor tracks the max successfully ingested logId (never cursor+len,
         // which would skip over failures or over-count short batches).
@@ -645,6 +647,38 @@ export async function pullTenant(
         }
         // A short batch means the history is exhausted — done.
         if (records.length < LOG_BATCH) break;
+      }
+
+      // Some eBio installations expose the date feed correctly but return an
+      // empty incremental cursor response. Fall back to today's IST feed and
+      // skip raw logs already stored locally before ingesting anything.
+      if (!receivedIncrementalRecords) {
+        const dayStart = istStartOfDay(new Date());
+        const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+        const dayResult = await call<unknown>(client, "GetDeviceLogs", {
+          ...authArgs(profile),
+          Location: "",
+          LogDate: istDateKey(new Date()),
+        });
+        const knownLogs = await prisma.deviceLog.findMany({
+          where: {
+            deviceId: { in: [...new Set([...deviceByDeviceName.values()].map((device) => device.id))] },
+            punchTime: { gte: dayStart, lt: dayEnd },
+          },
+          select: { deviceId: true, userId: true, punchTime: true },
+        });
+        const known = new Set(knownLogs.map((log) => `${log.deviceId}|${log.userId}|${log.punchTime?.getTime() ?? ""}`));
+        for (const rec of parseLogRecords(resultString(dayResult))) {
+          let device = deviceByDeviceName.get(rec.deviceName);
+          if (!device && deviceByDeviceName.size === 1) device = deviceByDeviceName.values().next().value;
+          if (device && known.has(`${device.id}|${rec.userId}|${rec.punchTime.getTime()}`)) continue;
+          try {
+            await ingestRecord(rec, deviceByDeviceName);
+          } catch (err) {
+            console.warn(`[eBioserver] Skipping fallback punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
+            summary.skipped++;
+          }
+        }
       }
     }
 
