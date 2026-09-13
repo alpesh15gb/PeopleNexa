@@ -57,7 +57,6 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
-  const [quickBusy, setQuickBusy] = useState<string | null>(null);
   const [correction, setCorrection] = useState<Row["record"] | null>(null);
   const [newTime, setNewTime] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -91,54 +90,6 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
       if (data.record) setCorrection(data.record);
     }
     router.refresh();
-  }
-
-  async function quickMark(employeeId: string, nextStatus: string) {
-    const target = rows.find((r) => r.employeeId === employeeId);
-    const key = `${employeeId}:${nextStatus}`;
-    // No derived row yet (implicit absent): only an explicit absent mark can
-    // create the day via POST /api/attendance; other statuses need punches.
-    if (!target?.record) {
-      if (nextStatus !== "absent") {
-        toast("error", "No attendance record yet for this day");
-        return;
-      }
-      setQuickBusy(key);
-      try {
-        const res = await fetch("/api/attendance", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ employeeId, date, status: "absent" }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          toast("error", data.error ?? "Failed to update");
-          return;
-        }
-        toast("success", "Marked absent");
-        router.refresh();
-      } finally {
-        setQuickBusy(null);
-      }
-      return;
-    }
-    setQuickBusy(key);
-    try {
-      const res = await fetch(`/api/attendance/${target.record.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to update");
-        return;
-      }
-      toast("success", `Marked ${nextStatus.replace("_", " ")}`);
-      router.refresh();
-    } finally {
-      setQuickBusy(null);
-    }
   }
 
   async function addPunch() {
@@ -213,7 +164,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
             <TH>In</TH>
             <TH>Out</TH>
             <TH>Status</TH>
-            <TH className="min-w-56">Quick mark</TH>
+            <TH className="w-20" />
           </TR>
         </THead>
         <TBody>
@@ -273,90 +224,16 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                       </Button>
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-1.5">
-                      {row.record && !row.leave ? (
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            size="sm"
-                            variant="success"
-                            className="min-h-[44px] px-2 text-[11px]"
-                            loading={quickBusy === `${row.employeeId}:present`}
-                            disabled={quickBusy !== null}
-                            title={`Mark present for ${row.name}`}
-                            aria-label={`Mark present for ${row.name}`}
-                            onClick={() => quickMark(row.employeeId, "present")}
-                          >
-                            Present
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            className="min-h-[44px] px-2 text-[11px]"
-                            loading={quickBusy === `${row.employeeId}:absent`}
-                            disabled={quickBusy !== null}
-                            title={`Mark absent for ${row.name}`}
-                            aria-label={`Mark absent for ${row.name}`}
-                            onClick={() => quickMark(row.employeeId, "absent")}
-                          >
-                            Absent
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="min-h-[44px] px-2 text-[11px]"
-                            loading={quickBusy === `${row.employeeId}:late`}
-                            disabled={quickBusy !== null}
-                            title={`Mark late for ${row.name}`}
-                            aria-label={`Mark late for ${row.name}`}
-                            onClick={() => quickMark(row.employeeId, "late")}
-                          >
-                            Late
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            className="min-h-[44px] px-2 text-[11px]"
-                            loading={quickBusy === `${row.employeeId}:half_day`}
-                            disabled={quickBusy !== null}
-                            title={`Mark half-day for ${row.name}`}
-                            aria-label={`Mark half-day for ${row.name}`}
-                            onClick={() => quickMark(row.employeeId, "half_day")}
-                          >
-                            Half-day
-                          </Button>
-                        </div>
-                      ) : null}
-                      {!row.record && !row.leave ? (
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            className="min-h-[44px] px-2 text-[11px]"
-                            loading={quickBusy === `${row.employeeId}:absent`}
-                            disabled={quickBusy !== null}
-                            title={`Mark absent for ${row.name}`}
-                            aria-label={`Mark absent for ${row.name}`}
-                            onClick={() => quickMark(row.employeeId, "absent")}
-                          >
-                            Absent
-                          </Button>
-                        </div>
-                      ) : null}
+                    <div className="flex items-center gap-1">
                       {row.record ? (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            title="View / correct punches"
-                            aria-label={`View punches for ${row.name ?? row.employeeId}`}
-                            onClick={() => setCorrection(row.record!)}
-                          >
+                        <>
+                          <Button size="sm" variant="ghost" title="View / correct punches" aria-label={`View punches for ${row.name ?? row.employeeId}`} onClick={() => setCorrection(row.record!)}>
                             <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
                           <Button size="sm" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
                             <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
-                        </div>
+                        </>
                       ) : null}
                     </div>
                   )}
