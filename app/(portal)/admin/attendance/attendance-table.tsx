@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ListChecks, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { ListChecks, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill, Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
   const [newTime, setNewTime] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [search, setSearch] = useState("");
 
   async function save(recordId: string) {
     setSaving(true);
@@ -179,8 +180,19 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
     }
   }
 
+  const searchTerm = search.trim().toLowerCase();
+  const visibleRows = searchTerm
+    ? rows.filter((row) => `${row.name} ${row.employeeNumber}`.toLowerCase().includes(searchTerm))
+    : rows;
+
   return (
     <>
+      <div className="border-b border-edge px-5 py-3">
+        <div className="relative max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
+        </div>
+      </div>
       <Table>
         <THead>
           <TR>
@@ -194,7 +206,7 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
           </TR>
         </THead>
         <TBody>
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const statusNow = row.leave ? "on_leave" : row.record?.status ?? "absent";
             return (
               <TR key={row.employeeId}>
@@ -341,6 +353,11 @@ export function AttendanceTable({ rows, date }: { rows: Row[]; date: string }) {
               </TR>
             );
           })}
+          {visibleRows.length === 0 && (
+            <TR>
+              <TD colSpan={7} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
+            </TR>
+          )}
         </TBody>
       </Table>
 
