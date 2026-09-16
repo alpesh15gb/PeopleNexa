@@ -345,6 +345,7 @@ model Employee {
   uan String?
   aadhaarNumber String?
   drivingLicenseNumber String?
+  drivingLicenseExpiresAt DateTime?
 
   // Salary structure components (Basic / HRA / Conveyance / Medical / Other).
   salaryStructure Json?

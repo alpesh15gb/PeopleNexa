@@ -65,6 +65,13 @@ function joiningDateRangeError(d: Date): string | null {
   return null;
 }
 
+function dateInput(value: unknown): Date | null | "invalid" {
+  if (value == null || String(value).trim() === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return "invalid";
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? "invalid" : date;
+}
+
 function salaryStructureError(v: unknown): string | null {
   if (v === undefined || v === null || v === "") return null;
   if (typeof v !== "object" || Array.isArray(v)) {
@@ -165,8 +172,10 @@ export async function POST(req: NextRequest) {
     }
     const aadhaarNumber = body.aadhaarNumber != null && String(body.aadhaarNumber).trim() !== "" ? String(body.aadhaarNumber).replace(/[\s-]/g, "") : null;
     const drivingLicenseNumber = body.drivingLicenseNumber != null && String(body.drivingLicenseNumber).trim() !== "" ? String(body.drivingLicenseNumber).trim().toUpperCase() : null;
+    const drivingLicenseExpiresAt = dateInput(body.drivingLicenseExpiresAt);
     if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
     if (drivingLicenseNumber && (drivingLicenseNumber.length < 8 || drivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
+    if (drivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
     const email = String(body.email ?? "").toLowerCase().trim();
@@ -333,7 +342,8 @@ export async function POST(req: NextRequest) {
           managerId: loginOnly ? null : body.managerId || null,
            salaryStructure: loginOnly ? null : body.salaryStructure || null,
            aadhaarNumber: loginOnly ? null : aadhaarNumber,
-           drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
+            drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
+            drivingLicenseExpiresAt: loginOnly ? null : drivingLicenseExpiresAt,
            profilePicture: photo.value,
         },
         select,

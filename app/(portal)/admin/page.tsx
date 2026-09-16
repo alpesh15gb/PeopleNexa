@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff } from "lucide-react";
+import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { addDays, toDateKey, formatTime, formatDate, relativeDay } from "@/lib/dates";
@@ -68,8 +68,12 @@ export default async function AdminDashboardPage({
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
   const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
   const empScope = { tenantId: session.tenantId, status: "active", ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
+  const currentMonth = istDateKey(today).slice(0, 7);
+  const [year, month] = currentMonth.split("-").map(Number);
+  const licenseExpiryStart = new Date(Date.UTC(year, month - 1, 1));
+  const licenseExpiryEnd = new Date(Date.UTC(year, month, 1));
 
-  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches] = await Promise.all([
+  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } } },
@@ -101,6 +105,21 @@ export default async function AdminDashboardPage({
         : { tenantId: session.tenantId, status: "pending", ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
     }),
     prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({
+      where: {
+        ...empScope,
+        drivingLicenseExpiresAt: { gte: licenseExpiryStart, lt: licenseExpiryEnd },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        employeeNumber: true,
+        drivingLicenseExpiresAt: true,
+        branch: { select: { name: true } },
+      },
+      orderBy: { drivingLicenseExpiresAt: "asc" },
+    }),
   ]);
 
   // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
@@ -233,6 +252,35 @@ export default async function AdminDashboardPage({
         </Card>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>Driving license expiry</CardTitle>
+                <CardDescription>{expiringLicenses.length} employee{expiringLicenses.length === 1 ? "" : "s"} expiring in {currentMonth}</CardDescription>
+              </div>
+              <IdCard className="h-4.5 w-4.5 text-amber-600" />
+            </CardHeader>
+            <CardContent className="pt-1">
+              {expiringLicenses.length === 0 ? (
+                <p className="py-4 text-center text-[13px] text-muted-foreground">No driving licenses expire this month.</p>
+              ) : (
+                <div className="divide-y divide-[color:var(--border)]">
+                  {expiringLicenses.map((employee) => (
+                    <Link key={employee.id} href="/admin/employees" className="flex items-center justify-between gap-3 py-3 transition-colors hover:text-primary">
+                      <div className="min-w-0">
+                        <p className="truncate text-[13.5px] font-medium">{employee.firstName} {employee.lastName}</p>
+                        <p className="truncate text-[11.5px] text-muted-foreground">{employee.employeeNumber} · {employee.branch?.name ?? "Unassigned"}</p>
+                      </div>
+                      <time dateTime={employee.drivingLicenseExpiresAt!.toISOString()} className="shrink-0 font-mono text-[12px] font-semibold text-amber-700 dark:text-amber-400">
+                        {formatDate(employee.drivingLicenseExpiresAt!)}
+                      </time>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Week chart */}
           <Card>
             <CardHeader>

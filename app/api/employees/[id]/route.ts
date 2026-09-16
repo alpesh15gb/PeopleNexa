@@ -48,6 +48,13 @@ function joiningDateRangeError(d: Date): string | null {
   return null;
 }
 
+function dateInput(value: unknown): Date | null | "invalid" {
+  if (value == null || String(value).trim() === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return "invalid";
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? "invalid" : date;
+}
+
 function salaryStructureError(v: unknown): string | null {
   if (v === undefined || v === null || v === "") return null;
   if (typeof v !== "object" || Array.isArray(v)) {
@@ -75,8 +82,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const body = await req.json();
   const nextAadhaarNumber = body.aadhaarNumber === undefined ? undefined : (body.aadhaarNumber == null || String(body.aadhaarNumber).trim() === "" ? null : String(body.aadhaarNumber).replace(/[\s-]/g, ""));
   const nextDrivingLicenseNumber = body.drivingLicenseNumber === undefined ? undefined : (body.drivingLicenseNumber == null || String(body.drivingLicenseNumber).trim() === "" ? null : String(body.drivingLicenseNumber).trim().toUpperCase());
+  const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : dateInput(body.drivingLicenseExpiresAt);
   if (nextAadhaarNumber && !/^\d{12}$/.test(nextAadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
   if (nextDrivingLicenseNumber && (nextDrivingLicenseNumber.length < 8 || nextDrivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
+  if (nextDrivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
   const photo = body.profilePicture === undefined ? null : profilePictureValue(body.profilePicture);
   if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
@@ -383,6 +392,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        profilePicture: photo ? photo.value : employee.profilePicture,
        aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
        drivingLicenseNumber: nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
+       drivingLicenseExpiresAt: nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
     },
     });
   } catch (err: unknown) {

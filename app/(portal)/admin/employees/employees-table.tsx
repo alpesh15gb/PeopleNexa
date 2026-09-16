@@ -38,6 +38,7 @@ interface Emp {
   uan?: string | null;
   aadhaarNumber: string | null;
   drivingLicenseNumber: string | null;
+  drivingLicenseExpiresAt: Date | null;
   payMode?: string;
   workBasisRate?: number | null;
   branch: { id: string; name: string } | null;
@@ -188,6 +189,7 @@ export function EmployeesTable({
       uan: form.get("uan") || null,
       aadhaarNumber: form.get("aadhaarNumber") || null,
       drivingLicenseNumber: form.get("drivingLicenseNumber") || null,
+      drivingLicenseExpiresAt: form.get("drivingLicenseExpiresAt") || null,
       payMode: form.get("payMode") || "monthly",
       workBasisRate: form.get("workBasisRate") || null,
       profilePicture: photo ?? editing?.profilePicture ?? null,
@@ -524,6 +526,9 @@ export function EmployeesTable({
             </Field>
             <Field label="Driving License Number">
               <Input name="drivingLicenseNumber" defaultValue={editing?.drivingLicenseNumber ?? ""} placeholder="e.g. DL0120110012345" />
+            </Field>
+            <Field label="Driving License Expiry">
+              <Input name="drivingLicenseExpiresAt" type="date" defaultValue={editing?.drivingLicenseExpiresAt ? formatDate(editing.drivingLicenseExpiresAt) : ""} />
             </Field>
             {!restricted && (
               <Field label="Pay mode" hint="How this employee is paid">
