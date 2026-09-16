@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp, Shield } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp, Shield, GraduationCap, BriefcaseBusiness } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,15 @@ interface Emp {
   shift: { id: string; name: string; startTime: string; endTime: string } | null;
   managerId: string | null;
   profilePicture: string | null;
+  education: Array<{ qualification: string; specialization: string | null; institution: string; board: string | null; completionYear: number | null; grade: string | null }>;
+  workExperience: Array<{ employer: string; jobTitle: string; startDate: Date; endDate: Date | null; isCurrent: boolean; location: string | null; responsibilities: string | null }>;
 }
+
+type EducationForm = { qualification: string; specialization: string; institution: string; board: string; completionYear: string; grade: string };
+type ExperienceForm = { employer: string; jobTitle: string; startDate: string; endDate: string; isCurrent: boolean; location: string; responsibilities: string };
+const emptyEducation = (): EducationForm => ({ qualification: "", specialization: "", institution: "", board: "", completionYear: "", grade: "" });
+const emptyExperience = (): ExperienceForm => ({ employer: "", jobTitle: "", startDate: "", endDate: "", isCurrent: false, location: "", responsibilities: "" });
+const dateKey = (value: Date | string | null) => value ? new Date(value).toISOString().slice(0, 10) : "";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BULK_MAX = 2500;
@@ -114,6 +122,15 @@ export function EmployeesTable({
   const [accessDevices, setAccessDevices] = useState<Array<{ id: string; name: string; serialNumber: string }>>([]);
   const [accessSelected, setAccessSelected] = useState<string[]>([]);
   const [accessBusy, setAccessBusy] = useState(false);
+  const [education, setEducation] = useState<EducationForm[]>([]);
+  const [workExperience, setWorkExperience] = useState<ExperienceForm[]>([]);
+
+  function openEmployee(employee: Emp | null) {
+    setPhoto(null);
+    setEducation(employee?.education.map((item) => ({ qualification: item.qualification, specialization: item.specialization ?? "", institution: item.institution, board: item.board ?? "", completionYear: item.completionYear?.toString() ?? "", grade: item.grade ?? "" })) ?? []);
+    setWorkExperience(employee?.workExperience.map((item) => ({ employer: item.employer, jobTitle: item.jobTitle, startDate: dateKey(item.startDate), endDate: dateKey(item.endDate), isCurrent: item.isCurrent, location: item.location ?? "", responsibilities: item.responsibilities ?? "" })) ?? []);
+    setModal(employee ?? "create");
+  }
 
   async function openAccess(employee: Emp) {
     setAccessEmployee(employee); setAccessBusy(true);
@@ -193,6 +210,7 @@ export function EmployeesTable({
       payMode: form.get("payMode") || "monthly",
       workBasisRate: form.get("workBasisRate") || null,
       profilePicture: photo ?? editing?.profilePicture ?? null,
+      history: { education, experience: workExperience },
     };
     if (!editing) payload.password = form.get("password");
     if (editing) payload.status = form.get("status");
@@ -377,7 +395,7 @@ export function EmployeesTable({
               <ImageUp className="h-3.5 w-3.5" /> Bulk photos
             </Button>
           )}
-          <Button size="sm" onClick={() => { setPhoto(null); setModal("create"); }}>
+          <Button size="sm" onClick={() => openEmployee(null)}>
             <Plus className="h-3.5 w-3.5" /> Add employee
           </Button>
         </div>
@@ -424,7 +442,7 @@ export function EmployeesTable({
               <TD><StatusPill status={emp.status} /></TD>
               <TD>
                 <div className="flex items-center justify-end gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => { setPhoto(null); setModal(emp); }}>
+                  <Button size="icon" variant="ghost" onClick={() => openEmployee(emp)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   {!restricted && (
@@ -591,6 +609,45 @@ export function EmployeesTable({
               </Field>
             )}
           </div>
+          <section className="space-y-3 rounded-xl border border-edge bg-tint/30 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div><h3 className="flex items-center gap-2 text-sm font-semibold"><GraduationCap className="h-4 w-4" /> Education</h3><p className="text-xs text-muted-foreground">Add qualifications held by this employee.</p></div>
+              <Button type="button" size="sm" variant="outline" disabled={education.length >= 10} onClick={() => setEducation((items) => [...items, emptyEducation()])}><Plus className="h-3.5 w-3.5" /> Add</Button>
+            </div>
+            {education.map((item, index) => (
+              <div key={index} className="space-y-3 rounded-lg border border-edge bg-card p-3">
+                <div className="flex justify-between"><p className="text-xs font-medium text-muted-foreground">Qualification {index + 1}</p><Button type="button" size="sm" variant="ghost" className="text-rose-300" onClick={() => setEducation((items) => items.filter((_, i) => i !== index))}>Remove</Button></div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input required value={item.qualification} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, qualification: e.target.value } : row))} placeholder="Qualification, e.g. B.Tech" aria-label={`Education ${index + 1} qualification`} />
+                  <Input value={item.specialization} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, specialization: e.target.value } : row))} placeholder="Specialization" aria-label={`Education ${index + 1} specialization`} />
+                  <Input required value={item.institution} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, institution: e.target.value } : row))} placeholder="Institution / college" aria-label={`Education ${index + 1} institution`} />
+                  <Input value={item.board} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, board: e.target.value } : row))} placeholder="Board / university" aria-label={`Education ${index + 1} board or university`} />
+                  <Input type="number" min="1950" max={new Date().getFullYear() + 1} value={item.completionYear} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, completionYear: e.target.value } : row))} placeholder="Completion year" aria-label={`Education ${index + 1} completion year`} />
+                  <Input value={item.grade} onChange={(e) => setEducation((items) => items.map((row, i) => i === index ? { ...row, grade: e.target.value } : row))} placeholder="Grade / percentage" aria-label={`Education ${index + 1} grade`} />
+                </div>
+              </div>
+            ))}
+          </section>
+          <section className="space-y-3 rounded-xl border border-edge bg-tint/30 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div><h3 className="flex items-center gap-2 text-sm font-semibold"><BriefcaseBusiness className="h-4 w-4" /> Work experience</h3><p className="text-xs text-muted-foreground">Add previous employers and current role history.</p></div>
+              <Button type="button" size="sm" variant="outline" disabled={workExperience.length >= 10} onClick={() => setWorkExperience((items) => [...items, emptyExperience()])}><Plus className="h-3.5 w-3.5" /> Add</Button>
+            </div>
+            {workExperience.map((item, index) => (
+              <div key={index} className="space-y-3 rounded-lg border border-edge bg-card p-3">
+                <div className="flex justify-between"><p className="text-xs font-medium text-muted-foreground">Employer {index + 1}</p><Button type="button" size="sm" variant="ghost" className="text-rose-300" onClick={() => setWorkExperience((items) => items.filter((_, i) => i !== index))}>Remove</Button></div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input required value={item.employer} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, employer: e.target.value } : row))} placeholder="Employer" aria-label={`Experience ${index + 1} employer`} />
+                  <Input required value={item.jobTitle} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, jobTitle: e.target.value } : row))} placeholder="Job title" aria-label={`Experience ${index + 1} job title`} />
+                  <Input required type="date" value={item.startDate} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, startDate: e.target.value } : row))} aria-label={`Experience ${index + 1} start date`} />
+                  <Input required={!item.isCurrent} disabled={item.isCurrent} type="date" value={item.endDate} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, endDate: e.target.value } : row))} aria-label={`Experience ${index + 1} end date`} />
+                  <Input value={item.location} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, location: e.target.value } : row))} placeholder="Work location" aria-label={`Experience ${index + 1} work location`} />
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={item.isCurrent} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, isCurrent: e.target.checked, endDate: e.target.checked ? "" : row.endDate } : row))} /> Current role</label>
+                </div>
+                <textarea value={item.responsibilities} onChange={(e) => setWorkExperience((items) => items.map((row, i) => i === index ? { ...row, responsibilities: e.target.value } : row))} placeholder="Key responsibilities (optional)" aria-label={`Experience ${index + 1} responsibilities`} className="min-h-20 w-full rounded-xl border border-input bg-card-2 px-3.5 py-2.5 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
+              </div>
+            ))}
+          </section>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
             <Button type="submit" loading={loading}>

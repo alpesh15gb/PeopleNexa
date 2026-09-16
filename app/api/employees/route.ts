@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { profilePictureValue } from "@/lib/profile-picture";
+import { employeeHistory } from "@/lib/employee-history";
 
 const select = {
   id: true,
@@ -138,6 +139,8 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
+    const history = employeeHistory(body.history);
+    if ("error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
     // Location managers create staff only inside their assigned location.
     // Financial/privileged fields stay admin-only and are stripped here.
     let locationId: string | null = null;
@@ -344,7 +347,9 @@ export async function POST(req: NextRequest) {
            aadhaarNumber: loginOnly ? null : aadhaarNumber,
             drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
             drivingLicenseExpiresAt: loginOnly ? null : drivingLicenseExpiresAt,
-           profilePicture: photo.value,
+            profilePicture: photo.value,
+            education: loginOnly ? undefined : { create: history.education },
+            workExperience: loginOnly ? undefined : { create: history.experience },
         },
         select,
       });

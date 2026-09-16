@@ -397,11 +397,46 @@ model Employee {
   onboardingTasks   OnboardingTask[]
   exitRequests      ExitRequest[]
   deviceAccess      EmployeeDeviceAccess[]
+  education         EmployeeEducation[]
+  workExperience    EmployeeWorkExperience[]
 
   @@unique([tenantId, employeeNumber])
   @@unique([tenantId, deviceCode])
   @@unique([tenantId, email])
   @@index([tenantId, locationId])
+}
+
+model EmployeeEducation {
+  id             String   @id @default(cuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  qualification  String
+  specialization String?
+  institution    String
+  board          String?
+  completionYear Int?
+  grade          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([employeeId])
+}
+
+model EmployeeWorkExperience {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employer         String
+  jobTitle         String
+  startDate        DateTime
+  endDate          DateTime?
+  isCurrent        Boolean  @default(false)
+  location         String?
+  responsibilities String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([employeeId])
 }
 
 // ─── Punches (immutable source of truth) ───────────────────────────────────

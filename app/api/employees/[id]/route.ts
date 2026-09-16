@@ -4,6 +4,7 @@ import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
 import { profilePictureValue } from "@/lib/profile-picture";
+import { employeeHistory } from "@/lib/employee-history";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -80,6 +81,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const { id } = await ctx.params;
   const body = await req.json();
+  const history = body.history === undefined ? null : employeeHistory(body.history);
+  if (history && "error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
   const nextAadhaarNumber = body.aadhaarNumber === undefined ? undefined : (body.aadhaarNumber == null || String(body.aadhaarNumber).trim() === "" ? null : String(body.aadhaarNumber).replace(/[\s-]/g, ""));
   const nextDrivingLicenseNumber = body.drivingLicenseNumber === undefined ? undefined : (body.drivingLicenseNumber == null || String(body.drivingLicenseNumber).trim() === "" ? null : String(body.drivingLicenseNumber).trim().toUpperCase());
   const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : dateInput(body.drivingLicenseExpiresAt);
@@ -393,6 +396,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
        drivingLicenseNumber: nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
        drivingLicenseExpiresAt: nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
+       ...(history ? {
+         education: { deleteMany: {}, create: history.education },
+         workExperience: { deleteMany: {}, create: history.experience },
+       } : {}),
     },
     });
   } catch (err: unknown) {
