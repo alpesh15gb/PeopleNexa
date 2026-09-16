@@ -45,7 +45,7 @@ interface DeviceLog {
   createdAt: string;
 }
 
-export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { total: number; online: number; offline: number } }) {
+export function DevicesPanel({ rows, counts, readOnly = false }: { rows: DeviceRow[]; counts: { total: number; online: number; offline: number }; readOnly?: boolean }) {
   const toast = useToast();
   const [devices, setDevices] = useState(rows);
   const [addOpen, setAddOpen] = useState(false);
@@ -169,9 +169,9 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
               Devices push punches to <span className="font-mono text-[11px]">/iclock/cdata?SN=…</span>
             </p>
           </div>
-          <Button onClick={() => setAddOpen(true)}>
+          {!readOnly && <Button onClick={() => setAddOpen(true)}>
             <Plus aria-hidden="true" className="h-4 w-4" /> Add device
-          </Button>
+          </Button>}
         </div>
 
         <div className="overflow-x-auto">
@@ -243,7 +243,7 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">
-                      <button
+                       <button
                         aria-label={`View logs for ${d.name}`}
                         title="View logs"
                         onClick={() => openLogs(d)}
@@ -251,38 +251,38 @@ export function DevicesPanel({ rows, counts }: { rows: DeviceRow[]; counts: { to
                       >
                         <ScrollText aria-hidden="true" className="h-4 w-4" />
                       </button>
-                      <button
+                       {!readOnly && <button
                         aria-label={`Sync attendance logs for ${d.name}`}
                         title="Sync attendance logs"
                         onClick={() => runCommand(d.id, "sync", "Sync command queued")}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
                         <RefreshCw aria-hidden="true" className="h-4 w-4" />
-                      </button>
-                      <button
+                       </button>}
+                       {!readOnly && <button
                         aria-label={`Reboot ${d.name}`}
                         title="Reboot device"
                         onClick={() => runCommand(d.id, "reboot", "Reboot command queued")}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
                         <RotateCcw aria-hidden="true" className="h-4 w-4" />
-                      </button>
-                      <button
+                       </button>}
+                       {!readOnly && <button
                         aria-label={`Sync clock for ${d.name}`}
                         title="Sync device clock"
                         onClick={() => runCommand(d.id, "set_time", "Time-sync command queued")}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"
                       >
                         <Clock aria-hidden="true" className="h-4 w-4" />
-                      </button>
-                      <button
+                       </button>}
+                       {!readOnly && <button
                         aria-label={`Delete ${d.name}`}
                         title="Delete device"
                         onClick={() => removeDevice(d)}
                         className="flex h-9 w-9 items-center justify-center rounded-lg text-rose-300 transition-colors hover:bg-rose-500/10"
                       >
                         <Trash2 aria-hidden="true" className="h-4 w-4" />
-                      </button>
+                       </button>}
                     </div>
                   </TD>
                 </TR>

@@ -9,15 +9,18 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminDevicesPage() {
   const session = await requireSession();
+  const ownLocationId = session.role === "location_manager"
+    ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? "__none__"
+    : null;
 
   const [devices, rtDevices, tenant] = await Promise.all([
     prisma.device.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}) },
       include: { _count: { select: { logs: true } } },
       orderBy: { createdAt: "asc" },
     }),
     prisma.realtimeDevice.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { id: "__none__" } : {}) },
       include: { _count: { select: { logs: true } } },
       orderBy: { createdAt: "asc" },
     }),
@@ -87,7 +90,7 @@ export default async function AdminDevicesPage() {
         counts={counts}
         ebioCount={ebioRows.length}
         rtCount={rtRows.length}
-        essl={<DevicesPanel rows={rows} counts={counts} />}
+         essl={<DevicesPanel rows={rows} counts={counts} readOnly={Boolean(ownLocationId)} />}
         ebio={
           ebioRows.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-muted-foreground">
