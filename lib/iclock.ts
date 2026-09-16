@@ -52,8 +52,7 @@ async function reconcileWithRetry(
  */
 export async function handleDevicePunch(
   device: Device,
-  punch: RawPunch,
-  options: { reattributeDuplicate?: boolean } = {}
+  punch: RawPunch
 ): Promise<PunchResult> {
   // 1. Idempotent raw log (device + user + time). Re-uploads are no-ops.
   const existing = await prisma.deviceLog.findFirst({
@@ -110,13 +109,6 @@ export async function handleDevicePunch(
     // Clean dedupe marker — a near-duplicate is expected device behaviour, not
     // an error, so leave error null (no pollution of the retry queue).
     await markProcessed(log.id);
-    // Historical eBio backfills have the machine's full group/worksite pair.
-    // Use that authoritative data to correct old punches that were previously
-    // attached through the former, ambiguous group-only device lookup.
-    if (options.reattributeDuplicate && near.source === "device" && near.deviceId !== device.id) {
-      await prisma.punch.update({ where: { id: near.id }, data: { deviceId: device.id } });
-      return { accepted: true, action: "reattributed", logId: log.id };
-    }
     return { accepted: true, action: "duplicate", logId: log.id };
   }
 

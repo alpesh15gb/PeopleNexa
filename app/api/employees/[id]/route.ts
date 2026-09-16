@@ -134,10 +134,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     ownLocationId = manager.locationId;
     const target = await prisma.employee.findFirst({
       where: { id, tenantId: session.tenantId },
-      select: { branch: { select: { locationId: true } } },
+      select: { role: true, branch: { select: { locationId: true } } },
     });
     if (!target?.branch || target.branch.locationId !== ownLocationId) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    if (["admin", "branch_manager", "location_manager"].includes(target.role)) {
+      return NextResponse.json({ error: "Location managers cannot edit privileged accounts." }, { status: 403 });
     }
     // Financial and privilege fields stay admin-only for location managers.
     // Status, branch assignment, codes, and identity fields remain editable.
@@ -153,6 +156,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       "ifscCode",
       "pan",
       "uan",
+      "email",
+      "password",
     ]) {
       delete (body as Record<string, unknown>)[k];
     }

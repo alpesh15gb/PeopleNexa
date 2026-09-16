@@ -315,6 +315,29 @@ function ebioDeviceKey(deviceName: string, location: string): string {
   return `${deviceName.trim().toLowerCase()}|${location.trim().toLowerCase()}`;
 }
 
+type EbioMappedDevice = Awaited<ReturnType<typeof prisma.device.create>>;
+
+// Log responses contain this pair but not a device serial. A collision is not
+// attributable, so exclude the key instead of silently choosing a machine.
+function registerEbioDevice(
+  devices: Map<string, EbioMappedDevice>,
+  ambiguousKeys: Set<string>,
+  deviceName: string,
+  location: string,
+  device: EbioMappedDevice
+) {
+  const key = ebioDeviceKey(deviceName, location);
+  if (ambiguousKeys.has(key)) return;
+  const existing = devices.get(key);
+  if (existing && existing.id !== device.id) {
+    devices.delete(key);
+    ambiguousKeys.add(key);
+    console.warn(`[eBioserver] Ambiguous log mapping: ${deviceName} / ${location} maps to multiple serial numbers.`);
+    return;
+  }
+  devices.set(key, device);
+}
+
 function parseDevicePing(result: string): Date | null {
   // eBio returns this as a vendor-specific string; extract the reported IST
   // timestamp from either a plain value or a labelled response.
@@ -435,7 +458,8 @@ export async function backfillDays(
     // Discover + register devices (same as pullTenant) and map by the full
     // eBio location/group plus worksite pair.
     const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
-    const deviceByEbioKey = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
+    const deviceByEbioKey = new Map<string, EbioMappedDevice>();
+    const ambiguousDeviceKeys = new Set<string>();
     for (const d of parseDeviceListResult(resultString(deviceResult))) {
       let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
       if (!device) {
@@ -453,7 +477,7 @@ export async function backfillDays(
       } else if (device.tenantId !== tenantId) {
         continue;
       }
-      deviceByEbioKey.set(ebioDeviceKey(d.deviceName, d.location), device);
+      registerEbioDevice(deviceByEbioKey, ambiguousDeviceKeys, d.deviceName, d.location, device);
       summary.devices++;
     }
     if (summary.devices === 0) {
@@ -472,9 +496,10 @@ export async function backfillDays(
       const records = parseLogRecords(resultString(dayResult));
       let dayIngested = 0;
       for (const rec of records) {
-        const device = deviceByEbioKey.get(ebioDeviceKey(rec.deviceName, rec.location));
+        const key = ebioDeviceKey(rec.deviceName, rec.location);
+        const device = deviceByEbioKey.get(key);
         if (!device) {
-          console.warn(`[eBioserver] Skipping punch: ${rec.deviceName} / ${rec.location} did not match any registered device (user=${rec.userId})`);
+          console.warn(`[eBioserver] Skipping punch: ${rec.deviceName} / ${rec.location} ${ambiguousDeviceKeys.has(key) ? "is ambiguous" : "did not match any registered device"} (user=${rec.userId})`);
           summary.skipped++;
           continue;
         }
@@ -488,7 +513,7 @@ export async function backfillDays(
         };
         let res;
         try {
-          res = await handleDevicePunch(device, raw, { reattributeDuplicate: true });
+          res = await handleDevicePunch(device, raw);
         } catch (err) {
           console.warn(`[eBioserver] Skipping punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
           summary.skipped++;
@@ -498,8 +523,6 @@ export async function backfillDays(
           summary.ingested++;
           dayIngested++;
           touched.add(device.id);
-        } else if (res.action === "reattributed") {
-          summary.repaired++;
         }
       }
       summary.days++;
@@ -571,8 +594,9 @@ export async function pullTenant(
     // Auto-register into this tenant; serial is globally unique so a device can
     // never be captured by a different tenant. DeviceName is a shared group
     // code, so map the group together with the worksite LocationName.
-    const deviceBySerial = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
-    const deviceByEbioKey = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
+    const deviceBySerial = new Map<string, EbioMappedDevice>();
+    const deviceByEbioKey = new Map<string, EbioMappedDevice>();
+    const ambiguousDeviceKeys = new Set<string>();
     for (const d of discovered) {
       let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
       let newlyRegistered = false;
@@ -593,7 +617,7 @@ export async function pullTenant(
         continue; // serial belongs to another tenant — never cross the boundary
       }
       deviceBySerial.set(d.serialNumber, device);
-      deviceByEbioKey.set(ebioDeviceKey(d.deviceName, d.location), device);
+      registerEbioDevice(deviceByEbioKey, ambiguousDeviceKeys, d.deviceName, d.location, device);
       if (newlyRegistered) await enforceNewEbioDeviceAccess(tenantId, profile, device);
       summary.devices++;
     }
@@ -639,7 +663,7 @@ export async function pullTenant(
         const dayRecords = parseLogRecords(resultString(dayResult));
         for (const rec of dayRecords) {
           try {
-            await ingestRecord(rec, deviceByEbioKey);
+            await ingestRecord(rec, deviceByEbioKey, ambiguousDeviceKeys);
           } catch (err) {
             console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
@@ -663,13 +687,15 @@ export async function pullTenant(
         // Cursor tracks the max successfully ingested logId (never cursor+len,
         // which would skip over failures or over-count short batches).
         let batchMax = cursor;
+        let batchBlocked = false;
         for (const rec of records) {
           try {
-            await ingestRecord(rec, deviceByEbioKey);
+            await ingestRecord(rec, deviceByEbioKey, ambiguousDeviceKeys);
           } catch (err) {
-            console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
+            console.warn(`[eBioserver] Stopping at unresolved punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
-            continue;
+            batchBlocked = true;
+            break;
           }
           if (rec.logId !== null && rec.logId > batchMax) batchMax = rec.logId;
         }
@@ -684,6 +710,7 @@ export async function pullTenant(
           // The next scheduled pull retries from this cursor.
           break;
         }
+        if (batchBlocked) break;
         // A short batch means the history is exhausted — done.
         if (records.length < LOG_BATCH) break;
       }
@@ -711,7 +738,7 @@ export async function pullTenant(
           const device = deviceByEbioKey.get(ebioDeviceKey(rec.deviceName, rec.location));
           if (device && known.has(`${device.id}|${rec.userId}|${rec.punchTime.getTime()}`)) continue;
           try {
-            await ingestRecord(rec, deviceByEbioKey);
+            await ingestRecord(rec, deviceByEbioKey, ambiguousDeviceKeys);
           } catch (err) {
             console.warn(`[eBioserver] Skipping fallback punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
@@ -727,15 +754,16 @@ export async function pullTenant(
     /** Ingest one parsed record; returns true when it produced a punch. */
     async function ingestRecord(
       rec: EbioLogRecord,
-      deviceByKey: Map<string, Awaited<ReturnType<typeof prisma.device.create>>>
+      deviceByKey: Map<string, EbioMappedDevice>,
+      ambiguousKeys: Set<string>
     ): Promise<boolean> {
       // DeviceName alone is a shared location code; never guess a machine
       // when the worksite pair does not resolve.
-      const device = deviceByKey.get(ebioDeviceKey(rec.deviceName, rec.location));
+      const key = ebioDeviceKey(rec.deviceName, rec.location);
+      const device = deviceByKey.get(key);
       if (!device) {
-        console.warn(`[eBioserver] Skipping punch: ${rec.deviceName} / ${rec.location} did not match any registered device (user=${rec.userId} logId=${rec.logId ?? "?"})`);
-        summary.skipped++;
-        return false;
+        const reason = ambiguousKeys.has(key) ? "maps to multiple serial numbers" : "did not match any registered device";
+        throw new Error(`eBio punch ${rec.deviceName} / ${rec.location} ${reason}`);
       }
       summary.pulled++;
       const raw: RawPunch = {

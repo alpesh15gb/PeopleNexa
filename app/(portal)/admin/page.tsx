@@ -88,8 +88,10 @@ export default async function AdminDashboardPage({
       orderBy: { punchInTime: "asc" },
     }),
     prisma.department.findMany({
-      where: { tenantId: session.tenantId },
-      include: { _count: { select: { employees: true } } },
+      where: {
+        tenantId: session.tenantId,
+        ...((branchId || ownLocationId) ? { employees: { some: branchId ? { branchId } : { branch: { locationId: ownLocationId! } } } } : {}),
+      },
     }),
     prisma.leaveRequest.findMany({
       where: branchId
@@ -308,12 +310,10 @@ export default async function AdminDashboardPage({
               ) : (
                 <DepartmentBars
                   data={
-                    branchId
-                      ? departments.map((d) => ({
-                          name: d.name,
-                          count: employees.filter((e) => e.department?.name === d.name).length,
-                        }))
-                      : departments.map((d) => ({ name: d.name, count: d._count.employees }))
+                    departments.map((d) => ({
+                      name: d.name,
+                      count: employees.filter((e) => e.department?.name === d.name).length,
+                    }))
                   }
                 />
               )}
