@@ -5,6 +5,7 @@ import { monthKeyIST } from "@/lib/dates";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { ReportControls } from "./report-controls";
 import { DeviceTables } from "./device-tables";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,7 @@ export default async function AdminReportsPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Reports" description="Attendance reports with Excel and print" />
+      <PageHeader title="Reports" description="Attendance reports with Excel and print" actions={<Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Punch Details</Link>} />
       <Card>
         <CardContent className="p-5">
           <ReportControls

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -149,7 +150,7 @@ export default async function AdminDashboardPage({
   return (
     <div className="animate-fade-up space-y-6">
       {/* Greeting */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary">Today at a glance</p>
           <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">Good day, Admin</h1>
@@ -158,13 +159,13 @@ export default async function AdminDashboardPage({
             {branchFilter ? ` · ${branchFilter.name}` : ""}.
           </p>
         </div>
-        {isBranchManager ? (
+        <div className="flex items-center gap-2">{isBranchManager ? (
           <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
             Branch: {ownBranchName}
           </span>
         ) : (
           <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
-        )}
+        )}<Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white">Punch Details</Link></div>
       </div>
 
       {/* Stats */}
