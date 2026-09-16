@@ -251,7 +251,11 @@ export async function syncEbioWorksites(tenantId: string, profile: EbioserverPro
       }
       branchByWorksite.set(branchKey, branchId);
     }
-    const device = await prisma.device.findUnique({ where: { serialNumber: item.serialNumber } });
+    // Older pulls registered some eBio machines by display name before their
+    // serial metadata was normalized. Fall back to that stable display name so
+    // topology repair can attach those existing machines to the new Branch.
+    const device = await prisma.device.findUnique({ where: { serialNumber: item.serialNumber } })
+      ?? await prisma.device.findFirst({ where: { tenantId, name: { equals: `${locationName} (${worksiteName})`, mode: "insensitive" } } });
     if (device && device.tenantId !== tenantId) { summary.skipped++; continue; }
     if (device) {
       if (device.branchId && device.branchId !== branchId) legacyBranchIds.add(device.branchId);
