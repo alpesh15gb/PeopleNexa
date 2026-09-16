@@ -6,10 +6,10 @@ import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
 
-/** PATCH — admin approves or rejects a pending correction. */
+/** PATCH — admin/supervisor/branch/location managers approve or reject a pending correction. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -34,6 +34,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       select: { branchId: true },
     });
     if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+    }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: correction.employeeId, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== manager.locationId) {
       return NextResponse.json({ error: "Correction not found" }, { status: 404 });
     }
   }

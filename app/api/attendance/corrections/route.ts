@@ -165,6 +165,27 @@ export async function GET() {
     return NextResponse.json({ corrections });
   }
 
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) {
+      return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    }
+    const corrections = await prisma.punchCorrection.findMany({
+      where: { tenantId: session.tenantId, employee: { branch: { locationId: manager.locationId } } },
+      include: {
+        employee: {
+          select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+    return NextResponse.json({ corrections });
+  }
+
   const corrections = await prisma.punchCorrection.findMany({
     where:
       session.role === "admin" || session.role === "supervisor"

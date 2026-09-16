@@ -12,7 +12,7 @@ async function loadOwned(id: string, tenantId: string) {
 // POST /api/attendance/:id/punches  { time: "2026-08-12T09:05:00" } — add a punch (IST) and re-derive.
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -29,6 +29,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       select: { branchId: true },
     });
     if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: attendance.employeeId, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== manager.locationId) {
       return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
     }
   }
@@ -98,7 +112,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 // DELETE /api/attendance/:id/punches?punchId=... — remove a punch and re-derive.
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -115,6 +129,20 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
       select: { branchId: true },
     });
     if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: attendance.employeeId, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== manager.locationId) {
       return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
     }
   }

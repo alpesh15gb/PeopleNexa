@@ -8,7 +8,7 @@ const ALLOWED = ["present", "late", "permission", "absent", "half_day"];
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -30,12 +30,26 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
   }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: record.employeeId, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== manager.locationId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+  }
   return NextResponse.json({ record });
 }
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -63,6 +77,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       select: { branchId: true },
     });
     if (!target || target.branchId !== manager.branchId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+  }
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const target = await prisma.employee.findFirst({
+      where: { id: record.employeeId, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== manager.locationId) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
   }

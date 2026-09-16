@@ -34,10 +34,29 @@ export default async function AdminEmployeesPage({
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
 
-  const [employees, branches, departments, shifts, tenant, totalCount] = await Promise.all([
-    prisma.employee.findMany({
-      where: { tenantId: session.tenantId, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) },
-      select: {
+  const employeeSelect = isLocationManager
+    ? {
+        id: true,
+        employeeNumber: true,
+        deviceCode: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        loginOnly: true,
+        position: true,
+        joiningDate: true,
+        aadhaarNumber: true,
+        drivingLicenseNumber: true,
+        managerId: true,
+        profilePicture: true,
+        branch: { select: { id: true, name: true } },
+        department: { select: { id: true, name: true } },
+        shift: { select: { id: true, name: true, startTime: true, endTime: true } },
+      }
+    : {
         id: true,
         employeeNumber: true,
         deviceCode: true,
@@ -65,14 +84,19 @@ export default async function AdminEmployeesPage({
         branch: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
         shift: { select: { id: true, name: true, startTime: true, endTime: true } },
-      },
+      };
+
+  const [employees, branches, departments, shifts, tenant, totalCount] = await Promise.all([
+    prisma.employee.findMany({
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) },
+      select: employeeSelect,
       orderBy: { createdAt: "asc" },
     }),
     prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true } }),
     prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true, plan: true } }),
-    prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }),
+    session.role === "admin" ? prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true, plan: true } }) : Promise.resolve(null),
+    session.role === "admin" ? prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }) : Promise.resolve(0),
   ]);
 
   const seatsUsed = totalCount;
@@ -96,15 +120,17 @@ export default async function AdminEmployeesPage({
             ) : (
               <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin/employees" />
             )}
-            <span
-              className={`rounded-xl border px-3 py-1.5 text-[12px] font-medium ${
-                seatsUsed >= seatsTotal
-                  ? "border-rose-400/20 bg-rose-500/10 text-rose-300"
-                  : "border-edge bg-tint text-muted-foreground"
-              }`}
-            >
-              {seatsUsed} / {seatsTotal} seats used{seatsUsed >= seatsTotal && " — upgrade needed"}
-            </span>
+            {session.role === "admin" && (
+              <span
+                className={`rounded-xl border px-3 py-1.5 text-[12px] font-medium ${
+                  seatsUsed >= seatsTotal
+                    ? "border-rose-400/20 bg-rose-500/10 text-rose-300"
+                    : "border-edge bg-tint text-muted-foreground"
+                }`}
+              >
+                {seatsUsed} / {seatsTotal} seats used{seatsUsed >= seatsTotal && " — upgrade needed"}
+              </span>
+            )}
           </div>
         }
       />
@@ -116,7 +142,7 @@ export default async function AdminEmployeesPage({
               description={branchId ? "Try another branch." : "Add your first employee to start tracking attendance."}
             />
           ) : (
-            <EmployeesTable employees={employees} branches={branches} departments={departments} shifts={shifts} />
+            <EmployeesTable employees={employees as never} branches={branches} departments={departments} shifts={shifts} viewerRole={session.role} isLocationManager={isLocationManager} />
           )}
         </CardContent>
       </Card>

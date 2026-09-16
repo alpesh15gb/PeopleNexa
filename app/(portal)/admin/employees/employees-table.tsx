@@ -29,17 +29,17 @@ interface Emp {
   status: string;
   loginOnly: boolean;
   position: string | null;
-  salary: number | null;
+  salary?: number | null;
   joiningDate: Date | null;
-  bankName: string | null;
-  accountNumber: string | null;
-  ifscCode: string | null;
-  pan: string | null;
-  uan: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  ifscCode?: string | null;
+  pan?: string | null;
+  uan?: string | null;
   aadhaarNumber: string | null;
   drivingLicenseNumber: string | null;
-  payMode: string;
-  workBasisRate: number | null;
+  payMode?: string;
+  workBasisRate?: number | null;
   branch: { id: string; name: string } | null;
   department: { id: string; name: string } | null;
   shift: { id: string; name: string; startTime: string; endTime: string } | null;
@@ -83,12 +83,17 @@ export function EmployeesTable({
   branches,
   departments,
   shifts,
+  viewerRole,
+  isLocationManager,
 }: {
   employees: Emp[];
   branches: Option[];
   departments: Option[];
   shifts: Option[];
+  viewerRole?: string;
+  isLocationManager?: boolean;
 }) {
+  const restricted = isLocationManager === true || viewerRole === "location_manager";
   const router = useRouter();
   const toast = useToast();
   const [modal, setModal] = useState<"create" | Emp | null>(null);
@@ -353,17 +358,23 @@ export function EmployeesTable({
           <Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Search name, Employee Code, or Device Code" aria-label="Search employees" />
         </div>
         <div className="flex items-center gap-2">
-          <a href="/api/employees/export" download="employees-export.csv">
-            <Button size="sm" variant="outline">
-              <Download className="h-3.5 w-3.5" /> Export employees
+          {!restricted && (
+            <a href="/api/employees/export" download="employees-export.csv">
+              <Button size="sm" variant="outline">
+                <Download className="h-3.5 w-3.5" /> Export employees
+              </Button>
+            </a>
+          )}
+          {!restricted && (
+            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+              <Upload className="h-3.5 w-3.5" /> Bulk import
             </Button>
-          </a>
-          <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
-            <Upload className="h-3.5 w-3.5" /> Bulk import
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => { setPhotoBulkResult([]); setPhotoBulkOpen(true); }}>
-            <ImageUp className="h-3.5 w-3.5" /> Bulk photos
-          </Button>
+          )}
+          {!restricted && (
+            <Button size="sm" variant="outline" onClick={() => { setPhotoBulkResult([]); setPhotoBulkOpen(true); }}>
+              <ImageUp className="h-3.5 w-3.5" /> Bulk photos
+            </Button>
+          )}
           <Button size="sm" onClick={() => { setPhoto(null); setModal("create"); }}>
             <Plus className="h-3.5 w-3.5" /> Add employee
           </Button>
@@ -414,8 +425,10 @@ export function EmployeesTable({
                   <Button size="icon" variant="ghost" onClick={() => { setPhoto(null); setModal(emp); }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="icon" variant="ghost" title="Allowed biometric devices" onClick={() => void openAccess(emp)}><Shield className="h-3.5 w-3.5" /></Button>
-                  {emp.role !== "admin" && (
+                  {!restricted && (
+                    <Button size="icon" variant="ghost" title="Allowed biometric devices" onClick={() => void openAccess(emp)}><Shield className="h-3.5 w-3.5" /></Button>
+                  )}
+                  {!restricted && emp.role !== "admin" && (
                     <Button size="icon" variant="ghost" className="text-rose-300 hover:bg-rose-500/10" onClick={() => setConfirmDelete(emp)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -473,45 +486,61 @@ export function EmployeesTable({
             <Field label="Position">
               <Input name="position" defaultValue={editing?.position ?? ""} placeholder="e.g. Software Engineer" />
             </Field>
-            <Field label="Monthly salary (₹)">
-              <Input name="salary" type="number" min={0} step="500" defaultValue={editing?.salary ?? ""} placeholder="e.g. 45000" />
-            </Field>
+            {!restricted && (
+              <Field label="Monthly salary (₹)">
+                <Input name="salary" type="number" min={0} step="500" defaultValue={editing?.salary ?? ""} placeholder="e.g. 45000" />
+              </Field>
+            )}
             <Field label="Joining date">
               <Input name="joiningDate" type="date" defaultValue={editing?.joiningDate ? formatDate(editing.joiningDate) : ""} />
             </Field>
-            <Field label="Bank name">
-              <Input name="bankName" defaultValue={editing?.bankName ?? ""} placeholder="e.g. HDFC Bank" />
-            </Field>
-            <Field label="Account number">
-              <Input name="accountNumber" defaultValue={editing?.accountNumber ?? ""} placeholder="For salary bank file" />
-            </Field>
-            <Field label="IFSC code">
-              <Input name="ifscCode" defaultValue={editing?.ifscCode ?? ""} placeholder="e.g. HDFC0001234" />
-            </Field>
-            <Field label="PAN">
-              <Input name="pan" defaultValue={editing?.pan ?? ""} placeholder="e.g. ABCDE1234F" />
-            </Field>
-            <Field label="UAN (EPF)">
-              <Input name="uan" defaultValue={editing?.uan ?? ""} placeholder="12-digit UAN" />
-            </Field>
+            {!restricted && (
+              <Field label="Bank name">
+                <Input name="bankName" defaultValue={editing?.bankName ?? ""} placeholder="e.g. HDFC Bank" />
+              </Field>
+            )}
+            {!restricted && (
+              <Field label="Account number">
+                <Input name="accountNumber" defaultValue={editing?.accountNumber ?? ""} placeholder="For salary bank file" />
+              </Field>
+            )}
+            {!restricted && (
+              <Field label="IFSC code">
+                <Input name="ifscCode" defaultValue={editing?.ifscCode ?? ""} placeholder="e.g. HDFC0001234" />
+              </Field>
+            )}
+            {!restricted && (
+              <Field label="PAN">
+                <Input name="pan" defaultValue={editing?.pan ?? ""} placeholder="e.g. ABCDE1234F" />
+              </Field>
+            )}
+            {!restricted && (
+              <Field label="UAN (EPF)">
+                <Input name="uan" defaultValue={editing?.uan ?? ""} placeholder="12-digit UAN" />
+              </Field>
+            )}
             <Field label="Aadhaar Number">
               <Input name="aadhaarNumber" inputMode="numeric" maxLength={14} defaultValue={editing?.aadhaarNumber ?? ""} placeholder="12-digit Aadhaar" />
             </Field>
             <Field label="Driving License Number">
               <Input name="drivingLicenseNumber" defaultValue={editing?.drivingLicenseNumber ?? ""} placeholder="e.g. DL0120110012345" />
             </Field>
-            <Field label="Pay mode" hint="How this employee is paid">
-              <Select name="payMode" defaultValue={editing?.payMode ?? "monthly"}>
-                <option value="monthly">Monthly</option>
-                <option value="daily">Daily wage</option>
-                <option value="weekly">Weekly wage</option>
-                <option value="hourly">Hourly</option>
-                <option value="work_basis">Work-basis / piece</option>
-              </Select>
-            </Field>
-            <Field label="Work-basis rate (₹/day, optional)" hint="Piece rate for work-basis mode">
-              <Input name="workBasisRate" type="number" min={0} defaultValue={editing?.workBasisRate ?? ""} placeholder="e.g. 400" />
-            </Field>
+            {!restricted && (
+              <Field label="Pay mode" hint="How this employee is paid">
+                <Select name="payMode" defaultValue={editing?.payMode ?? "monthly"}>
+                  <option value="monthly">Monthly</option>
+                  <option value="daily">Daily wage</option>
+                  <option value="weekly">Weekly wage</option>
+                  <option value="hourly">Hourly</option>
+                  <option value="work_basis">Work-basis / piece</option>
+                </Select>
+              </Field>
+            )}
+            {!restricted && (
+              <Field label="Work-basis rate (₹/day, optional)" hint="Piece rate for work-basis mode">
+                <Input name="workBasisRate" type="number" min={0} defaultValue={editing?.workBasisRate ?? ""} placeholder="e.g. 400" />
+              </Field>
+            )}
             <Field label="Department">
               <Select name="departmentId" defaultValue={editing?.department?.id ?? ""}>
                 <option value="">Unassigned</option>

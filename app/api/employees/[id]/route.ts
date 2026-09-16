@@ -68,7 +68,7 @@ function p2002Targets(err: unknown): string[] {
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "branch_manager")) {
+  if (!session || (session.role !== "admin" && session.role !== "branch_manager" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -99,6 +99,40 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       "role",
       "status",
       "branchId",
+      "payMode",
+      "salaryStructure",
+      "workBasisRate",
+      "bankName",
+      "accountNumber",
+      "ifscCode",
+      "pan",
+      "uan",
+    ]) {
+      delete (body as Record<string, unknown>)[k];
+    }
+  }
+
+  let ownLocationId: string | null = null;
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    ownLocationId = manager.locationId;
+    const target = await prisma.employee.findFirst({
+      where: { id, tenantId: session.tenantId },
+      select: { branch: { select: { locationId: true } } },
+    });
+    if (!target?.branch || target.branch.locationId !== ownLocationId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+    // Financial and privilege fields stay admin-only for location managers.
+    // Status, branch assignment, codes, and identity fields remain editable.
+    for (const k of [
+      "salary",
+      "role",
+      "loginOnly",
       "payMode",
       "salaryStructure",
       "workBasisRate",
@@ -281,10 +315,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const wantShift = body.shiftId !== undefined ? (body.shiftId || null) : employee.shiftId;
   const wantManager = body.managerId !== undefined ? (body.managerId || null) : employee.managerId;
   const [branch, department, shift, manager] = await Promise.all([
-    wantBranch ? prisma.branch.findFirst({ where: { id: String(wantBranch), tenantId: session.tenantId }, select: { id: true } }) : null,
+    wantBranch ? prisma.branch.findFirst({ where: { id: String(wantBranch), tenantId: session.tenantId }, select: { id: true, locationId: true } }) : null,
     wantDept ? prisma.department.findFirst({ where: { id: String(wantDept), tenantId: session.tenantId }, select: { id: true } }) : null,
     wantShift ? prisma.shift.findFirst({ where: { id: String(wantShift), tenantId: session.tenantId }, select: { id: true } }) : null,
-    wantManager ? prisma.employee.findFirst({ where: { id: String(wantManager), tenantId: session.tenantId, status: "active" }, select: { id: true, branchId: true } }) : null,
+    wantManager ? prisma.employee.findFirst({ where: { id: String(wantManager), tenantId: session.tenantId, status: "active" }, select: { id: true, branchId: true, branch: { select: { locationId: true } } } }) : null,
   ]);
   if (wantBranch && !branch) return NextResponse.json({ error: "Branch not found in this workspace." }, { status: 400 });
   if (wantDept && !department) return NextResponse.json({ error: "Department not found in this workspace." }, { status: 400 });
@@ -292,6 +326,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (wantManager && !manager) return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
   if (session.role === "branch_manager" && wantManager && manager && manager.branchId !== ownBranchId) {
     return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
+  }
+  if (session.role === "location_manager" && ownLocationId) {
+    if (wantBranch && branch?.locationId !== ownLocationId) {
+      return NextResponse.json({ error: "Branch must belong to your assigned location." }, { status: 403 });
+    }
+    if (wantManager && manager?.branch?.locationId !== ownLocationId) {
+      return NextResponse.json({ error: "Reporting manager must belong to your assigned location." }, { status: 403 });
+    }
   }
   if (wantManager && String(wantManager) === id) {
     return NextResponse.json({ error: "An employee cannot be their own manager." }, { status: 400 });

@@ -126,11 +126,43 @@ export async function POST(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
     const body = await req.json();
+    // Location managers create staff only inside their assigned location.
+    // Financial/privileged fields stay admin-only and are stripped here.
+    let locationId: string | null = null;
+    if (session.role === "location_manager") {
+      const manager = await prisma.employee.findFirst({
+        where: { id: session.sub, tenantId: session.tenantId },
+        select: { locationId: true },
+      });
+      if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+      locationId = manager.locationId;
+      if (body.loginOnly === true) {
+        return NextResponse.json({ error: "Only admins can create manager logins." }, { status: 403 });
+      }
+      if (!body.branchId) {
+        return NextResponse.json({ error: "A branch in your location is required." }, { status: 400 });
+      }
+      for (const k of [
+        "role",
+        "loginOnly",
+        "salary",
+        "payMode",
+        "workBasisRate",
+        "salaryStructure",
+        "bankName",
+        "accountNumber",
+        "ifscCode",
+        "pan",
+        "uan",
+      ]) {
+        delete (body as Record<string, unknown>)[k];
+      }
+    }
     const aadhaarNumber = body.aadhaarNumber != null && String(body.aadhaarNumber).trim() !== "" ? String(body.aadhaarNumber).replace(/[\s-]/g, "") : null;
     const drivingLicenseNumber = body.drivingLicenseNumber != null && String(body.drivingLicenseNumber).trim() !== "" ? String(body.drivingLicenseNumber).trim().toUpperCase() : null;
     if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
@@ -237,16 +269,23 @@ export async function POST(req: NextRequest) {
     if (ssErr) return NextResponse.json({ error: ssErr }, { status: 400 });
 
     // Cross-tenant FK guard: branch/department/shift/manager must belong to this tenant.
+    // Location managers are additionally pinned to their assigned location.
     const [branch, department, shift, manager] = await Promise.all([
-      body.branchId ? prisma.branch.findFirst({ where: { id: String(body.branchId), tenantId: session.tenantId }, select: { id: true } }) : null,
+      body.branchId ? prisma.branch.findFirst({ where: { id: String(body.branchId), tenantId: session.tenantId }, select: { id: true, locationId: true } }) : null,
       body.departmentId ? prisma.department.findFirst({ where: { id: String(body.departmentId), tenantId: session.tenantId }, select: { id: true } }) : null,
       body.shiftId ? prisma.shift.findFirst({ where: { id: String(body.shiftId), tenantId: session.tenantId }, select: { id: true } }) : null,
-      body.managerId ? prisma.employee.findFirst({ where: { id: String(body.managerId), tenantId: session.tenantId }, select: { id: true } }) : null,
+      body.managerId ? prisma.employee.findFirst({ where: { id: String(body.managerId), tenantId: session.tenantId }, select: { id: true, branch: { select: { locationId: true } } } }) : null,
     ]);
     if (body.branchId && !branch) return NextResponse.json({ error: "Branch not found in this workspace." }, { status: 400 });
     if (body.departmentId && !department) return NextResponse.json({ error: "Department not found in this workspace." }, { status: 400 });
     if (body.shiftId && !shift) return NextResponse.json({ error: "Shift not found in this workspace." }, { status: 400 });
     if (body.managerId && !manager) return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
+    if (locationId && branch && branch.locationId !== locationId) {
+      return NextResponse.json({ error: "Branch must belong to your assigned location." }, { status: 403 });
+    }
+    if (locationId && manager && manager.branch?.locationId !== locationId) {
+      return NextResponse.json({ error: "Reporting manager must belong to your assigned location." }, { status: 403 });
+    }
 
     const [count, tenant] = await Promise.all([
       prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }),
