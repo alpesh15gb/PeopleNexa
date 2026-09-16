@@ -21,6 +21,7 @@ interface PunchRow {
     department: { name: string } | null;
   };
   device: { name: string; serialNumber: string } | null;
+  realtimeDevice: { name: string; serialNumber: string } | null;
 }
 
 export function PunchDetailsTable({
@@ -152,21 +153,22 @@ export function PunchDetailsTable({
               {!loading && (data?.punches.length ?? 0) === 0 && (
                 <TR><TD colSpan={8} className="py-10 text-center text-muted-foreground">No punches found for this filter.</TD></TR>
               )}
-              {(data?.punches ?? []).map((p, i) => (
-                <TR key={p.id}>
+              {(data?.punches ?? []).map((p, i) => {
+                const machine = p.device ?? p.realtimeDevice;
+                return <TR key={p.id}>
                   <TD>{startRow + i}</TD>
                   <TD className="font-mono">{p.employee.employeeNumber}</TD>
                   <TD>{p.employee.firstName} {p.employee.lastName}</TD>
                   <TD>{p.employee.branch?.name ?? "—"}</TD>
                   <TD>
-                    <span className="block max-w-44 truncate" title={p.device?.name ?? ""}>{p.device?.name ?? "—"}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">{p.device?.serialNumber ?? ""}</span>
+                    <span className="block max-w-44 truncate" title={machine?.name ?? ""}>{machine?.name ?? "—"}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">{machine?.serialNumber ?? ""}</span>
                   </TD>
                   <TD className="font-mono">{new Date(p.punchTime).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</TD>
                   <TD className="uppercase">{p.inOutHint}</TD>
                   <TD className="text-emerald-400">ACTIVE</TD>
-                </TR>
-              ))}
+                </TR>;
+              })}
             </TBody>
           </Table>
         </div>

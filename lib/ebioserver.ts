@@ -309,6 +309,12 @@ export function parseLogRecords(result: string): EbioLogRecord[] {
   return records;
 }
 
+// eBio's DeviceName is a location/group code and is commonly shared by many
+// machines. The worksite LocationName is required to identify the machine.
+function ebioDeviceKey(deviceName: string, location: string): string {
+  return `${deviceName.trim().toLowerCase()}|${location.trim().toLowerCase()}`;
+}
+
 function parseDevicePing(result: string): Date | null {
   // eBio returns this as a vendor-specific string; extract the reported IST
   // timestamp from either a plain value or a labelled response.
@@ -426,9 +432,10 @@ export async function backfillDays(
   try {
     const client = await createClient(profile);
 
-    // Discover + register devices (same as pullTenant) and map by device name.
+    // Discover + register devices (same as pullTenant) and map by the full
+    // eBio location/group plus worksite pair.
     const deviceResult = await call<unknown>(client, "GetDeviceList", { ...authArgs(profile), Location: "" });
-    const deviceByDeviceName = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
+    const deviceByEbioKey = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
     for (const d of parseDeviceListResult(resultString(deviceResult))) {
       let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
       if (!device) {
@@ -446,7 +453,7 @@ export async function backfillDays(
       } else if (device.tenantId !== tenantId) {
         continue;
       }
-      deviceByDeviceName.set(d.deviceName, device);
+      deviceByEbioKey.set(ebioDeviceKey(d.deviceName, d.location), device);
       summary.devices++;
     }
     if (summary.devices === 0) {
@@ -465,10 +472,9 @@ export async function backfillDays(
       const records = parseLogRecords(resultString(dayResult));
       let dayIngested = 0;
       for (const rec of records) {
-        let device = deviceByDeviceName.get(rec.deviceName);
-        if (!device && deviceByDeviceName.size === 1) device = deviceByDeviceName.values().next().value;
+        const device = deviceByEbioKey.get(ebioDeviceKey(rec.deviceName, rec.location));
         if (!device) {
-          console.warn(`[eBioserver] Skipping punch: deviceName "${rec.deviceName}" did not match any registered device (user=${rec.userId})`);
+          console.warn(`[eBioserver] Skipping punch: ${rec.deviceName} / ${rec.location} did not match any registered device (user=${rec.userId})`);
           summary.skipped++;
           continue;
         }
@@ -561,9 +567,10 @@ export async function pullTenant(
     const discovered = parseDeviceListResult(resultString(deviceResult));
 
     // Auto-register into this tenant; serial is globally unique so a device can
-    // never be captured by a different tenant. Map deviceName → our Device row.
+    // never be captured by a different tenant. DeviceName is a shared group
+    // code, so map the group together with the worksite LocationName.
     const deviceBySerial = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
-    const deviceByDeviceName = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
+    const deviceByEbioKey = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
     for (const d of discovered) {
       let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
       if (!device) {
@@ -582,7 +589,7 @@ export async function pullTenant(
         continue; // serial belongs to another tenant — never cross the boundary
       }
       deviceBySerial.set(d.serialNumber, device);
-      deviceByDeviceName.set(d.deviceName, device);
+      deviceByEbioKey.set(ebioDeviceKey(d.deviceName, d.location), device);
       summary.devices++;
     }
     if (summary.devices === 0) {
@@ -627,7 +634,7 @@ export async function pullTenant(
         const dayRecords = parseLogRecords(resultString(dayResult));
         for (const rec of dayRecords) {
           try {
-            await ingestRecord(rec, deviceByDeviceName);
+            await ingestRecord(rec, deviceByEbioKey);
           } catch (err) {
             console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
@@ -653,7 +660,7 @@ export async function pullTenant(
         let batchMax = cursor;
         for (const rec of records) {
           try {
-            await ingestRecord(rec, deviceByDeviceName);
+            await ingestRecord(rec, deviceByEbioKey);
           } catch (err) {
             console.warn(`[eBioserver] Skipping punch (user=${rec.userId} logId=${rec.logId ?? "?"}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
@@ -689,18 +696,17 @@ export async function pullTenant(
         });
         const knownLogs = await prisma.deviceLog.findMany({
           where: {
-            deviceId: { in: [...new Set([...deviceByDeviceName.values()].map((device) => device.id))] },
+            deviceId: { in: [...new Set([...deviceByEbioKey.values()].map((device) => device.id))] },
             punchTime: { gte: dayStart, lt: dayEnd },
           },
           select: { deviceId: true, userId: true, punchTime: true },
         });
         const known = new Set(knownLogs.map((log) => `${log.deviceId}|${log.userId}|${log.punchTime?.getTime() ?? ""}`));
         for (const rec of parseLogRecords(resultString(dayResult))) {
-          let device = deviceByDeviceName.get(rec.deviceName);
-          if (!device && deviceByDeviceName.size === 1) device = deviceByDeviceName.values().next().value;
+          const device = deviceByEbioKey.get(ebioDeviceKey(rec.deviceName, rec.location));
           if (device && known.has(`${device.id}|${rec.userId}|${rec.punchTime.getTime()}`)) continue;
           try {
-            await ingestRecord(rec, deviceByDeviceName);
+            await ingestRecord(rec, deviceByEbioKey);
           } catch (err) {
             console.warn(`[eBioserver] Skipping fallback punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
             summary.skipped++;
@@ -716,14 +722,13 @@ export async function pullTenant(
     /** Ingest one parsed record; returns true when it produced a punch. */
     async function ingestRecord(
       rec: EbioLogRecord,
-      deviceByName: Map<string, Awaited<ReturnType<typeof prisma.device.create>>>
+      deviceByKey: Map<string, Awaited<ReturnType<typeof prisma.device.create>>>
     ): Promise<boolean> {
-      // Attribute the punch to the device this eBioserver reports by its
-      // device name; with a single device, fall back to it directly.
-      let device = deviceByName.get(rec.deviceName);
-      if (!device && deviceByName.size === 1) device = deviceByName.values().next().value;
+      // DeviceName alone is a shared location code; never guess a machine
+      // when the worksite pair does not resolve.
+      const device = deviceByKey.get(ebioDeviceKey(rec.deviceName, rec.location));
       if (!device) {
-        console.warn(`[eBioserver] Skipping punch: deviceName "${rec.deviceName}" did not match any registered device (user=${rec.userId} logId=${rec.logId ?? "?"})`);
+        console.warn(`[eBioserver] Skipping punch: ${rec.deviceName} / ${rec.location} did not match any registered device (user=${rec.userId} logId=${rec.logId ?? "?"})`);
         summary.skipped++;
         return false;
       }
