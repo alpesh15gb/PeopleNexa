@@ -151,8 +151,8 @@ export async function attendanceSummary(
   const rosterByDay = new Map(rosters.map((r) => [istDayStartKey(r.date), r.shift]));
 
   // Paid-hours (worked/overtime) are tracked separately from the
-  // workingDays denominator: punched hours count even on Sundays,
-  // holidays and on-leave days, while workingDays stays as-is.
+  // workingDays denominator: punched hours count on holidays and on-leave
+  // days, while workingDays stays as-is.
   const accumulateHours = (key: string, rec: { punchInTime: Date | null; punchOutTime: Date | null } | undefined) => {
     if (!rec?.punchInTime || !rec?.punchOutTime) return;
     const spanMin = (rec.punchOutTime.getTime() - rec.punchInTime.getTime()) / 60000;
@@ -172,11 +172,6 @@ export async function attendanceSummary(
     const istDay = new Date(d.getTime() + 5.5 * 3600 * 1000);
     const key = istDayStartKey(d);
     if (employee.joiningDate && key < istDayStartKey(employee.joiningDate)) continue;
-    if (istDay.getUTCDay() === 0) {
-      // Sunday: not a working day, but punched hours still count.
-      accumulateHours(key, recordByDay.get(key));
-      continue; // Sunday in the IST wall clock
-    }
     if (holidaySet.has(key) || recurringHolidaySet.has(key.slice(5))) {
       accumulateHours(key, recordByDay.get(key));
       continue;

@@ -100,11 +100,6 @@ export function monthDays(monthKey: string): string[] {
   return out;
 }
 
-/** Sundays are weekly offs (same probe convention as the reports route). */
-export function isSundayDayKey(dayKey: string): boolean {
-  return new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
-}
-
 export function shiftLabel(shift: DeviceShift | null): string {
   if (!shift) return "—";
   return `${shift.name} (${shift.startTime}-${shift.endTime})`;
@@ -410,9 +405,6 @@ export function buildDeviceMonthly(args: {
       if (holidays.has(dayKey)) {
         status = "H";
         holidayCount++;
-      } else if (isSundayDayKey(dayKey)) {
-        status = "WO";
-        weeklyOffs++;
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         leaveCount++;
@@ -594,8 +586,7 @@ export function buildStatusMatrix(args: {
       const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       let status: string;
       if (holidays.has(dayKey)) status = "H";
-      else if (isSundayDayKey(dayKey)) status = "WO";
-      else if (leaves.has(`${emp.id}|${dayKey}`)) status = "L";
+       else if (leaves.has(`${emp.id}|${dayKey}`)) status = "L";
       else if (record && PRESENT_STATUSES.has(record.status)) status = record.status === "half_day" ? "½P" : "P";
       else status = "A";
       const present = status === "P" || status === "½P";
@@ -845,9 +836,6 @@ export function buildPerformance(args: {
       if (holidays.has(dayKey)) {
         status = "H";
         hld++;
-      } else if (isSundayDayKey(dayKey)) {
-        status = "WO";
-        wo++;
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         leaveCount++;
