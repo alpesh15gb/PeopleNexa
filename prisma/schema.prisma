@@ -316,6 +316,8 @@ model Employee {
   // Immutable eBio/device enrollment code used to match punches. Employee Code
   // above remains the editable HR-facing code.
   deviceCode     String?
+  // Enables default-deny machine access enforcement for this biometric code.
+  deviceAccessEnabled Boolean @default(false)
   firstName      String
   lastName       String
   email          String
@@ -747,6 +749,10 @@ model EmployeeDeviceAccess {
   tenantId   String
   employeeId String
   deviceId   String
+  allowed    Boolean  @default(true)
+  commandStatus String @default("unverified") // pending | sent | failed | unverified
+  lastCommandAt DateTime?
+  lastError String?
   createdAt  DateTime @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
@@ -754,6 +760,7 @@ model EmployeeDeviceAccess {
 
   @@unique([employeeId, deviceId])
   @@index([tenantId, deviceId])
+  @@index([employeeId, commandStatus])
 }
 
 // ─── Asset tracking ────────────────────────────────────────────────────────

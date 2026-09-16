@@ -119,7 +119,7 @@ export function EmployeesTable({
   const [photoBulkLoading, setPhotoBulkLoading] = useState(false);
   const [photoBulkResult, setPhotoBulkResult] = useState<string[]>([]);
   const [accessEmployee, setAccessEmployee] = useState<Emp | null>(null);
-  const [accessDevices, setAccessDevices] = useState<Array<{ id: string; name: string; serialNumber: string }>>([]);
+  const [accessDevices, setAccessDevices] = useState<Array<{ id: string; name: string; serialNumber: string; commandStatus?: string; lastError?: string | null }>>([]);
   const [accessSelected, setAccessSelected] = useState<string[]>([]);
   const [accessBusy, setAccessBusy] = useState(false);
   const [education, setEducation] = useState<EducationForm[]>([]);
@@ -134,13 +134,21 @@ export function EmployeesTable({
 
   async function openAccess(employee: Emp) {
     setAccessEmployee(employee); setAccessBusy(true);
-    try { const data = await fetch(`/api/employees/${employee.id}/device-access`).then((res) => res.json()); setAccessDevices(data.devices ?? []); setAccessSelected(data.deviceIds ?? []); }
+    try {
+      const res = await fetch(`/api/employees/${employee.id}/device-access`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not load device access.");
+      setAccessDevices(data.devices ?? []); setAccessSelected(data.deviceIds ?? []);
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not load device access.");
+      setAccessEmployee(null);
+    }
     finally { setAccessBusy(false); }
   }
 
   async function saveAccess() {
     if (!accessEmployee) return; setAccessBusy(true);
-    try { const res = await fetch(`/api/employees/${accessEmployee.id}/device-access`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceIds: accessSelected }) }); const data = await res.json(); if (!res.ok) throw new Error(data.error); const failed = data.results.filter((result: { error?: string }) => result.error); toast(failed.length ? "error" : "success", failed.length ? `${failed.length} device command(s) failed.` : "Device access updated."); if (!failed.length) setAccessEmployee(null); }
+    try { const res = await fetch(`/api/employees/${accessEmployee.id}/device-access`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceIds: accessSelected }) }); const data = await res.json().catch(() => ({})); if (!res.ok && res.status !== 207) throw new Error(data.error); const failed = (data.results ?? []).filter((result: { status?: string }) => result.status === "failed"); toast(failed.length ? "error" : "success", failed.length ? `${failed.length} device command(s) failed. Review and retry.` : "Commands sent to eBio. Confirm access physically on the device."); if (!failed.length) setAccessEmployee(null); else setAccessDevices((devices) => devices.map((device) => ({ ...device, commandStatus: failed.some((result: { deviceId: string }) => result.deviceId === device.id) ? "failed" : "sent" }))); }
     catch (error) { toast("error", error instanceof Error ? error.message : "Failed to update device access."); }
     finally { setAccessBusy(false); }
   }
@@ -658,7 +666,7 @@ export function EmployeesTable({
       </Modal>
 
       <Modal open={accessEmployee !== null} onClose={() => setAccessEmployee(null)} title={`Allowed devices: ${accessEmployee?.firstName ?? ""}`} description="Selected devices are unblocked; all other eBio devices are blocked for this employee.">
-        <div className="space-y-3">{accessBusy && accessDevices.length === 0 ? <p className="text-sm text-muted-foreground">Loading devices…</p> : accessDevices.map((device) => <label key={device.id} className="flex items-center gap-3 rounded-lg border border-edge p-3 text-sm"><input type="checkbox" checked={accessSelected.includes(device.id)} onChange={() => setAccessSelected((current) => current.includes(device.id) ? current.filter((id) => id !== device.id) : [...current, device.id])} /><span className="flex-1">{device.name}<span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span></span></label>)}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setAccessEmployee(null)}>Cancel</Button><Button loading={accessBusy} onClick={() => void saveAccess()}>Apply device access</Button></div></div>
+        <div className="space-y-3">{accessBusy && accessDevices.length === 0 ? <p className="text-sm text-muted-foreground">Loading devices…</p> : accessDevices.map((device) => <label key={device.id} className="flex items-center gap-3 rounded-lg border border-edge p-3 text-sm"><input type="checkbox" checked={accessSelected.includes(device.id)} onChange={() => setAccessSelected((current) => current.includes(device.id) ? current.filter((id) => id !== device.id) : [...current, device.id])} /><span className="flex-1">{device.name}<span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span>{device.commandStatus && device.commandStatus !== "unrestricted" && <span className={`block text-xs ${device.commandStatus === "failed" ? "text-rose-300" : "text-muted-foreground"}`}>eBio command: {device.commandStatus}{device.lastError ? ` (${device.lastError})` : ""}</span>}</span></label>)}<p className="text-xs text-muted-foreground">Sent means eBio accepted the command request; verify access physically on the machine.</p><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setAccessEmployee(null)}>Cancel</Button><Button loading={accessBusy} onClick={() => void saveAccess()}>Apply device access</Button></div></div>
       </Modal>
 
       <Modal open={photoBulkOpen} onClose={() => setPhotoBulkOpen(false)} title="Bulk upload employee photos" description="Select multiple JPEG, PNG, or WebP files. Each filename must match a Device Code or Employee Code, for example 3947.jpg or MN3947.png.">

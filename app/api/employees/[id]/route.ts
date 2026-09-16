@@ -253,6 +253,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode: nextDeviceCode, NOT: { id } }, select: { id: true } });
     if (duplicate) return NextResponse.json({ error: "An employee with this Device Code already exists." }, { status: 409 });
   }
+  if (nextDeviceCode !== employee.deviceCode && employee.deviceAccessEnabled) {
+    return NextResponse.json({ error: "Remove or reapply biometric device access before changing this employee's Device Code." }, { status: 400 });
+  }
   if (body.salary != null && body.salary !== "") {
     const n = Number(body.salary);
     if (!Number.isFinite(n) || n < 0 || n > 100_000_000) {

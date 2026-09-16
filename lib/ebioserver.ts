@@ -575,6 +575,7 @@ export async function pullTenant(
     const deviceByEbioKey = new Map<string, Awaited<ReturnType<typeof prisma.device.create>>>();
     for (const d of discovered) {
       let device = await prisma.device.findUnique({ where: { serialNumber: d.serialNumber } });
+      let newlyRegistered = false;
       if (!device) {
         device = await prisma.device.create({
           data: {
@@ -587,11 +588,13 @@ export async function pullTenant(
             config: { ebioserver: true, location: d.location },
           },
         });
+        newlyRegistered = true;
       } else if (device.tenantId !== tenantId) {
         continue; // serial belongs to another tenant — never cross the boundary
       }
       deviceBySerial.set(d.serialNumber, device);
       deviceByEbioKey.set(ebioDeviceKey(d.deviceName, d.location), device);
+      if (newlyRegistered) await enforceNewEbioDeviceAccess(tenantId, profile, device);
       summary.devices++;
     }
     if (summary.devices === 0) {
@@ -821,4 +824,34 @@ export async function setEbioUserDeviceAccess(profile: EbioserverProfile, serial
     ...authArgs(profile), DeviceSerialNumber: serialNumber, EmployeeCode: employeeCode, BlockUser: !allowed,
   });
   return resultString(result);
+}
+
+/**
+ * A newly discovered machine must default to blocked for every employee whose
+ * device access policy is enabled. eBio only acknowledges that it received a
+ * command, so the persisted status intentionally remains "sent", not verified.
+ */
+async function enforceNewEbioDeviceAccess(
+  tenantId: string,
+  profile: EbioserverProfile,
+  device: { id: string; serialNumber: string }
+) {
+  if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) return;
+  const employees = await prisma.employee.findMany({
+    where: { tenantId, deviceAccessEnabled: true, deviceCode: { not: null } },
+    select: { id: true, deviceCode: true },
+  });
+  for (const employee of employees) {
+    const existing = await prisma.employeeDeviceAccess.findUnique({ where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } } });
+    if (existing) continue;
+    await prisma.employeeDeviceAccess.create({
+      data: { tenantId, employeeId: employee.id, deviceId: device.id, allowed: false, commandStatus: "pending" },
+    });
+    try {
+      await setEbioUserDeviceAccess(profile, device.serialNumber, employee.deviceCode!, false);
+      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } }, data: { commandStatus: "sent", lastCommandAt: new Date() } });
+    } catch (error) {
+      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } }, data: { commandStatus: "failed", lastCommandAt: new Date(), lastError: error instanceof Error ? error.message : "Command failed" } });
+    }
+  }
 }
