@@ -8,19 +8,22 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminBranchesPage() {
   const session = await requireSession();
+  const ownLocationId = session.role === "location_manager"
+    ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? "__none__"
+    : null;
   const [branches, employees, locations] = await Promise.all([
     prisma.branch.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       include: { _count: { select: { employees: true } } },
       orderBy: { createdAt: "asc" },
     }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true, role: true, branchId: true },
       orderBy: { firstName: "asc" },
     }),
     prisma.location.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { id: ownLocationId } : {}) },
       select: { id: true, name: true, code: true },
       orderBy: { createdAt: "asc" },
     }),

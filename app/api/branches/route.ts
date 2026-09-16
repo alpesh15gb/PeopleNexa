@@ -4,9 +4,11 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "supervisor" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const manager = session.role === "location_manager" ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }) : null;
+  if (session.role === "location_manager" && !manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const branches = await prisma.branch.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...(manager?.locationId ? { locationId: manager.locationId } : {}) },
     include: { _count: { select: { employees: true } } },
     orderBy: { createdAt: "asc" },
   });
@@ -15,7 +17,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
@@ -30,7 +32,9 @@ export async function POST(req: NextRequest) {
     });
     if (exists) return NextResponse.json({ error: "A branch with this code already exists." }, { status: 400 });
 
-    let locationId: string | null = null;
+    const manager = session.role === "location_manager" ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }) : null;
+    if (session.role === "location_manager" && !manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    let locationId: string | null = manager?.locationId ?? null;
     if (body.locationId != null && body.locationId !== "") {
       const loc = await prisma.location.findFirst({
         where: { id: String(body.locationId), tenantId: session.tenantId },
@@ -39,6 +43,7 @@ export async function POST(req: NextRequest) {
       if (!loc) return NextResponse.json({ error: "Location not found in this workspace." }, { status: 400 });
       locationId = loc.id;
     }
+    if (manager?.locationId && locationId !== manager.locationId) return NextResponse.json({ error: "Branch must belong to your assigned location." }, { status: 403 });
 
     const branch = await prisma.branch.create({
       data: {

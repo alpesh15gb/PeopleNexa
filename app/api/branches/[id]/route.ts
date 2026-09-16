@@ -4,12 +4,14 @@ import { prisma } from "@/lib/prisma";
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const body = await req.json();
-  const branch = await prisma.branch.findFirst({ where: { id, tenantId: session.tenantId } });
+  const manager = session.role === "location_manager" ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }) : null;
+  if (session.role === "location_manager" && !manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const branch = await prisma.branch.findFirst({ where: { id, tenantId: session.tenantId, ...(manager?.locationId ? { locationId: manager.locationId } : {}) } });
   if (!branch) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   try {
@@ -59,6 +61,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         locationId = loc.id;
       }
     }
+    if (manager?.locationId && locationId !== undefined && locationId !== manager.locationId) return NextResponse.json({ error: "Branch must remain in your assigned location." }, { status: 403 });
 
     const updated = await prisma.branch.update({
       where: { id },
@@ -83,11 +86,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const branch = await prisma.branch.findFirst({ where: { id, tenantId: session.tenantId } });
+  const manager = session.role === "location_manager" ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }) : null;
+  if (session.role === "location_manager" && !manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const branch = await prisma.branch.findFirst({ where: { id, tenantId: session.tenantId, ...(manager?.locationId ? { locationId: manager.locationId } : {}) } });
   if (!branch) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (branch.isDefault) {
     return NextResponse.json({ error: "The default branch cannot be deleted." }, { status: 400 });
