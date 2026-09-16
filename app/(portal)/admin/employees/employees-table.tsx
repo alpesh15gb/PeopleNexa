@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp, Shield } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -104,6 +104,23 @@ export function EmployeesTable({
   const [photoBulkOpen, setPhotoBulkOpen] = useState(false);
   const [photoBulkLoading, setPhotoBulkLoading] = useState(false);
   const [photoBulkResult, setPhotoBulkResult] = useState<string[]>([]);
+  const [accessEmployee, setAccessEmployee] = useState<Emp | null>(null);
+  const [accessDevices, setAccessDevices] = useState<Array<{ id: string; name: string; serialNumber: string }>>([]);
+  const [accessSelected, setAccessSelected] = useState<string[]>([]);
+  const [accessBusy, setAccessBusy] = useState(false);
+
+  async function openAccess(employee: Emp) {
+    setAccessEmployee(employee); setAccessBusy(true);
+    try { const data = await fetch(`/api/employees/${employee.id}/device-access`).then((res) => res.json()); setAccessDevices(data.devices ?? []); setAccessSelected(data.deviceIds ?? []); }
+    finally { setAccessBusy(false); }
+  }
+
+  async function saveAccess() {
+    if (!accessEmployee) return; setAccessBusy(true);
+    try { const res = await fetch(`/api/employees/${accessEmployee.id}/device-access`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceIds: accessSelected }) }); const data = await res.json(); if (!res.ok) throw new Error(data.error); const failed = data.results.filter((result: { error?: string }) => result.error); toast(failed.length ? "error" : "success", failed.length ? `${failed.length} device command(s) failed.` : "Device access updated."); if (!failed.length) setAccessEmployee(null); }
+    catch (error) { toast("error", error instanceof Error ? error.message : "Failed to update device access."); }
+    finally { setAccessBusy(false); }
+  }
 
   async function readPhoto(file: File): Promise<string> {
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Use a JPEG, PNG, or WebP image.");
@@ -397,6 +414,7 @@ export function EmployeesTable({
                   <Button size="icon" variant="ghost" onClick={() => { setPhoto(null); setModal(emp); }}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
+                  <Button size="icon" variant="ghost" title="Allowed biometric devices" onClick={() => void openAccess(emp)}><Shield className="h-3.5 w-3.5" /></Button>
                   {emp.role !== "admin" && (
                     <Button size="icon" variant="ghost" className="text-rose-300 hover:bg-rose-500/10" onClick={() => setConfirmDelete(emp)}>
                       <Trash2 className="h-3.5 w-3.5" />
@@ -546,6 +564,10 @@ export function EmployeesTable({
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={accessEmployee !== null} onClose={() => setAccessEmployee(null)} title={`Allowed devices: ${accessEmployee?.firstName ?? ""}`} description="Selected devices are unblocked; all other eBio devices are blocked for this employee.">
+        <div className="space-y-3">{accessBusy && accessDevices.length === 0 ? <p className="text-sm text-muted-foreground">Loading devices…</p> : accessDevices.map((device) => <label key={device.id} className="flex items-center gap-3 rounded-lg border border-edge p-3 text-sm"><input type="checkbox" checked={accessSelected.includes(device.id)} onChange={() => setAccessSelected((current) => current.includes(device.id) ? current.filter((id) => id !== device.id) : [...current, device.id])} /><span className="flex-1">{device.name}<span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span></span></label>)}<div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setAccessEmployee(null)}>Cancel</Button><Button loading={accessBusy} onClick={() => void saveAccess()}>Apply device access</Button></div></div>
       </Modal>
 
       <Modal open={photoBulkOpen} onClose={() => setPhotoBulkOpen(false)} title="Bulk upload employee photos" description="Select multiple JPEG, PNG, or WebP files. Each filename must match a Device Code or Employee Code, for example 3947.jpg or MN3947.png.">
