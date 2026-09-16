@@ -131,6 +131,10 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
+    const aadhaarNumber = body.aadhaarNumber != null && String(body.aadhaarNumber).trim() !== "" ? String(body.aadhaarNumber).replace(/[\s-]/g, "") : null;
+    const drivingLicenseNumber = body.drivingLicenseNumber != null && String(body.drivingLicenseNumber).trim() !== "" ? String(body.drivingLicenseNumber).trim().toUpperCase() : null;
+    if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
+    if (drivingLicenseNumber && (drivingLicenseNumber.length < 8 || drivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
     const email = String(body.email ?? "").toLowerCase().trim();
@@ -289,6 +293,8 @@ export async function POST(req: NextRequest) {
           workBasisRate: loginOnly ? null : workBasisRate,
           managerId: loginOnly ? null : body.managerId || null,
            salaryStructure: loginOnly ? null : body.salaryStructure || null,
+           aadhaarNumber: loginOnly ? null : aadhaarNumber,
+           drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
            profilePicture: photo.value,
         },
         select,

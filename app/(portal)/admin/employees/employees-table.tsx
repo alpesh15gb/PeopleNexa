@@ -36,6 +36,8 @@ interface Emp {
   ifscCode: string | null;
   pan: string | null;
   uan: string | null;
+  aadhaarNumber: string | null;
+  drivingLicenseNumber: string | null;
   payMode: string;
   workBasisRate: number | null;
   branch: { id: string; name: string } | null;
@@ -162,6 +164,8 @@ export function EmployeesTable({
       ifscCode: form.get("ifscCode") || null,
       pan: form.get("pan") || null,
       uan: form.get("uan") || null,
+      aadhaarNumber: form.get("aadhaarNumber") || null,
+      drivingLicenseNumber: form.get("drivingLicenseNumber") || null,
       payMode: form.get("payMode") || "monthly",
       workBasisRate: form.get("workBasisRate") || null,
       profilePicture: photo ?? editing?.profilePicture ?? null,
@@ -471,6 +475,12 @@ export function EmployeesTable({
             </Field>
             <Field label="UAN (EPF)">
               <Input name="uan" defaultValue={editing?.uan ?? ""} placeholder="12-digit UAN" />
+            </Field>
+            <Field label="Aadhaar Number">
+              <Input name="aadhaarNumber" inputMode="numeric" maxLength={14} defaultValue={editing?.aadhaarNumber ?? ""} placeholder="12-digit Aadhaar" />
+            </Field>
+            <Field label="Driving License Number">
+              <Input name="drivingLicenseNumber" defaultValue={editing?.drivingLicenseNumber ?? ""} placeholder="e.g. DL0120110012345" />
             </Field>
             <Field label="Pay mode" hint="How this employee is paid">
               <Select name="payMode" defaultValue={editing?.payMode ?? "monthly"}>

@@ -73,6 +73,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const { id } = await ctx.params;
   const body = await req.json();
+  const nextAadhaarNumber = body.aadhaarNumber === undefined ? undefined : (body.aadhaarNumber == null || String(body.aadhaarNumber).trim() === "" ? null : String(body.aadhaarNumber).replace(/[\s-]/g, ""));
+  const nextDrivingLicenseNumber = body.drivingLicenseNumber === undefined ? undefined : (body.drivingLicenseNumber == null || String(body.drivingLicenseNumber).trim() === "" ? null : String(body.drivingLicenseNumber).trim().toUpperCase());
+  if (nextAadhaarNumber && !/^\d{12}$/.test(nextAadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
+  if (nextDrivingLicenseNumber && (nextDrivingLicenseNumber.length < 8 || nextDrivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
   const photo = body.profilePicture === undefined ? null : profilePictureValue(body.profilePicture);
   if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
@@ -335,6 +339,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       payMode: nextPayMode,
        workBasisRate: body.workBasisRate !== undefined ? (body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null) : employee.workBasisRate,
        profilePicture: photo ? photo.value : employee.profilePicture,
+       aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
+       drivingLicenseNumber: nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
     },
     });
   } catch (err: unknown) {

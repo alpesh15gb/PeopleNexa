@@ -342,6 +342,8 @@ model Employee {
   // Statutory identifiers for compliance exports (ECR / Form 16 / 24Q).
   pan String?
   uan String?
+  aadhaarNumber String?
+  drivingLicenseNumber String?
 
   // Salary structure components (Basic / HRA / Conveyance / Medical / Other).
   salaryStructure Json?

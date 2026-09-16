@@ -56,6 +56,8 @@ export default async function AdminEmployeesPage({
         ifscCode: true,
         pan: true,
         uan: true,
+        aadhaarNumber: true,
+        drivingLicenseNumber: true,
         payMode: true,
         workBasisRate: true,
         managerId: true,
