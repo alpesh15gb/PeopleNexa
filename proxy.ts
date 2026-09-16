@@ -160,19 +160,20 @@ async function proxy(request: NextRequest) {
         new URL(role === "admin" || role === "branch_manager" || role === "location_manager" ? "/admin" : role === "supervisor" ? "/admin/attendance" : "/employee", request.url)
     );
   }
-  // Supervisor is admin-lite for their scope: attendance + regularization only.
-  if (role === "supervisor" && isAdminRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization")) {
+  // Supervisor is admin-lite for their scope: attendance + regularization + punch-details only.
+  if (role === "supervisor" && isAdminRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization") && !pathname.startsWith("/admin/reports/punch-details")) {
     return NextResponse.redirect(new URL("/admin/attendance", request.url));
   }
   // Branch manager is scoped to their branch: dashboard + attendance +
-  // regularization + employees + leaves only.
+  // regularization + employees + leaves + punch-details report only.
   if (role === "branch_manager" && isAdminRoute) {
     const allowed =
       pathname === "/admin" ||
       pathname.startsWith("/admin/attendance") ||
       pathname.startsWith("/admin/regularization") ||
       pathname.startsWith("/admin/employees") ||
-      pathname.startsWith("/admin/leaves");
+      pathname.startsWith("/admin/leaves") ||
+      pathname.startsWith("/admin/reports/punch-details");
     if (!allowed) {
       return NextResponse.redirect(new URL("/admin/attendance", request.url));
     }
