@@ -807,3 +807,11 @@ export async function runDeviceCommand(
     return { ok: false, message: err instanceof Error ? err.message : "Command failed" };
   }
 }
+
+export async function setEbioUserDeviceAccess(profile: EbioserverProfile, serialNumber: string, employeeCode: string, allowed: boolean): Promise<string> {
+  const client = await createClient(profile);
+  const result = await call<unknown>(client, "DeviceCommand_BlockUnBlockUser", {
+    ...authArgs(profile), DeviceSerialNumber: serialNumber, EmployeeCode: employeeCode, BlockUser: !allowed,
+  });
+  return resultString(result);
+}
