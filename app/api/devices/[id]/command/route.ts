@@ -13,20 +13,34 @@ const ICK_COMMANDS: Record<string, (now: Date) => string> = {
   },
 };
 
+const LOCATION_MANAGER_COMMANDS = new Set(["sync", "reboot", "set_time"]);
+
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
   const device = await prisma.device.findFirst({
     where: { id, tenantId: session.tenantId },
-    include: { tenant: { select: { config: true } } },
+    include: { tenant: { select: { config: true } }, branch: { select: { locationId: true } } },
   });
   if (!device) return NextResponse.json({ error: "Device not found" }, { status: 404 });
+  if (session.role === "location_manager") {
+    const manager = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { locationId: true },
+    });
+    if (!manager?.locationId || device.branch?.locationId !== manager.locationId) {
+      return NextResponse.json({ error: "Device not found" }, { status: 404 });
+    }
+  }
 
   const body = await req.json().catch(() => ({}));
   const action = String(body.action ?? "");
+  if (session.role === "location_manager" && !LOCATION_MANAGER_COMMANDS.has(action)) {
+    return NextResponse.json({ error: "This command is restricted to admins." }, { status: 403 });
+  }
 
   // eBioserver-managed devices (auto-registered from GetDeviceList) are
   // commanded through the tenant's own eBioserver instead of the iclock queue.

@@ -45,7 +45,7 @@ interface DeviceLog {
   createdAt: string;
 }
 
-export function DevicesPanel({ rows, counts, readOnly = false }: { rows: DeviceRow[]; counts: { total: number; online: number; offline: number }; readOnly?: boolean }) {
+export function DevicesPanel({ rows, counts, readOnly = false, branches = [], requireBranch = false }: { rows: DeviceRow[]; counts: { total: number; online: number; offline: number }; readOnly?: boolean; branches?: Array<{ id: string; name: string }>; requireBranch?: boolean }) {
   const toast = useToast();
   const [devices, setDevices] = useState(rows);
   const [addOpen, setAddOpen] = useState(false);
@@ -72,6 +72,7 @@ export function DevicesPanel({ rows, counts, readOnly = false }: { rows: DeviceR
           serialNumber: form.get("serialNumber"),
           ipAddress: form.get("ipAddress"),
           type: form.get("type"),
+          branchId: form.get("branchId") || undefined,
         }),
       });
       const data = await res.json();
@@ -307,6 +308,21 @@ export function DevicesPanel({ rows, counts, readOnly = false }: { rows: DeviceR
           <Field label="Serial number" hint="Printed on the device, e.g. ESQ3001...">
             <Input name="serialNumber" required placeholder="Device serial number" className="font-mono" />
           </Field>
+          {branches.length > 0 && (
+            <Field label="Branch" hint={requireBranch ? "Device must belong to a branch in your location" : "Assign this device to a branch"}>
+              <select
+                name="branchId"
+                required={requireBranch}
+                className="h-10 w-full appearance-none rounded-xl border border-input bg-card-2 px-3.5 text-sm text-foreground outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40"
+                defaultValue=""
+              >
+                <option value="">{requireBranch ? "Select branch" : "No branch"}</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Field label="IP address (optional)">
               <Input name="ipAddress" placeholder="192.168.1.50" className="font-mono" />

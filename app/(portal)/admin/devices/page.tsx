@@ -13,7 +13,7 @@ export default async function AdminDevicesPage() {
     ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? "__none__"
     : null;
 
-  const [devices, rtDevices, tenant] = await Promise.all([
+  const [devices, rtDevices, tenant, branches] = await Promise.all([
     prisma.device.findMany({
       where: { tenantId: session.tenantId, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}) },
       include: { _count: { select: { logs: true } } },
@@ -25,6 +25,11 @@ export default async function AdminDevicesPage() {
       orderBy: { createdAt: "asc" },
     }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { code: true } }),
+    prisma.branch.findMany({
+      where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   const isEbio = (d: { config: unknown }) =>
@@ -90,7 +95,7 @@ export default async function AdminDevicesPage() {
         counts={counts}
         ebioCount={ebioRows.length}
         rtCount={rtRows.length}
-         essl={<DevicesPanel rows={rows} counts={counts} readOnly={Boolean(ownLocationId)} />}
+         essl={<DevicesPanel rows={rows} counts={counts} readOnly={false} branches={branches} requireBranch={Boolean(ownLocationId)} />}
         ebio={
           ebioRows.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-muted-foreground">
