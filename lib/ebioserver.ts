@@ -426,8 +426,8 @@ export async function backfillDays(
   profile: EbioserverProfile,
   days: number,
   onProgress?: (day: number, date: string, records: number, ingested: number) => void
-): Promise<{ ok: boolean; days: number; records: number; ingested: number; devices: number; skipped: number; message?: string }> {
-  const summary = { ok: false, days: 0, records: 0, ingested: 0, devices: 0, skipped: 0, message: "" as string | undefined };
+): Promise<{ ok: boolean; days: number; records: number; ingested: number; repaired: number; devices: number; skipped: number; message?: string }> {
+  const summary = { ok: false, days: 0, records: 0, ingested: 0, repaired: 0, devices: 0, skipped: 0, message: "" as string | undefined };
   const touched = new Set<string>();
   try {
     const client = await createClient(profile);
@@ -488,7 +488,7 @@ export async function backfillDays(
         };
         let res;
         try {
-          res = await handleDevicePunch(device, raw);
+          res = await handleDevicePunch(device, raw, { reattributeDuplicate: true });
         } catch (err) {
           console.warn(`[eBioserver] Skipping punch (user=${rec.userId}):`, err instanceof Error ? err.message : err);
           summary.skipped++;
@@ -498,6 +498,8 @@ export async function backfillDays(
           summary.ingested++;
           dayIngested++;
           touched.add(device.id);
+        } else if (res.action === "reattributed") {
+          summary.repaired++;
         }
       }
       summary.days++;
