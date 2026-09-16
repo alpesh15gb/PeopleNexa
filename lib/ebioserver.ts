@@ -305,6 +305,13 @@ export function parseLogRecords(result: string): EbioLogRecord[] {
   return records;
 }
 
+function parseDevicePing(result: string): Date | null {
+  // eBio returns this as a vendor-specific string; extract the reported IST
+  // timestamp from either a plain value or a labelled response.
+  const timestamp = result.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?/)?.[0];
+  return timestamp ? parseIST(timestamp) : null;
+}
+
 // ── Employee master import ─────────────────────────────────────────────────
 //
 // GetEmployeeCodesResult: "HO009,HO115,..." (comma-separated codes)
@@ -577,6 +584,22 @@ export async function pullTenant(
     if (summary.devices === 0) {
       summary.message = "No devices found on this eBioserver.";
       return summary;
+    }
+
+    // Machine pings are independent of attendance activity. Refresh these on
+    // every pull so Device Health reflects a live machine, not just a device
+    // that happened to receive a punch recently.
+    for (const device of deviceBySerial.values()) {
+      try {
+        const pingResult = await call<unknown>(client, "GetDeviceLastPing", {
+          ...authArgs(profile),
+          DeviceSerialNumber: device.serialNumber,
+        });
+        const lastSeenAt = parseDevicePing(resultString(pingResult));
+        if (lastSeenAt) await prisma.device.update({ where: { id: device.id }, data: { lastSeenAt } });
+      } catch {
+        // A ping error must not block attendance ingestion for other machines.
+      }
     }
 
     // 2. Pull. A fresh cursor bootstraps: probe the head of the transaction
