@@ -13,6 +13,7 @@ const TYPES = [
   { key: "device-status-matrix", label: "Status Matrix" },
   { key: "device-work-summary", label: "Work Summary" },
   { key: "device-performance", label: "Performance" },
+  { key: "inactive-employees", label: "Inactive Employees" },
 ];
 
 export function ReportControls({
@@ -78,7 +79,7 @@ export function ReportControls({
             <Input key={`devdate-${deviceDate}`} type="date" defaultValue={deviceDate} onChange={(e) => update({ date: e.target.value })} className="w-40" />
           </div>
         )}
-        {type !== "device-daily" && (
+        {type !== "device-daily" && type !== "inactive-employees" && (
           <div>
             <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Month</label>
             <Input key={`devmonth-${deviceMonth}`} type="month" defaultValue={deviceMonth} onChange={(e) => update({ month: e.target.value })} className="w-40" />

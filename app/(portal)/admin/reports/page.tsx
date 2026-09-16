@@ -16,6 +16,7 @@ const KNOWN_TYPES = new Set([
   "device-status-matrix",
   "device-work-summary",
   "device-performance",
+  "inactive-employees",
 ]);
 
 const DEVICE_KIND_BY_TYPE: Record<string, "daily" | "monthly" | "status-matrix" | "work-summary" | "performance"> = {
@@ -62,6 +63,11 @@ export default async function AdminReportsPage({
   const deviceBranchId = forcedBranchId ?? (forcedLocationId && !visibleBranches.some((branch) => branch.id === params.branchId) ? "" : params.branchId ?? "");
   const deviceDepartmentId = params.departmentId ?? "";
   const kind = DEVICE_KIND_BY_TYPE[type];
+  const inactiveEmployees = type === "inactive-employees" ? await prisma.employee.findMany({
+    where: { tenantId: session.tenantId, status: "inactive", ...(forcedBranchId ? { branchId: forcedBranchId } : forcedLocationId ? { branch: { locationId: forcedLocationId } } : {}), ...(params.branchId ? { branchId: params.branchId } : {}), ...(params.departmentId ? { departmentId: params.departmentId } : {}) },
+    select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, branch: { select: { name: true } }, department: { select: { name: true } } },
+    orderBy: { employeeNumber: "asc" },
+  }) : null;
   const qs = new URLSearchParams({ kind });
   if (kind === "daily") qs.set("date", date);
   else qs.set("month", month);
@@ -88,7 +94,7 @@ export default async function AdminReportsPage({
       {/* key remounts per URL: without it a kind switch renders one frame with
           the previous kind's data shape (e.g. daily {rows} into a monthly
           table expecting {blocks}) and crashes before the refetch clears it. */}
-      <DeviceTables key={apiUrl} kind={kind} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />
+      {inactiveEmployees ? <Card><CardContent className="overflow-x-auto p-0"><table className="w-full text-left text-sm"><thead><tr className="border-b border-edge text-muted-foreground"><th className="p-4">Employee Code</th><th className="p-4">Device Code</th><th className="p-4">Employee</th><th className="p-4">Designation</th><th className="p-4">Department</th><th className="p-4">Branch</th></tr></thead><tbody>{inactiveEmployees.map((employee) => <tr key={employee.employeeNumber} className="border-b border-edge"><td className="p-4 font-mono">{employee.employeeNumber}</td><td className="p-4 font-mono">{employee.deviceCode ?? "—"}</td><td className="p-4 font-medium">{employee.firstName} {employee.lastName}</td><td className="p-4">{employee.position ?? "—"}</td><td className="p-4">{employee.department?.name ?? "—"}</td><td className="p-4">{employee.branch?.name ?? "—"}</td></tr>)}{inactiveEmployees.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-muted-foreground">No inactive employees match these filters.</td></tr>}</tbody></table></CardContent></Card> : <DeviceTables key={apiUrl} kind={kind} apiUrl={apiUrl} xlsxUrl={`${apiUrl}&format=xlsx`} />}
     </div>
   );
 }
