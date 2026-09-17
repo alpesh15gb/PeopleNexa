@@ -233,13 +233,16 @@ model DeviceLog {
 // Raw eBioServerNew webhook deliveries are staged before any attendance
 // processing. The delivery hash makes vendor retries idempotent.
 model EbioWebhookDelivery {
-  id          String   @id @default(cuid())
-  payloadHash String   @unique
-  rawBody     String   @db.Text
-  recordCount Int      @default(0)
-  receivedAt  DateTime @default(now())
+  id              String    @id @default(cuid())
+  payloadHash     String    @unique
+  rawBody         String    @db.Text
+  recordCount     Int       @default(0)
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processingError String?
 
   @@index([receivedAt])
+  @@index([processedAt])
 }
 
 model Location {

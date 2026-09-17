@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import crypto from "node:crypto";
+import { processEbioWebhookDelivery } from "@/lib/ebio-webhook";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
 /**
- * Receive-only eBioServerNew staging endpoint. No DeviceLog, Punch, or
- * Attendance rows are written here; processing is deliberately separate.
+ * eBioServerNew ingestion endpoint. Every batch is staged before it reaches
+ * the shared device-punch pipeline, making retries durable and idempotent.
  */
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -20,11 +21,23 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await prisma.ebioWebhookDelivery.create({ data: { payloadHash, rawBody, recordCount } });
-    console.info(`[eBio webhook] staged ${recordCount} record(s), hash=${payloadHash}`);
+    const delivery = await prisma.ebioWebhookDelivery.create({ data: { payloadHash, rawBody, recordCount } });
+    const stats = await processEbioWebhookDelivery(delivery.id);
+    console.info(`[eBio webhook] staged ${recordCount} record(s), ingested=${stats.ingested}, duplicates=${stats.duplicates}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
-      console.info(`[eBio webhook] duplicate delivery, hash=${payloadHash}`);
+      const existing = await prisma.ebioWebhookDelivery.findUnique({ where: { payloadHash }, select: { id: true, processedAt: true } });
+      if (existing && !existing.processedAt) {
+        try {
+          const stats = await processEbioWebhookDelivery(existing.id);
+          console.info(`[eBio webhook] retried delivery, ingested=${stats.ingested}, duplicates=${stats.duplicates}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
+        } catch (retryError) {
+          console.error("[eBio webhook] retry processing failed:", retryError);
+          return new Response("Unable to process webhook delivery", { status: 500 });
+        }
+      } else {
+        console.info(`[eBio webhook] duplicate delivery, hash=${payloadHash}`);
+      }
     } else {
       console.error("[eBio webhook] staging failed:", error);
       return new Response("Unable to stage webhook delivery", { status: 500 });
