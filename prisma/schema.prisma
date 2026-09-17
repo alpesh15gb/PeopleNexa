@@ -230,6 +230,18 @@ model DeviceLog {
 // Company hierarchy: Location (city) → Branch (office) → employees.
 // Departments stay company-wide (tenant level).
 
+// Raw eBioServerNew webhook deliveries are staged before any attendance
+// processing. The delivery hash makes vendor retries idempotent.
+model EbioWebhookDelivery {
+  id          String   @id @default(cuid())
+  payloadHash String   @unique
+  rawBody     String   @db.Text
+  recordCount Int      @default(0)
+  receivedAt  DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
 model Location {
   id        String   @id @default(cuid())
   tenantId  String
