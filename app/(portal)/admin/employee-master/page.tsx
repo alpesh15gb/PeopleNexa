@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BriefcaseBusiness, Building2, CreditCard, GraduationCap, IdCard, UserRound } from "lucide-react";
+import { BriefcaseBusiness, Building2, CreditCard, FileText, GraduationCap, IdCard, UserRound } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { formatDateIST } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
 import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
+import { EmployeeDeviceAccess } from "./employee-device-access";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export default async function EmployeeMasterPage({
       ],
     } : {}),
   };
-  const [total, employees, branches] = await Promise.all([
+  const [total, employees, branches, departments, shifts, managers, positions, subdepartments] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({
       where,
@@ -78,6 +79,11 @@ export default async function EmployeeMasterPage({
       take: pageSize,
     }),
     prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, status: "active", ...locationScope }, select: { id: true, firstName: true, lastName: true, employeeNumber: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
+    prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, position: { not: null }, ...locationScope }, distinct: ["position"], select: { position: true }, orderBy: { position: "asc" } }),
+    prisma.employeeEmploymentProfile.findMany({ where: { subDepartment: { not: null }, employee: { tenantId: session.tenantId, loginOnly: false, ...locationScope } }, distinct: ["subDepartment"], select: { subDepartment: true }, orderBy: { subDepartment: "asc" } }),
   ]);
   const selectedId = params.employee ?? employees[0]?.id;
   const employee = selectedId
@@ -152,7 +158,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <EmployeeMasterQuickEdit canEditEmail={isAdmin} canEditMaster={isAdmin || isLocationManager} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "", drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? formatDateIST(employee.drivingLicenseExpiresAt) : "" }} />
+                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} /><EmployeeMasterQuickEdit canEditEmail={isAdmin} canEditMaster={isAdmin || isLocationManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "", drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? formatDateIST(employee.drivingLicenseExpiresAt) : "" }} /></div>
                 </div>
               </CardContent>
             </Card>
@@ -162,6 +168,7 @@ export default async function EmployeeMasterPage({
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.profile?.personalEmail ?? employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Gender", value: employee.profile?.gender ?? "—" }, { label: "Date of birth", value: formatDateIST(employee.profile?.actualDateOfBirth ?? employee.profile?.dateOfBirthCertificate) }, { label: "Marital status", value: employee.profile?.maritalStatus ?? "—" }, { label: "Emergency contact", value: employee.profile?.emergencyContactName ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: employee.pan ?? "—" }, { label: "UAN", value: employee.uan ?? "—" }, ...sourceFields(source, "BANK_")]}/></CardContent></Card>}
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><IdCard className="h-4 w-4 text-primary" /> Identity documents</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Driving license", value: employee.drivingLicenseNumber ?? "—" }, { label: "License type", value: employee.drivingLicenseType ?? "—" }, { label: "License expiry", value: formatDateIST(employee.drivingLicenseExpiresAt) }, ...sourceFields(source, "ID_")]}/></CardContent></Card>}
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /> Employee documents</CardTitle></CardHeader><CardContent>{employee.documents.length ? <div className="space-y-3">{employee.documents.map((document) => <div key={document.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{document.name}</p><div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2"><p>Type: {document.docType}</p><p>Number: {document.number ?? "—"}</p><p>Issue: {formatDateIST(document.issuedDate)}</p><p>Expiry: {formatDateIST(document.expiryDate)}</p></div>{document.fileUrl && <a href={document.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open file</a>}</div>)}</div> : <p className="text-sm text-muted-foreground">No documents available.</p>}</CardContent></Card>
             </section>
 
             <section className="grid gap-6 2xl:grid-cols-2">

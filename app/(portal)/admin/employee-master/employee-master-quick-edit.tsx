@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Building2, ChevronRight, CreditCard, FileText, GraduationCap, Pencil, Plus, Trash2, UserRound, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -11,6 +11,9 @@ import { useRouter } from "next/navigation";
 type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; joiningDate: string; drivingLicenseNumber?: string | null; drivingLicenseType?: string | null; drivingLicenseExpiresAt?: string };
 type Row = Record<string, unknown>;
 type Master = Row & { profile?: Row | null; employmentProfile?: Row | null; dependents?: Row[]; education?: Row[]; workExperience?: Row[]; references?: Row[]; bankAccounts?: Row[]; documents?: Row[] };
+type EmployeeMasterLookups = { branches: Array<{ id: string; name: string }>; departments: Array<{ id: string; name: string }>; shifts: Array<{ id: string; name: string }>; managers: Array<{ id: string; firstName: string; lastName: string; employeeNumber: string }>; positions: string[]; subdepartments: string[] };
+const emptyLookups: EmployeeMasterLookups = { branches: [], departments: [], shifts: [], managers: [], positions: [], subdepartments: [] };
+const EmployeeMasterLookupsContext = createContext<EmployeeMasterLookups>(emptyLookups);
 
 const inputClass = "h-11 w-full rounded-[11px] border border-input bg-card px-3.5 text-sm text-foreground outline-none transition focus:border-primary/70 focus:ring-4 focus:ring-ring/15";
 const sections = [
@@ -35,17 +38,37 @@ function normalizeDates(master: Master): Master {
   };
 }
 
-function EmployeeFields({ employee, includeCodes = false, controlled, setControlled }: { employee: EmployeeForm; includeCodes?: boolean; controlled?: Row; setControlled?: (key: string, value: string) => void }) {
+function SelectField({ label, value, onChange, options, placeholder }: { label: string; value: unknown; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; placeholder: string }) {
+  return <Field label={label}><select value={stringValue(value)} onChange={(event) => onChange(event.target.value)} className={inputClass}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>;
+}
+
+function CustomSelectField({ label, value, onChange, options }: { label: string; value: unknown; onChange: (value: string) => void; options: string[] }) {
+  const text = stringValue(value);
+  const [custom, setCustom] = useState(() => options.length === 0 || (Boolean(text) && !options.includes(text)));
+  return <div className="space-y-3"><SelectField label={label} value={custom ? "__custom__" : text} onChange={(next) => { setCustom(next === "__custom__"); onChange(next === "__custom__" ? "" : next); }} placeholder={`Select ${label.toLowerCase()}`} options={[...options.map((option) => ({ value: option, label: option })), { value: "__custom__", label: "Custom entry" }]} />{custom && <TextField label={`Custom ${label.toLowerCase()}`} value={text} onChange={onChange} />}</div>;
+}
+
+function EmployeeFields({ employee, includeCodes = false, controlled, setControlled, positionChoices }: { employee: EmployeeForm; includeCodes?: boolean; controlled?: Row; setControlled?: (key: string, value: string) => void; positionChoices?: string[] }) {
+  const lookups = useContext(EmployeeMasterLookupsContext);
   const value = (key: string) => controlled ? stringValue(controlled[key]) : undefined;
   const change = (key: string) => (event: React.ChangeEvent<HTMLInputElement>) => setControlled?.(key, event.target.value);
-  return <><Field label="First name"><Input name="firstName" required value={value("firstName")} onChange={change("firstName")} defaultValue={controlled ? undefined : employee.firstName} /></Field><Field label="Last name"><Input name="lastName" value={value("lastName")} onChange={change("lastName")} defaultValue={controlled ? undefined : employee.lastName} /></Field>{includeCodes && <Field label="Employee code"><Input name="employeeNumber" required value={value("employeeNumber")} onChange={change("employeeNumber")} defaultValue={controlled ? undefined : employee.employeeNumber ?? ""} /></Field>}{includeCodes && <Field label="Device code"><Input name="deviceCode" placeholder="Biometric enrollment ID" value={value("deviceCode")} onChange={change("deviceCode")} defaultValue={controlled ? undefined : employee.deviceCode ?? ""} /></Field>}<Field label="Work email"><Input name="email" type="email" required value={value("email")} onChange={change("email")} defaultValue={controlled ? undefined : employee.email} /></Field><Field label="Phone"><Input name="phone" type="tel" value={value("phone")} onChange={change("phone")} defaultValue={controlled ? undefined : employee.phone ?? ""} /></Field><Field label="Position"><Input name="position" value={value("position")} onChange={change("position")} defaultValue={controlled ? undefined : employee.position ?? ""} /></Field><Field label="Joining date"><Input name="joiningDate" type="date" value={controlled ? dateValue(controlled.joiningDate) : undefined} onChange={change("joiningDate")} defaultValue={controlled ? undefined : employee.joiningDate} /></Field></>;
+  const positionOptions = positionChoices ?? (controlled ? lookups.positions : undefined);
+  return <><Field label="First name"><Input name="firstName" required value={value("firstName")} onChange={change("firstName")} defaultValue={controlled ? undefined : employee.firstName} /></Field><Field label="Last name"><Input name="lastName" value={value("lastName")} onChange={change("lastName")} defaultValue={controlled ? undefined : employee.lastName} /></Field>{includeCodes && <Field label="Employee code"><Input name="employeeNumber" required value={value("employeeNumber")} onChange={change("employeeNumber")} defaultValue={controlled ? undefined : employee.employeeNumber ?? ""} /></Field>}{includeCodes && <Field label="Device code"><Input name="deviceCode" placeholder="Biometric enrollment ID" value={value("deviceCode")} onChange={change("deviceCode")} defaultValue={controlled ? undefined : employee.deviceCode ?? ""} /></Field>}<Field label="Work email"><Input name="email" type="email" required value={value("email")} onChange={change("email")} defaultValue={controlled ? undefined : employee.email} /></Field><Field label="Phone"><Input name="phone" type="tel" value={value("phone")} onChange={change("phone")} defaultValue={controlled ? undefined : employee.phone ?? ""} /></Field>{positionOptions ? <CustomSelectField label="Position" value={controlled?.position} onChange={(next) => setControlled?.("position", next)} options={positionOptions} /> : <Field label="Position"><Input name="position" value={value("position")} onChange={change("position")} defaultValue={controlled ? undefined : employee.position ?? ""} /></Field>}<Field label="Joining date"><Input name="joiningDate" type="date" value={controlled ? dateValue(controlled.joiningDate) : undefined} onChange={change("joiningDate")} defaultValue={controlled ? undefined : employee.joiningDate} /></Field></>;
 }
 
 function TextField({ label, value, onChange, type = "text", required = false }: { label: string; value: unknown; onChange: (value: string) => void; type?: string; required?: boolean }) {
+  const lookups = useContext(EmployeeMasterLookupsContext);
+  if (label === "Gender") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select gender" options={[{ value: "Male", label: "Male" }, { value: "Female", label: "Female" }, { value: "Other", label: "Other" }, { value: "Prefer not to say", label: "Prefer not to say" }]} />;
+  if (label === "Sub department") return <CustomSelectField label={label} value={value} onChange={onChange} options={lookups.subdepartments} />;
   return <Field label={label}><Input type={type} required={required} value={type === "date" ? dateValue(value) : stringValue(value)} onChange={(event) => onChange(event.target.value)} /></Field>;
 }
 
-function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: EmployeeForm; onClose: () => void; canEditEmail: boolean }) {
+function OfficialLookupFields({ core, updateCore, employeeId }: { core: Row; updateCore: (key: string, value: string) => void; employeeId: string }) {
+  const lookups = useContext(EmployeeMasterLookupsContext);
+  return <><SelectField label="Branch" value={core.branchId} onChange={(value) => updateCore("branchId", value)} placeholder="Unassigned" options={lookups.branches.map((branch) => ({ value: branch.id, label: branch.name }))} /><SelectField label="Department" value={core.departmentId} onChange={(value) => updateCore("departmentId", value)} placeholder="Unassigned" options={lookups.departments.map((department) => ({ value: department.id, label: department.name }))} /><SelectField label="Shift" value={core.shiftId} onChange={(value) => updateCore("shiftId", value)} placeholder="Unassigned" options={lookups.shifts.map((shift) => ({ value: shift.id, label: shift.name }))} /><SelectField label="Reporting manager" value={core.managerId} onChange={(value) => updateCore("managerId", value)} placeholder="No manager" options={lookups.managers.filter((manager) => manager.id !== employeeId).map((manager) => ({ value: manager.id, label: `${manager.firstName} ${manager.lastName} (${manager.employeeNumber})` }))} /></>;
+}
+
+function Editor({ id, initial, onClose, canEditEmail, lookups = emptyLookups }: { id: string; initial: EmployeeForm; onClose: () => void; canEditEmail: boolean; lookups?: EmployeeMasterLookups }) {
   const toast = useToast();
   const router = useRouter();
   const [master, setMaster] = useState<Master | null>(null);
@@ -82,7 +105,7 @@ function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: E
       for (const address of ["currentAddress", "permanentAddress"]) {
         if (typeof profile[address] === "string") profile[address] = profile[address] ? JSON.parse(profile[address] as string) : null;
       }
-      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, joiningDate: core.joiningDate || null, drivingLicenseNumber: core.drivingLicenseNumber || null, drivingLicenseType: core.drivingLicenseType || null, drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null };
+      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, joiningDate: core.joiningDate || null, branchId: core.branchId || null, departmentId: core.departmentId || null, shiftId: core.shiftId || null, managerId: core.managerId || null, drivingLicenseNumber: core.drivingLicenseNumber || null, drivingLicenseType: core.drivingLicenseType || null, drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null };
       if (canEditEmail) corePayload.email = core.email;
       const coreResponse = await fetch(`/api/employees/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corePayload) });
       const coreData = await coreResponse.json().catch(() => ({}));
@@ -97,7 +120,7 @@ function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: E
 
   const profile = master?.profile ?? {};
   const employment = master?.employmentProfile ?? {};
-  return <Modal open onClose={onClose} size="xl" title="Employee master editor" description="Update core information and structured HR records in one place.">
+  return <EmployeeMasterLookupsContext.Provider value={lookups}><Modal open onClose={onClose} size="xl" title="Employee master editor" description="Update core information and structured HR records in one place.">
     {loading || !master ? <div className="py-16 text-center text-sm text-muted-foreground">Loading employee master...</div> : <form onSubmit={save} className="grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
       <nav aria-label="Employee master sections" className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
         {sections.map(([key, label, Icon]) => <button key={key} type="button" onClick={() => setActive(key)} aria-current={active === key ? "step" : undefined} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-white" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}><Icon className="h-4 w-4" aria-hidden="true" />{label}<ChevronRight className="ml-auto hidden h-3.5 w-3.5 lg:block" aria-hidden="true" /></button>)}
@@ -111,22 +134,23 @@ function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: E
         {active === "references" && <Collection title="References" rows={rows("references")} add={() => addRow("references", { name: "" })} remove={(index) => removeRow("references", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Name" required value={row.name} onChange={(value) => updateRow("references", index, "name", value)} /><TextField label="Relation" value={row.relation} onChange={(value) => updateRow("references", index, "relation", value)} /><TextField label="Mobile" type="tel" value={row.mobile} onChange={(value) => updateRow("references", index, "mobile", value)} /><TextField label="Email" type="email" value={row.email} onChange={(value) => updateRow("references", index, "email", value)} /></div>}</Collection>}
         {active === "banking" && <Collection title="Bank accounts" rows={rows("bankAccounts")} add={() => addRow("bankAccounts", { accountNumber: "", isPrimary: rows("bankAccounts").length === 0 })} remove={(index) => removeRow("bankAccounts", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Account number" required value={row.accountNumber} onChange={(value) => updateRow("bankAccounts", index, "accountNumber", value)} /><TextField label="IFSC code" value={row.ifscCode} onChange={(value) => updateRow("bankAccounts", index, "ifscCode", value)} /><TextField label="Bank name" value={row.bankName} onChange={(value) => updateRow("bankAccounts", index, "bankName", value)} /><TextField label="Account holder" value={row.accountHolder} onChange={(value) => updateRow("bankAccounts", index, "accountHolder", value)} /><label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={row.isPrimary === true} onChange={(event) => updateRows("bankAccounts", rows("bankAccounts").map((account, accountIndex) => ({ ...account, isPrimary: accountIndex === index ? event.target.checked : event.target.checked ? false : account.isPrimary })))} /> Primary account</label></div>}</Collection>}
         {active === "documents" && <Collection title="Documents" rows={rows("documents")} add={() => addRow("documents", { name: "", docType: "other" })} remove={(index) => removeRow("documents", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Document name" required value={row.name} onChange={(value) => updateRow("documents", index, "name", value)} /><TextField label="Type" value={row.docType} onChange={(value) => updateRow("documents", index, "docType", value)} /><TextField label="Document number" value={row.number} onChange={(value) => updateRow("documents", index, "number", value)} /><TextField label="File URL" value={row.fileUrl} onChange={(value) => updateRow("documents", index, "fileUrl", value)} /><TextField label="Expiry date" type="date" value={row.expiryDate} onChange={(value) => updateRow("documents", index, "expiryDate", value)} /></div>}</Collection>}
+        {active === "official" && <div className="grid gap-4 sm:grid-cols-2"><OfficialLookupFields core={core} updateCore={updateCore} employeeId={id} /></div>}
         <div className="flex justify-end gap-2 border-t border-edge pt-5"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit" loading={saving}>Save employee master</Button></div>
       </div>
     </form>}
-  </Modal>;
+  </Modal></EmployeeMasterLookupsContext.Provider>;
 }
 
 function Collection({ title, rows, add, remove, children }: { title: string; rows: Row[]; add: () => void; remove: (index: number) => void; children: (row: Row, index: number) => ReactNode }) {
   return <section className="space-y-4" aria-label={title}><div className="flex items-center justify-between gap-4"><div><h3 className="text-base font-semibold">{title}</h3><p className="text-sm text-muted-foreground">Add each record separately.</p></div><Button type="button" size="sm" variant="outline" onClick={add}><Plus className="h-4 w-4" /> Add</Button></div>{rows.length ? <div className="space-y-4">{rows.map((row, index) => <div key={String(row.id ?? index)} className="rounded-xl border border-edge bg-tint/20 p-4"><div className="mb-4 flex justify-between"><p className="text-sm font-medium">{title.slice(0, -1)} {index + 1}</p><Button type="button" size="sm" variant="ghost" onClick={() => remove(index)} aria-label={`Remove ${title.slice(0, -1).toLowerCase()} ${index + 1}`}><Trash2 className="h-4 w-4 text-destructive" /></Button></div>{children(row, index)}</div>)}</div> : <div className="rounded-xl border border-dashed border-edge p-8 text-center text-sm text-muted-foreground">No {title.toLowerCase()} added yet.</div>}</section>;
 }
 
-export function EmployeeMasterQuickEdit({ employee, canEditEmail, canEditMaster }: { employee: EmployeeForm & { id: string }; canEditEmail: boolean; canEditMaster: boolean }) {
+export function EmployeeMasterQuickEdit({ employee, canEditEmail, canEditMaster, ...lookups }: { employee: EmployeeForm & { id: string }; canEditEmail: boolean; canEditMaster: boolean } & EmployeeMasterLookups) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const toast = useToast(); const router = useRouter();
   async function quickSave(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); const form = new FormData(event.currentTarget); try { const payload: Row = { firstName: form.get("firstName"), lastName: form.get("lastName"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null }; if (canEditEmail) payload.email = form.get("email"); const response = await fetch(`/api/employees/${employee.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not update employee."); toast("success", "Employee updated"); setOpen(false); router.refresh(); } catch (error) { toast("error", error instanceof Error ? error.message : "Could not update employee."); } finally { setSaving(false); } }
-  if (canEditMaster) return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button>{open && <Editor id={employee.id} initial={employee} canEditEmail={canEditEmail} onClose={() => setOpen(false)} />}</>;
+  if (canEditMaster) return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button>{open && <Editor id={employee.id} initial={employee} canEditEmail={canEditEmail} lookups={lookups} onClose={() => setOpen(false)} />}</>;
   return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Edit employee"><form onSubmit={quickSave} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={employee} /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Save changes</Button></div></form></Modal></>;
 }
 
