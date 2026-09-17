@@ -6,6 +6,7 @@ import { requireActiveSession } from "@/lib/session";
 import { formatDateIST } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
+import { EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,9 @@ function DetailGrid({ fields }: { fields: Field[] }) {
   const visible = fields.filter((field) => field.value != null && field.value !== "");
   if (!visible.length) return <p className="text-sm text-muted-foreground">No data available.</p>;
   return (
-    <dl className="grid gap-x-8 gap-y-0 sm:grid-cols-2">
+    <dl className="space-y-0">
       {visible.map((field) => (
-        <div key={field.label} className="grid grid-cols-[minmax(8rem,0.8fr)_minmax(0,1.2fr)] gap-3 border-b border-edge py-2.5 text-sm">
+        <div key={field.label} className="grid grid-cols-[minmax(8rem,0.75fr)_minmax(0,1.25fr)] gap-4 border-b border-edge py-2.5 text-sm">
           <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{field.label}</dt>
           <dd className="min-w-0 break-words font-medium text-foreground">{String(field.value)}</dd>
         </div>
@@ -89,6 +90,8 @@ export default async function EmployeeMasterPage({
           education: { orderBy: { completionYear: "desc" } },
           workExperience: { orderBy: { startDate: "desc" } },
           documents: { orderBy: { createdAt: "desc" } },
+          profile: true,
+          employmentProfile: true,
         },
       })
     : null;
@@ -103,7 +106,7 @@ export default async function EmployeeMasterPage({
       <PageHeader
         title="Employee Master"
         description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
-        actions={<Link href="/admin/employees" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Manage employees</Link>}
+        actions={<Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Download master data</Link>}
       />
       {isLocationManager && !locationId && (
         <Card>
@@ -148,13 +151,14 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
+                  {isAdmin && <EmployeeMasterQuickEdit employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "" }} />}
                 </div>
               </CardContent>
             </Card>
 
             <section className="grid gap-6 2xl:grid-cols-2">
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Official details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Division / branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, ...(isAdmin ? [{ label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, ...sourceFields(source, "OFF_")] : [])]}/></CardContent></Card>
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.email }, { label: "Phone", value: employee.phone ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Official details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Division / branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, { label: "Sub department", value: employee.employmentProfile?.subDepartment ?? "—" }, { label: "Grade", value: employee.employmentProfile?.grade ?? "—" }, ...(isAdmin ? [{ label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, { label: "CTC", value: employee.employmentProfile?.ctc == null ? "—" : `₹${employee.employmentProfile.ctc}` }, ...sourceFields(source, "OFF_")] : [])]}/></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.profile?.personalEmail ?? employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Gender", value: employee.profile?.gender ?? "—" }, { label: "Date of birth", value: formatDateIST(employee.profile?.actualDateOfBirth ?? employee.profile?.dateOfBirthCertificate) }, { label: "Marital status", value: employee.profile?.maritalStatus ?? "—" }, { label: "Emergency contact", value: employee.profile?.emergencyContactName ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: employee.pan ?? "—" }, { label: "UAN", value: employee.uan ?? "—" }, ...sourceFields(source, "BANK_")]}/></CardContent></Card>}
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><IdCard className="h-4 w-4 text-primary" /> Identity documents</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Driving license", value: employee.drivingLicenseNumber ?? "—" }, { label: "License expiry", value: formatDateIST(employee.drivingLicenseExpiresAt) }, ...sourceFields(source, "ID_")]}/></CardContent></Card>}
             </section>
