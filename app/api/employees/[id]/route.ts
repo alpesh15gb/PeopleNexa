@@ -35,6 +35,7 @@ async function wouldCreateManagerCycle(
 }
 
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
+const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -116,9 +117,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (history && "error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
   const nextAadhaarNumber = body.aadhaarNumber === undefined ? undefined : (body.aadhaarNumber == null || String(body.aadhaarNumber).trim() === "" ? null : String(body.aadhaarNumber).replace(/[\s-]/g, ""));
   const nextDrivingLicenseNumber = body.drivingLicenseNumber === undefined ? undefined : (body.drivingLicenseNumber == null || String(body.drivingLicenseNumber).trim() === "" ? null : String(body.drivingLicenseNumber).trim().toUpperCase());
+  const nextDrivingLicenseType = body.drivingLicenseType === undefined ? undefined : (body.drivingLicenseType == null || String(body.drivingLicenseType).trim() === "" ? null : String(body.drivingLicenseType).trim().toLowerCase());
   const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : dateInput(body.drivingLicenseExpiresAt);
   if (nextAadhaarNumber && !/^\d{12}$/.test(nextAadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
   if (nextDrivingLicenseNumber && (nextDrivingLicenseNumber.length < 8 || nextDrivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
+  if (nextDrivingLicenseType && !LICENSE_TYPES.has(nextDrivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });
   if (nextDrivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
   const photo = body.profilePicture === undefined ? null : profilePictureValue(body.profilePicture);
   if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
@@ -441,6 +444,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        profilePicture: photo ? photo.value : employee.profilePicture,
        aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
        drivingLicenseNumber: nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
+       drivingLicenseType: nextDrivingLicenseType === undefined ? employee.drivingLicenseType : nextDrivingLicenseType,
        drivingLicenseExpiresAt: nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
        legacyImportData: nextLegacyImportData === null ? Prisma.DbNull : nextLegacyImportData,
        ...(history ? {

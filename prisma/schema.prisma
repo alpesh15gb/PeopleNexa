@@ -362,6 +362,7 @@ model Employee {
   uan                     String?
   aadhaarNumber           String?
   drivingLicenseNumber    String?
+  drivingLicenseType      String?
   drivingLicenseExpiresAt DateTime?
 
   // Complete normalized source row from a controlled legacy HR import.

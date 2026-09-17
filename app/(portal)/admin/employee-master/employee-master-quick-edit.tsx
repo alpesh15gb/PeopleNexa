@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 
-type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; joiningDate: string };
+type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; joiningDate: string; drivingLicenseNumber?: string | null; drivingLicenseType?: string | null; drivingLicenseExpiresAt?: string };
 type Row = Record<string, unknown>;
 type Master = Row & { profile?: Row | null; employmentProfile?: Row | null; dependents?: Row[]; education?: Row[]; workExperience?: Row[]; references?: Row[]; bankAccounts?: Row[]; documents?: Row[] };
 
@@ -82,7 +82,7 @@ function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: E
       for (const address of ["currentAddress", "permanentAddress"]) {
         if (typeof profile[address] === "string") profile[address] = profile[address] ? JSON.parse(profile[address] as string) : null;
       }
-      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, joiningDate: core.joiningDate || null };
+      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, joiningDate: core.joiningDate || null, drivingLicenseNumber: core.drivingLicenseNumber || null, drivingLicenseType: core.drivingLicenseType || null, drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null };
       if (canEditEmail) corePayload.email = core.email;
       const coreResponse = await fetch(`/api/employees/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corePayload) });
       const coreData = await coreResponse.json().catch(() => ({}));

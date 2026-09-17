@@ -51,6 +51,7 @@ const safeSelect = {
 } as const;
 
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
+const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -175,9 +176,11 @@ export async function POST(req: NextRequest) {
     }
     const aadhaarNumber = body.aadhaarNumber != null && String(body.aadhaarNumber).trim() !== "" ? String(body.aadhaarNumber).replace(/[\s-]/g, "") : null;
     const drivingLicenseNumber = body.drivingLicenseNumber != null && String(body.drivingLicenseNumber).trim() !== "" ? String(body.drivingLicenseNumber).trim().toUpperCase() : null;
+    const drivingLicenseType = body.drivingLicenseType != null && String(body.drivingLicenseType).trim() !== "" ? String(body.drivingLicenseType).trim().toLowerCase() : null;
     const drivingLicenseExpiresAt = dateInput(body.drivingLicenseExpiresAt);
     if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
     if (drivingLicenseNumber && (drivingLicenseNumber.length < 8 || drivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
+    if (drivingLicenseType && !LICENSE_TYPES.has(drivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });
     if (drivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
@@ -345,8 +348,9 @@ export async function POST(req: NextRequest) {
           managerId: loginOnly ? null : body.managerId || null,
            salaryStructure: loginOnly ? null : body.salaryStructure || null,
            aadhaarNumber: loginOnly ? null : aadhaarNumber,
-            drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
-            drivingLicenseExpiresAt: loginOnly ? null : drivingLicenseExpiresAt,
+             drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
+             drivingLicenseType: loginOnly ? null : drivingLicenseType,
+             drivingLicenseExpiresAt: loginOnly ? null : drivingLicenseExpiresAt,
             profilePicture: photo.value,
             education: loginOnly ? undefined : { create: history.education },
             workExperience: loginOnly ? undefined : { create: history.experience },
