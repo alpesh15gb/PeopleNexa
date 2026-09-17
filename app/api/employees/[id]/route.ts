@@ -193,7 +193,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       "ifscCode",
       "pan",
       "uan",
-      "email",
       "password",
     ]) {
       delete (body as Record<string, unknown>)[k];

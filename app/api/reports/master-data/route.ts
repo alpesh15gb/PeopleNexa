@@ -42,12 +42,18 @@ function safeCell(value: unknown): string {
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const locationId = session.role === "location_manager"
+    ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
+    : null;
+  if (session.role === "location_manager" && !locationId) {
+    return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   }
 
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, loginOnly: false },
+    where: { tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
     select: {
       employeeNumber: true,
       deviceCode: true,
