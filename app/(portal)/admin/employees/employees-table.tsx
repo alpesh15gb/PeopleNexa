@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp, Shield, GraduationCap, BriefcaseBusiness } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Upload, Download, Search, ImageUp, Shield, GraduationCap, BriefcaseBusiness, Database } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,29 @@ type ExperienceForm = { employer: string; jobTitle: string; startDate: string; e
 const emptyEducation = (): EducationForm => ({ qualification: "", specialization: "", institution: "", board: "", completionYear: "", grade: "" });
 const emptyExperience = (): ExperienceForm => ({ employer: "", jobTitle: "", startDate: "", endDate: "", isCurrent: false, location: "", responsibilities: "" });
 const dateKey = (value: Date | string | null) => value ? new Date(value).toISOString().slice(0, 10) : "";
+
+const IMPORT_GROUPS: Record<string, string> = {
+  ID: "Identity documents",
+  EDU: "Education source data",
+  BANK: "Bank details",
+  PER: "Personal details",
+  OFF: "Employment details",
+  WRK: "Work history source data",
+  RPT: "Reporting and biometric data",
+};
+
+function importedFieldLabel(key: string) {
+  return key.replace(/^[A-Z]+_/, "").replace(/_/g, " ");
+}
+
+function importedGroups(data: Record<string, string>) {
+  return Object.entries(data).reduce<Record<string, Array<[string, string]>>>((groups, entry) => {
+    const prefix = entry[0].split("_", 1)[0];
+    const group = IMPORT_GROUPS[prefix] ?? "Other imported data";
+    (groups[group] ??= []).push(entry);
+    return groups;
+  }, {});
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const BULK_MAX = 2500;
@@ -124,12 +147,24 @@ export function EmployeesTable({
   const [accessBusy, setAccessBusy] = useState(false);
   const [education, setEducation] = useState<EducationForm[]>([]);
   const [workExperience, setWorkExperience] = useState<ExperienceForm[]>([]);
+  const [importedData, setImportedData] = useState<Record<string, string>>({});
 
   function openEmployee(employee: Emp | null) {
     setPhoto(null);
     setEducation(employee?.education.map((item) => ({ qualification: item.qualification, specialization: item.specialization ?? "", institution: item.institution, board: item.board ?? "", completionYear: item.completionYear?.toString() ?? "", grade: item.grade ?? "" })) ?? []);
     setWorkExperience(employee?.workExperience.map((item) => ({ employer: item.employer, jobTitle: item.jobTitle, startDate: dateKey(item.startDate), endDate: dateKey(item.endDate), isCurrent: item.isCurrent, location: item.location ?? "", responsibilities: item.responsibilities ?? "" })) ?? []);
+    setImportedData({});
     setModal(employee ?? "create");
+    if (employee && viewerRole === "admin") {
+      void fetch(`/api/employees/${employee.id}`)
+        .then(async (response) => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error ?? "Could not load imported employee data.");
+          return data.legacyImportData as Record<string, string> | null;
+        })
+        .then((data) => setImportedData(data ?? {}))
+        .catch((error) => toast("error", error instanceof Error ? error.message : "Could not load imported employee data."));
+    }
   }
 
   async function openAccess(employee: Emp) {
@@ -220,6 +255,7 @@ export function EmployeesTable({
       profilePicture: photo ?? editing?.profilePicture ?? null,
       history: { education, experience: workExperience },
     };
+    if (editing && viewerRole === "admin") payload.legacyImportData = importedData;
     if (!editing) payload.password = form.get("password");
     if (editing) payload.status = form.get("status");
 
@@ -636,6 +672,35 @@ export function EmployeesTable({
               </div>
             ))}
           </section>
+          {editing && viewerRole === "admin" && Object.keys(importedData).length > 0 && (
+            <section className="rounded-xl border border-edge bg-tint/30 p-4">
+              <details>
+                <summary className="cursor-pointer list-none">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 rounded-lg bg-indigo-500/10 p-2 text-indigo-300"><Database className="h-4 w-4" aria-hidden="true" /></div>
+                    <div>
+                      <h3 className="text-sm font-semibold">Imported employee data</h3>
+                      <p className="text-xs leading-5 text-muted-foreground">All original HR source fields. Edit only when correcting source information.</p>
+                    </div>
+                  </div>
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {Object.entries(importedGroups(importedData)).map(([group, fields]) => (
+                    <fieldset key={group} className="space-y-3 rounded-lg border border-edge bg-card p-3">
+                      <legend className="px-1 text-xs font-semibold text-muted-foreground">{group}</legend>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {fields.map(([key, value]) => (
+                          <Field key={key} label={importedFieldLabel(key)}>
+                            <Input value={value} onChange={(event) => setImportedData((current) => ({ ...current, [key]: event.target.value }))} aria-label={key} />
+                          </Field>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ))}
+                </div>
+              </details>
+            </section>
+          )}
           <section className="space-y-3 rounded-xl border border-edge bg-tint/30 p-4">
             <div className="flex items-center justify-between gap-3">
               <div><h3 className="flex items-center gap-2 text-sm font-semibold"><BriefcaseBusiness className="h-4 w-4" /> Work experience</h3><p className="text-xs text-muted-foreground">Add previous employers and current role history.</p></div>

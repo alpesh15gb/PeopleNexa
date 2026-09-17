@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -74,6 +75,36 @@ function p2002Targets(err: unknown): string[] {
   return Array.isArray(t) ? t.map(String) : [];
 }
 
+function legacyImportData(value: unknown): Prisma.InputJsonValue | null | "invalid" {
+  if (value == null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return "invalid";
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 200) return "invalid";
+  const result: Record<string, string> = {};
+  let totalLength = 0;
+  for (const [key, raw] of entries) {
+    if (!key || key.length > 160 || typeof raw !== "string" || raw.length > 10_000) return "invalid";
+    totalLength += key.length + raw.length;
+    if (totalLength > 500_000) return "invalid";
+    result[key] = raw;
+  }
+  return result;
+}
+
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await requireActiveSession().catch(() => null);
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const { id } = await ctx.params;
+  const employee = await prisma.employee.findFirst({
+    where: { id, tenantId: session.tenantId },
+    select: { legacyImportData: true },
+  });
+  if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ legacyImportData: employee.legacyImportData });
+}
+
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "branch_manager" && session.role !== "location_manager")) {
@@ -93,6 +124,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (body.legacyImportData !== undefined && session.role !== "admin") {
+    return NextResponse.json({ error: "Only admins can edit imported employee data." }, { status: 403 });
+  }
 
   let ownBranchId: string | null = null;
   if (session.role === "branch_manager") {
@@ -328,6 +362,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const ssErr = body.salaryStructure !== undefined ? salaryStructureError(body.salaryStructure) : null;
   if (ssErr) return NextResponse.json({ error: ssErr }, { status: 400 });
+  const nextLegacyImportData = body.legacyImportData === undefined ? employee.legacyImportData : legacyImportData(body.legacyImportData);
+  if (nextLegacyImportData === "invalid") {
+    return NextResponse.json({ error: "Imported employee data must be up to 200 text fields and 500 KB." }, { status: 400 });
+  }
 
   // Cross-tenant FK guard — every linked row must belong to this tenant.
   const wantBranch = body.branchId !== undefined ? (body.branchId || null) : employee.branchId;
@@ -404,6 +442,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
        drivingLicenseNumber: nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
        drivingLicenseExpiresAt: nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
+       legacyImportData: nextLegacyImportData === null ? Prisma.DbNull : nextLegacyImportData,
        ...(history ? {
          education: { deleteMany: {}, create: history.education },
          workExperience: { deleteMany: {}, create: history.experience },
@@ -433,6 +472,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     status: r.status,
     role: r.role,
     managerId: r.managerId,
+    hasLegacyImportData: r.legacyImportData != null,
   });
   await appendAudit({
     tenantId: session.tenantId,
