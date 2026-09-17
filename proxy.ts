@@ -179,7 +179,7 @@ async function proxy(request: NextRequest) {
     }
   }
   if (role === "location_manager" && isAdminRoute) {
-    const allowed = pathname === "/admin" || pathname.startsWith("/admin/attendance") || pathname.startsWith("/admin/regularization") || pathname.startsWith("/admin/employees") || pathname.startsWith("/admin/departments") || pathname.startsWith("/admin/branches") || pathname.startsWith("/admin/devices") || pathname.startsWith("/admin/leaves") || pathname.startsWith("/admin/reports");
+    const allowed = pathname === "/admin" || pathname.startsWith("/admin/attendance") || pathname.startsWith("/admin/regularization") || pathname.startsWith("/admin/employees") || pathname.startsWith("/admin/employee-master") || pathname.startsWith("/admin/departments") || pathname.startsWith("/admin/branches") || pathname.startsWith("/admin/devices") || pathname.startsWith("/admin/leaves") || pathname.startsWith("/admin/reports");
     if (!allowed) return NextResponse.redirect(new URL("/admin", request.url));
   }
   if (isAdminRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {
