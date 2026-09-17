@@ -18,7 +18,7 @@ export function Modal({
   title?: ReactNode;
   description?: ReactNode;
   children: ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const titleId = useId();
   const descId = useId();
@@ -98,7 +98,8 @@ export function Modal({
           "card-surface relative flex max-h-[90vh] w-full animate-scale-in motion-reduce:animate-none flex-col overflow-hidden rounded-2xl bg-card-2 shadow-2xl",
           size === "sm" && "max-w-sm",
           size === "md" && "max-w-lg",
-          size === "lg" && "max-w-2xl"
+           size === "lg" && "max-w-2xl",
+           size === "xl" && "max-w-6xl"
         )}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-edge px-6 py-4">

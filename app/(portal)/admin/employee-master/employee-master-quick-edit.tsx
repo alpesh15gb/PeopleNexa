@@ -1,56 +1,137 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Building2, ChevronRight, CreditCard, FileText, GraduationCap, Pencil, Plus, Trash2, UserRound, UsersRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Textarea } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 
-type EmployeeForm = { firstName: string; lastName: string; email: string; phone: string | null; position: string | null; joiningDate: string };
+type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; joiningDate: string };
+type Row = Record<string, unknown>;
+type Master = Row & { profile?: Row | null; employmentProfile?: Row | null; dependents?: Row[]; education?: Row[]; workExperience?: Row[]; references?: Row[]; bankAccounts?: Row[]; documents?: Row[] };
 
-function EmployeeFields({ employee, includeCodes = false }: { employee: EmployeeForm; includeCodes?: boolean }) {
-  return <><Field label="First name"><Input name="firstName" required defaultValue={employee.firstName} /></Field><Field label="Last name"><Input name="lastName" defaultValue={employee.lastName} /></Field>{includeCodes && <Field label="Employee code"><Input name="employeeNumber" required /></Field>}{includeCodes && <Field label="Device code"><Input name="deviceCode" placeholder="Biometric enrollment ID" /></Field>}<Field label="Email"><Input name="email" type="email" required defaultValue={employee.email} /></Field><Field label="Phone"><Input name="phone" defaultValue={employee.phone ?? ""} /></Field><Field label="Position"><Input name="position" defaultValue={employee.position ?? ""} /></Field><Field label="Joining date"><Input name="joiningDate" type="date" defaultValue={employee.joiningDate} /></Field></>;
+const inputClass = "h-11 w-full rounded-[11px] border border-input bg-card px-3.5 text-sm text-foreground outline-none transition focus:border-primary/70 focus:ring-4 focus:ring-ring/15";
+const sections = [
+  ["official", "Official", Building2], ["personal", "Personal", UserRound], ["dependents", "Dependents", UsersRound], ["education", "Education", GraduationCap], ["experience", "Experience", Building2], ["references", "References", UsersRound], ["banking", "Bank accounts", CreditCard], ["documents", "Documents", FileText],
+] as const;
+
+function dateValue(value: unknown) { return typeof value === "string" ? value.slice(0, 10) : ""; }
+function stringValue(value: unknown) { return value == null ? "" : String(value); }
+function jsonValue(value: unknown) { return value && typeof value === "object" ? JSON.stringify(value, null, 2) : ""; }
+function normalizeDates(master: Master): Master {
+  const dateFields = (row: Row, keys: string[]) => ({ ...row, ...Object.fromEntries(keys.map((key) => [key, dateValue(row[key])])) });
+  const dateRows = (key: keyof Master, keys: string[]) => ((master[key] as Row[] | undefined) ?? []).map((row) => dateFields(row, keys));
+  return {
+    ...master,
+    joiningDate: dateValue(master.joiningDate),
+    profile: master.profile ? dateFields(master.profile, ["dateOfBirthCertificate", "actualDateOfBirth", "marriageDate"]) : master.profile,
+    employmentProfile: master.employmentProfile ? dateFields(master.employmentProfile, ["rejoiningDate", "statusUpdatedAt"]) : master.employmentProfile,
+    dependents: dateRows("dependents", ["dateOfBirth"]),
+    education: dateRows("education", ["startDate"]),
+    workExperience: dateRows("workExperience", ["startDate", "endDate"]),
+    documents: dateRows("documents", ["issuedDate", "expiryDate"]),
+  };
+}
+
+function EmployeeFields({ employee, includeCodes = false, controlled, setControlled }: { employee: EmployeeForm; includeCodes?: boolean; controlled?: Row; setControlled?: (key: string, value: string) => void }) {
+  const value = (key: string) => controlled ? stringValue(controlled[key]) : undefined;
+  const change = (key: string) => (event: React.ChangeEvent<HTMLInputElement>) => setControlled?.(key, event.target.value);
+  return <><Field label="First name"><Input name="firstName" required value={value("firstName")} onChange={change("firstName")} defaultValue={controlled ? undefined : employee.firstName} /></Field><Field label="Last name"><Input name="lastName" value={value("lastName")} onChange={change("lastName")} defaultValue={controlled ? undefined : employee.lastName} /></Field>{includeCodes && <Field label="Employee code"><Input name="employeeNumber" required value={value("employeeNumber")} onChange={change("employeeNumber")} defaultValue={controlled ? undefined : employee.employeeNumber ?? ""} /></Field>}{includeCodes && <Field label="Device code"><Input name="deviceCode" placeholder="Biometric enrollment ID" value={value("deviceCode")} onChange={change("deviceCode")} defaultValue={controlled ? undefined : employee.deviceCode ?? ""} /></Field>}<Field label="Work email"><Input name="email" type="email" required value={value("email")} onChange={change("email")} defaultValue={controlled ? undefined : employee.email} /></Field><Field label="Phone"><Input name="phone" type="tel" value={value("phone")} onChange={change("phone")} defaultValue={controlled ? undefined : employee.phone ?? ""} /></Field><Field label="Position"><Input name="position" value={value("position")} onChange={change("position")} defaultValue={controlled ? undefined : employee.position ?? ""} /></Field><Field label="Joining date"><Input name="joiningDate" type="date" value={controlled ? dateValue(controlled.joiningDate) : undefined} onChange={change("joiningDate")} defaultValue={controlled ? undefined : employee.joiningDate} /></Field></>;
+}
+
+function TextField({ label, value, onChange, type = "text", required = false }: { label: string; value: unknown; onChange: (value: string) => void; type?: string; required?: boolean }) {
+  return <Field label={label}><Input type={type} required={required} value={type === "date" ? dateValue(value) : stringValue(value)} onChange={(event) => onChange(event.target.value)} /></Field>;
+}
+
+function Editor({ id, initial, onClose, canEditEmail }: { id: string; initial: EmployeeForm; onClose: () => void; canEditEmail: boolean }) {
+  const toast = useToast();
+  const router = useRouter();
+  const [master, setMaster] = useState<Master | null>(null);
+  const [core, setCore] = useState<Row>({ ...initial });
+  const [active, setActive] = useState("official");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/employees/${id}/master`).then(async (response) => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not load employee master.");
+      if (!cancelled) { const employee = normalizeDates(data.employee); setMaster(employee); setCore(employee); }
+    }).catch((error) => { if (!cancelled) toast("error", error instanceof Error ? error.message : "Could not load employee master."); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, toast]);
+
+  const updateCore = (key: string, value: string) => setCore((current) => ({ ...current, [key]: value }));
+  const updateGroup = (group: "profile" | "employmentProfile", key: string, value: unknown) => setMaster((current) => current ? { ...current, [group]: { ...(current[group] ?? {}), [key]: value } } : current);
+  const rows = (key: keyof Master) => (master?.[key] as Row[] | undefined) ?? [];
+  const updateRows = (key: keyof Master, next: Row[]) => setMaster((current) => current ? { ...current, [key]: next } : current);
+  const addRow = (key: keyof Master, row: Row) => updateRows(key, [...rows(key), row]);
+  const updateRow = (key: keyof Master, index: number, field: string, value: unknown) => updateRows(key, rows(key).map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
+  const removeRow = (key: keyof Master, index: number) => updateRows(key, rows(key).filter((_, rowIndex) => rowIndex !== index));
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!master) return;
+    setSaving(true);
+    try {
+      const profile = { ...(master.profile ?? {}) };
+      for (const address of ["currentAddress", "permanentAddress"]) {
+        if (typeof profile[address] === "string") profile[address] = profile[address] ? JSON.parse(profile[address] as string) : null;
+      }
+      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, joiningDate: core.joiningDate || null };
+      if (canEditEmail) corePayload.email = core.email;
+      const coreResponse = await fetch(`/api/employees/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corePayload) });
+      const coreData = await coreResponse.json().catch(() => ({}));
+      if (!coreResponse.ok) throw new Error(coreData.error ?? "Could not update official details.");
+      const masterResponse = await fetch(`/api/employees/${id}/master`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, employment: master.employmentProfile ?? {}, dependents: rows("dependents"), education: rows("education"), workExperience: rows("workExperience"), references: rows("references"), bankAccounts: rows("bankAccounts"), documents: rows("documents") }) });
+      const masterData = await masterResponse.json().catch(() => ({}));
+      if (!masterResponse.ok) throw new Error(masterData.error ?? "Could not update employee master.");
+      toast("success", "Employee master saved"); onClose(); router.refresh();
+    } catch (error) { toast("error", error instanceof Error ? error.message : "Could not save employee master."); }
+    finally { setSaving(false); }
+  }
+
+  const profile = master?.profile ?? {};
+  const employment = master?.employmentProfile ?? {};
+  return <Modal open onClose={onClose} size="xl" title="Employee master editor" description="Update core information and structured HR records in one place.">
+    {loading || !master ? <div className="py-16 text-center text-sm text-muted-foreground">Loading employee master...</div> : <form onSubmit={save} className="grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]">
+      <nav aria-label="Employee master sections" className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4">
+        {sections.map(([key, label, Icon]) => <button key={key} type="button" onClick={() => setActive(key)} aria-current={active === key ? "step" : undefined} className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-white" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}><Icon className="h-4 w-4" aria-hidden="true" />{label}<ChevronRight className="ml-auto hidden h-3.5 w-3.5 lg:block" aria-hidden="true" /></button>)}
+      </nav>
+      <div className="min-w-0 space-y-5">
+        {active === "official" && <section aria-labelledby="official-heading" className="space-y-5"><div><h3 id="official-heading" className="text-base font-semibold">Official and employment</h3><p className="text-sm text-muted-foreground">Identity, work contact, and employment classification.</p></div><div className="grid gap-4 sm:grid-cols-2"><EmployeeFields includeCodes controlled={core} setControlled={updateCore} employee={{ ...initial, firstName: stringValue(core.firstName), lastName: stringValue(core.lastName), email: stringValue(core.email), phone: stringValue(core.phone), position: stringValue(core.position), joiningDate: dateValue(core.joiningDate) }} /><TextField label="Employment mode" value={employment.employmentMode} onChange={(value) => updateGroup("employmentProfile", "employmentMode", value)} /><TextField label="Nature of employment" value={employment.natureOfEmployment} onChange={(value) => updateGroup("employmentProfile", "natureOfEmployment", value)} /><TextField label="Probation period" value={employment.probationPeriod} onChange={(value) => updateGroup("employmentProfile", "probationPeriod", value)} /><TextField label="Total experience" value={employment.totalExperience} onChange={(value) => updateGroup("employmentProfile", "totalExperience", value)} /><TextField label="Sub department" value={employment.subDepartment} onChange={(value) => updateGroup("employmentProfile", "subDepartment", value)} /><TextField label="Grade" value={employment.grade} onChange={(value) => updateGroup("employmentProfile", "grade", value)} /><TextField label="CTC" type="number" value={employment.ctc} onChange={(value) => updateGroup("employmentProfile", "ctc", value)} /><TextField label="Salary group" value={employment.salaryGroup} onChange={(value) => updateGroup("employmentProfile", "salaryGroup", value)} /><TextField label="Salary payment mode" value={employment.salaryPaymentMode} onChange={(value) => updateGroup("employmentProfile", "salaryPaymentMode", value)} /></div></section>}
+        {active === "personal" && <section aria-labelledby="personal-heading" className="space-y-5"><div><h3 id="personal-heading" className="text-base font-semibold">Personal profile</h3><p className="text-sm text-muted-foreground">Private identity and emergency details.</p></div><div className="grid gap-4 sm:grid-cols-2"><TextField label="Middle name" value={profile.middleName} onChange={(value) => updateGroup("profile", "middleName", value)} /><TextField label="Name as on Aadhaar" value={profile.nameAsOnAadhaar} onChange={(value) => updateGroup("profile", "nameAsOnAadhaar", value)} /><TextField label="Gender" value={profile.gender} onChange={(value) => updateGroup("profile", "gender", value)} /><TextField label="Marital status" value={profile.maritalStatus} onChange={(value) => updateGroup("profile", "maritalStatus", value)} /><TextField label="Date of birth" type="date" value={profile.actualDateOfBirth} onChange={(value) => updateGroup("profile", "actualDateOfBirth", value)} /><TextField label="Personal email" type="email" value={profile.personalEmail} onChange={(value) => updateGroup("profile", "personalEmail", value)} /><TextField label="WhatsApp number" type="tel" value={profile.whatsappNumber} onChange={(value) => updateGroup("profile", "whatsappNumber", value)} /><TextField label="Blood group" value={profile.bloodGroup} onChange={(value) => updateGroup("profile", "bloodGroup", value)} /><TextField label="Father's name" value={profile.fatherName} onChange={(value) => updateGroup("profile", "fatherName", value)} /><TextField label="Mother's name" value={profile.motherName} onChange={(value) => updateGroup("profile", "motherName", value)} /><TextField label="Emergency contact name" value={profile.emergencyContactName} onChange={(value) => updateGroup("profile", "emergencyContactName", value)} /><TextField label="Emergency contact number" type="tel" value={profile.emergencyContactNumber} onChange={(value) => updateGroup("profile", "emergencyContactNumber", value)} /></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Current address" hint="Enter a JSON address object when address components are available."><Textarea value={jsonValue(profile.currentAddress)} onChange={(event) => updateGroup("profile", "currentAddress", event.target.value)} /></Field><Field label="Permanent address" hint="Enter a JSON address object when address components are available."><Textarea value={jsonValue(profile.permanentAddress)} onChange={(event) => updateGroup("profile", "permanentAddress", event.target.value)} /></Field></div></section>}
+        {active === "dependents" && <Collection title="Dependents" rows={rows("dependents")} add={() => addRow("dependents", { firstName: "", relation: "" })} remove={(index) => removeRow("dependents", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="First name" required value={row.firstName} onChange={(value) => updateRow("dependents", index, "firstName", value)} /><TextField label="Relation" value={row.relation} onChange={(value) => updateRow("dependents", index, "relation", value)} /><TextField label="Date of birth" type="date" value={row.dateOfBirth} onChange={(value) => updateRow("dependents", index, "dateOfBirth", value)} /><TextField label="Mobile" type="tel" value={row.mobile} onChange={(value) => updateRow("dependents", index, "mobile", value)} /><TextField label="Nominee share (%)" type="number" value={row.nomineeShare} onChange={(value) => updateRow("dependents", index, "nomineeShare", value)} /></div>}</Collection>}
+        {active === "education" && <Collection title="Education" rows={rows("education")} add={() => addRow("education", { qualification: "", institution: "" })} remove={(index) => removeRow("education", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Qualification" required value={row.qualification} onChange={(value) => updateRow("education", index, "qualification", value)} /><TextField label="Institution" required value={row.institution} onChange={(value) => updateRow("education", index, "institution", value)} /><TextField label="Specialization" value={row.specialization} onChange={(value) => updateRow("education", index, "specialization", value)} /><TextField label="Completion year" type="number" value={row.completionYear} onChange={(value) => updateRow("education", index, "completionYear", value)} /></div>}</Collection>}
+        {active === "experience" && <Collection title="Work experience" rows={rows("workExperience")} add={() => addRow("workExperience", { employer: "", jobTitle: "", startDate: "" })} remove={(index) => removeRow("workExperience", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Employer" required value={row.employer} onChange={(value) => updateRow("workExperience", index, "employer", value)} /><TextField label="Job title" required value={row.jobTitle} onChange={(value) => updateRow("workExperience", index, "jobTitle", value)} /><TextField label="Start date" required type="date" value={row.startDate} onChange={(value) => updateRow("workExperience", index, "startDate", value)} /><TextField label="End date" type="date" value={row.endDate} onChange={(value) => updateRow("workExperience", index, "endDate", value)} /><TextField label="Location" value={row.location} onChange={(value) => updateRow("workExperience", index, "location", value)} /><TextField label="Reason for leaving" value={row.reasonForLeaving} onChange={(value) => updateRow("workExperience", index, "reasonForLeaving", value)} /></div>}</Collection>}
+        {active === "references" && <Collection title="References" rows={rows("references")} add={() => addRow("references", { name: "" })} remove={(index) => removeRow("references", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Name" required value={row.name} onChange={(value) => updateRow("references", index, "name", value)} /><TextField label="Relation" value={row.relation} onChange={(value) => updateRow("references", index, "relation", value)} /><TextField label="Mobile" type="tel" value={row.mobile} onChange={(value) => updateRow("references", index, "mobile", value)} /><TextField label="Email" type="email" value={row.email} onChange={(value) => updateRow("references", index, "email", value)} /></div>}</Collection>}
+        {active === "banking" && <Collection title="Bank accounts" rows={rows("bankAccounts")} add={() => addRow("bankAccounts", { accountNumber: "", isPrimary: rows("bankAccounts").length === 0 })} remove={(index) => removeRow("bankAccounts", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Account number" required value={row.accountNumber} onChange={(value) => updateRow("bankAccounts", index, "accountNumber", value)} /><TextField label="IFSC code" value={row.ifscCode} onChange={(value) => updateRow("bankAccounts", index, "ifscCode", value)} /><TextField label="Bank name" value={row.bankName} onChange={(value) => updateRow("bankAccounts", index, "bankName", value)} /><TextField label="Account holder" value={row.accountHolder} onChange={(value) => updateRow("bankAccounts", index, "accountHolder", value)} /><label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" checked={row.isPrimary === true} onChange={(event) => updateRows("bankAccounts", rows("bankAccounts").map((account, accountIndex) => ({ ...account, isPrimary: accountIndex === index ? event.target.checked : event.target.checked ? false : account.isPrimary })))} /> Primary account</label></div>}</Collection>}
+        {active === "documents" && <Collection title="Documents" rows={rows("documents")} add={() => addRow("documents", { name: "", docType: "other" })} remove={(index) => removeRow("documents", index)}>{(row, index) => <div className="grid gap-4 sm:grid-cols-2"><TextField label="Document name" required value={row.name} onChange={(value) => updateRow("documents", index, "name", value)} /><TextField label="Type" value={row.docType} onChange={(value) => updateRow("documents", index, "docType", value)} /><TextField label="Document number" value={row.number} onChange={(value) => updateRow("documents", index, "number", value)} /><TextField label="File URL" value={row.fileUrl} onChange={(value) => updateRow("documents", index, "fileUrl", value)} /><TextField label="Expiry date" type="date" value={row.expiryDate} onChange={(value) => updateRow("documents", index, "expiryDate", value)} /></div>}</Collection>}
+        <div className="flex justify-end gap-2 border-t border-edge pt-5"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit" loading={saving}>Save employee master</Button></div>
+      </div>
+    </form>}
+  </Modal>;
+}
+
+function Collection({ title, rows, add, remove, children }: { title: string; rows: Row[]; add: () => void; remove: (index: number) => void; children: (row: Row, index: number) => ReactNode }) {
+  return <section className="space-y-4" aria-label={title}><div className="flex items-center justify-between gap-4"><div><h3 className="text-base font-semibold">{title}</h3><p className="text-sm text-muted-foreground">Add each record separately.</p></div><Button type="button" size="sm" variant="outline" onClick={add}><Plus className="h-4 w-4" /> Add</Button></div>{rows.length ? <div className="space-y-4">{rows.map((row, index) => <div key={String(row.id ?? index)} className="rounded-xl border border-edge bg-tint/20 p-4"><div className="mb-4 flex justify-between"><p className="text-sm font-medium">{title.slice(0, -1)} {index + 1}</p><Button type="button" size="sm" variant="ghost" onClick={() => remove(index)} aria-label={`Remove ${title.slice(0, -1).toLowerCase()} ${index + 1}`}><Trash2 className="h-4 w-4 text-destructive" /></Button></div>{children(row, index)}</div>)}</div> : <div className="rounded-xl border border-dashed border-edge p-8 text-center text-sm text-muted-foreground">No {title.toLowerCase()} added yet.</div>}</section>;
 }
 
 export function EmployeeMasterQuickEdit({ employee, canEditEmail }: { employee: EmployeeForm & { id: string }; canEditEmail: boolean }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  const router = useRouter();
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    const form = new FormData(event.currentTarget);
-    try {
-      const payload: Record<string, unknown> = { firstName: form.get("firstName"), lastName: form.get("lastName"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null };
-      if (canEditEmail) payload.email = form.get("email");
-      const response = await fetch(`/api/employees/${employee.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? "Could not update employee.");
-      toast("success", "Employee updated");
-      setOpen(false);
-      router.refresh();
-    } catch (error) { toast("error", error instanceof Error ? error.message : "Could not update employee."); }
-    finally { setSaving(false); }
-  }
-  return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Edit employee"><form onSubmit={save} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={employee} /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Save changes</Button></div></form></Modal></>;
+  const toast = useToast(); const router = useRouter();
+  async function quickSave(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); const form = new FormData(event.currentTarget); try { const payload: Row = { firstName: form.get("firstName"), lastName: form.get("lastName"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null }; if (canEditEmail) payload.email = form.get("email"); const response = await fetch(`/api/employees/${employee.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not update employee."); toast("success", "Employee updated"); setOpen(false); router.refresh(); } catch (error) { toast("error", error instanceof Error ? error.message : "Could not update employee."); } finally { setSaving(false); } }
+  if (canEditEmail) return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button>{open && <Editor id={employee.id} initial={employee} canEditEmail={canEditEmail} onClose={() => setOpen(false)} />}</>;
+  return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Edit employee"><form onSubmit={quickSave} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={employee} /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Save changes</Button></div></form></Modal></>;
 }
 
 export function EmployeeMasterCreate({ branches, requireBranch }: { branches: Array<{ id: string; name: string }>; requireBranch: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const toast = useToast();
-  const router = useRouter();
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setSaving(true);
-    const form = new FormData(event.currentTarget);
-    try {
-      const response = await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeNumber: form.get("employeeNumber"), deviceCode: form.get("deviceCode"), firstName: form.get("firstName"), lastName: form.get("lastName"), email: form.get("email"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null, branchId: form.get("branchId") || null, password: crypto.randomUUID() + "Aa1!" }) });
-      const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not add employee.");
-      toast("success", "Employee added. Complete the master profile next."); setOpen(false); router.push(`/admin/employee-master?employee=${data.employee.id}`); router.refresh();
-    } catch (error) { toast("error", error instanceof Error ? error.message : "Could not add employee."); } finally { setSaving(false); }
-  }
-  return <><Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Create the core employee record, then complete their master profile."><form onSubmit={create} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={{ firstName: "", lastName: "", email: "", phone: "", position: "", joiningDate: "" }} includeCodes /><Field label="Branch"><select name="branchId" required={requireBranch} className="h-10 w-full rounded-xl border border-input bg-card-2 px-3 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40"><option value="">{requireBranch ? "Select a branch" : "Unassigned"}</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></Field><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Add employee</Button></div></form></Modal></>;
+  const [open, setOpen] = useState(false); const [created, setCreated] = useState<EmployeeForm | null>(null); const [saving, setSaving] = useState(false); const toast = useToast(); const router = useRouter();
+  async function create(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSaving(true); const form = new FormData(event.currentTarget); try { const response = await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeNumber: form.get("employeeNumber"), deviceCode: form.get("deviceCode"), firstName: form.get("firstName"), lastName: form.get("lastName"), email: form.get("email"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null, branchId: form.get("branchId") || null, password: crypto.randomUUID() + "Aa1!" }) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not add employee."); setOpen(false); if (requireBranch) { toast("success", "Employee created."); router.push(`/admin/employee-master?employee=${data.employee.id}`); router.refresh(); } else { setCreated({ ...data.employee, joiningDate: dateValue(data.employee.joiningDate) }); toast("success", "Employee created. Complete the master profile."); } } catch (error) { toast("error", error instanceof Error ? error.message : "Could not add employee."); } finally { setSaving(false); } }
+  return <><Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Create the core record before completing the full master profile."><form onSubmit={create} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={{ firstName: "", lastName: "", email: "", phone: "", position: "", joiningDate: "" }} includeCodes /><Field label="Branch"><select name="branchId" required={requireBranch} className={inputClass}><option value="">{requireBranch ? "Select a branch" : "Unassigned"}</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></Field><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Create and continue</Button></div></form></Modal>{created && <Editor id={String(created.id)} initial={created} canEditEmail onClose={() => { setCreated(null); router.push(`/admin/employee-master?employee=${created.id}`); router.refresh(); }} />}</>;
 }
