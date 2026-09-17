@@ -23,14 +23,14 @@ export async function POST(request: NextRequest) {
   try {
     const delivery = await prisma.ebioWebhookDelivery.create({ data: { payloadHash, rawBody, recordCount } });
     const stats = await processEbioWebhookDelivery(delivery.id);
-    console.info(`[eBio webhook] staged ${recordCount} record(s), ingested=${stats.ingested}, duplicates=${stats.duplicates}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
+    console.info(`[eBio webhook] staged ${recordCount} record(s), punches=${stats.punches}, duplicates=${stats.duplicates}, unmatchedEmployees=${stats.unmatchedEmployees}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
       const existing = await prisma.ebioWebhookDelivery.findUnique({ where: { payloadHash }, select: { id: true, processedAt: true } });
       if (existing && !existing.processedAt) {
         try {
           const stats = await processEbioWebhookDelivery(existing.id);
-          console.info(`[eBio webhook] retried delivery, ingested=${stats.ingested}, duplicates=${stats.duplicates}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
+          console.info(`[eBio webhook] retried delivery, punches=${stats.punches}, duplicates=${stats.duplicates}, unmatchedEmployees=${stats.unmatchedEmployees}, quarantined=${stats.quarantined}, hash=${payloadHash}`);
         } catch (retryError) {
           console.error("[eBio webhook] retry processing failed:", retryError);
           return new Response("Unable to process webhook delivery", { status: 500 });

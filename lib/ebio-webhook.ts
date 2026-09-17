@@ -31,7 +31,7 @@ function liveCutover(): Date | null {
 
 export async function processEbioWebhookDelivery(deliveryId: string) {
   const delivery = await prisma.ebioWebhookDelivery.findUniqueOrThrow({ where: { id: deliveryId } });
-  if (delivery.processedAt) return { skipped: true, ingested: 0, duplicates: 0, quarantined: 0 };
+  if (delivery.processedAt) return { skipped: true, punches: 0, duplicates: 0, unmatchedEmployees: 0, quarantined: 0 };
   const cutoff = liveCutover();
 
   let payload: unknown;
@@ -42,10 +42,10 @@ export async function processEbioWebhookDelivery(deliveryId: string) {
       where: { id: delivery.id },
       data: { processedAt: new Date(), processingError: "Webhook body is not valid JSON." },
     });
-    return { skipped: true, ingested: 0, duplicates: 0, quarantined: 1 };
+    return { skipped: true, punches: 0, duplicates: 0, unmatchedEmployees: 0, quarantined: 1 };
   }
 
-  const stats = { skipped: false, ingested: 0, duplicates: 0, quarantined: 0 };
+  const stats = { skipped: false, punches: 0, duplicates: 0, unmatchedEmployees: 0, quarantined: 0 };
   const devices = new Map<string, Awaited<ReturnType<typeof prisma.device.findUnique>>>();
   for (const record of Array.isArray(payload) ? payload : [payload]) {
     if (!record || typeof record !== "object" || Array.isArray(record)) {
@@ -74,7 +74,8 @@ export async function processEbioWebhookDelivery(deliveryId: string) {
       rawLine: JSON.stringify(record),
     });
     if (result.action === "duplicate") stats.duplicates++;
-    else stats.ingested++;
+    else if (result.action === "no_employee") stats.unmatchedEmployees++;
+    else stats.punches++;
   }
 
   await prisma.ebioWebhookDelivery.update({
