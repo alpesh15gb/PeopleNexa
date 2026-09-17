@@ -3,8 +3,72 @@ import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { dayRangeIST, isDateKey } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
 
 const ALLOWED_ROLES = ["admin", "supervisor", "branch_manager", "location_manager"] as const;
+
+type AttendanceRow = {
+  id: string;
+  employeeId: string;
+  date: Date;
+  punchInTime: Date | null;
+  punchOutTime: Date | null;
+  status: string;
+  employee: {
+    employeeNumber: string;
+    deviceCode: string | null;
+    firstName: string;
+    lastName: string;
+    branch: { name: string } | null;
+    department: { name: string } | null;
+    shift: { name: string } | null;
+  };
+};
+
+type DevicePunch = {
+  employeeId: string;
+  punchTime: Date;
+  device: { name: string; serialNumber: string } | null;
+  realtimeDevice: { name: string; serialNumber: string } | null;
+};
+
+function nearestMachine(punches: DevicePunch[], at: Date | null): { name: string; serialNumber: string } | null {
+  if (!at) return null;
+  let nearest: DevicePunch | null = null;
+  let difference = Number.POSITIVE_INFINITY;
+  for (const punch of punches) {
+    const candidate = punch.device ?? punch.realtimeDevice;
+    const delta = Math.abs(punch.punchTime.getTime() - at.getTime());
+    if (candidate && delta < difference) {
+      nearest = punch;
+      difference = delta;
+    }
+  }
+  // Do not attach an unrelated device when a source event was not retained.
+  if (!nearest || difference > 12 * 60 * 60 * 1000) return null;
+  return nearest.device ?? nearest.realtimeDevice;
+}
+
+async function withMachines(rows: AttendanceRow[], tenantId: string, start: Date, end: Date) {
+  const employeeIds = [...new Set(rows.map((row) => row.employeeId))];
+  if (!employeeIds.length) return rows.map((row) => ({ ...row, deviceIn: null, deviceOut: null, workingMinutes: null }));
+  const punches = await prisma.punch.findMany({
+    where: { tenantId, employeeId: { in: employeeIds }, punchTime: { gte: start, lt: end } },
+    select: { employeeId: true, punchTime: true, device: { select: { name: true, serialNumber: true } }, realtimeDevice: { select: { name: true, serialNumber: true } } },
+  });
+  const byEmployee = new Map<string, DevicePunch[]>();
+  for (const punch of punches) {
+    const employeePunches = byEmployee.get(punch.employeeId) ?? [];
+    employeePunches.push(punch);
+    byEmployee.set(punch.employeeId, employeePunches);
+  }
+  return rows.map((row) => ({
+    ...row,
+    deviceIn: nearestMachine(byEmployee.get(row.employeeId) ?? [], row.punchInTime),
+    deviceOut: nearestMachine(byEmployee.get(row.employeeId) ?? [], row.punchOutTime),
+    workingMinutes: row.punchInTime && row.punchOutTime ? Math.max(0, Math.round((row.punchOutTime.getTime() - row.punchInTime.getTime()) / 60_000)) : null,
+  }));
+}
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -60,16 +124,20 @@ export async function GET(req: NextRequest) {
     : {};
   const where = {
     tenantId: session.tenantId,
-    punchTime: { gte: start, lt: end },
+    date: { gte: start, lt: end },
     employee: { ...employeeScope, ...searchFilter },
   };
 
   if (format === "xlsx") {
-    const rows = await prisma.punch.findMany({
+    const attendance = await prisma.attendance.findMany({
       where,
       select: {
-        punchTime: true,
-        inOutHint: true,
+        id: true,
+        employeeId: true,
+        date: true,
+        punchInTime: true,
+        punchOutTime: true,
+        status: true,
         employee: {
           select: {
             employeeNumber: true,
@@ -78,14 +146,14 @@ export async function GET(req: NextRequest) {
             lastName: true,
             branch: { select: { name: true } },
             department: { select: { name: true } },
+            shift: { select: { name: true } },
           },
         },
-        device: { select: { name: true, serialNumber: true } },
-        realtimeDevice: { select: { name: true, serialNumber: true } },
       },
-      orderBy: { punchTime: "desc" },
+      orderBy: [{ date: "desc" }, { punchInTime: "asc" }],
       take: 5000,
     });
+    const rows = await withMachines(attendance, session.tenantId, start, end);
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Punch Details");
     ws.columns = [
@@ -94,22 +162,32 @@ export async function GET(req: NextRequest) {
       { header: "Employee Name", key: "name", width: 26 },
       { header: "Branch / Division", key: "branch", width: 26 },
       { header: "Department", key: "department", width: 20 },
-      { header: "Machine", key: "machine", width: 26 },
-      { header: "Machine Serial", key: "serial", width: 20 },
-      { header: "Punch Time (IST)", key: "time", width: 22 },
-      { header: "Type", key: "type", width: 10 },
+      { header: "Date", key: "date", width: 14 },
+      { header: "Device IN", key: "deviceIn", width: 26 },
+      { header: "In Time (IST)", key: "inTime", width: 14 },
+      { header: "Device OUT", key: "deviceOut", width: 26 },
+      { header: "Out Time (IST)", key: "outTime", width: 14 },
+      { header: "Attendance", key: "attendance", width: 14 },
+      { header: "Working Hours", key: "workingHours", width: 16 },
+      { header: "Shift", key: "shift", width: 16 },
+      { header: "Status", key: "status", width: 12 },
     ];
-    for (const p of rows) {
+    for (const row of rows) {
       ws.addRow({
-        code: p.employee.employeeNumber,
-        deviceCode: p.employee.deviceCode ?? "",
-        name: `${p.employee.firstName} ${p.employee.lastName}`.trim(),
-        branch: p.employee.branch?.name ?? "",
-        department: p.employee.department?.name ?? "",
-        machine: (p.device ?? p.realtimeDevice)?.name ?? "",
-        serial: (p.device ?? p.realtimeDevice)?.serialNumber ?? "",
-        time: new Date(p.punchTime.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " "),
-        type: p.inOutHint,
+        code: row.employee.employeeNumber,
+        deviceCode: row.employee.deviceCode ?? "",
+        name: `${row.employee.firstName} ${row.employee.lastName}`.trim(),
+        branch: row.employee.branch?.name ?? "",
+        department: row.employee.department?.name ?? "",
+        date: istDateKey(row.date),
+        deviceIn: row.deviceIn?.name ?? "",
+        inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
+        deviceOut: row.deviceOut?.name ?? "",
+        outTime: row.punchOutTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchOutTime) : "",
+        attendance: row.status,
+        workingHours: row.workingMinutes == null ? "" : `${Math.floor(row.workingMinutes / 60)}h ${row.workingMinutes % 60}m`,
+        shift: row.employee.shift?.name ?? "",
+        status: "ACTIVE",
       });
     }
     ws.getRow(1).font = { bold: true };
@@ -122,31 +200,34 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const [total, punches] = await Promise.all([
-    prisma.punch.count({ where }),
-    prisma.punch.findMany({
+  const [total, attendance] = await Promise.all([
+    prisma.attendance.count({ where }),
+    prisma.attendance.findMany({
       where,
       select: {
         id: true,
-        punchTime: true,
-        inOutHint: true,
+        employeeId: true,
+        date: true,
+        punchInTime: true,
+        punchOutTime: true,
+        status: true,
         employee: {
           select: {
             employeeNumber: true,
             deviceCode: true,
             firstName: true,
             lastName: true,
-            branch: { select: { name: true } },
-            department: { select: { name: true } },
-          },
+          branch: { select: { name: true } },
+          department: { select: { name: true } },
+          shift: { select: { name: true } },
         },
-        device: { select: { name: true, serialNumber: true } },
-        realtimeDevice: { select: { name: true, serialNumber: true } },
+        },
       },
-      orderBy: { punchTime: "desc" },
+      orderBy: [{ date: "desc" }, { punchInTime: "asc" }],
       skip: (page - 1) * size,
       take: size,
     }),
   ]);
-  return NextResponse.json({ total, page, size, from, to, punches });
+  const rows = await withMachines(attendance, session.tenantId, start, end);
+  return NextResponse.json({ total, page, size, from, to, rows });
 }

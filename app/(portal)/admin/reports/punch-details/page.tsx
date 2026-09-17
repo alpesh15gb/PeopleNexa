@@ -19,7 +19,7 @@ export default async function PunchDetailsPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Punch Details" description="Raw biometric punches with the source machine." />
+      <PageHeader title="Punch Details" description="One attendance line per employee and day, with in and out punches together." />
       <Card>
         <CardContent className="p-5">
           <form className="flex flex-wrap items-end gap-3" action="/admin/reports/punch-details" method="get">

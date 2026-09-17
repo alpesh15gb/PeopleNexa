@@ -8,10 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 
-interface PunchRow {
+interface AttendanceRow {
   id: string;
-  punchTime: string;
-  inOutHint: string;
+  date: string;
+  punchInTime: string | null;
+  punchOutTime: string | null;
+  status: string;
+  workingMinutes: number | null;
   employee: {
     employeeNumber: string;
     deviceCode: string | null;
@@ -19,9 +22,22 @@ interface PunchRow {
     lastName: string;
     branch: { name: string } | null;
     department: { name: string } | null;
+    shift: { name: string } | null;
   };
-  device: { name: string; serialNumber: string } | null;
-  realtimeDevice: { name: string; serialNumber: string } | null;
+  deviceIn: { name: string; serialNumber: string } | null;
+  deviceOut: { name: string; serialNumber: string } | null;
+}
+
+function time(value: string | null) {
+  return value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)) : "—";
+}
+
+function date(value: string) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
+}
+
+function workingHours(minutes: number | null) {
+  return minutes == null ? "—" : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 export function PunchDetailsTable({
@@ -42,7 +58,7 @@ export function PunchDetailsTable({
   const [debounced, setDebounced] = useState(initialQuery);
   const [page, setPage] = useState(initialPage);
   const [size, setSize] = useState(initialSize);
-  const [data, setData] = useState<{ total: number; punches: PunchRow[] } | null>(null);
+  const [data, setData] = useState<{ total: number; rows: AttendanceRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,10 +84,10 @@ export function PunchDetailsTable({
         return json;
       })
       .then((json) => {
-        if (!cancelled) setData({ total: json.total ?? 0, punches: json.punches ?? [] });
+        if (!cancelled) setData({ total: json.total ?? 0, rows: json.rows ?? [] });
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load punches.");
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load attendance details.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -111,7 +127,7 @@ export function PunchDetailsTable({
       <div className="no-print flex flex-wrap items-center gap-2">
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" placeholder="Search name or code" aria-label="Search punches" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" placeholder="Search name or code" aria-label="Search attendance details" />
         </div>
         <Select value={String(size)} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }} className="w-20" aria-label="Rows per page">
           {[50, 100, 200, 500].map((s) => (
@@ -140,32 +156,38 @@ export function PunchDetailsTable({
                 <TH>Employee Id</TH>
                 <TH>Employee Name</TH>
                 <TH>Division</TH>
-                <TH>Machine</TH>
-                <TH>Punch Time</TH>
-                <TH>Type</TH>
+                <TH>Date</TH>
+                <TH>Device IN</TH>
+                <TH>In Time</TH>
+                <TH>Device OUT</TH>
+                <TH>Out Time</TH>
+                <TH>Attendance</TH>
+                <TH>Working Hours</TH>
+                <TH>Shift</TH>
                 <TH>Status</TH>
               </TR>
             </THead>
             <TBody>
               {loading && (
-                <TR><TD colSpan={8} className="py-10 text-center text-muted-foreground">Loading punches…</TD></TR>
+                <TR><TD colSpan={13} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
               )}
-              {!loading && (data?.punches.length ?? 0) === 0 && (
-                <TR><TD colSpan={8} className="py-10 text-center text-muted-foreground">No punches found for this filter.</TD></TR>
+              {!loading && (data?.rows.length ?? 0) === 0 && (
+                <TR><TD colSpan={13} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
               )}
-              {(data?.punches ?? []).map((p, i) => {
-                const machine = p.device ?? p.realtimeDevice;
-                return <TR key={p.id}>
+              {(data?.rows ?? []).map((row, i) => {
+                return <TR key={row.id}>
                   <TD>{startRow + i}</TD>
-                  <TD className="font-mono">{p.employee.employeeNumber}</TD>
-                  <TD>{p.employee.firstName} {p.employee.lastName}</TD>
-                  <TD>{p.employee.branch?.name ?? "—"}</TD>
-                  <TD>
-                    <span className="block max-w-44 truncate" title={machine?.name ?? ""}>{machine?.name ?? "—"}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">{machine?.serialNumber ?? ""}</span>
-                  </TD>
-                  <TD className="font-mono">{new Date(p.punchTime).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</TD>
-                  <TD className="uppercase">{p.inOutHint}</TD>
+                  <TD className="font-mono">{row.employee.employeeNumber}</TD>
+                  <TD>{row.employee.firstName} {row.employee.lastName}</TD>
+                  <TD>{row.employee.branch?.name ?? "—"}</TD>
+                  <TD className="font-mono">{date(row.date)}</TD>
+                  <TD><span className="block max-w-44 truncate" title={row.deviceIn?.serialNumber ?? ""}>{row.deviceIn?.name ?? "—"}</span></TD>
+                  <TD className="font-mono">{time(row.punchInTime)}</TD>
+                  <TD><span className="block max-w-44 truncate" title={row.deviceOut?.serialNumber ?? ""}>{row.deviceOut?.name ?? "—"}</span></TD>
+                  <TD className="font-mono">{time(row.punchOutTime)}</TD>
+                  <TD className="capitalize">{row.status.replace(/_/g, " ")}</TD>
+                  <TD className="font-mono">{workingHours(row.workingMinutes)}</TD>
+                  <TD>{row.employee.shift?.name ?? "—"}</TD>
                   <TD className="text-emerald-400">ACTIVE</TD>
                 </TR>;
               })}
