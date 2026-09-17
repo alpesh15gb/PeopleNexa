@@ -151,7 +151,6 @@ export async function GET(req: NextRequest) {
         },
       },
       orderBy: [{ date: "desc" }, { punchInTime: "asc" }],
-      take: 5000,
     });
     const rows = await withMachines(attendance, session.tenantId, start, end);
     const wb = new ExcelJS.Workbook();
