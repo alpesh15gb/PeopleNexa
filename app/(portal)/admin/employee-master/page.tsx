@@ -43,7 +43,13 @@ export default async function EmployeeMasterPage({
   searchParams: Promise<{ employee?: string; q?: string; page?: string }>;
 }) {
   const session = await requireSession();
-  if (session.role !== "admin") redirect("/admin");
+  const isAdmin = session.role === "admin";
+  const isLocationManager = session.role === "location_manager";
+  if (!isAdmin && !isLocationManager) redirect("/admin");
+  const locationId = isLocationManager
+    ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
+    : null;
+  if (isLocationManager && !locationId) redirect("/admin");
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
   const pageSize = 50;
@@ -51,6 +57,7 @@ export default async function EmployeeMasterPage({
   const where = {
     tenantId: session.tenantId,
     loginOnly: false,
+    ...(locationId ? { branch: { locationId } } : {}),
     ...(query ? {
       OR: [
         { firstName: { contains: query, mode: "insensitive" as const } },
@@ -73,7 +80,7 @@ export default async function EmployeeMasterPage({
   const selectedId = params.employee ?? employees[0]?.id;
   const employee = selectedId
     ? await prisma.employee.findFirst({
-        where: { id: selectedId, tenantId: session.tenantId, loginOnly: false },
+        where: { id: selectedId, tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
         include: {
           branch: true,
           department: true,
@@ -85,7 +92,7 @@ export default async function EmployeeMasterPage({
         },
       })
     : null;
-  const source = employee?.legacyImportData && typeof employee.legacyImportData === "object" && !Array.isArray(employee.legacyImportData)
+  const source = isAdmin && employee?.legacyImportData && typeof employee.legacyImportData === "object" && !Array.isArray(employee.legacyImportData)
     ? employee.legacyImportData as Record<string, unknown>
     : {};
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -95,7 +102,7 @@ export default async function EmployeeMasterPage({
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Employee Master"
-        description="Complete employee records, biometric identity, employment data, and imported HR master fields."
+        description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
         actions={<Link href="/admin/employees" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Manage employees</Link>}
       />
       <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
@@ -139,10 +146,10 @@ export default async function EmployeeMasterPage({
             </Card>
 
             <section className="grid gap-6 2xl:grid-cols-2">
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Official details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Division / branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, { label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, ...sourceFields(source, "OFF_")]}/></CardContent></Card>
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))]}/></CardContent></Card>
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: employee.pan ?? "—" }, { label: "UAN", value: employee.uan ?? "—" }, ...sourceFields(source, "BANK_")]}/></CardContent></Card>
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><IdCard className="h-4 w-4 text-primary" /> Identity documents</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Driving license", value: employee.drivingLicenseNumber ?? "—" }, { label: "License expiry", value: formatDateIST(employee.drivingLicenseExpiresAt) }, ...sourceFields(source, "ID_")]}/></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Official details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Division / branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, ...(isAdmin ? [{ label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, ...sourceFields(source, "OFF_")] : [])]}/></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.email }, { label: "Phone", value: employee.phone ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
+              {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: employee.pan ?? "—" }, { label: "UAN", value: employee.uan ?? "—" }, ...sourceFields(source, "BANK_")]}/></CardContent></Card>}
+              {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><IdCard className="h-4 w-4 text-primary" /> Identity documents</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Driving license", value: employee.drivingLicenseNumber ?? "—" }, { label: "License expiry", value: formatDateIST(employee.drivingLicenseExpiresAt) }, ...sourceFields(source, "ID_")]}/></CardContent></Card>}
             </section>
 
             <section className="grid gap-6 2xl:grid-cols-2">
