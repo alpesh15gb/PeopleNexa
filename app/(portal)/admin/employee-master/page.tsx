@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BriefcaseBusiness, Building2, CreditCard, GraduationCap, IdCard, UserRound } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { formatDateIST } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
@@ -42,7 +42,7 @@ export default async function EmployeeMasterPage({
 }: {
   searchParams: Promise<{ employee?: string; q?: string; page?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requireActiveSession();
   const isAdmin = session.role === "admin";
   const isLocationManager = session.role === "location_manager";
   if (!isAdmin && !isLocationManager) redirect("/admin");
