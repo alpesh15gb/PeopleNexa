@@ -103,6 +103,38 @@ async function main() {
   const devicePunchMatches = matchedPunches.filter((punch) => punch.source === "device" || punch.source === "ebioserver");
   const ambiguousPunchMatches = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === null).length;
   const alreadyAttributed = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === punch.deviceId).length;
+  const corrections = devicePunchMatches.flatMap((punch) => {
+    const deviceId = expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`);
+    return deviceId && deviceId !== punch.deviceId ? [{ punchId: punch.id, deviceId }] : [];
+  });
+  const apply = process.env.EBIO_APPLY === "true";
+  if (apply) {
+    const expected = Number(process.env.EBIO_EXPECT_CORRECTIONS);
+    if (!Number.isInteger(expected) || expected !== corrections.length) {
+      throw new Error(`Refusing to apply: expected ${process.env.EBIO_EXPECT_CORRECTIONS ?? "no count"} corrections, found ${corrections.length}.`);
+    }
+    const byDevice = new Map<string, string[]>();
+    for (const correction of corrections) {
+      const ids = byDevice.get(correction.deviceId) ?? [];
+      ids.push(correction.punchId);
+      byDevice.set(correction.deviceId, ids);
+    }
+    await prisma.$transaction([
+      ...[...byDevice.entries()].map(([deviceId, ids]) => prisma.punch.updateMany({ where: { id: { in: ids } }, data: { deviceId } })),
+      prisma.auditLog.create({
+        data: {
+          tenantId: tenant.id,
+          actorId: "system",
+          actorRole: "system",
+          action: "ebio.webhook_backfill.apply",
+          entity: "Punch",
+          entityId: "webhook-backfill",
+          summary: `Applied ${corrections.length} exact eBio serial attributions`,
+          after: { from: fromKey, to: toKey, corrections: corrections.length },
+        },
+      }),
+    ]);
+  }
 
   console.log(JSON.stringify({
     tenant: tenant.slug,
@@ -115,7 +147,8 @@ async function main() {
     nonDevicePunchMatches: matchedPunches.length - devicePunchMatches.length,
     exactDevicePunchMatches: devicePunchMatches.length,
     ambiguousPunchMatches,
-    eligibleMachineCorrections: devicePunchMatches.length - alreadyAttributed - ambiguousPunchMatches,
+    eligibleMachineCorrections: corrections.length,
+    applied: apply ? corrections.length : 0,
     unresolvedSerials: [...unresolvedSerials].sort(),
     unresolvedEmployeeCodes: [...unresolvedCodes].sort(),
   }, null, 2));
