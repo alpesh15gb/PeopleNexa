@@ -21,9 +21,18 @@ function attendanceRecord(record: EbioWebhookRecord) {
   return { employeeCode, serialNumber, punchTime };
 }
 
+function liveCutover(): Date | null {
+  const value = process.env.EBIO_WEBHOOK_LIVE_FROM?.trim();
+  if (!value) return null;
+  const parsed = parseIST(value);
+  if (!parsed) throw new Error("EBIO_WEBHOOK_LIVE_FROM must be an IST timestamp such as 2026-09-17 09:00:00.");
+  return parsed;
+}
+
 export async function processEbioWebhookDelivery(deliveryId: string) {
   const delivery = await prisma.ebioWebhookDelivery.findUniqueOrThrow({ where: { id: deliveryId } });
   if (delivery.processedAt) return { skipped: true, ingested: 0, duplicates: 0, quarantined: 0 };
+  const cutoff = liveCutover();
 
   let payload: unknown;
   try {
@@ -44,7 +53,7 @@ export async function processEbioWebhookDelivery(deliveryId: string) {
       continue;
     }
     const event = attendanceRecord(record as EbioWebhookRecord);
-    if (!event) {
+    if (!event || !cutoff || event.punchTime < cutoff) {
       stats.quarantined++;
       continue;
     }
@@ -72,7 +81,7 @@ export async function processEbioWebhookDelivery(deliveryId: string) {
     where: { id: delivery.id },
     data: {
       processedAt: new Date(),
-      processingError: stats.quarantined ? `${stats.quarantined} record(s) quarantined: invalid payload, unknown serial, or unsupported employee code.` : null,
+      processingError: stats.quarantined ? `${stats.quarantined} record(s) quarantined: live cutover, invalid payload, unknown serial, or unsupported employee code.` : null,
     },
   });
   return stats;
