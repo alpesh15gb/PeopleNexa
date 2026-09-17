@@ -13,9 +13,22 @@ export const dynamic = "force-dynamic";
 
 type Field = { label: string; value: unknown };
 
+function displayValue(value: unknown): string {
+  if (value == null || value === "") return "—";
+  let parsed = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); } catch { return value; }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return String(parsed);
+  const address = parsed as Record<string, unknown>;
+  const parts = ["flatHouseWingNumber", "streetLocalityArea", "landmark", "state", "country"]
+    .map((key) => address[key] == null ? "" : String(address[key]).replace(/^Select\.\.\.\s*/i, "").trim())
+    .filter(Boolean);
+  return parts.length ? parts.join(", ") : "—";
+}
+
 function sourceValue(source: Record<string, unknown>, key: string) {
-  const value = source[key];
-  return value == null || value === "" ? "—" : String(value);
+  return displayValue(source[key]);
 }
 
 function sourceFields(source: Record<string, unknown>, prefix: string): Field[] {
@@ -32,7 +45,7 @@ function DetailGrid({ fields }: { fields: Field[] }) {
       {visible.map((field) => (
         <div key={field.label} className="grid grid-cols-[minmax(8rem,0.75fr)_minmax(0,1.25fr)] gap-4 border-b border-edge py-2.5 text-sm">
           <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{field.label}</dt>
-          <dd className="min-w-0 break-words font-medium text-foreground">{String(field.value)}</dd>
+          <dd className="min-w-0 break-words font-medium text-foreground">{displayValue(field.value)}</dd>
         </div>
       ))}
     </dl>
@@ -165,7 +178,7 @@ export default async function EmployeeMasterPage({
 
             <section className="grid gap-6 2xl:grid-cols-2">
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Official details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Division / branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, { label: "Sub department", value: employee.employmentProfile?.subDepartment ?? "—" }, { label: "Grade", value: employee.employmentProfile?.grade ?? "—" }, ...(isAdmin ? [{ label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, { label: "CTC", value: employee.employmentProfile?.ctc == null ? "—" : `₹${employee.employmentProfile.ctc}` }, ...sourceFields(source, "OFF_")] : [])]}/></CardContent></Card>
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.profile?.personalEmail ?? employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Gender", value: employee.profile?.gender ?? "—" }, { label: "Date of birth", value: formatDateIST(employee.profile?.actualDateOfBirth ?? employee.profile?.dateOfBirthCertificate) }, { label: "Marital status", value: employee.profile?.maritalStatus ?? "—" }, { label: "Emergency contact", value: employee.profile?.emergencyContactName ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.profile?.personalEmail ?? employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Gender", value: employee.profile?.gender ?? "—" }, { label: "Date of birth", value: formatDateIST(employee.profile?.actualDateOfBirth ?? employee.profile?.dateOfBirthCertificate) }, { label: "Marital status", value: employee.profile?.maritalStatus ?? "—" }, { label: "Current address", value: employee.profile?.currentAddress }, { label: "Permanent address", value: employee.profile?.permanentAddress }, { label: "Emergency contact", value: employee.profile?.emergencyContactName ?? "—" }, ...(isAdmin ? [{ label: "Aadhaar", value: employee.aadhaarNumber ?? "—" }, ...sourceFields(source, "PER_"), ...sourceFields(source, "RPT_").filter((field) => !/Biometric ID|Division|Department|Designation|Joining Date|Ctc|Gross Salary|Status/.test(field.label))] : [])]}/></CardContent></Card>
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: employee.pan ?? "—" }, { label: "UAN", value: employee.uan ?? "—" }, ...sourceFields(source, "BANK_")]}/></CardContent></Card>}
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><IdCard className="h-4 w-4 text-primary" /> Identity documents</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Driving license", value: employee.drivingLicenseNumber ?? "—" }, { label: "License type", value: employee.drivingLicenseType ?? "—" }, { label: "License expiry", value: formatDateIST(employee.drivingLicenseExpiresAt) }, ...(isAdmin ? sourceFields(source, "ID_") : [])]}/></CardContent></Card>
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /> Employee documents</CardTitle></CardHeader><CardContent>{employee.documents.length ? <div className="space-y-3">{employee.documents.map((document) => <div key={document.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{document.name}</p><div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2"><p>Type: {document.docType}</p><p>Number: {document.number ?? "—"}</p><p>Issue: {formatDateIST(document.issuedDate)}</p><p>Expiry: {formatDateIST(document.expiryDate)}</p></div>{document.fileUrl && <a href={document.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open file</a>}</div>)}</div> : <p className="text-sm text-muted-foreground">No documents available.</p>}</CardContent></Card>
