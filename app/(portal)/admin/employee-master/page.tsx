@@ -152,7 +152,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <EmployeeMasterQuickEdit canEditEmail={isAdmin} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "" }} />
+                  <EmployeeMasterQuickEdit canEditEmail={isAdmin} canEditMaster={isAdmin || isLocationManager} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "" }} />
                 </div>
               </CardContent>
             </Card>

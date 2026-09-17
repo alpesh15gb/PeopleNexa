@@ -77,7 +77,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (session.role === "admin") return NextResponse.json({ employee });
+  if (session.role === "admin" || session.role === "location_manager") return NextResponse.json({ employee });
 
   const { salary: _salary, bankName: _bankName, accountNumber: _accountNumber, ifscCode: _ifscCode, pan: _pan, uan: _uan, aadhaarNumber: _aadhaarNumber, drivingLicenseNumber: _drivingLicenseNumber, drivingLicenseExpiresAt: _drivingLicenseExpiresAt, salaryStructure: _salaryStructure, workBasisRate: _workBasisRate, legacyImportData: _legacyImportData, deviceCode: _deviceCode, profile, employmentProfile: _employmentProfile, dependents: _dependents, references: _references, bankAccounts: _bankAccounts, documents, workExperience, ...safeEmployee } = employee;
   return NextResponse.json({
@@ -93,10 +93,14 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body: Record<string, unknown> = await req.json().catch(() => ({}));
   const { id } = await ctx.params;
-  const exists = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId }, select: { id: true } });
+  const locationId = session.role === "location_manager"
+    ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
+    : null;
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const exists = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true } });
   if (!exists) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const collections = ["dependents", "references", "bankAccounts", "education", "workExperience", "documents"] as const;
