@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { addDays, toDateKey, formatTime, formatDate, formatDateIST, relativeDay } from "@/lib/dates";
@@ -81,7 +81,7 @@ export default async function AdminDashboardPage({
   const attendanceWhere = branchId
     ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
     : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) };
-  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners] = await Promise.all([
+  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } } },
@@ -137,6 +137,10 @@ export default async function AdminDashboardPage({
       select: { id: true, firstName: true, lastName: true, employeeNumber: true, joiningDate: true, position: true, branch: { select: { name: true } } },
       orderBy: { joiningDate: "desc" },
     }),
+    prisma.employeeProfile.findMany({
+      where: { employee: empScope, OR: [{ dateOfBirthCertificate: { not: null } }, { actualDateOfBirth: { not: null } }, { marriageDate: { not: null } }] },
+      select: { dateOfBirthCertificate: true, actualDateOfBirth: true, marriageDate: true, employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true, branch: { select: { name: true } } } } },
+    }),
   ]);
 
   // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
@@ -173,6 +177,12 @@ export default async function AdminDashboardPage({
   };
   const currentMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate >= currentMonthStart);
   const previousMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate < currentMonthStart);
+  const todayMonthDay = istDateKey(today).slice(5);
+  const birthdays = celebrationProfiles.filter((profile) => {
+    const birthday = profile.actualDateOfBirth ?? profile.dateOfBirthCertificate;
+    return birthday && istDateKey(birthday).slice(5) === todayMonthDay;
+  });
+  const anniversaries = celebrationProfiles.filter((profile) => profile.marriageDate && istDateKey(profile.marriageDate).slice(5) === todayMonthDay);
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -321,6 +331,26 @@ export default async function AdminDashboardPage({
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div><CardTitle>Today&apos;s birthdays</CardTitle><CardDescription>{birthdays.length} celebration{birthdays.length === 1 ? "" : "s"} today</CardDescription></div>
+              <PartyPopper className="h-4.5 w-4.5 text-amber-500" />
+            </CardHeader>
+            <CardContent className="pt-1">
+              {birthdays.length === 0 ? <p className="py-3 text-center text-[13px] text-muted-foreground">No birthdays today.</p> : <div className="divide-y divide-[color:var(--border)]">{birthdays.map(({ employee }) => <Link key={employee.id} href="/admin/employees" className="flex items-center gap-3 py-3 transition-colors hover:text-primary"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-[11px] font-bold text-amber-700 dark:text-amber-300">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div><div className="min-w-0"><p className="truncate text-[13px] font-medium">{employee.firstName} {employee.lastName}</p><p className="truncate text-[11px] text-muted-foreground">{employee.employeeNumber} · {employee.position ?? employee.branch?.name ?? "Employee"}</p></div></Link>)}</div>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div><CardTitle>Today&apos;s anniversaries</CardTitle><CardDescription>{anniversaries.length} marriage {anniversaries.length === 1 ? "anniversary" : "anniversaries"} today</CardDescription></div>
+              <CalendarCheck2 className="h-4.5 w-4.5 text-rose-500" />
+            </CardHeader>
+            <CardContent className="pt-1">
+              {anniversaries.length === 0 ? <p className="py-3 text-center text-[13px] text-muted-foreground">No anniversaries today.</p> : <div className="divide-y divide-[color:var(--border)]">{anniversaries.map(({ employee }) => <Link key={employee.id} href="/admin/employees" className="flex items-center gap-3 py-3 transition-colors hover:text-primary"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/10 text-[11px] font-bold text-rose-700 dark:text-rose-300">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div><div className="min-w-0"><p className="truncate text-[13px] font-medium">{employee.firstName} {employee.lastName}</p><p className="truncate text-[11px] text-muted-foreground">{employee.employeeNumber} · {employee.position ?? employee.branch?.name ?? "Employee"}</p></div></Link>)}</div>}
             </CardContent>
           </Card>
 
