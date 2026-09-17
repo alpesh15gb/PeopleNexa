@@ -97,11 +97,12 @@ async function main() {
 
   const punches = await prisma.punch.findMany({
     where: { tenantId: tenant.id, punchTime: { gte: from, lte: to } },
-    select: { id: true, employeeId: true, deviceId: true, punchTime: true },
+    select: { id: true, employeeId: true, deviceId: true, punchTime: true, source: true },
   });
   const matchedPunches = punches.filter((punch) => expectedDeviceByPunch.has(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`));
-  const ambiguousPunchMatches = matchedPunches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === null).length;
-  const alreadyAttributed = matchedPunches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === punch.deviceId).length;
+  const devicePunchMatches = matchedPunches.filter((punch) => punch.source === "device" || punch.source === "ebioserver");
+  const ambiguousPunchMatches = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === null).length;
+  const alreadyAttributed = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === punch.deviceId).length;
 
   console.log(JSON.stringify({
     tenant: tenant.slug,
@@ -111,8 +112,10 @@ async function main() {
     ignoredRecords: ignored,
     mappedEvents,
     exactPunchMatches: matchedPunches.length,
+    nonDevicePunchMatches: matchedPunches.length - devicePunchMatches.length,
+    exactDevicePunchMatches: devicePunchMatches.length,
     ambiguousPunchMatches,
-    eligibleMachineCorrections: matchedPunches.length - alreadyAttributed - ambiguousPunchMatches,
+    eligibleMachineCorrections: devicePunchMatches.length - alreadyAttributed - ambiguousPunchMatches,
     unresolvedSerials: [...unresolvedSerials].sort(),
     unresolvedEmployeeCodes: [...unresolvedCodes].sort(),
   }, null, 2));
