@@ -42,6 +42,7 @@ import {
   BadgePercent,
   MessageSquareText,
   Wallet,
+  IdCard,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { relativeDay, toDateKey } from "@/lib/dates";
@@ -66,6 +67,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance", section: "People & time" },
   { href: "/admin/regularization", label: "Regularization", icon: <Wrench className="h-4 w-4" />, module: "attendance", section: "People & time" },
   { href: "/admin/employees", label: "Employees", icon: <Users className="h-4 w-4" />, module: "employees", section: "People & time" },
+  { href: "/admin/employee-master", label: "Employee Master", icon: <IdCard className="h-4 w-4" />, module: "employees", section: "People & time" },
   { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" />, section: "People & time" },
   { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts", section: "People & time" },
   { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters", section: "People & time" },
