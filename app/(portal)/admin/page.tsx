@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard } from "lucide-react";
+import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { addDays, toDateKey, formatTime, formatDate, relativeDay } from "@/lib/dates";
@@ -43,10 +43,10 @@ function StatsSkeleton() {
 export default async function AdminDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ branch?: string }>;
+  searchParams: Promise<{ branch?: string; attendancePage?: string }>;
 }) {
   const session = await requireSession();
-  const { branch: branchParam } = await searchParams;
+  const { branch: branchParam, attendancePage: attendancePageParam } = await searchParams;
   const today = istStartOfDay(new Date());
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
@@ -69,24 +69,31 @@ export default async function AdminDashboardPage({
   const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
   const empScope = { tenantId: session.tenantId, status: "active", ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = istDateKey(today).slice(0, 7);
+  const attendancePageSize = 25;
+  const attendancePage = Math.max(1, Number.parseInt(attendancePageParam ?? "1", 10) || 1);
   const [year, month] = currentMonth.split("-").map(Number);
   const licenseExpiryStart = new Date(Date.UTC(year, month - 1, 1));
   const licenseExpiryEnd = new Date(Date.UTC(year, month, 1));
 
-  const [employees, attendance, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses] = await Promise.all([
+  const attendanceWhere = branchId
+    ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
+    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) };
+  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } } },
     }),
     prisma.attendance.findMany({
-      where: branchId
-        ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
-        : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
+      where: attendanceWhere,
       include: {
         employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } },
       },
       orderBy: { punchInTime: "asc" },
+      skip: (attendancePage - 1) * attendancePageSize,
+      take: attendancePageSize,
     }),
+    prisma.attendance.count({ where: attendanceWhere }),
+    prisma.attendance.groupBy({ by: ["status"], where: attendanceWhere, _count: true }),
     prisma.department.findMany({
       where: {
         tenantId: session.tenantId,
@@ -144,11 +151,18 @@ export default async function AdminDashboardPage({
   }
 
   const counts = { present: 0, late: 0, permission: 0, half_day: 0, absent: 0 };
-  for (const a of attendance) {
-    if (counts[a.status as keyof typeof counts] !== undefined) counts[a.status as keyof typeof counts]!++;
+  for (const row of attendanceStatusCounts) {
+    if (counts[row.status as keyof typeof counts] !== undefined) counts[row.status as keyof typeof counts] += row._count;
   }
-  const marked = attendance.length;
+  const marked = attendanceTotal;
   counts.absent += Math.max(employees.length - marked, 0);
+  const attendancePageCount = Math.max(1, Math.ceil(attendanceTotal / attendancePageSize));
+  const attendanceHref = (page: number) => {
+    const params = new URLSearchParams();
+    if (branchId) params.set("branch", branchId);
+    params.set("attendancePage", String(page));
+    return `/admin?${params.toString()}`;
+  };
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -225,7 +239,8 @@ export default async function AdminDashboardPage({
                 description="Punches will appear here in real time as employees check in."
               />
             ) : (
-              <div className="divide-y divide-[color:var(--border)]">
+              <>
+                <div className="divide-y divide-[color:var(--border)]">
                 {attendance.map((a) => (
                   <div key={a.id} className="flex items-center gap-3 py-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
@@ -248,7 +263,23 @@ export default async function AdminDashboardPage({
                     <StatusPill status={a.status} />
                   </div>
                 ))}
-              </div>
+                </div>
+                {attendancePageCount > 1 && (
+                <nav aria-label="Today&apos;s attendance pages" className="mt-4 flex items-center justify-between border-t border-edge pt-3">
+                  {attendancePage > 1 ? (
+                    <Link href={attendanceHref(attendancePage - 1)} className="inline-flex min-h-11 items-center gap-1 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-tint hover:text-foreground">
+                      <ChevronLeft className="h-4 w-4" aria-hidden="true" /> Previous
+                    </Link>
+                  ) : <span className="inline-flex min-h-11 items-center px-3 text-xs text-muted-foreground/50">Previous</span>}
+                  <span className="text-xs font-medium text-muted-foreground" aria-current="page">Page {Math.min(attendancePage, attendancePageCount)} of {attendancePageCount}</span>
+                  {attendancePage < attendancePageCount ? (
+                    <Link href={attendanceHref(attendancePage + 1)} className="inline-flex min-h-11 items-center gap-1 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-tint hover:text-foreground">
+                      Next <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                    </Link>
+                  ) : <span className="inline-flex min-h-11 items-center px-3 text-xs text-muted-foreground/50">Next</span>}
+                </nav>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
