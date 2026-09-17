@@ -38,7 +38,7 @@ export function EmployeeMasterQuickEdit({ employee, canEditEmail }: { employee: 
   return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Edit employee"><form onSubmit={save} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={employee} /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Save changes</Button></div></form></Modal></>;
 }
 
-export function EmployeeMasterCreate() {
+export function EmployeeMasterCreate({ branches, requireBranch }: { branches: Array<{ id: string; name: string }>; requireBranch: boolean }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -47,10 +47,10 @@ export function EmployeeMasterCreate() {
     event.preventDefault(); setSaving(true);
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeNumber: form.get("employeeNumber"), deviceCode: form.get("deviceCode"), firstName: form.get("firstName"), lastName: form.get("lastName"), email: form.get("email"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null, password: crypto.randomUUID() + "Aa1!" }) });
+      const response = await fetch("/api/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeNumber: form.get("employeeNumber"), deviceCode: form.get("deviceCode"), firstName: form.get("firstName"), lastName: form.get("lastName"), email: form.get("email"), phone: form.get("phone"), position: form.get("position"), joiningDate: form.get("joiningDate") || null, branchId: form.get("branchId") || null, password: crypto.randomUUID() + "Aa1!" }) });
       const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not add employee.");
       toast("success", "Employee added. Complete the master profile next."); setOpen(false); router.push(`/admin/employee-master?employee=${data.employee.id}`); router.refresh();
     } catch (error) { toast("error", error instanceof Error ? error.message : "Could not add employee."); } finally { setSaving(false); }
   }
-  return <><Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Create the core employee record, then complete their master profile."><form onSubmit={create} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={{ firstName: "", lastName: "", email: "", phone: "", position: "", joiningDate: "" }} includeCodes /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Add employee</Button></div></form></Modal></>;
+  return <><Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Add employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Add employee" description="Create the core employee record, then complete their master profile."><form onSubmit={create} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={{ firstName: "", lastName: "", email: "", phone: "", position: "", joiningDate: "" }} includeCodes /><Field label="Branch"><select name="branchId" required={requireBranch} className="h-10 w-full rounded-xl border border-input bg-card-2 px-3 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40"><option value="">{requireBranch ? "Select a branch" : "Unassigned"}</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></Field><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Add employee</Button></div></form></Modal></>;
 }

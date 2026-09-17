@@ -68,7 +68,7 @@ export default async function EmployeeMasterPage({
       ],
     } : {}),
   };
-  const [total, employees] = await Promise.all([
+  const [total, employees, branches] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({
       where,
@@ -77,6 +77,7 @@ export default async function EmployeeMasterPage({
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
+    prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
   const selectedId = params.employee ?? employees[0]?.id;
   const employee = selectedId
@@ -106,7 +107,7 @@ export default async function EmployeeMasterPage({
       <PageHeader
         title="Employee Master"
         description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
-        actions={isAdmin ? <div className="flex flex-wrap gap-2"><EmployeeMasterCreate /><Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Download master data</Link></div> : undefined}
+        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap gap-2"><EmployeeMasterCreate branches={branches} requireBranch={isLocationManager} />{isAdmin && <Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Download master data</Link>}</div> : undefined}
       />
       {isLocationManager && !locationId && (
         <Card>
