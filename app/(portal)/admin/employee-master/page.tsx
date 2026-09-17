@@ -49,7 +49,7 @@ export default async function EmployeeMasterPage({
   const locationId = isLocationManager
     ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
     : null;
-  if (isLocationManager && !locationId) redirect("/admin");
+  const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : {};
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
   const pageSize = 50;
@@ -57,7 +57,7 @@ export default async function EmployeeMasterPage({
   const where = {
     tenantId: session.tenantId,
     loginOnly: false,
-    ...(locationId ? { branch: { locationId } } : {}),
+    ...locationScope,
     ...(query ? {
       OR: [
         { firstName: { contains: query, mode: "insensitive" as const } },
@@ -80,7 +80,7 @@ export default async function EmployeeMasterPage({
   const selectedId = params.employee ?? employees[0]?.id;
   const employee = selectedId
     ? await prisma.employee.findFirst({
-        where: { id: selectedId, tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
+        where: { id: selectedId, tenantId: session.tenantId, loginOnly: false, ...locationScope },
         include: {
           branch: true,
           department: true,
@@ -105,6 +105,13 @@ export default async function EmployeeMasterPage({
         description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
         actions={<Link href="/admin/employees" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Manage employees</Link>}
       />
+      {isLocationManager && !locationId && (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            Your Location Manager account has no location assigned. Ask an administrator to assign your location before viewing Employee Master.
+          </CardContent>
+        </Card>
+      )}
       <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
         <Card className="h-fit xl:sticky xl:top-6">
           <CardHeader>
