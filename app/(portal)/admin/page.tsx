@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { addDays, toDateKey, formatTime, formatDate, relativeDay } from "@/lib/dates";
+import { addDays, toDateKey, formatTime, formatDate, formatDateIST, relativeDay } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { StatCard } from "@/components/ui/stat";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,13 +72,16 @@ export default async function AdminDashboardPage({
   const attendancePageSize = 25;
   const attendancePage = Math.max(1, Number.parseInt(attendancePageParam ?? "1", 10) || 1);
   const [year, month] = currentMonth.split("-").map(Number);
+  const currentMonthStart = istStartOfDay(new Date(Date.UTC(year, month - 1, 1, 12)));
+  const previousMonthStart = istStartOfDay(new Date(Date.UTC(year, month - 2, 1, 12)));
+  const nextMonthStart = istStartOfDay(new Date(Date.UTC(year, month, 1, 12)));
   const licenseExpiryStart = new Date(Date.UTC(year, month - 1, 1));
   const licenseExpiryEnd = new Date(Date.UTC(year, month, 1));
 
   const attendanceWhere = branchId
     ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
     : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) };
-  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses] = await Promise.all([
+  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } } },
@@ -129,6 +132,11 @@ export default async function AdminDashboardPage({
       },
       orderBy: { drivingLicenseExpiresAt: "asc" },
     }),
+    prisma.employee.findMany({
+      where: { ...empScope, joiningDate: { gte: previousMonthStart, lt: nextMonthStart } },
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true, joiningDate: true, position: true, branch: { select: { name: true } } },
+      orderBy: { joiningDate: "desc" },
+    }),
   ]);
 
   // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
@@ -163,6 +171,8 @@ export default async function AdminDashboardPage({
     params.set("attendancePage", String(page));
     return `/admin?${params.toString()}`;
   };
+  const currentMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate >= currentMonthStart);
+  const previousMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate < currentMonthStart);
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -311,6 +321,35 @@ export default async function AdminDashboardPage({
                   ))}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div>
+                <CardTitle>New joiners</CardTitle>
+                <CardDescription>{currentMonthJoiners.length} this month · {previousMonthJoiners.length} last month</CardDescription>
+              </div>
+              <Users className="h-4.5 w-4.5 text-primary" />
+            </CardHeader>
+            <CardContent className="pt-1">
+              {newJoiners.length === 0 ? (
+                <p className="py-4 text-center text-[13px] text-muted-foreground">No employees joined this or last month.</p>
+              ) : (
+                <div className="divide-y divide-[color:var(--border)]">
+                  {newJoiners.slice(0, 10).map((employee) => (
+                    <Link key={employee.id} href="/admin/employees" className="flex items-center gap-3 py-3 transition-colors hover:text-primary">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/[0.1] text-[11px] font-bold text-primary">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-medium">{employee.firstName} {employee.lastName}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{employee.employeeNumber} · {employee.position ?? employee.branch?.name ?? "New employee"}</p>
+                      </div>
+                      <time dateTime={employee.joiningDate?.toISOString()} className="shrink-0 font-mono text-[11px] text-muted-foreground">{formatDateIST(employee.joiningDate)}</time>
+                    </Link>
+                  ))}
+                </div>
+              )}
+              {newJoiners.length > 10 && <Link href="/admin/employees" className="mt-3 inline-flex text-xs font-medium text-primary hover:underline">View all new joiners</Link>}
             </CardContent>
           </Card>
 
