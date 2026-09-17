@@ -41,3 +41,6 @@ public/models/face/
 *.mp4
 *.mov
 *.webm
+
+# Local HR source data; contains employee PII and financial identifiers.
+/MASTER-Employee-ALL.csv

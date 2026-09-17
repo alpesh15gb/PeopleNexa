@@ -14,51 +14,51 @@ datasource db {
 // ─── Tenant (one client / company) ─────────────────────────────────────────
 
 model Tenant {
-  id                String    @id @default(cuid())
-  name              String
-  code              String    @unique // corporate code, e.g. "CP26080012"
-  slug              String    @unique // subdomain: crk.peoplenexa.in
-  domain            String? // optional custom domain
-  email             String?
-  phone             String?
-  address           String?
-  status            String    @default("active") // active | suspended | trial
+  id      String  @id @default(cuid())
+  name    String
+  code    String  @unique // corporate code, e.g. "CP26080012"
+  slug    String  @unique // subdomain: crk.peoplenexa.in
+  domain  String? // optional custom domain
+  email   String?
+  phone   String?
+  address String?
+  status  String  @default("active") // active | suspended | trial
 
   // License (denormalized current state; history lives in License rows)
-  plan              String    @default("trial") // trial | starter | growth | pro | enterprise
-  seats             Int       @default(10) // max employees allowed
+  plan               String    @default("trial") // trial | starter | growth | pro | enterprise
+  seats              Int       @default(10) // max employees allowed
   subscriptionExpiry DateTime?
-  config            Json?     @default("{}") // per-tenant settings (eBioserver profile, etc.)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  config             Json?     @default("{}") // per-tenant settings (eBioserver profile, etc.)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  branches    Branch[]
-  locations   Location[]
-  departments Department[]
-  shifts      Shift[]
-  employees   Employee[]
-  leaveTypes  LeaveType[]
-  holidays    Holiday[]
-  attendance  Attendance[]
-  assets      Asset[]
-  devices     Device[]
-  realtimeDevices RealtimeDevice[]
-  modules     TenantModule[]
-  licenses    License[]
-  corrections PunchCorrection[]
-  expenseClaims ExpenseClaim[]
-  locationPings LocationPing[]
-  documents   Document[]
-  kpis        Kpi[]
-  reviews     PerformanceReview[]
-  tickets     Ticket[]
-  orgPosts    OrgPost[]
-  policies    Policy[]
-  rosters     RosterAssignment[]
-  onboardingTasks OnboardingTask[]
-  exitRequests   ExitRequest[]
-  webhooks    WebhookEndpoint[]
-  taxDeclarations TaxDeclaration[]
+  branches           Branch[]
+  locations          Location[]
+  departments        Department[]
+  shifts             Shift[]
+  employees          Employee[]
+  leaveTypes         LeaveType[]
+  holidays           Holiday[]
+  attendance         Attendance[]
+  assets             Asset[]
+  devices            Device[]
+  realtimeDevices    RealtimeDevice[]
+  modules            TenantModule[]
+  licenses           License[]
+  corrections        PunchCorrection[]
+  expenseClaims      ExpenseClaim[]
+  locationPings      LocationPing[]
+  documents          Document[]
+  kpis               Kpi[]
+  reviews            PerformanceReview[]
+  tickets            Ticket[]
+  orgPosts           OrgPost[]
+  policies           Policy[]
+  rosters            RosterAssignment[]
+  onboardingTasks    OnboardingTask[]
+  exitRequests       ExitRequest[]
+  webhooks           WebhookEndpoint[]
+  taxDeclarations    TaxDeclaration[]
   payrollAdjustments PayrollAdjustment[]
 }
 
@@ -90,16 +90,16 @@ model TenantModule {
 // ─── License history (one row per grant/change) ────────────────────────────
 
 model License {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan       String
-  seats      Int
-  startsAt   DateTime @default(now())
-  expiresAt  DateTime?
-  note       String?
-  createdBy  String? // superadmin id / email
-  createdAt  DateTime @default(now())
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan      String
+  seats     Int
+  startsAt  DateTime  @default(now())
+  expiresAt DateTime?
+  note      String?
+  createdBy String? // superadmin id / email
+  createdAt DateTime  @default(now())
 
   @@index([tenantId])
 }
@@ -107,27 +107,27 @@ model License {
 // ─── Biometric devices (ESSL ADMS / iClock + eBioserver) ──────────────────
 
 model Device {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String
-  serialNumber String   @unique // device serial, e.g. ESSL SN
+  serialNumber String    @unique // device serial, e.g. ESSL SN
   ipAddress    String?
-  type         String   @default("biometric") // biometric | face | card
-  protocol     String   @default("attlog") // attlog (iClock) | json (AI devices)
-  status       String   @default("active") // active | inactive | offline
+  type         String    @default("biometric") // biometric | face | card
+  protocol     String    @default("attlog") // attlog (iClock) | json (AI devices)
+  status       String    @default("active") // active | inactive | offline
   lastSeenAt   DateTime?
-  config       Json?    @default("{}")
+  config       Json?     @default("{}")
   // eBio source location and the PeopleNexa worksite branch it maps to.
   ebioLocation String?
   branchId     String?
-  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  branch       Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  logs     DeviceLog[]
-  commands DeviceCommand[]
-  punches  Punch[]
+  logs           DeviceLog[]
+  commands       DeviceCommand[]
+  punches        Punch[]
   employeeAccess EmployeeDeviceAccess[]
 
   @@index([tenantId])
@@ -154,23 +154,23 @@ model DeviceCommand {
 // attendance reconciles uniformly across ESSL / eBioserver / Realtime.
 
 model RealtimeDevice {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name            String
-  serialNumber    String   @unique // e.g. RSS2025…
+  serialNumber    String    @unique // e.g. RSS2025…
   productName     String? // e.g. Pro1100B
-  protocol        String   @default("wss") // wss | fkweb
-  capabilities    Json?    @default("[]") // ["FP","PASSWORD","IDCARD","FACE","QR"]
-  apiKey          String   @unique // X-API-Key for cloud calls
+  protocol        String    @default("wss") // wss | fkweb
+  capabilities    Json?     @default("[]") // ["FP","PASSWORD","IDCARD","FACE","QR"]
+  apiKey          String    @unique // X-API-Key for cloud calls
   ipAddress       String?
-  status          String   @default("active") // active | inactive
+  status          String    @default("active") // active | inactive
   lastSeenAt      DateTime?
   lastSyncAt      DateTime?
-  linkedDeviceIds String[] @default([])
-  config          Json?    @default("{}")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  linkedDeviceIds String[]  @default([])
+  config          Json?     @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   commands RealtimeCommand[]
   logs     RealtimeLog[]
@@ -204,26 +204,26 @@ model RealtimeLog {
   error            String?
   createdAt        DateTime       @default(now())
 
+  @@unique([realtimeDeviceId, userId, punchTime])
   @@index([realtimeDeviceId, processed])
   @@index([tenantId, punchTime])
-  @@unique([realtimeDeviceId, userId, punchTime])
 }
 
 model DeviceLog {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   tenantId  String
   deviceId  String
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   rawData   String?
   userId    String? // employee code as enrolled on the device
   punchTime DateTime?
-  processed Boolean  @default(false)
+  processed Boolean   @default(false)
   error     String?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
+  @@unique([deviceId, userId, punchTime])
   @@index([deviceId, processed])
   @@index([tenantId, punchTime])
-  @@unique([deviceId, userId, punchTime])
 }
 
 // ─── Branches with GPS geofencing ──────────────────────────────────────────
@@ -275,8 +275,8 @@ model Branch {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  locationId     String?
-  location       Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   employees  Employee[]
   attendance Attendance[]
@@ -287,9 +287,9 @@ model Branch {
 }
 
 model Department {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   tenantId    String
-  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name        String
   description String?
   createdAt   DateTime @default(now())
@@ -301,16 +301,16 @@ model Department {
 }
 
 model Shift {
-  id           String  @id @default(cuid())
+  id           String   @id @default(cuid())
   tenantId     String
-  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String
   code         String?
   startTime    String // "09:00"
   endTime      String // "18:00"
-  graceMinutes Int     @default(15) // punch-in grace before late
-  isNightShift Boolean @default(false)
-  isDefault    Boolean @default(false)
+  graceMinutes Int      @default(15) // punch-in grace before late
+  isNightShift Boolean  @default(false)
+  isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -324,92 +324,96 @@ model Shift {
 // ─── Employees ─────────────────────────────────────────────────────────────
 
 model Employee {
-  id             String    @id @default(cuid())
-  tenantId       String
-  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeNumber String // e.g. EMP-001
+  id                  String    @id @default(cuid())
+  tenantId            String
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeNumber      String // e.g. EMP-001
   // Immutable eBio/device enrollment code used to match punches. Employee Code
   // above remains the editable HR-facing code.
-  deviceCode     String?
+  deviceCode          String?
   // Enables default-deny machine access enforcement for this biometric code.
-  deviceAccessEnabled Boolean @default(false)
-  firstName      String
-  lastName       String
-  email          String
-  phone          String?
-  password       String // bcrypt hash
-  role           String    @default("employee") // admin | supervisor | employee
-  status         String    @default("active") // active | inactive
+  deviceAccessEnabled Boolean   @default(false)
+  firstName           String
+  lastName            String
+  email               String
+  phone               String?
+  password            String // bcrypt hash
+  role                String    @default("employee") // admin | supervisor | employee
+  status              String    @default("active") // active | inactive
   // Login-only accounts (e.g. branch managers who are not staff): can sign
   // in and use their scoped portal, but are excluded from attendance,
   // leave, rosters, reports, payroll, and seat counts. Cannot punch.
-  loginOnly      Boolean   @default(false)
-  position       String?
-  salary         Float?
-  joiningDate    DateTime?
-  profilePicture String?
-  lastLoginAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime @updatedAt
+  loginOnly           Boolean   @default(false)
+  position            String?
+  salary              Float?
+  joiningDate         DateTime?
+  profilePicture      String?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   // Bank details for bulk salary file generation.
-  bankName       String?
-  accountNumber  String?
-  ifscCode       String?
+  bankName      String?
+  accountNumber String?
+  ifscCode      String?
 
   // Statutory identifiers for compliance exports (ECR / Form 16 / 24Q).
-  pan String?
-  uan String?
-  aadhaarNumber String?
-  drivingLicenseNumber String?
+  pan                     String?
+  uan                     String?
+  aadhaarNumber           String?
+  drivingLicenseNumber    String?
   drivingLicenseExpiresAt DateTime?
+
+  // Complete normalized source row from a controlled legacy HR import.
+  // Retains fields not yet represented by dedicated PeopleNexa models.
+  legacyImportData Json?
 
   // Salary structure components (Basic / HRA / Conveyance / Medical / Other).
   salaryStructure Json?
 
   // Reporting line for the org chart.
   managerId String?
-  manager   Employee? @relation("OrgChart", fields: [managerId], references: [id], onDelete: SetNull)
+  manager   Employee?  @relation("OrgChart", fields: [managerId], references: [id], onDelete: SetNull)
   team      Employee[] @relation("OrgChart")
 
   // Pay mode: monthly (default) | daily | weekly | hourly | work_basis.
   // `salary` holds the per-period rate for non-monthly modes (daily wage,
   // weekly wage, hourly rate, or per-day piece rate).
-  payMode       String  @default("monthly")
+  payMode       String @default("monthly")
   workBasisRate Float? // optional per-unit rate for work_basis mode
 
-  taxDeclarations  TaxDeclaration[]
+  taxDeclarations    TaxDeclaration[]
   payrollAdjustments PayrollAdjustment[]
 
-  branchId       String?
-  branch         Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   // Login-only location managers are scoped to every branch in this location.
-  locationId     String?
-  location       Location?   @relation("LocationManagers", fields: [locationId], references: [id], onDelete: SetNull)
-  departmentId   String?
-  department     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  shiftId        String?
-  shift          Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  locationId   String?
+  location     Location?   @relation("LocationManagers", fields: [locationId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  shiftId      String?
+  shift        Shift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
-  attendance      Attendance[]
-  punches         Punch[]
-  leaveRequests   LeaveRequest[]
-  notifications   Notification[]
-  payslips        Payslip[]
-  loans           EmployeeLoan[]
-  assetAssignments AssetAssignment[]
-  corrections     PunchCorrection[]
-  expenseClaims   ExpenseClaim[]
-  locationPings   LocationPing[]
-  documents       Document[]
-  reviews         PerformanceReview[] @relation("ReviewReviewee")
-  reviewsReviewed PerformanceReview[] @relation("ReviewReviewer")
-  feedbackGiven   ReviewFeedback[]
-  ticketsRequested Ticket[]   @relation("TicketRequester")
-  ticketsAssigned Ticket[]   @relation("TicketAssignee")
-  ticketMessages  TicketMessage[]
-  orgPosts        OrgPost[]
-  orgComments     OrgComment[]
+  attendance        Attendance[]
+  punches           Punch[]
+  leaveRequests     LeaveRequest[]
+  notifications     Notification[]
+  payslips          Payslip[]
+  loans             EmployeeLoan[]
+  assetAssignments  AssetAssignment[]
+  corrections       PunchCorrection[]
+  expenseClaims     ExpenseClaim[]
+  locationPings     LocationPing[]
+  documents         Document[]
+  reviews           PerformanceReview[]      @relation("ReviewReviewee")
+  reviewsReviewed   PerformanceReview[]      @relation("ReviewReviewer")
+  feedbackGiven     ReviewFeedback[]
+  ticketsRequested  Ticket[]                 @relation("TicketRequester")
+  ticketsAssigned   Ticket[]                 @relation("TicketAssignee")
+  ticketMessages    TicketMessage[]
+  orgPosts          OrgPost[]
+  orgComments       OrgComment[]
   rosterAssignments RosterAssignment[]
   onboardingTasks   OnboardingTask[]
   exitRequests      ExitRequest[]
@@ -440,18 +444,18 @@ model EmployeeEducation {
 }
 
 model EmployeeWorkExperience {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   employeeId       String
-  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee         Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   employer         String
   jobTitle         String
   startDate        DateTime
   endDate          DateTime?
-  isCurrent        Boolean  @default(false)
+  isCurrent        Boolean   @default(false)
   location         String?
   responsibilities String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([employeeId])
 }
@@ -462,31 +466,31 @@ model EmployeeWorkExperience {
 // (lib/reconcile.ts); in/out times are never edited directly.
 
 model Punch {
-  id         String   @id @default(cuid())
-  tenantId   String
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  deviceId   String?
-  device     Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  id               String          @id @default(cuid())
+  tenantId         String
+  employeeId       String
+  employee         Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deviceId         String?
+  device           Device?         @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   realtimeDeviceId String?
   realtimeDevice   RealtimeDevice? @relation(fields: [realtimeDeviceId], references: [id], onDelete: SetNull)
-  source     String   @default("mobile") // mobile | device | ebioserver | realtime
-  punchTime  DateTime
-  inOutHint  String   @default("unknown") // in | out | unknown (device-reported; weak hint only)
-  lat        Float?
-  lng        Float?
-  selfie     String?
-  faceScore  Float?
-  faceStatus String   @default("none") // none | matched | review | rejected | approved
+  source           String          @default("mobile") // mobile | device | ebioserver | realtime
+  punchTime        DateTime
+  inOutHint        String          @default("unknown") // in | out | unknown (device-reported; weak hint only)
+  lat              Float?
+  lng              Float?
+  selfie           String?
+  faceScore        Float?
+  faceStatus       String          @default("none") // none | matched | review | rejected | approved
   // Attendance authorization for self-service (mobile) punches:
   // auto = reconciled normally; pending = held for admin accept/decline
   // (unenrolled employee while face-match is enabled); approved = admin-
   // authorized, reconciles normally. Device/eBioserver punches stay "auto".
-  authStatus String   @default("auto") // auto | pending | approved
+  authStatus       String          @default("auto") // auto | pending | approved
   // Why a punch is held (pending): no_enrollment | location_mismatch |
   // face_mismatch. Null for auto/approved rows and legacy rows.
-  holdReason String?
-  createdAt  DateTime @default(now())
+  holdReason       String?
+  createdAt        DateTime        @default(now())
 
   @@index([tenantId, employeeId, punchTime])
 }
@@ -513,15 +517,15 @@ model FaceEnrollment {
 // ─── Attendance ────────────────────────────────────────────────────────────
 
 model Attendance {
-  id             String   @id @default(cuid())
-  tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId     String
-  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  branchId       String?
-  branch         Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  shiftId        String?
-  shift          Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branchId   String?
+  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  shiftId    String?
+  shift      Shift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
   date            DateTime
   punchInTime     DateTime?
@@ -533,18 +537,18 @@ model Attendance {
   punchInSelfie   String?
   punchOutSelfie  String?
   status          String // present | late | permission | absent | half_day
-  lateMinutes     Int      @default(0)
-  overtimeMinutes Int      @default(0)
+  lateMinutes     Int       @default(0)
+  overtimeMinutes Int       @default(0)
   note            String?
 
   // Reconciliation layer (Phase 4): the punches snapshot this day was derived
   // from, whether the window has closed (finalized), and any flag raised.
   punches      Json?
-  finalized    Boolean  @default(false)
+  finalized    Boolean @default(false)
   reviewStatus String? // needs_review | missed_punch | null
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([employeeId, date])
   @@index([tenantId, date])
@@ -554,16 +558,16 @@ model Attendance {
 // ─── Leaves ────────────────────────────────────────────────────────────────
 
 model LeaveType {
-  id               String  @id @default(cuid())
+  id               String   @id @default(cuid())
   tenantId         String
-  tenant           Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name             String
   code             String
   maxDays          Int
-  isCarryForward   Boolean @default(false)
-  requiresApproval Boolean @default(true)
-  color            String  @default("#3b82f6")
-  encashable       Boolean @default(false) // unused balance is paid out (F&F / year-end)
+  isCarryForward   Boolean  @default(false)
+  requiresApproval Boolean  @default(true)
+  color            String   @default("#3b82f6")
+  encashable       Boolean  @default(false) // unused balance is paid out (F&F / year-end)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -607,23 +611,23 @@ model Holiday {
 // approve/reject. On approval the attendance row is updated + reconciled.
 
 model PunchCorrection {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId    String
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  date          DateTime // the day being corrected
-  currentIn     DateTime?
-  currentOut    DateTime?
-  requestedIn   DateTime?
-  requestedOut  DateTime?
-  reason        String
-  status        String   @default("pending") // pending | approved | rejected
-  reviewNote    String?
-  reviewedBy    String? // admin employee id
-  reviewedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date         DateTime // the day being corrected
+  currentIn    DateTime?
+  currentOut   DateTime?
+  requestedIn  DateTime?
+  requestedOut DateTime?
+  reason       String
+  status       String    @default("pending") // pending | approved | rejected
+  reviewNote   String?
+  reviewedBy   String? // admin employee id
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([tenantId, status])
   @@index([employeeId, date])
@@ -634,23 +638,23 @@ model PunchCorrection {
 // and settle. Advances (EmployeeLoan) can be marked as settled against these.
 
 model ExpenseClaim {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employeeId  String
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   title       String
-  category    String   @default("travel") // travel | food | fuel | mobile | medical | other
+  category    String    @default("travel") // travel | food | fuel | mobile | medical | other
   amount      Float
   description String?
   receiptUrl  String? // data URL (same pattern as punch selfies)
-  status      String   @default("pending") // pending | approved | rejected | settled
+  status      String    @default("pending") // pending | approved | rejected | settled
   reviewNote  String?
   reviewedBy  String?
   reviewedAt  DateTime?
   settledAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([tenantId, status])
   @@index([employeeId])
@@ -659,56 +663,56 @@ model ExpenseClaim {
 // ─── Payroll / Payslips ────────────────────────────────────────────────────
 
 model Payslip {
-  id         String   @id @default(cuid())
-  tenantId   String
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  month      String // "2026-08"
-  baseSalary Float
-  basicSalary Float   @default(0) // PF / gratuity wage base used by the payroll engine
-  allowances Float    @default(0)
+  id          String   @id @default(cuid())
+  tenantId    String
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  month       String // "2026-08"
+  baseSalary  Float
+  basicSalary Float    @default(0) // PF / gratuity wage base used by the payroll engine
+  allowances  Float    @default(0)
 
   // Earnings breakdown
-  overtimePay  Float @default(0)
+  overtimePay   Float @default(0)
   grossEarnings Float @default(0)
-  gratuity     Float @default(0) // employer contribution (4.81% of basic)
+  gratuity      Float @default(0) // employer contribution (4.81% of basic)
 
   // Deduction breakdown (all monthly)
-  pfEmployee     Float @default(0)
-  pfEmployer     Float @default(0)
-  esicEmployee   Float @default(0)
-  esicEmployer   Float @default(0)
+  pfEmployee      Float @default(0)
+  pfEmployer      Float @default(0)
+  esicEmployee    Float @default(0)
+  esicEmployer    Float @default(0)
   professionalTax Float @default(0)
-  lwf            Float @default(0)
-  tds            Float @default(0)
-  lateFines      Float @default(0)
-  loanDeduction  Float @default(0)
+  lwf             Float @default(0)
+  tds             Float @default(0)
+  lateFines       Float @default(0)
+  loanDeduction   Float @default(0)
   absentDeduction Float @default(0)
-  workingDays    Int   @default(0)
-  divisorUsed    Float @default(26)
-  onLeaveDays    Float @default(0)
-  deductions     Float // total deducted (incl. statutory + fines + loans)
+  workingDays     Int   @default(0)
+  divisorUsed     Float @default(26)
+  onLeaveDays     Float @default(0)
+  deductions      Float // total deducted (incl. statutory + fines + loans)
 
   // Manual adjustments (arrears / bonus / one-off deductions).
-  adjustments    Json?
+  adjustments Json?
 
   // Attendance inputs that drove the calculation
-  presentDays    Int    @default(0)
-  lateDays       Int    @default(0)
-  halfDays       Int    @default(0)
-  absentDays     Int    @default(0)
-  overtimeHours  Float  @default(0)
-  workedHours    Float  @default(0)
+  presentDays   Int   @default(0)
+  lateDays      Int   @default(0)
+  halfDays      Int   @default(0)
+  absentDays    Int   @default(0)
+  overtimeHours Float @default(0)
+  workedHours   Float @default(0)
 
-  netSalary Float
-  status    String   @default("draft") // draft | paid
-  note      String?
+  netSalary  Float
+  status     String    @default("draft") // draft | paid
+  note       String?
   // Payout tracking (bulk/online/offline payment reconciliation).
-  paidVia     String?   // cash | upi | bank | other
-  paidAt      DateTime?
-  paymentRef  String?   // bank UTR / batch id / offline receipt no.
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  paidVia    String? // cash | upi | bank | other
+  paidAt     DateTime?
+  paymentRef String? // bank UTR / batch id / offline receipt no.
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@unique([employeeId, month])
   @@index([tenantId, month])
@@ -722,11 +726,11 @@ model CashbookEntry {
   id          String   @id @default(cuid())
   tenantId    String
   date        DateTime
-  type        String   // cash_in | cash_out
-  category    String   // salary | advance | vendor | expense | other
+  type        String // cash_in | cash_out
+  category    String // salary | advance | vendor | expense | other
   amount      Float
   note        String?
-  paymentMode String?  // cash | upi | bank | other
+  paymentMode String? // cash | upi | bank | other
   createdBy   String?
   createdAt   DateTime @default(now())
 
@@ -740,35 +744,35 @@ model CashbookEntry {
 // idempotent across payroll runs.
 
 model EmployeeLoan {
-  id               String   @id @default(cuid())
-  tenantId         String
-  employeeId       String
-  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  type             String   @default("advance") // advance | loan
-  amount           Float
-  outstanding      Float
-  emiCount         Int      @default(1)
-  emiAmount        Float    @default(0)
-  startMonth       String // "2026-08" — first month a deduction applies
+  id                String   @id @default(cuid())
+  tenantId          String
+  employeeId        String
+  employee          Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type              String   @default("advance") // advance | loan
+  amount            Float
+  outstanding       Float
+  emiCount          Int      @default(1)
+  emiAmount         Float    @default(0)
+  startMonth        String // "2026-08" — first month a deduction applies
   lastDeductedMonth String?
-  status           String   @default("active") // active | closed
-  note             String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  status            String   @default("active") // active | closed
+  note              String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@index([tenantId, employeeId])
 }
 
 model EmployeeDeviceAccess {
-  id         String   @id @default(cuid())
-  tenantId   String
-  employeeId String
-  deviceId   String
-  allowed    Boolean  @default(true)
-  commandStatus String @default("unverified") // pending | sent | failed | unverified
+  id            String    @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  deviceId      String
+  allowed       Boolean   @default(true)
+  commandStatus String    @default("unverified") // pending | sent | failed | unverified
   lastCommandAt DateTime?
-  lastError String?
-  createdAt  DateTime @default(now())
+  lastError     String?
+  createdAt     DateTime  @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
@@ -781,19 +785,19 @@ model EmployeeDeviceAccess {
 // ─── Asset tracking ────────────────────────────────────────────────────────
 
 model Asset {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name         String
-  category     String   @default("other") // laptop | phone | id_card | vehicle | device | furniture | other
+  category     String    @default("other") // laptop | phone | id_card | vehicle | device | furniture | other
   tag          String? // asset tag, e.g. AST-001
   serialNumber String?
   value        Float?
   purchaseDate DateTime?
-  status       String   @default("available") // available | assigned | maintenance | retired | lost
+  status       String    @default("available") // available | assigned | maintenance | retired | lost
   notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   assignments AssetAssignment[]
 
@@ -856,20 +860,20 @@ model LocationPing {
 // ─── Document management (visa/passport/Aadhaar, expiry alerts) ────────────
 
 model Document {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId  String
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  name        String // e.g. "Passport", "Aadhaar card"
-  docType     String   @default("other") // passport | visa | aadhaar | pan | license | other
-  number      String? // document number (masked in views)
-  issuedDate  DateTime?
-  expiryDate  DateTime?
-  fileUrl     String? // data URL (image/PDF)
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(cuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  name       String // e.g. "Passport", "Aadhaar card"
+  docType    String    @default("other") // passport | visa | aadhaar | pan | license | other
+  number     String? // document number (masked in views)
+  issuedDate DateTime?
+  expiryDate DateTime?
+  fileUrl    String? // data URL (image/PDF)
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([tenantId, expiryDate])
   @@index([employeeId])
@@ -888,25 +892,26 @@ model Kpi {
   createdAt   DateTime @default(now())
 
   scores ReviewScore[]
+
   @@index([tenantId])
 }
 
 model PerformanceReview {
-  id          String    @id @default(cuid())
-  tenantId    String
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId  String
-  employee    Employee  @relation("ReviewReviewee", fields: [employeeId], references: [id], onDelete: Cascade)
-  reviewerId  String? // manager/admin who completes it
-  reviewer    Employee? @relation("ReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
-  period      String // e.g. "Q3 2026" or "H2 2026"
-  status      String    @default("draft") // draft | self_done | completed
-  selfSummary String?
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee  @relation("ReviewReviewee", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewerId     String? // manager/admin who completes it
+  reviewer       Employee? @relation("ReviewReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  period         String // e.g. "Q3 2026" or "H2 2026"
+  status         String    @default("draft") // draft | self_done | completed
+  selfSummary    String?
   managerSummary String?
-  overallRating Int? // 1–5
-  dueDate     DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  overallRating  Int? // 1–5
+  dueDate        DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   scores    ReviewScore[]
   feedbacks ReviewFeedback[]
@@ -916,28 +921,28 @@ model PerformanceReview {
 }
 
 model ReviewScore {
-  id            String           @id @default(cuid())
-  reviewId      String
-  review        PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  kpiId         String
-  kpi           Kpi              @relation(fields: [kpiId], references: [id], onDelete: Cascade)
-  selfScore     Int?
-  managerScore  Int?
+  id             String            @id @default(cuid())
+  reviewId       String
+  review         PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  kpiId          String
+  kpi            Kpi               @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+  selfScore      Int?
+  managerScore   Int?
   managerComment String?
-  updatedAt     DateTime         @updatedAt
+  updatedAt      DateTime          @updatedAt
 
   @@unique([reviewId, kpiId])
 }
 
 model ReviewFeedback {
-  id        String           @id @default(cuid())
+  id        String            @id @default(cuid())
   reviewId  String
   review    PerformanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   raterId   String // employee who gave the feedback (peer 360°)
-  rater     Employee         @relation(fields: [raterId], references: [id], onDelete: Cascade)
+  rater     Employee          @relation(fields: [raterId], references: [id], onDelete: Cascade)
   comment   String
   rating    Int? // 1–5 optional
-  createdAt DateTime         @default(now())
+  createdAt DateTime          @default(now())
 
   @@index([reviewId])
 }
@@ -962,6 +967,7 @@ model Ticket {
   resolvedAt  DateTime?
 
   messages TicketMessage[]
+
   @@index([tenantId, status])
   @@index([requesterId])
 }
@@ -981,17 +987,18 @@ model TicketMessage {
 // ─── Org feed (announcements + posts + comments) ───────────────────────────
 
 model OrgPost {
-  id        String       @id @default(cuid())
-  tenantId  String
-  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  authorId  String
-  author    Employee     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  body      String
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         Employee @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body           String
   isAnnouncement Boolean  @default(false)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   comments OrgComment[]
+
   @@index([tenantId, createdAt])
 }
 
@@ -1061,28 +1068,28 @@ model OnboardingTask {
   completedAt DateTime?
   createdAt   DateTime  @default(now())
 
-  @@index([tenantId, employeeId])
   @@unique([tenantId, employeeId, name])
+  @@index([tenantId, employeeId])
 }
 
 // ─── Exit management (resignation → full & final) ──────────────────────────
 
 model ExitRequest {
-  id             String   @id @default(cuid())
-  tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employeeId     String
-  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  reason         String
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reason          String
   resignationDate DateTime
   lastWorkingDay  DateTime
-  status         String   @default("pending") // pending | approved | completed | cancelled
-  note           String?
-  reviewedBy     String?
-  reviewedAt     DateTime?
-  fAndF          Json? // computed full & final summary
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  status          String    @default("pending") // pending | approved | completed | cancelled
+  note            String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  fAndF           Json? // computed full & final summary
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([tenantId, status])
 }
@@ -1152,7 +1159,7 @@ model PayrollAdjustment {
 // code default; modules, when non-empty, replaces the plan's module set.
 
 model PlanOverride {
-  planKey            String    @id
+  planKey            String   @id
   label              String?
   pricePerSeat       Int?
   annualPricePerSeat Int?
@@ -1160,7 +1167,7 @@ model PlanOverride {
   seats              Int?
   modules            String[]
   updatedBy          String?
-  updatedAt          DateTime  @updatedAt
+  updatedAt          DateTime @updatedAt
 }
 
 // ─── Audit log (branch-wise login + mutation trail) ────────────────────────
