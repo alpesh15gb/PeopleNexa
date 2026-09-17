@@ -6,6 +6,7 @@ import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { ReportControls } from "./report-controls";
 import { DeviceTables } from "./device-tables";
 import Link from "next/link";
+import { Download } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,20 @@ export default async function AdminReportsPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Reports" description="Attendance reports with Excel and print" actions={<Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Punch Details</Link>} />
+      <PageHeader
+        title="Reports"
+        description="Attendance reports with Excel and print"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {session.role === "admin" && (
+              <a href="/api/reports/master-data" className="inline-flex items-center gap-2 rounded-lg border border-edge bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-tint">
+                <Download className="h-4 w-4" aria-hidden="true" /> Download master data
+              </a>
+            )}
+            <Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Punch Details</Link>
+          </div>
+        }
+      />
       <Card>
         <CardContent className="p-5">
           <ReportControls
