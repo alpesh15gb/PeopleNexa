@@ -12,6 +12,7 @@ export async function renderIdCardPdf(employee: IdCardData): Promise<Buffer> {
   const width = 153; const height = 244;
   const [front, back] = await Promise.all([readFile(path.join(process.cwd(), "public", "id-cards", "1.png")), readFile(path.join(process.cwd(), "public", "id-cards", "2.png"))]);
   const doc = new PDFDocument({ size: [width, height], margin: 0 });
+  doc.registerFont("CanvaSans", path.join(process.cwd(), "canva-sans-regular.otf"));
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
   const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
@@ -22,7 +23,7 @@ export async function renderIdCardPdf(employee: IdCardData): Promise<Buffer> {
   const values = [employee.deviceCode ?? employee.employeeNumber, `${employee.firstName} ${employee.lastName}`.trim(), employee.position ?? "-", date(employee.joiningDate), employee.profile?.bloodGroup ?? "-", employee.phone ?? "-"];
   const labels = ["Emp. ID", "Emp. Name", "Designation", "DOJ", "Blood Group", "Contact"];
   const positions = [134, 145, 164, 183, 196, 207];
-  values.forEach((value, index) => { doc.font("Helvetica-Bold").fontSize(7).fillColor(brown).text(labels[index], 5, positions[index], { width: 47 }); doc.text(`: ${value}`, 52, positions[index], { width: 98, align: "left" }); });
+  values.forEach((value, index) => { doc.font("CanvaSans").fontSize(7).fillColor(brown).text(labels[index], 5, positions[index], { width: 47 }); doc.text(`: ${value}`, 52, positions[index], { width: 98, align: "left" }); });
   doc.addPage({ size: [width, height], margin: 0 }); doc.image(back, 0, 0, { width, height });
   doc.end(); return done;
 }
