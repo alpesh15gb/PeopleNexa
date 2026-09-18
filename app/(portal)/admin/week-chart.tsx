@@ -11,7 +11,7 @@ export function WeekChart({ data }: { data: { day: string; label: string; presen
           const tip = `${d.label}: ${d.present} present, ${d.late} late, ${d.absent} absent`;
           return (
             <div key={d.day} title={tip} className="group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-              <span aria-hidden="true" className="flex h-4 items-center rounded-md border border-edge bg-card px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-foreground shadow-sm motion-safe:opacity-0 motion-safe:group-hover:opacity-100">{total}</span>
+              <span aria-hidden="true" className="flex h-4 items-center rounded-md border border-edge bg-card px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-foreground shadow-sm">{total}</span>
               <div className="flex w-full flex-col-reverse items-center gap-px" style={{ height: `${Math.max((total / max) * 100, 4)}%` }}>
                 <div
                   aria-hidden="true"
