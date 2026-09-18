@@ -54,6 +54,9 @@ export function ClockCard({
   const [faceBasic, setFaceBasic] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Preserve an event identity through an uncertain network failure so a retry
+  // cannot become a second mobile punch.
+  const punchRequestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -226,11 +229,25 @@ export function ClockCard({
         const res = await fetch("/api/attendance/clock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lat, lng, selfie }),
+          body: JSON.stringify({
+            lat,
+            lng,
+            selfie,
+            idempotencyKey: punchRequestIdRef.current ?? (punchRequestIdRef.current = crypto.randomUUID()),
+          }),
         });
         const data = await res.json();
         if (!res.ok) {
+          // A 5xx may have happened after persistence; retain the identity so
+          // the next tap retries that event rather than creating another one.
+          if (res.status < 500) punchRequestIdRef.current = null;
           toast("error", data.error ?? "Failed to clock " + action);
+          return;
+        }
+        punchRequestIdRef.current = null;
+        if (data.duplicate) {
+          toast("info", "This punch was already recorded.");
+          router.refresh();
           return;
         }
         if (data.pendingApproval) {

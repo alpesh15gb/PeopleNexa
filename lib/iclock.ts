@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { createPunchForEvent } from "./punch-idempotency";
 import { reconcileEmployeeDay, punchDayForShift } from "./reconcile";
 import type { Device, Employee } from "@/generated/prisma/client";
 
@@ -58,29 +59,32 @@ export async function handleDevicePunch(
   const existing = await prisma.deviceLog.findFirst({
     where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing) {
+  if (existing?.processed) {
     return { accepted: true, action: "duplicate", logId: existing.id };
   }
 
-  let log;
-  try {
-    log = await prisma.deviceLog.create({
-      data: {
-        tenantId: device.tenantId,
-        deviceId: device.id,
-        rawData: punch.rawLine,
-        userId: punch.userId,
-        punchTime: punch.punchTime,
-        processed: false,
-      },
-    });
-  } catch (error) {
-    if (prismaErrorCode(error) !== "P2002") throw error;
-    const duplicate = await prisma.deviceLog.findFirst({
-      where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
-    });
-    if (duplicate) return { accepted: true, action: "duplicate", logId: duplicate.id };
-    throw error;
+  let log = existing;
+  if (!log) {
+    try {
+      log = await prisma.deviceLog.create({
+        data: {
+          tenantId: device.tenantId,
+          deviceId: device.id,
+          rawData: punch.rawLine,
+          userId: punch.userId,
+          punchTime: punch.punchTime,
+          processed: false,
+        },
+      });
+    } catch (error) {
+      if (prismaErrorCode(error) !== "P2002") throw error;
+      const duplicate = await prisma.deviceLog.findFirst({
+        where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
+      });
+      if (!duplicate) throw error;
+      if (duplicate.processed) return { accepted: true, action: "duplicate", logId: duplicate.id };
+      log = duplicate;
+    }
   }
 
   // 2. Match the immutable device enrollment code first. Employee Code is a
@@ -98,31 +102,22 @@ export async function handleDevicePunch(
     return { accepted: true, action: "no_employee", logId: log.id };
   }
 
-  // 3. Append the normalized punch (dedupe ±60s, same as reconciliation).
-  const near = await prisma.punch.findFirst({
-    where: {
-      employeeId: employee.id,
-      punchTime: { gte: new Date(punch.punchTime.getTime() - 60000), lte: new Date(punch.punchTime.getTime() + 60000) },
-    },
-  });
-  if (near) {
-    // Clean dedupe marker — a near-duplicate is expected device behaviour, not
-    // an error, so leave error null (no pollution of the retry queue).
-    await markProcessed(log.id);
-    return { accepted: true, action: "duplicate", logId: log.id };
-  }
-
+  // 3. Append exactly once for this immutable raw-device event. Unlike a time
+  // window this preserves distinct IN/OUT events seconds apart.
   const hint = String(punch.inOutMode ?? "0").trim() === "5" ? "in" : String(punch.inOutMode ?? "0").trim() === "1" ? "out" : "unknown";
-  const created = await prisma.punch.create({
-    data: {
+  const created = await createPunchForEvent({
       tenantId: device.tenantId,
       employeeId: employee.id,
       deviceId: device.id,
       source: "device",
+      eventKey: `device-log:${log.id}`,
       punchTime: punch.punchTime,
       inOutHint: hint,
-    },
   });
+  if (!created.created) {
+    await markProcessed(log.id);
+    return { accepted: true, action: "duplicate", logId: log.id };
+  }
 
   // 4. Re-derive the day.
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
@@ -188,28 +183,20 @@ export async function reprocessFailedLogs(
         continue; // still unmapped — stays flagged
       }
 
-      const near = await prisma.punch.findFirst({
-        where: {
-          employeeId: employee.id,
-          punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
-        },
-      });
-      if (near) {
-        await markProcessed(log.id); // punch exists — just clear the flag, no error pollution
-        counters.duplicate++;
-        continue;
-      }
-
-      await prisma.punch.create({
-        data: {
+      const created = await createPunchForEvent({
           tenantId,
           employeeId: employee.id,
           deviceId: log.deviceId,
           source: "device",
+          eventKey: `device-log:${log.id}`,
           punchTime: log.punchTime,
           inOutHint: "unknown",
-        },
       });
+      if (!created.created) {
+        await markProcessed(log.id);
+        counters.duplicate++;
+        continue;
+      }
 
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       await reconcileWithRetry(

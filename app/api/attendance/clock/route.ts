@@ -7,6 +7,7 @@ import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
 import { describeFace, verifyFace } from "@/lib/face";
+import { createPunchForEvent } from "@/lib/punch-idempotency";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -16,6 +17,10 @@ export async function POST(req: NextRequest) {
   const lat = body.lat != null && body.lat !== "" ? Number(body.lat) : null;
   const lng = body.lng != null && body.lng !== "" ? Number(body.lng) : null;
   const selfie = typeof body.selfie === "string" && body.selfie.length < 500_000 ? body.selfie : null;
+  const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey)) {
+    return NextResponse.json({ error: "A valid punch request ID is required." }, { status: 400 });
+  }
   if ((lat != null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) || (lng != null && (!Number.isFinite(lng) || lng < -180 || lng > 180))) {
     return NextResponse.json({ error: "Location coordinates are invalid." }, { status: 400 });
   }
@@ -84,17 +89,6 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date();
-
-  // 1. Record the immutable punch (dedupe ±60s).
-  const near = await prisma.punch.findFirst({
-    where: {
-      employeeId: employee.id,
-      punchTime: { gte: new Date(now.getTime() - 60000), lte: new Date(now.getTime() + 60000) },
-    },
-  });
-  if (near) {
-    return NextResponse.json({ error: "A punch was already recorded in the last minute." }, { status: 400 });
-  }
 
   // ── Face VERIFY (additive, never blocks pay on ML failure) ──────────────
   // Kill-switch (enabled===false) skips all face logic. No enrollment →
@@ -183,11 +177,11 @@ export async function POST(req: NextRequest) {
         ? "face_mismatch"
         : "no_enrollment";
 
-  const punch = await prisma.punch.create({
-    data: {
+  const created = await createPunchForEvent({
       tenantId: employee.tenantId,
       employeeId: employee.id,
       source: "mobile",
+      eventKey: `mobile:${employee.id}:${idempotencyKey}`,
       punchTime: now,
       inOutHint: "unknown",
       lat,
@@ -197,8 +191,11 @@ export async function POST(req: NextRequest) {
       faceStatus,
       authStatus: needsApproval ? "pending" : "auto",
       holdReason,
-    },
   });
+  const punch = created.punch;
+  if (!created.created) {
+    return NextResponse.json({ success: true, duplicate: true, punch: { id: punch.id, punchTime: punch.punchTime.toISOString() } });
+  }
   await dispatchWebhook(employee.tenantId, "punch.created", {
     employeeId: employee.id,
     punchId: punch.id,

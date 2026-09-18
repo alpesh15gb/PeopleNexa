@@ -617,6 +617,9 @@ model Punch {
   realtimeDeviceId String?
   realtimeDevice   RealtimeDevice? @relation(fields: [realtimeDeviceId], references: [id], onDelete: SetNull)
   source           String          @default("mobile") // mobile | device | ebioserver | realtime
+  // Exact idempotency identity for newly ingested source events. Nullable so
+  // historic and manually corrected punches remain untouched.
+  eventKey         String?         @unique
   punchTime        DateTime
   inOutHint        String          @default("unknown") // in | out | unknown (device-reported; weak hint only)
   lat              Float?

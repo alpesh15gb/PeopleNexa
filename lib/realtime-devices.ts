@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { prisma } from "./prisma";
+import { createPunchForEvent } from "./punch-idempotency";
 import { reconcileEmployeeDay, punchDayForShift } from "./reconcile";
 import type { RealtimeDevice } from "@/generated/prisma/client";
 
@@ -80,27 +81,30 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   const existing = await prisma.realtimeLog.findFirst({
     where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
+  if (existing?.processed) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
 
-  let log;
-  try {
-    log = await prisma.realtimeLog.create({
-      data: {
-        tenantId: device.tenantId,
-        realtimeDeviceId: device.id,
-        rawData: punch.rawLine,
-        userId: punch.userId,
-        punchTime: punch.punchTime,
-        processed: false,
-      },
-    });
-  } catch (error) {
-    if (prismaErrorCode(error) !== "P2002") throw error;
-    const duplicate = await prisma.realtimeLog.findFirst({
-      where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
-    });
-    if (duplicate) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
-    throw error;
+  let log = existing;
+  if (!log) {
+    try {
+      log = await prisma.realtimeLog.create({
+        data: {
+          tenantId: device.tenantId,
+          realtimeDeviceId: device.id,
+          rawData: punch.rawLine,
+          userId: punch.userId,
+          punchTime: punch.punchTime,
+          processed: false,
+        },
+      });
+    } catch (error) {
+      if (prismaErrorCode(error) !== "P2002") throw error;
+      const duplicate = await prisma.realtimeLog.findFirst({
+        where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
+      });
+      if (!duplicate) throw error;
+      if (duplicate.processed) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
+      log = duplicate;
+    }
   }
 
   const employee = await prisma.employee.findFirst({
@@ -115,35 +119,25 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
     return { accepted: true as const, action: "no_employee" as const, logId: log.id };
   }
 
-  const near = await prisma.punch.findFirst({
-    where: {
-      employeeId: employee.id,
-      punchTime: { gte: new Date(punch.punchTime.getTime() - 60000), lte: new Date(punch.punchTime.getTime() + 60000) },
-    },
-  });
-  if (near) {
-    // Clean dedupe marker — expected device behaviour, not an error.
-    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-    return { accepted: true as const, action: "duplicate" as const, logId: log.id };
-  }
-
   const hint =
     String(punch.inOutMode ?? "0").trim() === "5"
       ? "in"
       : String(punch.inOutMode ?? "0").trim() === "1"
         ? "out"
         : "unknown";
-  const created = await prisma.punch.create({
-    data: {
+  const created = await createPunchForEvent({
       tenantId: device.tenantId,
       employeeId: employee.id,
       realtimeDeviceId: device.id,
       source: "realtime",
+      eventKey: `realtime-log:${log.id}`,
       punchTime: punch.punchTime,
       inOutHint: hint,
-    },
   });
-  void created;
+  if (!created.created) {
+    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+    return { accepted: true as const, action: "duplicate" as const, logId: log.id };
+  }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
   const result = await reconcileWithRetry(
@@ -196,27 +190,20 @@ export async function reprocessFailedRealtimeLogs(
         counters.failed++;
         continue;
       }
-      const near = await prisma.punch.findFirst({
-        where: {
-          employeeId: employee.id,
-          punchTime: { gte: new Date(log.punchTime.getTime() - 60000), lte: new Date(log.punchTime.getTime() + 60000) },
-        },
-      });
-      if (near) {
-        await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-        counters.duplicate++;
-        continue;
-      }
-      await prisma.punch.create({
-        data: {
+      const created = await createPunchForEvent({
           tenantId,
           employeeId: employee.id,
           realtimeDeviceId: device.id,
           source: "realtime",
+          eventKey: `realtime-log:${log.id}`,
           punchTime: log.punchTime,
           inOutHint: "unknown",
-        },
       });
+      if (!created.created) {
+        await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+        counters.duplicate++;
+        continue;
+      }
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
