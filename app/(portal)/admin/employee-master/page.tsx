@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
 import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
 import { EmployeeDeviceAccess } from "./employee-device-access";
-import { EmployeeMasterManagement } from "./employee-master-management";
 
 export const dynamic = "force-dynamic";
 
@@ -139,7 +138,6 @@ export default async function EmployeeMasterPage({
         </Card>
       )}
       {isBranchManager && !branchId && <Card><CardContent className="p-6 text-sm text-muted-foreground">Your Branch Manager account has no branch assigned. Ask an administrator to assign your branch before viewing Employee Master.</CardContent></Card>}
-      <EmployeeMasterManagement branches={branches} departments={departments} shifts={shifts} viewerRole={session.role} />
       <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
         <Card className="h-fit xl:sticky xl:top-6">
           <CardHeader>
