@@ -562,11 +562,6 @@ export function computePayroll(
   // Gratuity: employer contribution, 4.81% of basic (Payment of Gratuity Act).
   const gratuity = round2(basic * 0.0481);
 
-  const { employee: pfEmployee, employer: pfEmployer } = calcPF(basic, config);
-  const { employee: esicEmployee, employer: esicEmployer } = calcESIC(gross, config);
-  const pt = config.pt.enabled ? professionalTax(config.pt.state, gross, month) : 0;
-  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, gross, month) : 0;
-  const tds = config.tds.enabled ? calcTDS(gross, config.tds.regime, investments) : 0;
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   // For daily/hourly/work-basis pay, `base` is already pro-rated by attendance —
   // applying an extra absent deduction would deduct twice.
@@ -575,6 +570,18 @@ export function computePayroll(
     config.deductAbsentDays && mode === "monthly" && divisor > 0
       ? round2((base / divisor) * unpaidDayFractions)
       : 0;
+
+  // LOP is displayed separately, but statutory wage bases must reflect the pay
+  // earned after LOP. Allocate LOP across basic and allowances proportionally;
+  // this preserves an explicit salary structure instead of taking all LOP from
+  // basic. Earnings adjustments and overtime retain their existing treatment.
+  const earnedBasic = base > 0 ? round2(Math.max(0, basic - (absentDeduction * basic) / base)) : 0;
+  const earnedGross = round2(Math.max(0, gross - absentDeduction));
+  const { employee: pfEmployee, employer: pfEmployer } = calcPF(earnedBasic, config);
+  const { employee: esicEmployee, employer: esicEmployer } = calcESIC(earnedGross, config);
+  const pt = config.pt.enabled ? professionalTax(config.pt.state, earnedGross, month) : 0;
+  const lwf = config.lwf.enabled ? labourWelfareFund(config.pt.state, earnedGross, month) : 0;
+  const tds = config.tds.enabled ? calcTDS(earnedGross, config.tds.regime, investments) : 0;
 
   // Cap loan deduction so net can never go negative because of loans alone.
   const statutoryAndOther = pfEmployee + esicEmployee + pt + lwf + tds + lateFines + absentDeduction + adj.deductions;

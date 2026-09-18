@@ -11,6 +11,7 @@ import {
   loanDeductionForMonth,
 } from "@/lib/payroll";
 import { appendAudit } from "@/lib/audit";
+import { monthKeyIST } from "@/lib/dates";
 
 /** POST — recompute a single payslip from fresh attendance/adjustments/config (admin). */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -29,6 +30,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (existing.status === "paid") {
     return NextResponse.json({ error: "Paid payslips cannot be regenerated." }, { status: 409 });
+  }
+  if (existing.month < monthKeyIST()) {
+    return NextResponse.json({ error: "Prior-month payslips cannot be regenerated." }, { status: 409 });
   }
 
   const [tenant, employee] = await Promise.all([
