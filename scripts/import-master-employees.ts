@@ -100,6 +100,13 @@ function optionalNumber(value: string | undefined, field: string, rowNumber: num
   return number;
 }
 
+function drivingLicenseType(documentType: string | null, details: string | null): "commercial" | "permanent" | null {
+  if (!documentType?.toLowerCase().includes("licen") || !details) return null;
+  if (/(?:^|\W)(?:tr|transport)(?:\W|$)/i.test(details)) return "commercial";
+  if (/(?:^|\W)(?:nt|non[-\s]?transport)(?:\W|$)/i.test(details)) return "permanent";
+  return null;
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const sourcePath = process.argv.find((argument) => argument.startsWith("--file="))?.slice(7) ?? DEFAULT_FILE;
@@ -141,8 +148,9 @@ async function main() {
       const match = [...candidates.values()][0] ?? null;
       if (match?.deviceCode && match.deviceCode !== deviceCode) throw new Error(`row ${rowNumber}: existing employee has a different immutable device code.`);
       if (match && match.employeeNumber !== employeeNumber && byEmployeeNumber.has(employeeNumber)) throw new Error(`row ${rowNumber}: EmpId already belongs to another employee.`);
-      const licenceType = text(row["ID_Document Type"]);
-      const isLicence = licenceType?.toLowerCase().includes("licen") ?? false;
+       const licenceType = text(row["ID_Document Type"]);
+       const isLicence = licenceType?.toLowerCase().includes("licen") ?? false;
+       const licenceCategory = drivingLicenseType(licenceType, text(row["ID_Licence / Registration Details"]));
       const rawAadhaar = text(row["RPT_Aadhaar Number"])?.replace(/[\s-]/g, "") ?? null;
       const aadhaar = rawAadhaar && /^\d{12}$/.test(rawAadhaar) ? rawAadhaar : null;
       if (rawAadhaar && !aadhaar) warnings.push(`row ${rowNumber}: Aadhaar number retained only in the import snapshot because it is invalid.`);
@@ -178,8 +186,9 @@ async function main() {
           pan,
           uan: text(row["RPT_UAN No"]),
           aadhaarNumber: aadhaar,
-          drivingLicenseNumber: isLicence ? text(row["ID_Registered No"]) : null,
-          drivingLicenseExpiresAt: isLicence ? parseDate(row["ID_Expiry Date"], "ID_Expiry Date", rowNumber) : null,
+           drivingLicenseNumber: isLicence ? text(row["ID_Registered No"]) : null,
+           drivingLicenseType: licenceCategory,
+           drivingLicenseExpiresAt: isLicence ? parseDate(row["ID_Expiry Date"], "ID_Expiry Date", rowNumber) : null,
           legacyImportData: row as Prisma.InputJsonValue,
         },
       });
