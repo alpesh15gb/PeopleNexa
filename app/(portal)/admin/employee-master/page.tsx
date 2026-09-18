@@ -114,14 +114,16 @@ export default async function EmployeeMasterPage({
           workExperience: { orderBy: { startDate: "desc" } },
           documents: { orderBy: { createdAt: "desc" } },
            profile: true,
-           employmentProfile: true,
-           bankAccounts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+            employmentProfile: true,
+            bankAccounts: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+            transfers: { where: { status: "scheduled" }, orderBy: { effectiveDate: "asc" }, take: 1 },
         },
       })
     : null;
   const source = isAdmin && employee?.legacyImportData && typeof employee.legacyImportData === "object" && !Array.isArray(employee.legacyImportData)
     ? employee.legacyImportData as Record<string, unknown>
     : {};
+  const scheduledTransfer = employee?.transfers[0];
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const listHref = (nextPage: number) => `/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(nextPage) })}`;
 
@@ -176,7 +178,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={branches} departments={departments} shifts={shifts} managers={managers} />}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
+                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={branches} departments={departments} shifts={shifts} managers={managers} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: branches.find((branch) => branch.id === scheduledTransfer.destinationBranchId)?.name ?? "selected branch" } : null} />}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
                 </div>
               </CardContent>
             </Card>
