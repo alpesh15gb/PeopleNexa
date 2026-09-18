@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, History, ArrowRightLeft, Undo2, Search, Package } from "lucide-react";
+import { Plus, Pencil, Trash2, History, ArrowRightLeft, Undo2, Search, Package, Upload, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -120,6 +120,9 @@ export function AssetsPanel({
 
   const [deleting, setDeleting] = useState<AssetRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -278,6 +281,19 @@ export function AssetsPanel({
     }
   }
 
+  async function importAssets() {
+    if (!importFile) { toast("error", "Choose a CSV or XLSX file first"); return; }
+    setImportBusy(true);
+    try {
+      const formData = new FormData(); formData.set("file", importFile);
+      const response = await fetch("/api/assets/import", { method: "POST", body: formData }); const data = await response.json();
+      if (!response.ok) { toast("error", data.error ?? "Asset import failed"); return; }
+      toast(data.skipped ? "info" : "success", `${data.created} assets imported${data.assigned ? `, ${data.assigned} assigned` : ""}${data.skipped ? `, ${data.skipped} skipped` : ""}`);
+      if (data.errors?.length) toast("info", data.errors[0]);
+      setImportOpen(false); setImportFile(null); router.refresh();
+    } finally { setImportBusy(false); }
+  }
+
   return (
     <>
       {/* Stats */}
@@ -319,6 +335,8 @@ export function AssetsPanel({
         <Button size="sm" onClick={openCreate}>
           <Plus className="h-3.5 w-3.5" /> Add asset
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}><Upload className="h-3.5 w-3.5" /> Import</Button>
+        <Button size="sm" variant="ghost" onClick={() => window.location.assign("/api/assets?format=csv")}><Download className="h-3.5 w-3.5" /> Report</Button>
       </div>
 
       {/* Table */}
@@ -386,7 +404,7 @@ export function AssetsPanel({
                 <TD><StatusPill status={a.status} /></TD>
                 <TD>
                   <div className="flex items-center gap-1.5">
-                    {a.status !== "assigned" ? (
+                    {a.status === "available" ? (
                       <Button size="sm" variant="outline" onClick={() => { setAssigning(a); setAssignEmp(""); setAssignNote(""); }}>
                         <ArrowRightLeft className="h-3.5 w-3.5" /> Assign
                       </Button>
@@ -464,6 +482,15 @@ export function AssetsPanel({
               {editing ? "Save changes" : "Add asset"}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import assets" description="Upload a CSV or XLSX inventory file. Existing asset tags are skipped.">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Required: <strong>Name</strong> or <strong>Asset Name</strong>. Optional columns: Category, Asset Tag, Serial Number, Value, Purchase Date, Status, Notes, Employee Number.</p>
+          <p className="text-xs text-muted-foreground">Use an active Employee Number to create the assignment during import. Purchase dates accept DD/MM/YYYY.</p>
+          <Input type="file" accept=".csv,.xlsx" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} />
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button><Button loading={importBusy} onClick={importAssets}><Upload className="h-3.5 w-3.5" /> Import assets</Button></div>
         </div>
       </Modal>
 

@@ -14,8 +14,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!asset) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   }
-  if (asset.status === "assigned") {
-    return NextResponse.json({ error: "This asset is already assigned. Return it first." }, { status: 400 });
+  if (asset.status !== "available") {
+    return NextResponse.json({ error: "Only available assets can be assigned. Return it or mark it available first." }, { status: 400 });
   }
 
   const body = await req.json();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { formatDateIST } from "@/lib/dates";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status") || undefined;
   const category = req.nextUrl.searchParams.get("category") || undefined;
   const q = req.nextUrl.searchParams.get("q")?.trim() || undefined;
+  const format = req.nextUrl.searchParams.get("format");
 
   const assets = await prisma.asset.findMany({
     where: {
@@ -56,6 +58,11 @@ export async function GET(req: NextRequest) {
     }
   }
   counts.total = (await prisma.asset.count({ where: { tenantId: session.tenantId } }));
+  if (format === "csv") {
+    const quote = (value: unknown) => { const text = value == null ? "" : String(value); return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+    const lines = ["Asset Name,Category,Asset Tag,Serial Number,Value,Purchase Date,Status,Assignee,Employee Number,Assigned Date,Notes", ...assets.map((asset) => [asset.name, asset.category, asset.tag, asset.serialNumber, asset.value, formatDateIST(asset.purchaseDate), asset.status, asset.assignments[0]?.employee ? `${asset.assignments[0].employee.firstName} ${asset.assignments[0].employee.lastName}` : "", asset.assignments[0]?.employee?.employeeNumber, formatDateIST(asset.assignments[0]?.assignedAt), asset.notes].map(quote).join(","))];
+    return new NextResponse(lines.join("\r\n") + "\r\n", { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="asset-inventory-report.csv"' } });
+  }
 
   return NextResponse.json({
     assets: assets.map((a) => ({
