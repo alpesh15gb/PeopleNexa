@@ -31,7 +31,7 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   box(y, 104); doc.font("Helvetica-Bold").fontSize(8).text("EMPLOYEE DETAILS", left, y + 4, { width, align: "center" }); doc.moveTo(left, y + 17).lineTo(right, y + 17).stroke();
   const e = data.employee;
   label(left + 8, y + 26, "Employee name:", `${e.firstName} ${e.lastName}`.trim()); label(left + 285, y + 26, "Employee ID:", e.deviceCode ?? e.employeeNumber);
-  label(left + 8, y + 43, "Designation:", e.position ?? "-"); label(left + 285, y + 43, "Date of joining:", e.joiningDate ? new Intl.DateTimeFormat("en-IN").format(e.joiningDate) : "-");
+  label(left + 8, y + 43, "Designation:", e.position ?? "-"); label(left + 285, y + 43, "Date of joining:", e.joiningDate ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(e.joiningDate) : "-");
   label(left + 8, y + 60, "Department:", e.department?.name ?? "-"); label(left + 285, y + 60, "Employee Code:", e.employeeNumber);
   label(left + 8, y + 77, "UAN:", e.uan ?? "-"); label(left + 285, y + 77, "A/C no.:", e.accountNumber ?? "-");
   label(left + 8, y + 94, "Bank name:", e.bankName ?? "-"); label(left + 285, y + 94, "PAN:", e.pan ?? "-"); y += 112;

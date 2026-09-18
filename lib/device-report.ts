@@ -74,11 +74,11 @@ export function formatHHMM(totalMinutes: number): string {
 
 const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "2026-08-12" → "12-Aug-2026". */
+/** "2026-08-12" → "12/08/2026". */
 export function formatDayLabel(dayKey: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
   if (!m) return dayKey;
-  return `${m[3]}-${MON3[Number(m[2]) - 1] ?? m[2]}-${m[1]}`;
+  return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
 /** "2026-08" → "Aug-2026". */
@@ -486,14 +486,14 @@ export function dowLetter(dayKey: string): string {
   return DOW_LETTERS[dow] ?? "";
 }
 
-/** "2026-09-01" → "Sep 01 2026". */
+/** "2026-09-01" → "01/09/2026". */
 export function formatMonDDYYYY(dayKey: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
   if (!m) return dayKey;
-  return `${MON3[Number(m[2]) - 1] ?? m[2]} ${m[3]} ${m[1]}`;
+  return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
-/** "2026-09" → "Sep 01 2026 To Sep 30 2026". */
+/** "2026-09" → "01/09/2026 To 30/09/2026". */
 export function formatRangeLabel(monthKey: string): string {
   const days = monthDays(monthKey);
   if (days.length === 0) return formatMonthLabel(monthKey);

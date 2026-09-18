@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
+import { formatDate } from "@/lib/dates";
 
 type Msg = { id: string; sender: { id: string; firstName: string; lastName: string; role: string }; body: string; createdAt: string };
 type Ticket = {
@@ -133,7 +134,7 @@ export default function EmployeeHelpdeskPage() {
               <button onClick={() => setOpenId(openId === t.id ? null : t.id)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-medium">{t.subject}</p>
-                  <p className="text-[11.5px] text-muted-foreground">{t.category} · {new Date(t.createdAt).toLocaleDateString()}</p>
+                  <p className="text-[11.5px] text-muted-foreground">{t.category} · {formatDate(new Date(t.createdAt))}</p>
                 </div>
                 <Badge tone={tone[t.status] ?? "neutral"} className="capitalize">{t.status.replace("_", " ")}</Badge>
               </button>

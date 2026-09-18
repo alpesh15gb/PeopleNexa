@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/dates";
 
 export interface EnrollmentStatus {
   status: "enrolled" | "none";
@@ -189,7 +190,7 @@ export function EnrollPanel({
               {enrolled
                 ? `Enrolled · ${enrollment.sampleCount} samples` +
                   (enrollment.consentedAt
-                    ? ` · consent given ${new Date(enrollment.consentedAt).toLocaleDateString("en-IN")}`
+                    ? ` · consent given ${formatDate(new Date(enrollment.consentedAt))}`
                     : "")
                 : "You have not enrolled Face ID yet."}
             </CardDescription>

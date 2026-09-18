@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
-import { dayRangeIST, isDateKey } from "@/lib/dates";
-import { istDateKey } from "@/lib/ist";
+import { dayRangeIST, formatDateIST, isDateKey } from "@/lib/dates";
 
 const ALLOWED_ROLES = ["admin", "supervisor", "branch_manager", "location_manager"] as const;
 
@@ -182,7 +181,7 @@ export async function GET(req: NextRequest) {
         designation: row.employee.position ?? "",
         branch: row.employee.branch?.name ?? "",
         department: row.employee.department?.name ?? "",
-        date: istDateKey(row.date),
+        date: formatDateIST(row.date),
         deviceIn: row.deviceIn?.name ?? "",
         inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
         deviceOut: row.deviceOut?.name ?? "",

@@ -12,6 +12,7 @@ import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
+import { formatDate } from "@/lib/dates";
 
 interface Employee {
   id: string;
@@ -85,7 +86,7 @@ const PAID_VIA_OPTIONS = [
 function formatPaidMeta(p: Pick<Payslip, "paidVia" | "paidAt" | "paymentRef">): string | null {
   if (!p.paidVia && !p.paidAt) return null;
   const date = p.paidAt
-    ? new Date(p.paidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    ? formatDate(new Date(p.paidAt))
     : null;
   const via = p.paidVia ? `via ${p.paidVia}` : null;
   return [via, date].filter(Boolean).join(" · ");

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
+import { formatDateIST } from "@/lib/dates";
 
 const HEADERS = [
   "employeeNumber", "deviceCode", "firstName", "lastName", "email", "phone", "position", "salary", "joiningDate",
@@ -26,8 +27,8 @@ export async function GET() {
   });
   const rows = employees.map((employee) => [
     employee.employeeNumber, employee.deviceCode, employee.firstName, employee.lastName, employee.email, employee.phone, employee.position, employee.salary,
-    employee.joiningDate ? employee.joiningDate.toISOString().slice(0, 10) : "", employee.branch?.name, employee.department?.name, employee.shiftId,
-    employee.payMode, employee.workBasisRate, employee.managerId, employee.status, employee.bankName, employee.accountNumber, employee.ifscCode, employee.pan, employee.uan, employee.aadhaarNumber, employee.drivingLicenseNumber, employee.drivingLicenseExpiresAt ? employee.drivingLicenseExpiresAt.toISOString().slice(0, 10) : "",
+    formatDateIST(employee.joiningDate), employee.branch?.name, employee.department?.name, employee.shiftId,
+    employee.payMode, employee.workBasisRate, employee.managerId, employee.status, employee.bankName, employee.accountNumber, employee.ifscCode, employee.pan, employee.uan, employee.aadhaarNumber, employee.drivingLicenseNumber, formatDateIST(employee.drivingLicenseExpiresAt),
   ].map(cell).join(","));
   const csv = [HEADERS.join(","), ...rows].join("\r\n") + "\r\n";
   return new NextResponse(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="employees-export.csv"' } });

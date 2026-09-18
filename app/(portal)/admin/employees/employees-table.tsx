@@ -10,7 +10,6 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
 
 interface Option {
   id: string;
@@ -556,7 +555,7 @@ export function EmployeesTable({
               </Field>
             )}
             <Field label="Joining date">
-              <Input name="joiningDate" type="date" defaultValue={editing?.joiningDate ? formatDate(editing.joiningDate) : ""} />
+              <Input name="joiningDate" type="date" defaultValue={dateKey(editing?.joiningDate ?? null)} />
             </Field>
             {!restricted && (
               <Field label="Bank name">
@@ -590,7 +589,7 @@ export function EmployeesTable({
               <Input name="drivingLicenseNumber" defaultValue={editing?.drivingLicenseNumber ?? ""} placeholder="e.g. DL0120110012345" />
             </Field>
             <Field label="Driving License Expiry">
-              <Input name="drivingLicenseExpiresAt" type="date" defaultValue={editing?.drivingLicenseExpiresAt ? formatDate(editing.drivingLicenseExpiresAt) : ""} />
+              <Input name="drivingLicenseExpiresAt" type="date" defaultValue={dateKey(editing?.drivingLicenseExpiresAt ?? null)} />
             </Field>
             {!restricted && (
               <Field label="Pay mode" hint="How this employee is paid">

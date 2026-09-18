@@ -9,7 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { todayKey } from "@/lib/dates";
+import { formatDateIST, todayKey } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
 
 type Correction = {
@@ -108,7 +108,7 @@ export function CorrectionsPanel({
           {corrections.map((c) => (
             <div key={c.id} className="flex flex-wrap items-center gap-3 py-3">
               <span className="font-mono text-[12.5px] text-muted-foreground">
-                {new Date(c.date).toISOString().slice(0, 10)}
+                {formatDateIST(c.date)}
               </span>
               <span className="text-[12.5px] text-muted-foreground">
                 {t(lang, "corrections.requested")}:{" "}
