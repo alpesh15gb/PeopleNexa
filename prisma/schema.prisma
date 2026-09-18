@@ -913,6 +913,7 @@ model EmployeeDeviceAccess {
   allowed       Boolean   @default(true)
   commandStatus String    @default("unverified") // pending | sent | failed | unverified
   lastCommandAt DateTime?
+  lastResponse  String?
   lastError     String?
   createdAt     DateTime  @default(now())
 

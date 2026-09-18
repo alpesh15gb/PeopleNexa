@@ -6,6 +6,7 @@ import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { startOfDay, toDateKey } from "@/lib/dates";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
+import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 
 /** PATCH — { action: "approve" | "reject" | "complete" | "cancel", note? } */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -179,12 +180,21 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       before: { status: "approved" },
       after: { status: "completed" },
     });
-    // Disable portal/device policy access. Physical device commands are handled
-    // separately by the device-access workflow and must be verified there.
-    await prisma.$transaction([
-      prisma.employee.updateMany({ where: { id: request.employeeId, tenantId: session.tenantId }, data: { status: "inactive", deviceAccessEnabled: false } }),
-      prisma.employeeDeviceAccess.deleteMany({ where: { employeeId: request.employeeId } }),
-    ]);
+    // Retain per-device policies; lifecycle enforcement below records each
+    // physical block result instead of erasing the evidence.
+    await prisma.employee.updateMany({ where: { id: request.employeeId, tenantId: session.tenantId }, data: { status: "inactive", deviceAccessEnabled: false } });
+    const deviceResults = await enforceEbioEmployeeAccess(session.tenantId, request.employeeId, false);
+    const deviceFailures = deviceResults.filter((result) => result.status === "failed");
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: "exit.device_access.block",
+      entity: "Employee",
+      entityId: request.employeeId,
+      summary: `${request.employee.firstName} ${request.employee.lastName}: block sent to ${deviceResults.length} active eBio device(s)${deviceFailures.length ? `; ${deviceFailures.length} failed` : ""}`,
+      after: { allowed: false, results: deviceResults },
+    });
     // Unassign active assets: AssetAssignment has no tenantId, so scope via asset relation.
     const activeAssignments = await prisma.assetAssignment.findMany({
       where: { employeeId: request.employeeId, returnedAt: null },

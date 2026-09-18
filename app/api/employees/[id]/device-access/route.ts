@@ -19,17 +19,22 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const locationId = await locationIdFor(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const locationScope = locationId ? { branch: { locationId } } : {};
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true, deviceAccessEnabled: true } });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true, deviceAccessEnabled: true, status: true } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
   const [devices, access] = await Promise.all([
     prisma.device.findMany({ where: { tenantId: session.tenantId, status: "active", config: { path: ["ebioserver"], equals: true }, ...locationScope }, select: { id: true, name: true, serialNumber: true }, orderBy: { name: "asc" } }),
-    prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId }, select: { deviceId: true, allowed: true, commandStatus: true, lastCommandAt: true, lastError: true } }),
+    prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId }, select: { deviceId: true, allowed: true, commandStatus: true, lastCommandAt: true, lastResponse: true, lastError: true } }),
   ]);
   const state = new Map(access.map((row) => [row.deviceId, row]));
   return NextResponse.json({
     deviceCode: employee.deviceCode,
     enabled: employee.deviceAccessEnabled,
-    devices: devices.map((device) => ({ ...device, ...(state.get(device.id) ?? { allowed: false, commandStatus: employee.deviceAccessEnabled ? "pending" : "unrestricted", lastCommandAt: null, lastError: null }) })),
+    status: employee.status,
+    mode: employee.status === "inactive" ? "blocked" : employee.deviceAccessEnabled ? "restricted" : "all",
+    devices: devices.map((device) => {
+      const policy = state.get(device.id) ?? { allowed: employee.status === "active" && !employee.deviceAccessEnabled, commandStatus: employee.status === "inactive" ? "pending" : employee.deviceAccessEnabled ? "pending" : "unrestricted", lastCommandAt: null, lastResponse: null, lastError: null };
+      return { ...device, ...policy, blocked: !policy.allowed };
+    }),
     deviceIds: access.filter((row) => row.allowed && devices.some((device) => device.id === row.deviceId)).map((row) => row.deviceId),
   });
 }
@@ -46,8 +51,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const locationId = await locationIdFor(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const locationScope = locationId ? { branch: { locationId } } : {};
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true } });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true, status: true } });
   if (!employee?.deviceCode) return NextResponse.json({ error: "Employee needs a Device Code before device access can be managed." }, { status: 400 });
+  if (employee.status !== "active") return NextResponse.json({ error: "Inactive employees are blocked on all active eBio devices and cannot be granted device access." }, { status: 409 });
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   if (!tenant) return NextResponse.json({ error: "not found" }, { status: 404 });
   const profile = getEbioserverConfig(tenant);
@@ -63,21 +69,29 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   // accepts the command. An empty eBio response means command sent, not verified.
   await prisma.$transaction([
     prisma.employee.update({ where: { id }, data: { deviceAccessEnabled: body.mode === "restricted" } }),
-    prisma.employeeDeviceAccess.deleteMany({ where: { employeeId: id, tenantId: session.tenantId, ...(session.role === "location_manager" ? { deviceId: { in: devices.map((device) => device.id) } } : {}) } }),
-    ...(body.mode === "restricted" ? [prisma.employeeDeviceAccess.createMany({ data: devices.map((device) => ({ tenantId: session.tenantId, employeeId: id, deviceId: device.id, allowed: selected.has(device.id), commandStatus: "pending" })) })] : []),
+    ...devices.map((device) => prisma.employeeDeviceAccess.upsert({
+      where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } },
+      create: { tenantId: session.tenantId, employeeId: id, deviceId: device.id, allowed: body.mode === "all" || selected.has(device.id), commandStatus: "pending", lastError: null, lastResponse: null },
+      update: { allowed: body.mode === "all" || selected.has(device.id), commandStatus: "pending", lastError: null, lastResponse: null },
+    })),
   ]);
 
   const results: Array<{ deviceId: string; name: string; allowed: boolean; status: "sent" | "failed"; response?: string; error?: string }> = [];
   for (const device of devices) {
     const allowed = body.mode === "all" || selected.has(device.id);
-    if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) { results.push({ deviceId: device.id, name: device.name, allowed, status: "sent", response: "Policy saved; eBioserver is not configured." }); continue; }
+    if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) {
+      const error = "eBioserver connection is not configured and enabled for this workspace.";
+      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "failed", lastCommandAt: new Date(), lastError: error } });
+      results.push({ deviceId: device.id, name: device.name, allowed, status: "failed", error });
+      continue;
+    }
     try {
       const response = await setEbioUserDeviceAccess(profile, device.serialNumber, employee.deviceCode, allowed);
-      if (body.mode === "restricted") await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "sent", lastCommandAt: new Date(), lastError: null } });
+      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "sent", lastCommandAt: new Date(), lastResponse: response, lastError: null } });
       results.push({ deviceId: device.id, name: device.name, allowed, status: "sent", response });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Command failed";
-      if (body.mode === "restricted") await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "failed", lastCommandAt: new Date(), lastError: message } });
+      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "failed", lastCommandAt: new Date(), lastResponse: null, lastError: message } });
       results.push({ deviceId: device.id, name: device.name, allowed, status: "failed", error: message });
     }
   }

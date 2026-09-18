@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
 import { profilePictureValue } from "@/lib/profile-picture";
 import { employeeHistory } from "@/lib/employee-history";
+import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -478,6 +479,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     before: pickAuditFields(employee),
     after: pickAuditFields(updated),
   });
+  if (updated.status !== employee.status) {
+    const results = await enforceEbioEmployeeAccess(session.tenantId, updated.id, updated.status === "active");
+    const failed = results.filter((result) => result.status === "failed");
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: updated.status === "active" ? "employee.device_access.restore" : "employee.device_access.block",
+      entity: "Employee",
+      entityId: updated.id,
+      summary: `${updated.firstName} ${updated.lastName}: ${updated.status === "active" ? "restore" : "block"} sent to ${results.length} active eBio device(s)${failed.length ? `; ${failed.length} failed` : ""}`,
+      after: { allowed: updated.status === "active", results },
+    });
+  }
   return NextResponse.json({ employee: updated });
 }
 

@@ -854,6 +854,91 @@ export async function setEbioUserDeviceAccess(profile: EbioserverProfile, serial
   return resultString(result);
 }
 
+export type EbioAccessEnforcementResult = {
+  deviceId: string;
+  name: string;
+  allowed: boolean;
+  status: "sent" | "failed";
+  response?: string;
+  error?: string;
+};
+
+/**
+ * Persist and apply a lifecycle access decision to every active eBio machine
+ * in one tenant. A failed command remains as a failed desired policy so it can
+ * be inspected and retried; policy rows are never removed by this flow.
+ */
+export async function enforceEbioEmployeeAccess(
+  tenantId: string,
+  employeeId: string,
+  allowed: boolean
+): Promise<EbioAccessEnforcementResult[]> {
+  const [tenant, employee, devices] = await Promise.all([
+    prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } }),
+    prisma.employee.findFirst({ where: { id: employeeId, tenantId }, select: { id: true, deviceCode: true } }),
+    prisma.device.findMany({
+      where: { tenantId, status: "active", config: { path: ["ebioserver"], equals: true } },
+      select: { id: true, name: true, serialNumber: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  if (!employee || !tenant) return [];
+
+  let profile: EbioserverProfile | null = null;
+  let unavailableReason: string | null = null;
+  try {
+    const candidate = getEbioserverConfig(tenant);
+    if (!candidate.enabled || !candidate.url || !getEbioserverPassword(candidate)) {
+      unavailableReason = "eBioserver connection is not configured and enabled for this workspace.";
+    } else {
+      profile = candidate;
+    }
+  } catch (error) {
+    unavailableReason = error instanceof Error ? error.message : "Could not read eBioserver configuration.";
+  }
+
+  const results: EbioAccessEnforcementResult[] = [];
+  for (const device of devices) {
+    // Write the desired state before touching the device so a failed call can
+    // never leave the database reporting unrestricted access.
+    await prisma.employeeDeviceAccess.upsert({
+      where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } },
+      create: { tenantId, employeeId: employee.id, deviceId: device.id, allowed, commandStatus: "pending", lastError: null, lastResponse: null },
+      update: { allowed, commandStatus: "pending", lastError: null, lastResponse: null },
+    });
+
+    const deviceCode = employee.deviceCode;
+    const error = !deviceCode
+      ? "Employee has no Device Code."
+      : unavailableReason;
+    if (!deviceCode || !profile) {
+      await prisma.employeeDeviceAccess.update({
+        where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } },
+        data: { commandStatus: "failed", lastCommandAt: new Date(), lastError: error ?? "eBioserver unavailable." },
+      });
+      results.push({ deviceId: device.id, name: device.name, allowed, status: "failed", error: error ?? "eBioserver unavailable." });
+      continue;
+    }
+
+    try {
+      const response = await setEbioUserDeviceAccess(profile, device.serialNumber, deviceCode, allowed);
+      await prisma.employeeDeviceAccess.update({
+        where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } },
+        data: { commandStatus: "sent", lastCommandAt: new Date(), lastResponse: response, lastError: null },
+      });
+      results.push({ deviceId: device.id, name: device.name, allowed, status: "sent", response });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Command failed";
+      await prisma.employeeDeviceAccess.update({
+        where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } },
+        data: { commandStatus: "failed", lastCommandAt: new Date(), lastError: message, lastResponse: null },
+      });
+      results.push({ deviceId: device.id, name: device.name, allowed, status: "failed", error: message });
+    }
+  }
+  return results;
+}
+
 /**
  * A newly discovered machine must default to blocked for every employee whose
  * device access policy is enabled. eBio only acknowledges that it received a
