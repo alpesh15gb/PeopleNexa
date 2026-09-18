@@ -7,7 +7,7 @@ import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
 type Employee = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
-const details = (employee: Employee) => [["Emp. ID", employee.deviceCode ?? employee.employeeNumber], ["Emp. Name", `${employee.firstName} ${employee.lastName}`], ["Designation", employee.position ?? "-"], ["DOJ", employee.joiningDate ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(employee.joiningDate)) : "-"], ["Blood Group", employee.profile?.bloodGroup ?? "-"], ["Contact", employee.phone ?? "-"]];
+const details = (employee: Employee) => [["Emp. ID", employee.employeeNumber], ["Emp. Name", `${employee.firstName} ${employee.lastName}`], ["Designation", employee.position ?? "-"], ["DOJ", employee.joiningDate ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(employee.joiningDate)) : "-"], ["Blood Group", employee.profile?.bloodGroup ?? "-"], ["Contact", employee.phone ?? "-"]];
 
 export function IdCardGenerator() {
   const [deviceCode, setDeviceCode] = useState(""); const [employee, setEmployee] = useState<Employee | null>(null); const [loading, setLoading] = useState(false); const toast = useToast();
