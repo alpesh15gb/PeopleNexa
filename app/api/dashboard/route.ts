@@ -3,6 +3,7 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { addDays, dayRangeIST, monthKeyIST } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
+import { tallyDailyAttendance } from "@/lib/attendance-tally";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -22,7 +23,7 @@ export async function GET() {
     const branchId = manager.branchId;
     const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
       prisma.employee.findMany({
-        where: { tenantId: session.tenantId, status: "active", branchId },
+        where: { tenantId: session.tenantId, status: "active", loginOnly: false, branchId },
         select: {
           id: true,
           tenantId: true,
@@ -48,12 +49,12 @@ export async function GET() {
         },
       }),
       prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: range, employee: { branchId } },
+        where: { tenantId: session.tenantId, date: range, employee: { branchId, status: "active", loginOnly: false } },
         include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
       }),
       prisma.department.findMany({
         where: { tenantId: session.tenantId },
-        include: { _count: { select: { employees: { where: { branchId, status: "active" } } } } },
+        include: { _count: { select: { employees: { where: { branchId, status: "active", loginOnly: false } } } } },
       }),
       prisma.leaveRequest.findMany({
         where: { tenantId: session.tenantId, status: "pending", employee: { branchId } },
@@ -63,24 +64,22 @@ export async function GET() {
       }),
       prisma.attendance.groupBy({
         by: ["date", "status"],
-        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId } },
+        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId, status: "active", loginOnly: false } },
         _count: true,
       }),
     ]);
 
-    const counts = { present: 0, late: 0, permission: 0, absent: 0, half_day: 0 };
-    for (const a of attendance) counts[a.status as keyof typeof counts] = (counts[a.status as keyof typeof counts] ?? 0) + 1;
-
-    const onLeaveRows = await prisma.leaveRequest.count({
+    const approvedLeaves = await prisma.leaveRequest.findMany({
       where: {
         tenantId: session.tenantId,
         status: "approved",
-        fromDate: { lte: addDays(today, 1) },
+        fromDate: { lt: addDays(today, 1) },
         toDate: { gte: today },
-        employee: { branchId },
+        employee: { branchId, status: "active", loginOnly: false },
       },
+      select: { employeeId: true },
     });
-    const onLeave = onLeaveRows;
+    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId));
 
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -88,7 +87,7 @@ export async function GET() {
       const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
       week.push({
         day: istDateKey(day),
-        present: recs.filter((r) => r.status === "present" || r.status === "late").reduce((s, r) => s + r._count, 0),
+        present: recs.filter((r) => r.status === "present" || r.status === "late" || r.status === "half_day").reduce((s, r) => s + r._count, 0),
         late: recs.filter((r) => r.status === "late").reduce((s, r) => s + r._count, 0),
         absent: recs.filter((r) => r.status === "absent").reduce((s, r) => s + r._count, 0),
       });
@@ -96,12 +95,14 @@ export async function GET() {
 
     return NextResponse.json({
       summary: {
-        totalEmployees: employees.length,
+        totalEmployees: counts.total,
         present: counts.present,
         late: counts.late,
         permission: counts.permission,
         absent: counts.absent,
-        onLeave,
+        halfDay: counts.halfDay,
+        onLeave: counts.onLeave,
+        noRecord: counts.noRecord,
         pendingLeaves: pendingLeaves.length,
       },
       departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),
@@ -114,7 +115,7 @@ export async function GET() {
   if (session.role === "admin") {
     const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
       prisma.employee.findMany({
-        where: { tenantId: session.tenantId, status: "active" },
+        where: { tenantId: session.tenantId, status: "active", loginOnly: false },
         select: {
           id: true,
           tenantId: true,
@@ -140,12 +141,12 @@ export async function GET() {
         },
       }),
       prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: range },
+        where: { tenantId: session.tenantId, date: range, employee: { status: "active", loginOnly: false } },
         include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
       }),
       prisma.department.findMany({
         where: { tenantId: session.tenantId },
-        include: { _count: { select: { employees: true } } },
+        include: { _count: { select: { employees: { where: { status: "active", loginOnly: false } } } } },
       }),
       prisma.leaveRequest.findMany({
         where: { tenantId: session.tenantId, status: "pending" },
@@ -155,24 +156,22 @@ export async function GET() {
       }),
       prisma.attendance.groupBy({
         by: ["date", "status"],
-        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today } },
+        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { status: "active", loginOnly: false } },
         _count: true,
       }),
     ]);
 
-    const counts = { present: 0, late: 0, permission: 0, absent: 0, half_day: 0 };
-    for (const a of attendance) counts[a.status as keyof typeof counts] = (counts[a.status as keyof typeof counts] ?? 0) + 1;
-
-    // On-leave = approved leaves spanning today (not pending, not past).
-    const onLeaveRows = await prisma.leaveRequest.count({
+    const approvedLeaves = await prisma.leaveRequest.findMany({
       where: {
         tenantId: session.tenantId,
         status: "approved",
-        fromDate: { lte: addDays(today, 1) },
+        fromDate: { lt: addDays(today, 1) },
         toDate: { gte: today },
+        employee: { status: "active", loginOnly: false },
       },
+      select: { employeeId: true },
     });
-    const onLeave = onLeaveRows;
+    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId));
 
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -180,7 +179,7 @@ export async function GET() {
       const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
       week.push({
         day: istDateKey(day),
-        present: recs.filter((r) => r.status === "present" || r.status === "late").reduce((s, r) => s + r._count, 0),
+        present: recs.filter((r) => r.status === "present" || r.status === "late" || r.status === "half_day").reduce((s, r) => s + r._count, 0),
         late: recs.filter((r) => r.status === "late").reduce((s, r) => s + r._count, 0),
         absent: recs.filter((r) => r.status === "absent").reduce((s, r) => s + r._count, 0),
       });
@@ -188,12 +187,14 @@ export async function GET() {
 
     return NextResponse.json({
       summary: {
-        totalEmployees: employees.length,
+        totalEmployees: counts.total,
         present: counts.present,
         late: counts.late,
         permission: counts.permission,
         absent: counts.absent,
-        onLeave,
+        halfDay: counts.halfDay,
+        onLeave: counts.onLeave,
+        noRecord: counts.noRecord,
         pendingLeaves: pendingLeaves.length,
       },
       departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),

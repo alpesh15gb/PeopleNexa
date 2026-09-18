@@ -8,6 +8,7 @@ import { AttendanceTable } from "./attendance-table";
 import { DatePicker } from "./date-picker";
 import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
+import { tallyDailyAttendance } from "@/lib/attendance-tally";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZES = [50, 100, 200, 500] as const;
@@ -46,7 +47,7 @@ export default async function AdminAttendancePage({
   const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
   const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
 
-  const employeeScope = { tenantId: session.tenantId, status: "active", ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) };
+  const employeeScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) };
   const employeeWhere = query
     ? { ...employeeScope, AND: query.split(/\s+/).filter(Boolean).map((term) => ({ OR: [{ firstName: { contains: term, mode: "insensitive" as const } }, { lastName: { contains: term, mode: "insensitive" as const } }, { employeeNumber: { contains: term, mode: "insensitive" as const } }] })) }
     : employeeScope;
@@ -54,7 +55,7 @@ export default async function AdminAttendancePage({
   const totalPages = Math.max(1, Math.ceil(totalEmployees / pageSize));
   const page = Math.min(requestedPage, totalPages);
 
-  const [employees, holidays, branches, attendanceCounts, leaveCount] = await Promise.all([
+  const [employees, tallyEmployees, holidays, branches, tallyRecords, tallyLeaves] = await Promise.all([
     prisma.employee.findMany({
        where: employeeWhere,
       select: {
@@ -69,20 +70,15 @@ export default async function AdminAttendancePage({
        skip: (page - 1) * pageSize,
        take: pageSize,
      }),
+    prisma.employee.findMany({ where: employeeScope, select: { id: true } }),
     prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
     prisma.branch.findMany({
        where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       select: { id: true, name: true },
        orderBy: { name: "asc" },
     }),
-    prisma.attendance.groupBy({
-      by: ["status"],
-      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
-      _count: true,
-    }),
-    prisma.leaveRequest.count({
-      where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, ...(branchId ? { employee: { branchId } } : ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) },
-    }),
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true } }),
+    prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, employee: employeeScope }, select: { employeeId: true } }),
   ]);
 
   const employeeIds = employees.map((employee) => employee.id);
@@ -119,17 +115,16 @@ export default async function AdminAttendancePage({
     };
   });
 
-  const counts = Object.fromEntries(attendanceCounts.map((count) => [count.status, count._count])) as Record<string, number>;
-  const marked = attendanceCounts.reduce((total, count) => total + count._count, 0);
-  counts.on_leave = leaveCount;
-  counts.absent = Math.max(totalEmployees - marked - leaveCount, 0);
+  const counts = tallyDailyAttendance(tallyEmployees.map((employee) => employee.id), tallyRecords, tallyLeaves.map((leave) => leave.employeeId));
 
   const statCards = [
-    { label: "Present", value: counts.present ?? 0, cls: "text-emerald-300" },
-    { label: "Late", value: counts.late ?? 0, cls: "text-amber-300" },
-    { label: "Permission", value: counts.permission ?? 0, cls: "text-sky-300" },
-    { label: "On leave", value: counts.on_leave ?? 0, cls: "text-violet-300" },
-    { label: "Absent", value: counts.absent ?? 0, cls: "text-rose-300" },
+    { label: "Present", value: counts.present, cls: "text-emerald-300" },
+    { label: "Late", value: counts.late, cls: "text-amber-300" },
+    { label: "Half day", value: counts.halfDay, cls: "text-violet-300" },
+    { label: "Permission", value: counts.permission, cls: "text-sky-300" },
+    { label: "On leave", value: counts.onLeave, cls: "text-violet-300" },
+    { label: "Explicit absent", value: counts.absent, cls: "text-rose-300" },
+    { label: "No record", value: counts.noRecord, cls: "text-muted-foreground" },
   ];
 
   const isHoliday = holidays.length > 0;
@@ -166,7 +161,7 @@ export default async function AdminAttendancePage({
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
         {statCards.map((s) => (
           <div key={s.label} className="card-surface rounded-xl px-4 py-3">
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{s.label}</p>

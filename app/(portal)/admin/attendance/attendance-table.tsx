@@ -169,7 +169,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
         </THead>
         <TBody>
           {rows.map((row) => {
-            const statusNow = row.leave ? "on_leave" : row.record?.status ?? "absent";
+            const statusNow = row.record?.status ?? (row.leave ? "on_leave" : "no_record");
             return (
               <TR key={row.employeeId}>
                 <TD>
@@ -192,11 +192,11 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                 <TD className="font-mono text-[13px]">{row.record?.punchIn ?? "—"}</TD>
                 <TD className="font-mono text-[13px]">{row.record?.punchOut ?? "—"}</TD>
                 <TD>
-                  {row.leave ? (
+                  {!row.record && row.leave ? (
                     <Badge className="border-transparent" style={{ background: `${row.leave.color}22`, color: row.leave.color }}>
                       On leave · {row.leave.type}
                     </Badge>
-                  ) : editing === row.employeeId ? (
+                  ) : row.record && editing === row.employeeId ? (
                     <Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 w-32 text-xs">
                       {["present", "late", "permission", "absent", "half_day"].map((s) => (
                         <option key={s} value={s}>

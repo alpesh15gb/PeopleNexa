@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/stat";
 import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 import { BranchPicker } from "./attendance/branch-picker";
+import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,9 @@ function StatsSkeleton() {
     <div
       role="status"
       aria-label="Loading statistics"
-      className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6"
+      className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5"
     >
-      {Array.from({ length: 6 }).map((_, i) => (
+      {Array.from({ length: 9 }).map((_, i) => (
         <div key={i} className="rounded-2xl border border-edge bg-card p-4 motion-safe:animate-pulse sm:p-5">
           <div className="h-3 w-2/3 rounded-md bg-muted" />
           <div className="mt-3 h-8 w-1/2 rounded-md bg-muted" />
@@ -67,7 +68,7 @@ export default async function AdminDashboardPage({
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
   const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
-  const empScope = { tenantId: session.tenantId, status: "active", ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
+  const empScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = istDateKey(today).slice(0, 7);
   const attendancePageSize = 25;
   const attendancePage = Math.max(1, Number.parseInt(attendancePageParam ?? "1", 10) || 1);
@@ -79,9 +80,9 @@ export default async function AdminDashboardPage({
   const licenseExpiryEnd = new Date(Date.UTC(year, month, 1));
 
   const attendanceWhere = branchId
-    ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active" } }
-    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", branch: { locationId: ownLocationId } } : { status: "active" } };
-  const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
+    ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active", loginOnly: false } }
+    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } };
+  const [employees, attendance, attendanceTotal, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } } },
@@ -96,7 +97,11 @@ export default async function AdminDashboardPage({
       take: attendancePageSize,
     }),
     prisma.attendance.count({ where: attendanceWhere }),
-    prisma.attendance.groupBy({ by: ["status"], where: attendanceWhere, _count: true }),
+    prisma.attendance.findMany({ where: attendanceWhere, select: { employeeId: true, status: true } }),
+    prisma.leaveRequest.findMany({
+      where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: addDays(today, 1) }, toDate: { gte: today }, employee: empScope },
+      select: { employeeId: true },
+    }),
     prisma.department.findMany({
       where: {
         tenantId: session.tenantId,
@@ -149,25 +154,21 @@ export default async function AdminDashboardPage({
   let weekRows: WeekRow[];
   if (branchId || ownLocationId) {
     const rows = await prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: branchId ? { branchId } : { branch: { locationId: ownLocationId! } } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : { status: "active", loginOnly: false, branch: { locationId: ownLocationId! } } },
       select: { date: true, status: true },
     });
     weekRows = rows.map((r) => ({ date: r.date, status: r.status }));
   } else {
     const grouped = await prisma.attendance.groupBy({
       by: ["date", "status"],
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: { status: "active", loginOnly: false } },
       _count: true,
     });
     weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
   }
 
-  const counts = { present: 0, late: 0, permission: 0, half_day: 0, absent: 0 };
-  for (const row of attendanceStatusCounts) {
-    if (counts[row.status as keyof typeof counts] !== undefined) counts[row.status as keyof typeof counts] += row._count;
-  }
-  const marked = attendanceTotal;
-  counts.absent += Math.max(employees.length - marked, 0);
+  const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendanceRecords, approvedLeaves.map((leave) => leave.employeeId));
+  const marked = counts.marked;
   const attendancePageCount = Math.max(1, Math.ceil(attendanceTotal / attendancePageSize));
   const attendanceHref = (page: number) => {
     const params = new URLSearchParams();
@@ -184,16 +185,32 @@ export default async function AdminDashboardPage({
   });
   const anniversaries = celebrationProfiles.filter((profile) => profile.marriageDate && istDateKey(profile.marriageDate).slice(5) === todayMonthDay);
   const [devicePunches, projectAttendance] = await Promise.all([
-    prisma.punch.findMany({ where: { tenantId: session.tenantId, punchTime: { gte: today, lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active" } : ownLocationId ? { status: "active", branch: { locationId: ownLocationId } } : { status: "active" } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
-    prisma.attendance.findMany({ where: attendanceWhere, select: { status: true, employee: { select: { branch: { select: { name: true } } } } } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, punchTime: { gte: today, lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
+    prisma.attendance.findMany({ where: attendanceWhere, select: { employeeId: true, status: true, employee: { select: { branch: { select: { name: true } } } } } }),
   ]);
   const deviceEmployees = new Map<string, Set<string>>();
   for (const punch of devicePunches) { const name = punch.device?.name ?? punch.realtimeDevice?.name ?? "Unidentified device"; const employees = deviceEmployees.get(name) ?? new Set<string>(); employees.add(punch.employeeId); deviceEmployees.set(name, employees); }
   const deviceAttendance = new Map([...deviceEmployees].map(([name, employees]) => [name, employees.size]));
-  const projectAttendanceCounts = new Map<string, { present: number; marked: number; absent: number; total: number }>();
-  for (const employee of employees) { const name = employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name) ?? { present: 0, marked: 0, absent: 0, total: 0 }; current.total++; projectAttendanceCounts.set(name, current); }
-  for (const row of projectAttendance) { const name = row.employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name); if (!current) continue; current.marked++; if (["present", "late", "half_day"].includes(row.status)) current.present++; if (row.status === "absent") current.absent++; }
-  for (const count of projectAttendanceCounts.values()) count.absent += count.total - count.marked;
+  const projectEmployeeIds = new Map<string, string[]>();
+  const projectRecords = new Map<string, Array<{ employeeId: string; status: string }>>();
+  const projectLeaveIds = new Map<string, string[]>();
+  const employeeProject = new Map(employees.map((employee) => [employee.id, employee.branch?.name ?? "Unassigned"]));
+  for (const employee of employees) {
+    const name = employeeProject.get(employee.id)!;
+    projectEmployeeIds.set(name, [...(projectEmployeeIds.get(name) ?? []), employee.id]);
+  }
+  for (const row of projectAttendance) {
+    const name = employeeProject.get(row.employeeId);
+    if (name) projectRecords.set(name, [...(projectRecords.get(name) ?? []), row]);
+  }
+  for (const leave of approvedLeaves) {
+    const name = employeeProject.get(leave.employeeId);
+    if (name) projectLeaveIds.set(name, [...(projectLeaveIds.get(name) ?? []), leave.employeeId]);
+  }
+  const projectAttendanceCounts = new Map<string, AttendanceTally>();
+  for (const [name, employeeIds] of projectEmployeeIds) {
+    projectAttendanceCounts.set(name, tallyDailyAttendance(employeeIds, projectRecords.get(name) ?? [], projectLeaveIds.get(name) ?? []));
+  }
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -236,12 +253,15 @@ export default async function AdminDashboardPage({
 
       {/* Stats */}
       <Suspense fallback={<StatsSkeleton />}>
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Total employees" value={employees.length} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+        <StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
         <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
         <StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
+        <StatCard label="Half day" value={counts.halfDay} icon={<CalendarClock className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
         <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} />
-        <StatCard label="Absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
+        <StatCard label="On leave" value={counts.onLeave} icon={<CalendarCheck2 className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
+        <StatCard label="Explicit absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
+        <StatCard label="No record" value={counts.noRecord} icon={<CalendarClock className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
         <StatCard
           label="Pending leaves"
           value={pendingLeaveCount}
@@ -254,7 +274,7 @@ export default async function AdminDashboardPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
-        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present}/{count.total} present · {count.absent} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
+        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s mutually exclusive attendance tally by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present + count.late + count.halfDay}/{count.total} at work · {count.absent} explicit absent · {count.noRecord} no record</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
@@ -263,7 +283,7 @@ export default async function AdminDashboardPage({
           <CardHeader>
             <div>
               <CardTitle>Today&apos;s attendance</CardTitle>
-              <CardDescription>{marked} of {employees.length} employees marked · {toDateKey(today)}</CardDescription>
+              <CardDescription>{marked} attendance records · {counts.onLeave} on leave · {counts.noRecord} no record · {toDateKey(today)}</CardDescription>
             </div>
             <CalendarClock className="h-4.5 w-4.5 text-muted-foreground" />
           </CardHeader>
