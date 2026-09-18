@@ -18,8 +18,8 @@ export async function renderIdCardPdf(employee: IdCardData): Promise<Buffer> {
   const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
   doc.image(front, 0, 0, { width, height });
   const image = photo(employee.profilePicture);
-  doc.roundedRect(43, 56, 67, 75, 4).lineWidth(2.4).strokeColor("#ef7600").stroke();
   if (image) { try { doc.image(image, 46, 59, { cover: [61, 69], align: "center", valign: "center" }); } catch { /* The supplied template remains usable when a legacy photo is invalid. */ } }
+  doc.roundedRect(43, 56, 67, 75, 4).lineWidth(2.4).strokeColor("#ef7600").stroke();
   const values = [employee.employeeNumber, `${employee.firstName} ${employee.lastName}`.trim(), employee.position ?? "-", date(employee.joiningDate), employee.profile?.bloodGroup ?? "-", employee.phone ?? "-"];
   const labels = ["Emp. ID", "Emp. Name", "Designation", "DOJ", "Blood Group", "Contact"];
   const positions = [134, 146, 158, 170, 182, 194];
