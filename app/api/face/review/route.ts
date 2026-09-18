@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
+import { attendanceDayForPunch, reconcileEmployeeDay } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         tenantId: employee.tenantId,
         branchId: employee.branchId,
       },
-      punchDayForShift(punchTimeValue, employee.shift),
+      await attendanceDayForPunch(employee, punchTimeValue),
       { finalize: false }
     );
   }

@@ -121,6 +121,66 @@ export function shiftWindow(
 }
 
 /**
+ * The persisted Attendance.date key is always IST midnight. It is deliberately
+ * separate from shiftWindow(): a night-shift window crosses midnight, but both
+ * manual and reconciled attendance for that shift must address the same day.
+ */
+export function attendanceDayKey(istDay: Date): Date {
+  return istStartOfDay(istDay);
+}
+
+/** Resolve the shift assigned to one canonical attendance day. */
+export async function shiftForEmployeeDay(
+  employee: Pick<Employee, "id" | "shiftId" | "tenantId">,
+  istDay: Date
+): Promise<Shift | null> {
+  const roster = await prisma.rosterAssignment.findUnique({
+    where: {
+      tenantId_employeeId_date: {
+        tenantId: employee.tenantId,
+        employeeId: employee.id,
+        date: attendanceDayKey(istDay),
+      },
+    },
+    include: { shift: true },
+  });
+  return roster?.shift ?? (employee.shiftId ? prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
+}
+
+/**
+ * Resolve the canonical attendance day for an ingested punch. A prior day's
+ * rostered night shift owns its next-morning punches; otherwise today's roster
+ * (or the employee default shift) determines the normal day/night mapping.
+ */
+export async function attendanceDayForPunch(
+  employee: Pick<Employee, "id" | "shiftId" | "tenantId">,
+  instant: Date
+): Promise<Date> {
+  const today = attendanceDayKey(instant);
+  const previousDay = new Date(today.getTime() - 24 * 3600 * 1000);
+  const [previousRoster, todayRoster] = await Promise.all([
+    prisma.rosterAssignment.findUnique({
+      where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: previousDay } },
+      include: { shift: true },
+    }),
+    prisma.rosterAssignment.findUnique({
+      where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: today } },
+      include: { shift: true },
+    }),
+  ]);
+  // A roster on the previous day is authoritative for that day's overnight
+  // window. If it is not a night shift, do not infer a night shift from the
+  // employee default merely because today's roster is a night shift.
+  const previousShift = previousRoster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
+  if (previousShift?.isNightShift) {
+    const previousWindow = shiftWindow(previousDay, previousShift);
+    if (instant >= previousWindow.start && instant < previousWindow.end) return previousDay;
+  }
+  if (previousRoster) return today;
+  return punchDayForShift(instant, todayRoster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null));
+}
+
+/**
  * The IST calendar day whose punch window contains `instant`, given the
  * employee's shift. For night shifts a morning punch (before the shift's start
  * time, e.g. the 06:00 out of a 22:00 → 06:00 shift) belongs to the previous
@@ -153,14 +213,15 @@ export async function reconcileEmployeeDay(
   istDay: Date,
   opts: { finalize?: boolean; mode?: PunchMode } = {}
 ): Promise<ReconcileResult> {
+  const attendanceDate = attendanceDayKey(istDay);
   // The day's shift: a roster assignment for this date wins over the
   // employee's default shift (weekly rosters drive daily reconciliation).
   const roster = await prisma.rosterAssignment.findUnique({
-    where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: istStartOfDay(istDay) } },
+    where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: attendanceDate } },
     include: { shift: true },
   });
   const shift = roster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
-  const { start: dayStart, end: dayEnd } = shiftWindow(istDay, shift);
+  const { start: dayStart, end: dayEnd } = shiftWindow(attendanceDate, shift);
 
   const punches = await prisma.punch.findMany({
     // Held-for-approval self-service punches must not leak into attendance
@@ -277,8 +338,8 @@ export async function reconcileEmployeeDay(
     }
   }
 
-  const existing = await prisma.attendance.findFirst({
-    where: { employeeId: employee.id, date: { gte: dayStart, lt: dayEnd } },
+  const existing = await prisma.attendance.findUnique({
+    where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },
   });
 
   // A live punch (mobile/device ingest with finalize:false) landing on an
@@ -337,7 +398,7 @@ export async function reconcileEmployeeDay(
       data: {
         ...data,
         employeeId: employee.id,
-        date: dayStart,
+        date: attendanceDate,
       },
     });
   }
@@ -393,7 +454,7 @@ export async function finalizeEligibleDays(tenantId: string, limit = 200): Promi
       select: { id: true, shiftId: true, tenantId: true, branchId: true },
     });
     if (!employee) continue;
-    const shift = employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null;
+    const shift = await shiftForEmployeeDay(employee, row.date);
     if (!isFinalizable(row.date, undefined, shift)) continue;
     await reconcileEmployeeDay(tenant, employee, row.date, { finalize: true });
     count++;

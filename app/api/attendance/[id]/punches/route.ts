@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
-import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
+import { reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
 import { appendAudit } from "@/lib/audit";
 
 async function loadOwned(id: string, tenantId: string) {
@@ -68,7 +68,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // The punch must belong to this day's IST punch window (admin corrections
   // move times within the day; they don't glue days together). Night-shift
   // windows start at the shift start so the morning out punch is accepted.
-  const { start: dayStart, end: dayEnd } = shiftWindow(attendance.date, employee.shift);
+  const attendanceShift = await shiftForEmployeeDay(employee, attendance.date);
+  const { start: dayStart, end: dayEnd } = shiftWindow(attendance.date, attendanceShift);
   if (punchTime < dayStart || punchTime >= dayEnd) {
     return NextResponse.json({ error: "Time is outside this day's window." }, { status: 400 });
   }
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     tenant ?? { id: session.tenantId, config: null },
     employee,
     attendance.date,
-    { finalize: isFinalizable(attendance.date, undefined, employee.shift) }
+    { finalize: isFinalizable(attendance.date, undefined, attendanceShift) }
   );
   const updated = result.attendanceId ? await prisma.attendance.findUnique({ where: { id: result.attendanceId } }) : null;
   return NextResponse.json({ success: true, record: updated, result });
@@ -161,7 +162,10 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     where: { id: attendance.employeeId },
     select: { id: true, shift: true },
   });
-  const { start: ownerStart, end: ownerEnd } = shiftWindow(attendance.date, ownerEmployee?.shift ?? null);
+  const attendanceShift = ownerEmployee
+    ? await shiftForEmployeeDay({ ...ownerEmployee, shiftId: ownerEmployee.shift?.id ?? null, tenantId: session.tenantId }, attendance.date)
+    : null;
+  const { start: ownerStart, end: ownerEnd } = shiftWindow(attendance.date, attendanceShift);
   if (punch.punchTime < ownerStart || punch.punchTime >= ownerEnd) {
     return NextResponse.json({ error: "Punch does not belong to this day." }, { status: 404 });
   }
@@ -195,7 +199,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     tenant ?? { id: session.tenantId, config: null },
     employee,
     attendance.date,
-    { finalize: isFinalizable(attendance.date, undefined, employee.shift) }
+    { finalize: isFinalizable(attendance.date, undefined, await shiftForEmployeeDay(employee, attendance.date)) }
   );
   const updated = result.attendanceId ? await prisma.attendance.findUnique({ where: { id: result.attendanceId } }) : null;
   return NextResponse.json({ success: true, record: updated, result });

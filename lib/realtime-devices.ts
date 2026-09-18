@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "./prisma";
 import { createPunchForEvent } from "./punch-idempotency";
-import { reconcileEmployeeDay, punchDayForShift } from "./reconcile";
+import { attendanceDayForPunch, reconcileEmployeeDay } from "./reconcile";
 import type { RealtimeDevice } from "@/generated/prisma/client";
 
 // ── Realtime ingest (own track) ─────────────────────────────────────────────
@@ -143,7 +143,7 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   const result = await reconcileWithRetry(
     tenant ?? { id: device.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    punchDayForShift(punch.punchTime, employee.shift)
+    await attendanceDayForPunch(employee, punch.punchTime)
   );
 
   await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
@@ -208,7 +208,7 @@ export async function reprocessFailedRealtimeLogs(
       await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
         { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        punchDayForShift(log.punchTime, employee.shift)
+        await attendanceDayForPunch(employee, log.punchTime)
       );
       await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
       counters.accepted++;

@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { createPunchForEvent } from "./punch-idempotency";
-import { reconcileEmployeeDay, punchDayForShift } from "./reconcile";
+import { attendanceDayForPunch, reconcileEmployeeDay } from "./reconcile";
 import type { Device, Employee } from "@/generated/prisma/client";
 
 export interface RawPunch {
@@ -124,7 +124,7 @@ export async function handleDevicePunch(
   const result = await reconcileWithRetry(
     tenant ?? { id: device.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    punchDayForShift(punch.punchTime, employee.shift)
+    await attendanceDayForPunch(employee, punch.punchTime)
   );
 
   await markProcessed(log.id);
@@ -202,7 +202,7 @@ export async function reprocessFailedLogs(
       await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
         { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        punchDayForShift(log.punchTime, employee.shift)
+        await attendanceDayForPunch(employee, log.punchTime)
       );
       await markProcessed(log.id);
       counters.accepted++;

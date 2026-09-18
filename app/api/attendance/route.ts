@@ -3,7 +3,7 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dayRangeIST, isDateKey, todayKey } from "@/lib/dates";
 import { istStartOfDay, parseIST } from "@/lib/ist";
-import { finalizeEligibleDays } from "@/lib/reconcile";
+import { finalizeEligibleDays, shiftForEmployeeDay } from "@/lib/reconcile";
 
 const MANUAL_STATUSES = ["present", "late", "permission", "absent", "half_day"];
 
@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
 
   const employee = await prisma.employee.findFirst({
     where: { id: employeeId, tenantId: session.tenantId },
-    select: { id: true, status: true, joiningDate: true, branchId: true, shiftId: true, branch: { select: { locationId: true } } },
+    select: { id: true, tenantId: true, status: true, joiningDate: true, branchId: true, shiftId: true, branch: { select: { locationId: true } } },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
   if (session.role === "branch_manager") {
@@ -181,7 +181,7 @@ export async function POST(req: NextRequest) {
         tenantId: session.tenantId,
         employeeId,
         branchId: employee.branchId ?? null,
-        shiftId: employee.shiftId ?? null,
+        shiftId: (await shiftForEmployeeDay(employee, dayStart))?.id ?? null,
         date: dayStart,
         status,
         note,

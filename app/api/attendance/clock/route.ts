@@ -3,7 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
-import { reconcileEmployeeDay, punchDayForShift } from "@/lib/reconcile";
+import { attendanceDayForPunch, reconcileEmployeeDay } from "@/lib/reconcile";
 import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
 import { describeFace, verifyFace } from "@/lib/face";
@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
   const result = await reconcileEmployeeDay(
     tenant ?? { id: employee.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: employee.tenantId, branchId: employee.branchId },
-    punchDayForShift(now, employee.shift),
+    await attendanceDayForPunch(employee, now),
     { finalize: false }
   );
 

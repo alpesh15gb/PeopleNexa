@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
+import { reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { formatDateIST } from "@/lib/dates";
@@ -126,7 +126,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ error: "The employee no longer exists." }, { status: 404 });
   }
 
-  const { start: windowStart, end: windowEnd } = shiftWindow(istStartOfDay(correction.date), employee.shift);
+  const attendanceShift = await shiftForEmployeeDay(employee, correction.date);
+  const { start: windowStart, end: windowEnd } = shiftWindow(istStartOfDay(correction.date), attendanceShift);
   // Validate requested times: in < out, within the shift window, not future.
   const now = new Date();
   if (correction.requestedIn && correction.requestedOut && correction.requestedIn.getTime() >= correction.requestedOut.getTime()) {
@@ -292,7 +293,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     tenant ?? { id: session.tenantId, config: null },
     employee,
     correction.date,
-    { finalize: isFinalizable(correction.date, undefined, employee.shift) }
+    { finalize: isFinalizable(correction.date, undefined, attendanceShift) }
   );
 
   const updated = await prisma.punchCorrection.findUnique({ where: { id } });

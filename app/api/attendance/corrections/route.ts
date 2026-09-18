@@ -55,7 +55,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Corrected punch times cannot be in the future." }, { status: 400 });
   }
 
-  const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
   // Guard against pre-joining + excessive backdate.
   const requester = await prisma.employee.findFirst({
     where: { id: session.sub, tenantId: session.tenantId },
@@ -76,10 +75,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Corrections older than 60 days need admin assistance." }, { status: 400 });
     }
   }
-  // Range lookup: Attendance.date may be normalized differently (shift-window
-  // start for night shifts), so match the whole IST day instead of exact equality.
-  const attendance = await prisma.attendance.findFirst({
-    where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd } },
+  const attendance = await prisma.attendance.findUnique({
+    where: { employeeId_date: { employeeId: session.sub, date: dayStart } },
   });
   // Allow absent-day corrections: no Attendance row just means there is
   // nothing recorded yet — store date only with null current punches.
@@ -93,7 +90,7 @@ export async function POST(req: NextRequest) {
       try {
         correction = await prisma.$transaction(async (tx) => {
           const existing = await tx.punchCorrection.findFirst({
-            where: { employeeId: session.sub, date: { gte: dayStart, lt: dayEnd }, status: "pending" },
+            where: { employeeId: session.sub, date: dayStart, status: "pending" },
           });
           if (existing) {
             const err = new Error("DUPLICATE_PENDING") as Error & { code?: string };
