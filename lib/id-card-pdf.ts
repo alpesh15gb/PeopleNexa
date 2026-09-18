@@ -17,12 +17,12 @@ export async function renderIdCardPdf(employee: IdCardData): Promise<Buffer> {
   const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
   doc.image(front, 0, 0, { width, height });
   const image = photo(employee.profilePicture);
-  doc.roundedRect(43, 56, 67, 75, 4).lineWidth(2).strokeColor("#ef7600").stroke();
+  doc.roundedRect(43, 56, 67, 75, 4).lineWidth(2.4).strokeColor("#ef7600").stroke();
   if (image) { try { doc.image(image, 46, 59, { fit: [61, 69], align: "center", valign: "center" }); } catch { /* The supplied template remains usable when a legacy photo is invalid. */ } }
   const values = [employee.deviceCode ?? employee.employeeNumber, `${employee.firstName} ${employee.lastName}`.trim(), employee.position ?? "-", date(employee.joiningDate), employee.profile?.bloodGroup ?? "-", employee.phone ?? "-"];
   const labels = ["Emp. ID", "Emp. Name", "Designation", "DOJ", "Blood Group", "Contact"];
   const positions = [134, 145, 164, 183, 196, 207];
-  values.forEach((value, index) => { doc.font("Helvetica-Bold").fontSize(index === 1 ? 7.4 : 8.4).fillColor(brown).text(labels[index], 5, positions[index], { width: 47 }); doc.text(`: ${value}`, 52, positions[index], { width: 98, align: "left" }); });
+  values.forEach((value, index) => { doc.font("Helvetica-Bold").fontSize(7).fillColor(brown).text(labels[index], 5, positions[index], { width: 47 }); doc.text(`: ${value}`, 52, positions[index], { width: 98, align: "left" }); });
   doc.addPage({ size: [width, height], margin: 0 }); doc.image(back, 0, 0, { width, height });
   doc.end(); return done;
 }
