@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { StatusPill } from "@/components/ui/badge";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, formatDateIST } from "@/lib/dates";
+import { formatDate, todayKey } from "@/lib/dates";
 
 interface ExitRequest {
   id: string;
@@ -105,7 +105,7 @@ export default function EmployeeExitsPage() {
     }
   }
 
-  const today = formatDateIST(new Date());
+  const today = todayKey();
 
   return (
     <div className="animate-fade-up space-y-6">

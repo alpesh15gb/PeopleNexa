@@ -62,12 +62,12 @@ export function formatDateTime(d: Date | null | undefined): string {
   return `${date} ${formatTime(d)}`;
 }
 
-/** IST calendar day (YYYY-MM-DD) for display. Deterministic server+client. */
+/** IST calendar date for display. Use toDateKey/todayKey for native date inputs and APIs. */
 export function formatDateIST(d: Date | string | null | undefined): string {
   if (!d) return "—";
   const dt = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(dt.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-CA", {
+  return new Intl.DateTimeFormat("en-GB", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
