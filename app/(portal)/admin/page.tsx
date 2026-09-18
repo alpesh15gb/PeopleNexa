@@ -253,15 +253,12 @@ export default async function AdminDashboardPage({
 
       {/* Stats */}
       <Suspense fallback={<StatsSkeleton />}>
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
         <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
         <StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
-        <StatCard label="Half day" value={counts.halfDay} icon={<CalendarClock className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
         <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} />
-        <StatCard label="On leave" value={counts.onLeave} icon={<CalendarCheck2 className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
-        <StatCard label="Explicit absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
-        <StatCard label="No record" value={counts.noRecord} icon={<CalendarClock className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
+        <StatCard label="Absent" value={counts.absent + counts.noRecord} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
         <StatCard
           label="Pending leaves"
           value={pendingLeaveCount}
