@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Portal } from "@/components/ui/portal";
 import { useToast } from "@/components/ui/toast";
-import { formatTime, toDateKey } from "@/lib/dates";
+import { formatDate, formatTime } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -273,7 +273,7 @@ export function ClockCard({
   const time = mounted
     ? now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" })
     : "--:--:--";
-  const dateLabel = mounted ? toDateKey(now) : "";
+  const dateLabel = mounted ? formatDate(now) : "";
 
   return (
     <div className="card-surface relative overflow-hidden rounded-2xl">

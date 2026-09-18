@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { startOfDay, addDays, toDateKey } from "@/lib/dates";
+import { startOfDay, addDays, formatDate } from "@/lib/dates";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { ClockCard } from "./clock-card";
@@ -83,7 +83,7 @@ export default async function EmployeeDashboardPage() {
           {t(lang, "dashboard.welcome", { name: employee.firstName })}
         </h1>
         <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-          {employee.department?.name ?? t(lang, "common.general")} · {employee.shift?.name ?? t(lang, "common.noShift")} · {toDateKey(today)}
+          {employee.department?.name ?? t(lang, "common.general")} · {employee.shift?.name ?? t(lang, "common.noShift")} · {formatDate(today)}
         </p>
       </div>
 
@@ -103,7 +103,7 @@ export default async function EmployeeDashboardPage() {
         {/* Month stats */}
         <Suspense fallback={<StatsSkeleton />}>
         <div className="space-y-4">
-          <StatCard label={t(lang, "dashboard.thisMonth")} value={t(lang, "dashboard.days", { n: present + late })} icon={<CalendarDays className="h-4.5 w-4.5" />} tone="indigo" sub={`${toDateKey(today).slice(0, 7)}`} className={statCardClass} />
+          <StatCard label={t(lang, "dashboard.thisMonth")} value={t(lang, "dashboard.days", { n: present + late })} icon={<CalendarDays className="h-4.5 w-4.5" />} tone="indigo" sub={formatDate(today)} className={statCardClass} />
           <StatCard label={t(lang, "common.present")} value={present} icon={<CalendarCheck2 className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
           <StatCard label={t(lang, "common.late")} value={late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
           <StatCard label={t(lang, "common.onLeave")} value={monthLeaves.reduce((s, l) => s + l.days, 0)} icon={<TimerOff className="h-4.5 w-4.5" />} tone="violet" className={statCardClass} />
@@ -130,7 +130,7 @@ export default async function EmployeeDashboardPage() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[13.5px] font-medium">{l.leaveType.name}</p>
                     <p className="text-[11.5px] text-muted-foreground">
-                      {toDateKey(l.fromDate)} → {toDateKey(l.toDate)} · {l.days}d
+                       {formatDate(l.fromDate)} → {formatDate(l.toDate)} · {l.days}d
                     </p>
                   </div>
                   <StatusPill status={l.status} lang={lang} />

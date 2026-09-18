@@ -13,7 +13,7 @@ import { Select } from "@/components/ui/select";
 import { StatCard, EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
-import { toDateKey, todayKey } from "@/lib/dates";
+import { formatDateIST, todayKey } from "@/lib/dates";
 
 export interface CashbookEntryRow {
   id: string;
@@ -177,7 +177,7 @@ export function CashbookPanel({
               {entries.map((e) => (
                 <TR key={e.id}>
                   <TD className="whitespace-nowrap text-[13px] text-muted-foreground">
-                    {toDateKey(new Date(e.date))}
+                    {formatDateIST(e.date)}
                   </TD>
                   <TD>
                     <Badge tone={e.type === "cash_in" ? "success" : "danger"}>
