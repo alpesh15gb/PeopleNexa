@@ -79,12 +79,12 @@ export default async function AdminDashboardPage({
   const licenseExpiryEnd = new Date(Date.UTC(year, month, 1));
 
   const attendanceWhere = branchId
-    ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId } }
-    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, ...(ownLocationId ? { employee: { branch: { locationId: ownLocationId } } } : {}) };
+    ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active" } }
+    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", branch: { locationId: ownLocationId } } : { status: "active" } };
   const [employees, attendance, attendanceTotal, attendanceStatusCounts, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
-      select: { id: true, department: { select: { name: true } } },
+      select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } } },
     }),
     prisma.attendance.findMany({
       where: attendanceWhere,
@@ -189,8 +189,10 @@ export default async function AdminDashboardPage({
   ]);
   const deviceAttendance = new Map<string, number>();
   for (const punch of devicePunches) { const name = punch.device?.name ?? punch.realtimeDevice?.name ?? "Unidentified device"; deviceAttendance.set(name, (deviceAttendance.get(name) ?? 0) + 1); }
-  const projectAttendanceCounts = new Map<string, { present: number; total: number }>();
-  for (const row of projectAttendance) { const name = row.employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name) ?? { present: 0, total: 0 }; current.total++; if (["present", "late", "half_day"].includes(row.status)) current.present++; projectAttendanceCounts.set(name, current); }
+  const projectAttendanceCounts = new Map<string, { present: number; marked: number; absent: number; total: number }>();
+  for (const employee of employees) { const name = employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name) ?? { present: 0, marked: 0, absent: 0, total: 0 }; current.total++; projectAttendanceCounts.set(name, current); }
+  for (const row of projectAttendance) { const name = row.employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name); if (!current) continue; current.marked++; if (["present", "late", "half_day"].includes(row.status)) current.present++; if (row.status === "absent") current.absent++; }
+  for (const count of projectAttendanceCounts.values()) count.absent += count.total - count.marked;
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -251,7 +253,7 @@ export default async function AdminDashboardPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Today&apos;s punch events by device</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} punches</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric punches today.</p>}</CardContent></Card>
-        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present}/{count.total} present</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No attendance marked today.</p>}</CardContent></Card>
+        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present}/{count.total} present · {count.absent} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
