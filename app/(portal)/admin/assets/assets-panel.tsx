@@ -385,14 +385,14 @@ export function AssetsPanel({
         <Table>
           <THead>
             <TR>
-              <TH>Asset</TH>
+            <TH className="sticky left-0 z-20 bg-card">Asset</TH>
               <TH className="hidden md:table-cell">Category</TH>
               <TH className="hidden lg:table-cell">Serial</TH>
               <TH className="hidden xl:table-cell">Condition</TH>
               <TH className="text-right">Value</TH>
               <TH>Assignee</TH>
               <TH>Status</TH>
-              <TH className="w-52" />
+            <TH className="sticky right-0 z-20 w-60 bg-card" />
             </TR>
           </THead>
           <TBody>
@@ -408,10 +408,10 @@ export function AssetsPanel({
             )}
             {filtered.map((a) => (
               <TR key={a.id}>
-                <TD>
+                <TD className="sticky left-0 z-10 bg-card">
                   <div className="flex items-center gap-3">
                     {a.photoUrl ? <img src={a.photoUrl} alt={`${a.name} asset photo`} className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint text-muted-foreground"><Package className="h-4 w-4" /></div>}
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-[13.5px] font-medium">{a.name}</p>
                       <p className="text-[11.5px] text-muted-foreground">{a.tag ?? "no tag"}</p>
                     </div>
@@ -443,8 +443,8 @@ export function AssetsPanel({
                   )}
                 </TD>
                 <TD><StatusPill status={a.status} /></TD>
-                <TD>
-                  <div className="flex items-center gap-1.5">
+                <TD className="sticky right-0 z-10 bg-card">
+                  <div className="flex items-center gap-2">
                     {a.status === "available" ? (
                       <Button size="sm" variant="outline" onClick={() => { setAssigning(a); setAssignEmp(""); setAssignNote(""); }}>
                         <ArrowRightLeft className="h-3.5 w-3.5" /> Assign
@@ -454,14 +454,14 @@ export function AssetsPanel({
                         <Undo2 className="h-3.5 w-3.5" /> Return
                       </Button>
                     ) : null}
-                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="sm" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
-                    <Button size="sm" variant="ghost" loading={historyBusy && history?.asset.id === a.id} onClick={() => openHistory(a)}>
+                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="icon" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
+                    <Button size="icon" variant="ghost" loading={historyBusy && history?.asset.id === a.id} aria-label={`View history for ${a.name}`} onClick={() => openHistory(a)}>
                       <History className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(a)}>
+                    <Button size="icon" variant="ghost" aria-label={`Edit ${a.name}`} onClick={() => openEdit(a)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setDeleting(a)}>
+                    <Button size="icon" variant="ghost" aria-label={`Delete ${a.name}`} onClick={() => setDeleting(a)}>
                       <Trash2 className="h-3.5 w-3.5 text-rose-300" />
                     </Button>
                   </div>

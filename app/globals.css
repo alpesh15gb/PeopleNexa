@@ -77,12 +77,14 @@
      4.5:1+ contrast on light surfaces; emerald/rose/amber stay semantic. */
   --indigo-200: #1D4ED8;
   --indigo-300: #2563EB;
-  --emerald-300: #059669;
-  --emerald-400: #10b981;
-  --rose-300: #e11d48;
-  --rose-400: #f43f5e;
-  --amber-300: #d97706;
-  --amber-400: #f59e0b;
+   /* Semantic foregrounds stay at AA contrast on light surfaces, including
+      translucent status badges and compact dashboard statistics. */
+   --emerald-300: #047857;
+   --emerald-400: #047857;
+   --rose-300: #be123c;
+   --rose-400: #be123c;
+   --amber-300: #a16207;
+   --amber-400: #a16207;
   --sky-300: #1D4ED8;
   --sky-400: #2563EB;
   --violet-200: #1E40AF;

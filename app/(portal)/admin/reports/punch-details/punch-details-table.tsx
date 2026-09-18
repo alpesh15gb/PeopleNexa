@@ -154,8 +154,8 @@ export function PunchDetailsTable({
             <THead>
               <TR>
                 <TH>Sl No</TH>
-                <TH>Employee Id</TH>
-                <TH>Employee Name</TH>
+                <TH className="hidden md:table-cell">Employee Id</TH>
+                <TH className="sticky left-0 z-20 bg-card">Employee Name</TH>
                 <TH>Designation</TH>
                 <TH>Division</TH>
                 <TH>Date</TH>
@@ -179,8 +179,8 @@ export function PunchDetailsTable({
               {(data?.rows ?? []).map((row, i) => {
                 return <TR key={row.id}>
                   <TD>{startRow + i}</TD>
-                  <TD className="font-mono">{row.employee.employeeNumber}</TD>
-                  <TD>{row.employee.firstName} {row.employee.lastName}</TD>
+                  <TD className="hidden font-mono md:table-cell">{row.employee.employeeNumber}</TD>
+                  <TD className="sticky left-0 z-10 bg-card"><p>{row.employee.firstName} {row.employee.lastName}</p><p className="font-mono text-[11px] text-muted-foreground md:hidden">{row.employee.employeeNumber} · {row.employee.position ?? "No designation"}</p></TD>
                   <TD>{row.employee.position ?? "—"}</TD>
                   <TD>{row.employee.branch?.name ?? "—"}</TD>
                   <TD className="font-mono">{date(row.date)}</TD>

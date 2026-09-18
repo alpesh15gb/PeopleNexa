@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { renderIdCardPdf } from "@/lib/id-card-pdf";
+import { photoPosition } from "@/lib/id-card-content";
 
 export async function GET(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -15,6 +16,6 @@ export async function GET(request: NextRequest) {
   const employee = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, phone: true, profilePicture: true, profile: { select: { bloodGroup: true } } } });
   if (!employee) return NextResponse.json({ error: "No employee matches this Device ID." }, { status: 404 });
   if (request.nextUrl.searchParams.get("format") !== "pdf") return NextResponse.json({ employee });
-  const pdf = await renderIdCardPdf(employee);
+  const pdf = await renderIdCardPdf(employee, { x: photoPosition(request.nextUrl.searchParams.get("photoX")), y: photoPosition(request.nextUrl.searchParams.get("photoY")) });
   return new NextResponse(new Uint8Array(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="id-card-${employee.deviceCode ?? employee.employeeNumber}.pdf"` } });
 }

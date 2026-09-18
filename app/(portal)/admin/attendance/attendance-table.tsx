@@ -158,13 +158,13 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
       <Table>
         <THead>
           <TR>
-            <TH>Employee</TH>
+            <TH className="sticky left-0 z-20 bg-card">Employee</TH>
             <TH className="hidden md:table-cell">Department</TH>
             <TH className="hidden lg:table-cell">Shift</TH>
             <TH>In</TH>
             <TH>Out</TH>
             <TH>Status</TH>
-            <TH className="w-20" />
+            <TH className="sticky right-0 z-20 w-28 bg-card" />
           </TR>
         </THead>
         <TBody>
@@ -172,14 +172,15 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
             const statusNow = row.record?.status ?? (row.leave ? "on_leave" : "no_record");
             return (
               <TR key={row.employeeId}>
-                <TD>
+                <TD className="sticky left-0 z-10 bg-card">
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint-strong text-[11px] font-bold text-muted-foreground">
                       {row.name.charAt(0)}
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-[13.5px] font-medium">{row.name}</p>
                       <p className="text-[11.5px] text-muted-foreground">{row.employeeNumber}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{row.department} · {row.shift}</p>
                     </div>
                   </div>
                 </TD>
@@ -191,7 +192,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                 </TD>
                 <TD className="font-mono text-[13px]">{row.record?.punchIn ?? "—"}</TD>
                 <TD className="font-mono text-[13px]">{row.record?.punchOut ?? "—"}</TD>
-                <TD>
+                <TD className="sticky right-0 z-10 bg-card">
                   {!row.record && row.leave ? (
                     <Badge className="border-transparent" style={{ background: `${row.leave.color}22`, color: row.leave.color }}>
                       On leave · {row.leave.type}
@@ -216,10 +217,10 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                 <TD>
                   {editing === row.employeeId ? (
                     <div className="flex items-center gap-1.5">
-                      <Button size="sm" variant="success" loading={saving} onClick={() => save(row.record!.id)}>
+                      <Button size="icon" variant="success" loading={saving} aria-label={`Save status for ${row.name}`} onClick={() => save(row.record!.id)}>
                         <Save className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                      <Button size="icon" variant="ghost" aria-label={`Cancel editing ${row.name}`} onClick={() => setEditing(null)}>
                         <X className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -227,10 +228,10 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                     <div className="flex items-center gap-1">
                       {row.record ? (
                         <>
-                          <Button size="sm" variant="ghost" title="View / correct punches" aria-label={`View punches for ${row.name ?? row.employeeId}`} onClick={() => setCorrection(row.record!)}>
+                          <Button size="icon" variant="ghost" title="View / correct punches" aria-label={`View punches for ${row.name ?? row.employeeId}`} onClick={() => setCorrection(row.record!)}>
                             <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="sm" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
+                          <Button size="icon" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
                             <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
                         </>
@@ -286,7 +287,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                 <button
                   onClick={() => setDeleteTarget(p.id)}
                   aria-label={`Delete punch at ${fmtISTFull(p.time)}`}
-                  className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+                  className="ml-auto flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
                   title="Delete punch"
                 >
                   <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />

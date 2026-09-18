@@ -448,21 +448,21 @@ export function EmployeesTable({
       <Table>
         <THead>
           <TR>
-            <TH>Employee</TH>
+            <TH className="sticky left-0 z-20 bg-card">Employee</TH>
             <TH className="hidden md:table-cell">Department</TH>
             <TH className="hidden lg:table-cell">Branch</TH>
             <TH className="hidden lg:table-cell">Shift</TH>
             <TH>Status</TH>
-            <TH className="w-20" />
+            <TH className="sticky right-0 z-20 w-36 bg-card" />
           </TR>
         </THead>
         <TBody>
           {visibleEmployees.map((emp) => (
             <TR key={emp.id}>
-              <TD>
+              <TD className="sticky left-0 z-10 bg-card">
                 <div className="flex items-center gap-3">
                   {emp.profilePicture ? <img src={emp.profilePicture} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">{(emp.firstName[0] ?? "") + (emp.lastName[0] ?? "")}</div>}
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[13.5px] font-medium">
                       {emp.firstName} {emp.lastName}
                       {emp.role === "admin" && <span className="ml-2 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">ADMIN</span>}
@@ -471,6 +471,7 @@ export function EmployeesTable({
                     <p className="text-[11.5px] text-muted-foreground">
                       Code: {emp.employeeNumber}{emp.deviceCode ? ` · Device: ${emp.deviceCode}` : ""} · {emp.email}
                     </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{emp.department?.name ?? "Unassigned"} · {emp.branch?.name ?? "No branch"}</p>
                   </div>
                 </div>
               </TD>
@@ -484,16 +485,16 @@ export function EmployeesTable({
                 <span className="text-[13px] text-muted-foreground">{emp.shift?.name ?? "—"}</span>
               </TD>
               <TD><StatusPill status={emp.status} /></TD>
-              <TD>
+              <TD className="sticky right-0 z-10 bg-card">
                 <div className="flex items-center justify-end gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => openEmployee(emp)}>
+                  <Button size="icon" variant="ghost" aria-label={`Edit ${emp.firstName} ${emp.lastName}`} onClick={() => openEmployee(emp)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                   {!restricted && (
                     <Button size="icon" variant="ghost" title="Allowed biometric devices" onClick={() => void openAccess(emp)}><Shield className="h-3.5 w-3.5" /></Button>
                   )}
                   {!restricted && emp.role !== "admin" && (
-                    <Button size="icon" variant="ghost" className="text-rose-300 hover:bg-rose-500/10" onClick={() => setConfirmDelete(emp)}>
+                    <Button size="icon" variant="ghost" className="text-rose-300 hover:bg-rose-500/10" aria-label={`Remove ${emp.firstName} ${emp.lastName}`} onClick={() => setConfirmDelete(emp)}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
