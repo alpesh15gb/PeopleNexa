@@ -20,6 +20,7 @@ interface AttendanceRow {
     deviceCode: string | null;
     firstName: string;
     lastName: string;
+    position: string | null;
     branch: { name: string } | null;
     department: { name: string } | null;
     shift: { name: string } | null;
@@ -155,6 +156,7 @@ export function PunchDetailsTable({
                 <TH>Sl No</TH>
                 <TH>Employee Id</TH>
                 <TH>Employee Name</TH>
+                <TH>Designation</TH>
                 <TH>Division</TH>
                 <TH>Date</TH>
                 <TH>Device IN</TH>
@@ -169,16 +171,17 @@ export function PunchDetailsTable({
             </THead>
             <TBody>
               {loading && (
-                <TR><TD colSpan={13} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
+                <TR><TD colSpan={14} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
               )}
               {!loading && (data?.rows.length ?? 0) === 0 && (
-                <TR><TD colSpan={13} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
+                <TR><TD colSpan={14} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
               )}
               {(data?.rows ?? []).map((row, i) => {
                 return <TR key={row.id}>
                   <TD>{startRow + i}</TD>
                   <TD className="font-mono">{row.employee.employeeNumber}</TD>
                   <TD>{row.employee.firstName} {row.employee.lastName}</TD>
+                  <TD>{row.employee.position ?? "—"}</TD>
                   <TD>{row.employee.branch?.name ?? "—"}</TD>
                   <TD className="font-mono">{date(row.date)}</TD>
                   <TD><span className="block max-w-44 truncate" title={row.deviceIn?.serialNumber ?? ""}>{row.deviceIn?.name ?? "—"}</span></TD>

@@ -19,6 +19,7 @@ type AttendanceRow = {
     deviceCode: string | null;
     firstName: string;
     lastName: string;
+    position: string | null;
     branch: { name: string } | null;
     department: { name: string } | null;
     shift: { name: string } | null;
@@ -144,6 +145,7 @@ export async function GET(req: NextRequest) {
             deviceCode: true,
             firstName: true,
             lastName: true,
+            position: true,
             branch: { select: { name: true } },
             department: { select: { name: true } },
             shift: { select: { name: true } },
@@ -159,6 +161,7 @@ export async function GET(req: NextRequest) {
       { header: "Employee Code", key: "code", width: 16 },
       { header: "Device Code", key: "deviceCode", width: 14 },
       { header: "Employee Name", key: "name", width: 26 },
+      { header: "Designation", key: "designation", width: 24 },
       { header: "Branch / Division", key: "branch", width: 26 },
       { header: "Department", key: "department", width: 20 },
       { header: "Date", key: "date", width: 14 },
@@ -176,6 +179,7 @@ export async function GET(req: NextRequest) {
         code: row.employee.employeeNumber,
         deviceCode: row.employee.deviceCode ?? "",
         name: `${row.employee.firstName} ${row.employee.lastName}`.trim(),
+        designation: row.employee.position ?? "",
         branch: row.employee.branch?.name ?? "",
         department: row.employee.department?.name ?? "",
         date: istDateKey(row.date),
@@ -216,6 +220,7 @@ export async function GET(req: NextRequest) {
             deviceCode: true,
             firstName: true,
             lastName: true,
+            position: true,
           branch: { select: { name: true } },
           department: { select: { name: true } },
           shift: { select: { name: true } },
