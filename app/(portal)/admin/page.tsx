@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper } from "lucide-react";
+import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper, Fingerprint, Building2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { addDays, toDateKey, formatTime, formatDate, formatDateIST, relativeDay } from "@/lib/dates";
@@ -183,6 +183,14 @@ export default async function AdminDashboardPage({
     return birthday && istDateKey(birthday).slice(5) === todayMonthDay;
   });
   const anniversaries = celebrationProfiles.filter((profile) => profile.marriageDate && istDateKey(profile.marriageDate).slice(5) === todayMonthDay);
+  const [devicePunches, projectAttendance] = await Promise.all([
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, punchTime: { gte: today, lt: addDays(today, 1) }, employee: branchId ? { branchId } : ownLocationId ? { branch: { locationId: ownLocationId } } : {} }, select: { device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
+    prisma.attendance.findMany({ where: attendanceWhere, select: { status: true, employee: { select: { branch: { select: { name: true } } } } } }),
+  ]);
+  const deviceAttendance = new Map<string, number>();
+  for (const punch of devicePunches) { const name = punch.device?.name ?? punch.realtimeDevice?.name ?? "Unidentified device"; deviceAttendance.set(name, (deviceAttendance.get(name) ?? 0) + 1); }
+  const projectAttendanceCounts = new Map<string, { present: number; total: number }>();
+  for (const row of projectAttendance) { const name = row.employee.branch?.name ?? "Unassigned"; const current = projectAttendanceCounts.get(name) ?? { present: 0, total: 0 }; current.total++; if (["present", "late", "half_day"].includes(row.status)) current.present++; projectAttendanceCounts.set(name, current); }
 
   const week = [];
   // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
@@ -240,6 +248,11 @@ export default async function AdminDashboardPage({
         />
       </div>
       </Suspense>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Today&apos;s punch events by device</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} punches</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric punches today.</p>}</CardContent></Card>
+        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present}/{count.total} present</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No attendance marked today.</p>}</CardContent></Card>
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
         {/* Today's live list */}

@@ -77,7 +77,7 @@ export function formatDateIST(d: Date | string | null | undefined): string {
 
 export function formatDate(d: Date | null | undefined): string {
   if (!d) return "—";
-  return toDateKey(d);
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(d);
 }
 
 export function todayKey(now: Date = new Date()): string {
