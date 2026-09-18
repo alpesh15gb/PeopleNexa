@@ -243,7 +243,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
   const isUnprovisionedDeviceAccount = employee.email.endsWith("@device.local");
-  if (requestedStatus === "active" && isUnprovisionedDeviceAccount && (email.endsWith("@device.local") || !password)) {
+  if (requestedStatus === "active" && employee.status !== "active" && isUnprovisionedDeviceAccount && (email.endsWith("@device.local") || !password)) {
     return NextResponse.json({ error: "Provision a real email and a new password before activating this imported account." }, { status: 400 });
   }
 
