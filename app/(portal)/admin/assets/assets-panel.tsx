@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, History, ArrowRightLeft, Undo2, Search, Package, Upload, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, History, ArrowRightLeft, Undo2, Search, Package, Upload, Download, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -34,8 +34,12 @@ interface AssetRow {
   category: string;
   tag: string | null;
   serialNumber: string | null;
+  photoUrl: string | null;
   value: number | null;
   purchaseDate: string | Date | null;
+  condition: string;
+  warrantyExpiry: string | Date | null;
+  maintenanceDue: string | Date | null;
   status: string;
   notes: string | null;
   assignee: Assignee | null;
@@ -71,6 +75,10 @@ interface FormState {
   serialNumber: string;
   value: string;
   purchaseDate: string;
+  photoUrl: string;
+  condition: string;
+  warrantyExpiry: string;
+  maintenanceDue: string;
   status: string;
   notes: string;
 }
@@ -82,6 +90,10 @@ const emptyForm: FormState = {
   serialNumber: "",
   value: "",
   purchaseDate: "",
+  photoUrl: "",
+  condition: "good",
+  warrantyExpiry: "",
+  maintenanceDue: "",
   status: "available",
   notes: "",
 };
@@ -115,6 +127,7 @@ export function AssetsPanel({
   const [history, setHistory] = useState<{
     asset: AssetRow;
     entries: Array<{ id: string; employee: Assignee; assignedAt: Date; returnedAt: Date | null; note: string | null }>;
+    maintenance: Array<{ id: string; type: string; description: string; provider: string | null; cost: number | null; performedAt: Date; nextDueDate: Date | null; status: string; notes: string | null }>;
   } | null>(null);
   const [historyBusy, setHistoryBusy] = useState(false);
 
@@ -123,6 +136,9 @@ export function AssetsPanel({
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [maintaining, setMaintaining] = useState<AssetRow | null>(null);
+  const [maintenanceForm, setMaintenanceForm] = useState({ type: "service", description: "", provider: "", cost: "", performedAt: new Date().toISOString().slice(0, 10), nextDueDate: "", status: "completed", notes: "" });
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -159,6 +175,10 @@ export function AssetsPanel({
       serialNumber: asset.serialNumber ?? "",
       value: asset.value != null ? String(asset.value) : "",
       purchaseDate: asset.purchaseDate ? String(asset.purchaseDate).slice(0, 10) : "",
+      photoUrl: asset.photoUrl ?? "",
+      condition: asset.condition,
+      warrantyExpiry: asset.warrantyExpiry ? String(asset.warrantyExpiry).slice(0, 10) : "",
+      maintenanceDue: asset.maintenanceDue ? String(asset.maintenanceDue).slice(0, 10) : "",
       status: asset.status,
       notes: asset.notes ?? "",
     });
@@ -183,6 +203,10 @@ export function AssetsPanel({
           serialNumber: form.serialNumber || null,
           value: form.value ? Number(form.value) : null,
           purchaseDate: form.purchaseDate || null,
+          photoUrl: form.photoUrl || null,
+          condition: form.condition,
+          warrantyExpiry: form.warrantyExpiry || null,
+          maintenanceDue: form.maintenanceDue || null,
           status: form.status,
           notes: form.notes || null,
         }),
@@ -257,6 +281,7 @@ export function AssetsPanel({
           returnedAt: x.returnedAt ? new Date(x.returnedAt) : null,
           note: x.note,
         })),
+        maintenance: (data.asset.maintenanceRecords ?? []).map((x: { id: string; type: string; description: string; provider: string | null; cost: number | null; performedAt: string; nextDueDate: string | null; status: string; notes: string | null }) => ({ ...x, performedAt: new Date(x.performedAt), nextDueDate: x.nextDueDate ? new Date(x.nextDueDate) : null })),
       });
     } finally {
       setHistoryBusy(false);
@@ -279,6 +304,22 @@ export function AssetsPanel({
     } finally {
       setDeleteBusy(false);
     }
+  }
+
+  async function saveMaintenance() {
+    if (!maintaining || !maintenanceForm.description.trim()) {
+      toast("error", "Maintenance description is required");
+      return;
+    }
+    setMaintenanceBusy(true);
+    try {
+      const res = await fetch(`/api/assets/${maintaining.id}/maintenance`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...maintenanceForm, cost: maintenanceForm.cost ? Number(maintenanceForm.cost) : null }) });
+      const data = await res.json();
+      if (!res.ok) { toast("error", data.error ?? "Failed to record maintenance"); return; }
+      toast("success", "Maintenance recorded");
+      setMaintaining(null);
+      router.refresh();
+    } finally { setMaintenanceBusy(false); }
   }
 
   async function importAssets() {
@@ -347,16 +388,17 @@ export function AssetsPanel({
               <TH>Asset</TH>
               <TH className="hidden md:table-cell">Category</TH>
               <TH className="hidden lg:table-cell">Serial</TH>
+              <TH className="hidden xl:table-cell">Condition</TH>
               <TH className="text-right">Value</TH>
               <TH>Assignee</TH>
               <TH>Status</TH>
-              <TH className="w-44" />
+              <TH className="w-52" />
             </TR>
           </THead>
           <TBody>
             {filtered.length === 0 && (
               <TR>
-                <TD colSpan={7}>
+                <TD colSpan={8}>
                   <div className="flex flex-col items-center gap-2 py-10 text-center">
                     <Package className="h-6 w-6 text-muted-foreground/40" />
                     <p className="text-[13.5px] text-muted-foreground">No assets match your filters.</p>
@@ -368,9 +410,7 @@ export function AssetsPanel({
               <TR key={a.id}>
                 <TD>
                   <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint text-muted-foreground">
-                      <Package className="h-4 w-4" />
-                    </div>
+                    {a.photoUrl ? <img src={a.photoUrl} alt={`${a.name} asset photo`} className="h-9 w-9 shrink-0 rounded-lg object-cover" /> : <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint text-muted-foreground"><Package className="h-4 w-4" /></div>}
                     <div>
                       <p className="text-[13.5px] font-medium">{a.name}</p>
                       <p className="text-[11.5px] text-muted-foreground">{a.tag ?? "no tag"}</p>
@@ -385,6 +425,7 @@ export function AssetsPanel({
                 <TD className="hidden font-mono text-[12.5px] text-muted-foreground lg:table-cell">
                   {a.serialNumber ?? "—"}
                 </TD>
+                <TD className="hidden xl:table-cell"><Badge tone={a.condition === "damaged" || a.condition === "poor" ? "warning" : "neutral"} className="capitalize">{a.condition}</Badge></TD>
                 <TD className="text-right font-mono text-[13px]">{a.value != null ? formatMoney(a.value) : "—"}</TD>
                 <TD>
                   {a.assignee ? (
@@ -408,11 +449,12 @@ export function AssetsPanel({
                       <Button size="sm" variant="outline" onClick={() => { setAssigning(a); setAssignEmp(""); setAssignNote(""); }}>
                         <ArrowRightLeft className="h-3.5 w-3.5" /> Assign
                       </Button>
-                    ) : (
+                    ) : a.status === "assigned" ? (
                       <Button size="sm" variant="ghost" onClick={() => returnAsset(a)}>
                         <Undo2 className="h-3.5 w-3.5" /> Return
                       </Button>
-                    )}
+                    ) : null}
+                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="sm" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: new Date().toISOString().slice(0, 10), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
                     <Button size="sm" variant="ghost" loading={historyBusy && history?.asset.id === a.id} onClick={() => openHistory(a)}>
                       <History className="h-3.5 w-3.5" />
                     </Button>
@@ -457,6 +499,9 @@ export function AssetsPanel({
               </Select>
             </Field>
           </div>
+          <Field label="Photo URL">
+            <Input value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
+          </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Asset tag">
               <Input value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="AST-009" />
@@ -464,6 +509,15 @@ export function AssetsPanel({
             <Field label="Serial number">
               <Input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} placeholder="S/N" />
             </Field>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Field label="Condition">
+              <Select value={form.condition} onChange={(e) => setForm({ ...form, condition: e.target.value })}>
+                {(["new", "good", "fair", "poor", "damaged"] as const).map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+              </Select>
+            </Field>
+            <Field label="Warranty expiry"><Input type="date" value={form.warrantyExpiry} onChange={(e) => setForm({ ...form, warrantyExpiry: e.target.value })} /></Field>
+            <Field label="Next maintenance"><Input type="date" value={form.maintenanceDue} onChange={(e) => setForm({ ...form, maintenanceDue: e.target.value })} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Value (₹)">
@@ -487,7 +541,7 @@ export function AssetsPanel({
 
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import assets" description="Upload a CSV or XLSX inventory file. Existing asset tags are skipped.">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">Required: <strong>Name</strong> or <strong>Asset Name</strong>. Optional columns: Category, Asset Tag, Serial Number, Value, Purchase Date, Status, Notes, Employee Number.</p>
+          <p className="text-sm text-muted-foreground">Required: <strong>Name</strong> or <strong>Asset Name</strong>. Optional columns: Category, Asset Tag, Serial Number, Photo URL, Value, Purchase Date, Condition, Warranty Expiry, Maintenance Due, Status, Notes, Employee Number.</p>
           <p className="text-xs text-muted-foreground">Use an active Employee Number to create the assignment during import. Purchase dates accept DD/MM/YYYY.</p>
           <Input type="file" accept=".csv,.xlsx" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} />
           <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button><Button loading={importBusy} onClick={importAssets}><Upload className="h-3.5 w-3.5" /> Import assets</Button></div>
@@ -528,13 +582,13 @@ export function AssetsPanel({
       <Modal
         open={history !== null}
         onClose={() => setHistory(null)}
-        title="Assignment history"
+        title="Lifecycle history"
         description={history ? `${history.asset.name}${history.asset.tag ? ` (${history.asset.tag})` : ""}` : ""}
       >
         {history && (
           <div className="space-y-3">
-            {history.entries.length === 0 && (
-              <p className="py-4 text-center text-[13px] text-muted-foreground">No assignments yet.</p>
+            {history.entries.length === 0 && history.maintenance.length > 0 && (
+              <p className="py-2 text-center text-[13px] text-muted-foreground">No assignments yet.</p>
             )}
             {history.entries.map((e) => (
               <div key={e.id} className="flex items-start gap-3 rounded-xl border border-edge bg-tint px-3.5 py-3">
@@ -558,8 +612,26 @@ export function AssetsPanel({
                 )}
               </div>
             ))}
+            {history.maintenance.length > 0 && <p className="pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Maintenance</p>}
+            {history.maintenance.map((record) => (
+              <div key={record.id} className="rounded-xl border border-edge bg-tint px-3.5 py-3">
+                <div className="flex items-start gap-3"><Wrench className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><div className="min-w-0 flex-1"><p className="text-[13px] font-medium capitalize">{record.type}: {record.description}</p><p className="mt-0.5 text-[12px] text-muted-foreground">{formatDate(record.performedAt)}{record.provider ? ` · ${record.provider}` : ""}{record.cost != null ? ` · ${formatMoney(record.cost)}` : ""}</p>{record.nextDueDate && <p className="mt-0.5 text-[12px] text-muted-foreground">Next service: {formatDate(record.nextDueDate)}</p>}{record.notes && <p className="mt-1 text-[12px] text-muted-foreground/80">{record.notes}</p>}</div><Badge tone={record.status === "completed" ? "success" : "warning"} className="capitalize">{record.status.replace("_", " ")}</Badge></div>
+              </div>
+            ))}
+            {history.entries.length === 0 && history.maintenance.length === 0 && <p className="py-2 text-center text-[13px] text-muted-foreground">No lifecycle history yet.</p>}
           </div>
         )}
+      </Modal>
+
+      <Modal open={maintaining !== null} onClose={() => setMaintaining(null)} title="Record maintenance" description={maintaining ? maintaining.name : ""}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4"><Field label="Type"><Select value={maintenanceForm.type} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, type: e.target.value })}>{["service", "repair", "inspection", "other"].map((type) => <option key={type} value={type}>{type}</option>)}</Select></Field><Field label="Status"><Select value={maintenanceForm.status} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, status: e.target.value })}>{["scheduled", "in_progress", "completed"].map((status) => <option key={status} value={status}>{status.replace("_", " ")}</option>)}</Select></Field></div>
+          <Field label="Description *"><Input value={maintenanceForm.description} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, description: e.target.value })} placeholder="e.g. Annual inspection and cleaning" /></Field>
+          <div className="grid grid-cols-2 gap-4"><Field label="Provider"><Input value={maintenanceForm.provider} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, provider: e.target.value })} placeholder="Service provider" /></Field><Field label="Cost (₹)"><Input type="number" value={maintenanceForm.cost} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, cost: e.target.value })} placeholder="0" /></Field></div>
+          <div className="grid grid-cols-2 gap-4"><Field label="Service date"><Input type="date" value={maintenanceForm.performedAt} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, performedAt: e.target.value })} /></Field><Field label="Next due date"><Input type="date" value={maintenanceForm.nextDueDate} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, nextDueDate: e.target.value })} /></Field></div>
+          <Field label="Notes"><Input value={maintenanceForm.notes} onChange={(e) => setMaintenanceForm({ ...maintenanceForm, notes: e.target.value })} placeholder="Parts replaced or follow-up required" /></Field>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setMaintaining(null)}>Cancel</Button><Button loading={maintenanceBusy} onClick={saveMaintenance}><Wrench className="h-3.5 w-3.5" /> Save maintenance</Button></div>
+        </div>
       </Modal>
 
       {/* Delete confirm */}

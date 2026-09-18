@@ -934,17 +934,43 @@ model Asset {
   category     String    @default("other") // laptop | phone | id_card | vehicle | device | furniture | other
   tag          String? // asset tag, e.g. AST-001
   serialNumber String?
+  photoUrl     String?
   value        Float?
   purchaseDate DateTime?
+  condition    String    @default("good") // new | good | fair | poor | damaged
+  warrantyExpiry DateTime?
+  maintenanceDue DateTime?
   status       String    @default("available") // available | assigned | maintenance | retired | lost
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   assignments AssetAssignment[]
+  maintenanceRecords AssetMaintenance[]
 
   @@unique([tenantId, tag])
   @@index([tenantId, status])
+  @@index([tenantId, maintenanceDue])
+}
+
+model AssetMaintenance {
+  id          String   @id @default(cuid())
+  assetId     String
+  asset       Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  type        String   @default("service") // service | repair | inspection | other
+  description String
+  provider    String?
+  cost        Float?
+  performedAt DateTime @default(now())
+  nextDueDate DateTime?
+  status      String   @default("completed") // scheduled | in_progress | completed
+  notes       String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([assetId, performedAt])
+  @@index([assetId, nextDueDate])
 }
 
 model AssetAssignment {

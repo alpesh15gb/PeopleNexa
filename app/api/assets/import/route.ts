@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   const headers = rows.shift()!.map(key); const column = (...names: string[]) => names.map(key).map((name) => headers.indexOf(name)).find((index) => index >= 0) ?? -1;
   const nameColumn = column("name", "assetname");
   if (nameColumn < 0) return NextResponse.json({ error: "A Name or Asset Name column is required." }, { status: 400 });
-  const categoryColumn = column("category"); const tagColumn = column("tag", "assettag"); const serialColumn = column("serialnumber", "serial"); const valueColumn = column("value", "purchasevalue"); const dateColumn = column("purchasedate"); const statusColumn = column("status"); const notesColumn = column("notes", "note"); const employeeColumn = column("employeenumber", "employeeid", "assigneecode");
+  const categoryColumn = column("category"); const tagColumn = column("tag", "assettag"); const serialColumn = column("serialnumber", "serial"); const photoColumn = column("photourl", "photo"); const valueColumn = column("value", "purchasevalue"); const dateColumn = column("purchasedate"); const conditionColumn = column("condition"); const warrantyColumn = column("warrantyexpiry", "warrantyend"); const maintenanceDueColumn = column("maintenancedue", "nextservicedate"); const statusColumn = column("status"); const notesColumn = column("notes", "note"); const employeeColumn = column("employeenumber", "employeeid", "assigneecode");
   const employees = employeeColumn >= 0 ? await prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active" }, select: { id: true, employeeNumber: true } }) : [];
   const employeeByNumber = new Map(employees.map((employee) => [employee.employeeNumber.toLowerCase(), employee]));
   let created = 0; let assigned = 0; const errors: string[] = [];
@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
     const requestedStatus = at(statusColumn).toLowerCase(); const status = employee ? "assigned" : (statuses.has(requestedStatus) ? requestedStatus : "available");
     const value = at(valueColumn) ? Number(at(valueColumn).replace(/,/g, "")) : null;
     try {
-      await prisma.$transaction(async (tx) => { const asset = await tx.asset.create({ data: { tenantId: session.tenantId, name, category: at(categoryColumn) || "other", tag: at(tagColumn) || null, serialNumber: at(serialColumn) || null, value: value != null && Number.isFinite(value) ? value : null, purchaseDate: parseDate(at(dateColumn)), status, notes: at(notesColumn) || null } }); if (employee) await tx.assetAssignment.create({ data: { assetId: asset.id, employeeId: employee.id, assignedBy: session.sub, note: "Imported assignment" } }); });
+      const condition = at(conditionColumn).toLowerCase();
+      await prisma.$transaction(async (tx) => { const asset = await tx.asset.create({ data: { tenantId: session.tenantId, name, category: at(categoryColumn) || "other", tag: at(tagColumn) || null, serialNumber: at(serialColumn) || null, photoUrl: at(photoColumn) || null, value: value != null && Number.isFinite(value) ? value : null, purchaseDate: parseDate(at(dateColumn)), condition: ["new", "good", "fair", "poor", "damaged"].includes(condition) ? condition : "good", warrantyExpiry: parseDate(at(warrantyColumn)), maintenanceDue: parseDate(at(maintenanceDueColumn)), status, notes: at(notesColumn) || null } }); if (employee) await tx.assetAssignment.create({ data: { assetId: asset.id, employeeId: employee.id, assignedBy: session.sub, note: "Imported assignment" } }); });
       created++; if (employee) assigned++;
     } catch (error) { errors.push(`Row ${index + 2}: ${(error as { code?: string }).code === "P2002" ? "asset tag already exists." : "could not be imported."}`); }
   }

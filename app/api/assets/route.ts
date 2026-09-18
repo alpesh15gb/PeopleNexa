@@ -35,6 +35,10 @@ export async function GET(req: NextRequest) {
         include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
         take: 1,
       },
+      maintenanceRecords: {
+        orderBy: { performedAt: "desc" },
+        take: 1,
+      },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -60,7 +64,7 @@ export async function GET(req: NextRequest) {
   counts.total = (await prisma.asset.count({ where: { tenantId: session.tenantId } }));
   if (format === "csv") {
     const quote = (value: unknown) => { const text = value == null ? "" : String(value); return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-    const lines = ["Asset Name,Category,Asset Tag,Serial Number,Value,Purchase Date,Status,Assignee,Employee Number,Assigned Date,Notes", ...assets.map((asset) => [asset.name, asset.category, asset.tag, asset.serialNumber, asset.value, formatDateIST(asset.purchaseDate), asset.status, asset.assignments[0]?.employee ? `${asset.assignments[0].employee.firstName} ${asset.assignments[0].employee.lastName}` : "", asset.assignments[0]?.employee?.employeeNumber, formatDateIST(asset.assignments[0]?.assignedAt), asset.notes].map(quote).join(","))];
+    const lines = ["Asset Name,Category,Asset Tag,Serial Number,Photo URL,Value,Purchase Date,Condition,Warranty Expiry,Maintenance Due,Status,Assignee,Employee Number,Assigned Date,Last Maintenance,Last Maintenance Cost,Notes", ...assets.map((asset) => [asset.name, asset.category, asset.tag, asset.serialNumber, asset.photoUrl, asset.value, formatDateIST(asset.purchaseDate), asset.condition, formatDateIST(asset.warrantyExpiry), formatDateIST(asset.maintenanceDue), asset.status, asset.assignments[0]?.employee ? `${asset.assignments[0].employee.firstName} ${asset.assignments[0].employee.lastName}` : "", asset.assignments[0]?.employee?.employeeNumber, formatDateIST(asset.assignments[0]?.assignedAt), formatDateIST(asset.maintenanceRecords[0]?.performedAt), asset.maintenanceRecords[0]?.cost, asset.notes].map(quote).join(","))];
     return new NextResponse(lines.join("\r\n") + "\r\n", { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="asset-inventory-report.csv"' } });
   }
 
@@ -71,8 +75,12 @@ export async function GET(req: NextRequest) {
       category: a.category,
       tag: a.tag,
       serialNumber: a.serialNumber,
+      photoUrl: a.photoUrl,
       value: a.value,
       purchaseDate: a.purchaseDate,
+      condition: a.condition,
+      warrantyExpiry: a.warrantyExpiry,
+      maintenanceDue: a.maintenanceDue,
       status: a.status,
       notes: a.notes,
       assignee: a.assignments[0]?.employee ?? null,
@@ -95,6 +103,9 @@ export async function POST(req: NextRequest) {
     const serialNumber = body.serialNumber ? String(body.serialNumber).trim() : null;
     const value = body.value !== undefined && body.value !== "" ? Number(body.value) : null;
     const purchaseDate = body.purchaseDate ? new Date(String(body.purchaseDate)) : null;
+    const warrantyExpiry = body.warrantyExpiry ? new Date(String(body.warrantyExpiry)) : null;
+    const maintenanceDue = body.maintenanceDue ? new Date(String(body.maintenanceDue)) : null;
+    const condition = String(body.condition ?? "good").trim();
     const status = String(body.status ?? "available").trim();
     const notes = body.notes ? String(body.notes).trim() : null;
 
@@ -105,6 +116,9 @@ export async function POST(req: NextRequest) {
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
+    if (!["new", "good", "fair", "poor", "damaged"].includes(condition)) {
+      return NextResponse.json({ error: "Invalid asset condition." }, { status: 400 });
+    }
 
     const asset = await prisma.asset.create({
       data: {
@@ -113,8 +127,12 @@ export async function POST(req: NextRequest) {
         category,
         tag,
         serialNumber,
+        photoUrl: body.photoUrl ? String(body.photoUrl).trim() : null,
         value: Number.isFinite(value) ? value : null,
         purchaseDate,
+        condition,
+        warrantyExpiry: warrantyExpiry && !Number.isNaN(warrantyExpiry.getTime()) ? warrantyExpiry : null,
+        maintenanceDue: maintenanceDue && !Number.isNaN(maintenanceDue.getTime()) ? maintenanceDue : null,
         status,
         notes,
       },

@@ -16,6 +16,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
         orderBy: { assignedAt: "desc" },
       },
+      maintenanceRecords: {
+        orderBy: { performedAt: "desc" },
+      },
     },
   });
   if (!asset) {
@@ -43,11 +46,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.category !== undefined) data.category = String(body.category).trim();
     if (body.tag !== undefined) data.tag = body.tag ? String(body.tag).trim() : null;
     if (body.serialNumber !== undefined) data.serialNumber = body.serialNumber ? String(body.serialNumber).trim() : null;
+    if (body.photoUrl !== undefined) data.photoUrl = body.photoUrl ? String(body.photoUrl).trim() : null;
     if (body.value !== undefined) {
       const v = body.value === "" || body.value === null ? null : Number(body.value);
       data.value = Number.isFinite(v) ? v : null;
     }
     if (body.purchaseDate !== undefined) data.purchaseDate = body.purchaseDate ? new Date(String(body.purchaseDate)) : null;
+    if (body.warrantyExpiry !== undefined) data.warrantyExpiry = body.warrantyExpiry ? new Date(String(body.warrantyExpiry)) : null;
+    if (body.maintenanceDue !== undefined) data.maintenanceDue = body.maintenanceDue ? new Date(String(body.maintenanceDue)) : null;
+    if (body.condition !== undefined) {
+      const condition = String(body.condition).trim();
+      if (!["new", "good", "fair", "poor", "damaged"].includes(condition)) {
+        return NextResponse.json({ error: "Invalid asset condition." }, { status: 400 });
+      }
+      data.condition = condition;
+    }
     if (body.status !== undefined) {
       const validStatuses = ["available", "assigned", "maintenance", "retired", "lost"];
       if (!validStatuses.includes(String(body.status))) {
