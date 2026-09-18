@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper, Fingerprint, Building2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { addDays, toDateKey, formatTime, formatDate, formatDateIST, relativeDay } from "@/lib/dates";
+import { addDays, formatTime, formatDate, formatDateIST, relativeDay } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { StatCard } from "@/components/ui/stat";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -283,7 +283,7 @@ export default async function AdminDashboardPage({
           <CardHeader>
             <div>
               <CardTitle>Today&apos;s attendance</CardTitle>
-              <CardDescription>{marked} attendance records · {counts.onLeave} on leave · {counts.noRecord} no record · {toDateKey(today)}</CardDescription>
+              <CardDescription>{marked} attendance records · {counts.onLeave} on leave · {counts.noRecord} no record · {formatDate(today)}</CardDescription>
             </div>
             <CalendarClock className="h-4.5 w-4.5 text-muted-foreground" />
           </CardHeader>

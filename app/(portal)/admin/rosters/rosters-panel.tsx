@@ -7,7 +7,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { addDays, toDateKey, fromDateKey } from "@/lib/dates";
+import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
 
 interface Employee {
   id: string;
@@ -103,7 +103,7 @@ export function RostersPanel({
   const assignedCount = new Set(rows.map((r) => `${r.employeeId}|${r.date}`)).size;
 
   function exportCsv() {
-    const header = ["Employee", "Emp No", ...days.map((d) => toDateKey(d))].join(",");
+    const header = ["Employee", "Emp No", ...days.map((d) => formatDate(d))].join(",");
     const lines = employees.map((e) => {
       const cell = (d: Date) => {
         const a = byEmp.get(e.id)?.get(toDateKey(d));
@@ -129,7 +129,7 @@ export function RostersPanel({
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <p className="min-w-44 text-center text-[13.5px] font-semibold">
-            {fromKey} → {toKey}
+            {formatDate(from)} → {formatDate(to)}
           </p>
           <Button size="icon" variant="outline" onClick={() => setWeek(addDays(week, 7))}>
             <ChevronRight className="h-4 w-4" />

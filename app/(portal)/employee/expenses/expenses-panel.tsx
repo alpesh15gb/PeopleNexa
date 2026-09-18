@@ -10,7 +10,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { toDateKey } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
 
 type Claim = {
@@ -107,7 +107,7 @@ export function ExpensesPanel({ claims, lang = "en" }: { claims: Claim[]; lang?:
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] font-medium">{c.title}</p>
                 <p className="text-[11.5px] text-muted-foreground">
-                  {c.category} · {toDateKey(new Date(c.createdAt))}
+                  {c.category} · {formatDate(new Date(c.createdAt))}
                 </p>
               </div>
               {c.receiptUrl && (

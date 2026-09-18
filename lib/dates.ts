@@ -53,13 +53,7 @@ export function formatTime(d: Date | null | undefined): string {
 
 export function formatDateTime(d: Date | null | undefined): string {
   if (!d) return "—";
-  const date = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: "Asia/Kolkata",
-  }).format(d);
-  return `${date} ${formatTime(d)}`;
+  return `${formatDate(d)} ${formatTime(d)}`;
 }
 
 /** IST calendar date for display. Use toDateKey/todayKey for native date inputs and APIs. */

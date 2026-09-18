@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { toDateKey, startOfDay, endOfDay, todayKey, monthKeyIST } from "./dates";
+import { formatDate, formatTime, startOfDay, endOfDay, todayKey, monthKeyIST } from "./dates";
 
 /**
  * "Ask AI" — a deterministic natural-language engine over the tenant's data.
@@ -78,8 +78,8 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     const last = recs[0];
     return {
       tone: "info",
-      answer: `**${emp.firstName} ${emp.lastName}** (${emp.employeeNumber}, ${emp.department?.name ?? "no dept"}) — this month so far: ${present} present, ${late} late, ${absent} absent. ${punches > 0 ? `Today: ${punches} punch${punches > 1 ? "es" : ""} recorded.` : "No punches today yet."}${last ? ` Last day: **${toDateKey(last.date)}** (${last.status}).` : ""}`,
-      data: recs.slice(0, 10).map((r) => ({ date: toDateKey(r.date), status: r.status, in: r.punchInTime ? new Date(r.punchInTime).toLocaleTimeString() : "—", out: r.punchOutTime ? new Date(r.punchOutTime).toLocaleTimeString() : "—" })),
+      answer: `**${emp.firstName} ${emp.lastName}** (${emp.employeeNumber}, ${emp.department?.name ?? "no dept"}) — this month so far: ${present} present, ${late} late, ${absent} absent. ${punches > 0 ? `Today: ${punches} punch${punches > 1 ? "es" : ""} recorded.` : "No punches today yet."}${last ? ` Last day: **${formatDate(last.date)}** (${last.status}).` : ""}`,
+      data: recs.slice(0, 10).map((r) => ({ date: formatDate(r.date), status: r.status, in: formatTime(r.punchInTime), out: formatTime(r.punchOutTime) })),
       columns: ["date", "status", "in", "out"],
     };
   }
@@ -109,7 +109,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
         answer: lateRows.length
           ? `**${lateRows.length} employee${lateRows.length > 1 ? "s" : ""}** came in late today: ${lateRows.map((r) => r.employee.firstName).join(", ")}.`
           : `No one was late today. 🎉`,
-        data: lateRows.map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, in: r.punchInTime ? new Date(r.punchInTime).toLocaleTimeString() : "—" })),
+        data: lateRows.map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, in: formatTime(r.punchInTime) })),
         columns: ["employee", "in"],
       };
     }
@@ -126,7 +126,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     return {
       tone: "info",
       answer: `**${presentRows.length} of ${employeeCount}** employees are present today${lateRows.length ? `, ${lateRows.length} of them late` : ""}.`,
-      data: dayRows.map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, status: r.status, in: r.punchInTime ? new Date(r.punchInTime).toLocaleTimeString() : "—" })),
+      data: dayRows.map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, status: r.status, in: formatTime(r.punchInTime) })),
       columns: ["employee", "status", "in"],
     };
   }
@@ -142,7 +142,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     return {
       tone: pending.length ? "warning" : "success",
       answer: pending.length ? `**${pending.length} leave request${pending.length > 1 ? "s" : ""}** waiting for approval.` : `No pending leave requests.`,
-      data: pending.map((l) => ({ employee: `${l.employee.firstName} ${l.employee.lastName}`, type: l.leaveType.name, from: toDateKey(l.fromDate), to: toDateKey(l.toDate), days: l.days })),
+      data: pending.map((l) => ({ employee: `${l.employee.firstName} ${l.employee.lastName}`, type: l.leaveType.name, from: formatDate(l.fromDate), to: formatDate(l.toDate), days: l.days })),
       columns: ["employee", "type", "from", "to", "days"],
     };
   }
@@ -189,7 +189,7 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     return {
       tone: "info",
       answer: `**${totalHours} overtime hours** recorded this month across ${ot.length} employee-day${ot.length === 1 ? "" : "s"}.`,
-      data: ot.slice(0, 10).map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, date: toDateKey(r.date), ot: `${Math.round((r.overtimeMinutes ?? 0) / 6) / 10}h` })),
+      data: ot.slice(0, 10).map((r) => ({ employee: `${r.employee.firstName} ${r.employee.lastName}`, date: formatDate(r.date), ot: `${Math.round((r.overtimeMinutes ?? 0) / 6) / 10}h` })),
       columns: ["employee", "date", "ot"],
     };
   }
@@ -204,9 +204,9 @@ export async function askAi(tenantId: string, rawQuestion: string): Promise<AiRe
     return {
       tone: "info",
       answer: holidays.length
-        ? `Next holidays: ${holidays.map((h) => `**${h.name}** (${toDateKey(h.date)}${h.isHalfDay ? ", half day" : ""})`).join(", ")}.`
+        ? `Next holidays: ${holidays.map((h) => `**${h.name}** (${formatDate(h.date)}${h.isHalfDay ? ", half day" : ""})`).join(", ")}.`
         : `No upcoming holidays scheduled.`,
-      data: holidays.map((h) => ({ date: toDateKey(h.date), name: h.name, type: h.isHalfDay ? "Half day" : "Full day" })),
+      data: holidays.map((h) => ({ date: formatDate(h.date), name: h.name, type: h.isHalfDay ? "Half day" : "Full day" })),
       columns: ["date", "name", "type"],
     };
   }

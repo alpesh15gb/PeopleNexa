@@ -5,6 +5,7 @@ import { CheckCheck, Info, CheckCircle2, AlertTriangle, XCircle, Inbox } from "l
 import { cn } from "@/lib/utils";
 import { t, type Lang } from "@/lib/i18n";
 import { EmptyState } from "@/components/ui/stat";
+import { formatDateTime } from "@/lib/dates";
 
 interface Notif {
   id: string;
@@ -23,13 +24,7 @@ const icons = {
 };
 
 function formatWhen(dateStr: string | Date) {
-  return new Date(dateStr).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(new Date(dateStr));
 }
 
 export function NotificationsList({ notifications, lang = "en" }: { notifications: Notif[]; lang?: Lang }) {

@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseIST, istStartOfDay } from "@/lib/ist";
 import { notifyAdmins } from "@/lib/notifications";
+import { formatDateIST } from "@/lib/dates";
 
 /** POST — employee raises a correction for a day. */
 export async function POST(req: NextRequest) {
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
     session.tenantId,
     "info",
     "Punch correction requested",
-    `An employee requested a punch correction for ${dayStart.toISOString().slice(0, 10)}.`
+    `An employee requested a punch correction for ${formatDateIST(dayStart)}.`
   );
 
   return NextResponse.json({ correction }, { status: 201 });

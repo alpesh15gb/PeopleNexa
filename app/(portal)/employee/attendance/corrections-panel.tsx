@@ -9,7 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { formatDateIST, todayKey } from "@/lib/dates";
+import { formatDateIST, formatTime, todayKey } from "@/lib/dates";
 import { t, type Lang } from "@/lib/i18n";
 
 type Correction = {
@@ -113,8 +113,8 @@ export function CorrectionsPanel({
               <span className="text-[12.5px] text-muted-foreground">
                 {t(lang, "corrections.requested")}:{" "}
                 <span className="text-foreground">
-                  {c.requestedIn ? new Date(c.requestedIn).toISOString().slice(11, 16) : "—"} →{" "}
-                  {c.requestedOut ? new Date(c.requestedOut).toISOString().slice(11, 16) : "—"}
+                  {formatTime(c.requestedIn ? new Date(c.requestedIn) : null)} →{" "}
+                  {formatTime(c.requestedOut ? new Date(c.requestedOut) : null)}
                 </span>
               </span>
               <span className="hidden min-w-0 max-w-xs truncate text-[12.5px] text-muted-foreground sm:inline">

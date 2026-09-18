@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { toDateKey } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 type Claim = {
   id: string;
@@ -77,7 +77,7 @@ export function ExpensesPanel({ claims }: { claims: Claim[] }) {
                 <div className="min-w-0">
                   <p className="truncate text-[13.5px] font-medium">{c.title}</p>
                   <p className="text-[11.5px] text-muted-foreground">
-                    {c.employee.firstName} {c.employee.lastName} · {c.category} · {toDateKey(new Date(c.createdAt))}
+                    {c.employee.firstName} {c.employee.lastName} · {c.category} · {formatDate(new Date(c.createdAt))}
                   </p>
                 </div>
               </button>

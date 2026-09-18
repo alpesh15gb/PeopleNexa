@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { todayKey } from "@/lib/dates";
 
 interface Option {
   id: string;
@@ -53,7 +54,7 @@ type EducationForm = { qualification: string; specialization: string; institutio
 type ExperienceForm = { employer: string; jobTitle: string; startDate: string; endDate: string; isCurrent: boolean; location: string; responsibilities: string };
 const emptyEducation = (): EducationForm => ({ qualification: "", specialization: "", institution: "", board: "", completionYear: "", grade: "" });
 const emptyExperience = (): ExperienceForm => ({ employer: "", jobTitle: "", startDate: "", endDate: "", isCurrent: false, location: "", responsibilities: "" });
-const dateKey = (value: Date | string | null) => value ? new Date(value).toISOString().slice(0, 10) : "";
+const dateKey = (value: Date | string | null) => value ? todayKey(new Date(value)) : "";
 
 const IMPORT_GROUPS: Record<string, string> = {
   ID: "Identity documents",

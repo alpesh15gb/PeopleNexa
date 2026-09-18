@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { formatDateIST, isMonthKey, monthKeyIST } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
 import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
           p.employee.employeeNumber,
           `${p.employee.firstName} ${p.employee.lastName}`.trim(),
           p.employee.uan ?? "",
-          p.employee.joiningDate ? p.employee.joiningDate.toISOString().slice(0, 10) : "",
+          p.employee.joiningDate ? formatDateIST(p.employee.joiningDate) : "",
           wages.toFixed(2),
           Number(ee).toFixed(2),
           erPpf.toFixed(2),

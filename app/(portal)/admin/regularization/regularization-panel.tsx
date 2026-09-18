@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { toDateKey, formatTime } from "@/lib/dates";
+import { formatDate, formatTime } from "@/lib/dates";
 
 type Correction = {
   id: string;
@@ -166,7 +166,7 @@ export function RegularizationPanel({
                         </span>
                       </p>
                       <span className="font-mono text-[12px] text-muted-foreground">
-                        {toDateKey(new Date(r.punchTime))} · {fmt(r.punchTime)}
+                        {formatDate(new Date(r.punchTime))} · {fmt(r.punchTime)}
                       </span>
                       <Badge tone={r.faceStatus === "rejected" && r.authStatus !== "pending" ? "danger" : "warning"}>
                         {r.authStatus === "pending"
@@ -244,7 +244,7 @@ export function RegularizationPanel({
                   {c.employee.firstName} {c.employee.lastName}
                   <span className="ml-1.5 text-[11.5px] text-muted-foreground">({c.employee.employeeNumber})</span>
                 </p>
-                <span className="font-mono text-[12px] text-muted-foreground">{toDateKey(new Date(c.date))}</span>
+                <span className="font-mono text-[12px] text-muted-foreground">{formatDate(new Date(c.date))}</span>
                 <Badge tone={pending ? "warning" : c.status === "approved" ? "success" : "danger"}>{c.status}</Badge>
                 {c.faceFlagged === true && (
                   <Badge tone="warning">Face flagged — see review queue</Badge>

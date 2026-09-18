@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { reconcileEmployeeDay, isFinalizable, shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
+import { formatDateIST } from "@/lib/dates";
 import { appendAudit } from "@/lib/audit";
 
 /** PATCH — admin/supervisor/branch/location managers approve or reject a pending correction. */
@@ -108,7 +109,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       correction.employeeId,
       "danger",
       "Punch correction rejected",
-      `Your punch correction for ${correction.date.toISOString().slice(0, 10)} was rejected.`
+      `Your punch correction for ${formatDateIST(correction.date)} was rejected.`
     );
     return NextResponse.json({ correction: updated });
   }
@@ -314,7 +315,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     correction.employeeId,
     "success",
     "Punch correction approved",
-    `Your punch correction for ${correction.date.toISOString().slice(0, 10)} was approved.`
+    `Your punch correction for ${formatDateIST(correction.date)} was approved.`
   );
 
   return NextResponse.json({ correction: updated });

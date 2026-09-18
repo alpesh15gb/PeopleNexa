@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { FileText, AlertTriangle } from "lucide-react";
 import { expiryStatus } from "@/app/api/documents/route";
-import { toDateKey } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,7 @@ export default async function EmployeeDocumentsPage() {
       {alerts.length > 0 && (
         <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
           <AlertTriangle className="mr-2 inline h-4 w-4" />
-          {alerts.map((d) => `"${d.name}" ${expiryStatus(d.expiryDate) === "expired" ? "has expired" : `expires ${toDateKey(d.expiryDate!)}`}`).join(" · ")}
+          {alerts.map((d) => `"${d.name}" ${expiryStatus(d.expiryDate) === "expired" ? "has expired" : `expires ${formatDate(d.expiryDate!)}`}`).join(" · ")}
         </div>
       )}
 
@@ -48,7 +48,7 @@ export default async function EmployeeDocumentsPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13.5px] font-medium">{d.name}</p>
-                      <p className="text-[11.5px] text-muted-foreground">{d.docType}{d.expiryDate ? ` · expires ${toDateKey(d.expiryDate)}` : ""}</p>
+                      <p className="text-[11.5px] text-muted-foreground">{d.docType}{d.expiryDate ? ` · expires ${formatDate(d.expiryDate)}` : ""}</p>
                     </div>
                     <Badge tone={st === "expired" ? "danger" : st === "expiring" ? "warning" : "success"} className="capitalize">{st}</Badge>
                   </div>

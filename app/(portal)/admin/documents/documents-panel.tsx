@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
-import { toDateKey } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 type Doc = {
   id: string;
@@ -146,7 +146,7 @@ export function DocumentsPanel({
               <div className="flex items-center gap-3">
                 {d.expiryDate && (
                   <span className={`font-mono text-[12.5px] ${d.status === "expired" ? "text-rose-300" : d.status === "expiring" ? "text-amber-300" : "text-muted-foreground"}`}>
-                    {toDateKey(new Date(d.expiryDate))}
+                    {formatDate(new Date(d.expiryDate))}
                   </span>
                 )}
                 <Badge tone={tone[d.status] ?? "neutral"} className="capitalize">{d.status}</Badge>
@@ -209,7 +209,7 @@ export function DocumentsPanel({
           <div className="space-y-3 text-[13px]">
             <p className="text-muted-foreground">{viewing.employee.firstName} {viewing.employee.lastName} · {viewing.docType}</p>
             {viewing.number && <p className="font-mono">••••{viewing.number.slice(-4)}</p>}
-            {viewing.expiryDate && <p>Expires: <span className="font-mono">{toDateKey(new Date(viewing.expiryDate))}</span></p>}
+            {viewing.expiryDate && <p>Expires: <span className="font-mono">{formatDate(new Date(viewing.expiryDate))}</span></p>}
             {viewing.notes && <p className="text-muted-foreground">{viewing.notes}</p>}
           </div>
         )}

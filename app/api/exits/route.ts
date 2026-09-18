@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey } from "@/lib/dates";
+import { formatDateIST, fromDateKey } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
 
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     session.tenantId,
     "info",
     "Resignation received",
-    `${request.employee.firstName} ${request.employee.lastName} has resigned — last working day ${lastWorkingDay.toISOString().slice(0, 10)}.`
+    `${request.employee.firstName} ${request.employee.lastName} has resigned — last working day ${formatDateIST(lastWorkingDay)}.`
   );
   await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "exit.submit", entity: "ExitRequest", entityId: request.id, summary: `${request.employee.firstName} ${request.employee.lastName} submitted an exit request`, after: { status: "pending", resignationDate: resignationDate.toISOString(), lastWorkingDay: lastWorkingDay.toISOString() } });
 

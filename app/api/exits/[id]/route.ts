@@ -3,7 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { computeFandF } from "@/lib/exit";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
-import { startOfDay, toDateKey } from "@/lib/dates";
+import { formatDateIST, startOfDay } from "@/lib/dates";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
@@ -121,10 +121,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       request.employeeId,
       "success",
       "Resignation approved",
-      `Your last working day is ${toDateKey(request.lastWorkingDay)}. Final settlement: ₹${fAndF.finalAmount.toLocaleString("en-IN")}.`
+      `Your last working day is ${formatDateIST(request.lastWorkingDay)}. Final settlement: ₹${fAndF.finalAmount.toLocaleString("en-IN")}.`
     );
     await sendWhatsApp(session.tenantId, request.employee.phone ?? null, "exit.approved", {
-      lwd: toDateKey(request.lastWorkingDay),
+      lwd: formatDateIST(request.lastWorkingDay),
       amount: fAndF.finalAmount.toFixed(0),
     });
     return NextResponse.json({ request: updated, fAndF });
@@ -159,7 +159,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     const now = new Date();
     if (startOfDay(now) < startOfDay(request.lastWorkingDay)) {
-      return NextResponse.json({ error: `This employee's last working day is ${toDateKey(request.lastWorkingDay)}. Complete the exit on or after that date, or amend the approved exit first.` }, { status: 400 });
+      return NextResponse.json({ error: `This employee's last working day is ${formatDateIST(request.lastWorkingDay)}. Complete the exit on or after that date, or amend the approved exit first.` }, { status: 400 });
     }
     const claimed = await prisma.exitRequest.updateMany({
       where: { id, tenantId: session.tenantId, status: "approved" },

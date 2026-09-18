@@ -406,7 +406,7 @@ function TeamCalendar({
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <p suppressHydrationWarning className="min-w-36 text-center font-display text-[15px] font-semibold capitalize">
-            {month.toLocaleString("en", { month: "long", year: "numeric" })}
+            {month.toLocaleString("en", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" })}
           </p>
           <Button size="icon" variant="outline" onClick={() => setMonth(new Date(year, mon + 1, 1))}>
             <ChevronRight className="h-4 w-4" />

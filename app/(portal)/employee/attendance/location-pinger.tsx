@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MapPin, Loader2, Radio } from "lucide-react";
+import { formatTime } from "@/lib/dates";
 
 const PING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes while on duty
 
@@ -26,7 +27,7 @@ export function LocationPinger({ active }: { active: boolean }) {
       return;
     }
     setState("tracking");
-    setLastPing(new Date().toLocaleTimeString());
+    setLastPing(formatTime(new Date()));
 
     const sendPing = async () => {
       try {
@@ -49,7 +50,7 @@ export function LocationPinger({ active }: { active: boolean }) {
           if (timerRef.current) clearInterval(timerRef.current);
           return;
         }
-        setLastPing(new Date().toLocaleTimeString());
+        setLastPing(formatTime(new Date()));
       } catch {
         // Location denied / unavailable — skip silently (no location = no ping).
       }

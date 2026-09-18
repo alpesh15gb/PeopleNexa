@@ -104,7 +104,7 @@ export function HolidaysManager({ holidays }: { holidays: Holiday[] }) {
               <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
                 <span className="font-display text-[15px] font-bold leading-none">{h.date.getDate()}</span>
                 <span className="text-[9px] font-semibold uppercase">
-                  {h.date.toLocaleString("en", { month: "short" })}
+                  {h.date.toLocaleString("en", { month: "short", timeZone: "Asia/Kolkata" })}
                 </span>
               </div>
               <div className="min-w-0 flex-1">

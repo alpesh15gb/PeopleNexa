@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 type Msg = { id: string; sender: { id: string; firstName: string; lastName: string; role: string }; body: string; createdAt: string };
 type Ticket = {
@@ -144,7 +144,7 @@ export default function EmployeeHelpdeskPage() {
                   <div className="space-y-2">
                     {t.messages.map((m) => (
                       <div key={m.id} className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-[12.5px] ${m.sender.id === "you" || m.sender.role !== "admin" ? "" : "ml-auto bg-indigo-500/15"}`}>
-                        <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">{m.sender.firstName} {m.sender.lastName} {m.sender.role === "admin" ? "(support)" : ""} · {new Date(m.createdAt).toLocaleString()}</p>
+                        <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">{m.sender.firstName} {m.sender.lastName} {m.sender.role === "admin" ? "(support)" : ""} · {formatDateTime(new Date(m.createdAt))}</p>
                         {m.body}
                       </div>
                     ))}

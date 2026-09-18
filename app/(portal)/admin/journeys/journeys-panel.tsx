@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { RouteMap } from "./route-map";
+import { formatDateIST, formatTime } from "@/lib/dates";
 
 type Emp = { id: string; firstName: string; lastName: string; employeeNumber: string; position: string | null };
 type Point = { lat: number; lng: number; at: string; accuracy: number | null };
@@ -51,7 +52,7 @@ export function JourneysPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">Journey Tracker</h1>
-          <p className="text-[13px] text-muted-foreground">Field GPS — route replay & distance for {date}</p>
+          <p className="text-[13px] text-muted-foreground">Field GPS — route replay & distance for {formatDateIST(date)}</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -135,7 +136,7 @@ export function JourneysPanel({
                 <Badge tone="info">{selected.employee.employeeNumber}</Badge>
                 <span className="font-mono text-[13px] font-bold">{selected.distanceKm} km</span>
                 <span className="text-[12px] text-muted-foreground">
-                  {selected.pingCount} pings · {new Date(selected.startAt).toLocaleTimeString()} → {new Date(selected.endAt).toLocaleTimeString()}
+                  {selected.pingCount} pings · {formatTime(new Date(selected.startAt))} → {formatTime(new Date(selected.endAt))}
                 </span>
               </div>
             )}
@@ -156,7 +157,7 @@ export function JourneysPanel({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-medium">{m.employee.firstName} {m.employee.lastName}</p>
-                  <p className="text-[11.5px] text-muted-foreground">{m.employee.position ?? "—"} · last seen {new Date(m.at).toLocaleTimeString()}</p>
+                  <p className="text-[11.5px] text-muted-foreground">{m.employee.position ?? "—"} · last seen {formatTime(new Date(m.at))}</p>
                 </div>
                 <span className="font-mono text-[11.5px] text-muted-foreground">{m.lat.toFixed(4)}, {m.lng.toFixed(4)}</span>
               </div>

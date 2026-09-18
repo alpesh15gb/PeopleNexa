@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { startOfDay, toDateKey, addDays, monthKey, formatTime } from "@/lib/dates";
+import { startOfDay, toDateKey, addDays, monthKey, formatDate, formatTime } from "@/lib/dates";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
@@ -193,7 +193,7 @@ export default async function EmployeeAttendancePage() {
               <TBody>
                 {records.map((r) => (
                   <TR key={r.id}>
-                    <TD className="font-mono text-[13px]">{toDateKey(r.date)}</TD>
+                    <TD className="font-mono text-[13px]">{formatDate(r.date)}</TD>
                     <TD className="font-mono text-[13px]">{formatTime(r.punchInTime)}</TD>
                     <TD className="font-mono text-[13px]">{formatTime(r.punchOutTime)}</TD>
                     <TD className="hidden md:table-cell">

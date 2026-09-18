@@ -7,6 +7,7 @@ import {
   GoogleMapsSkeleton,
   useGoogleMapsLoader,
 } from "@/components/maps/google-maps";
+import { formatTime } from "@/lib/dates";
 
 export type MapPoint = { lat: number; lng: number; at?: string; accuracy?: number | null };
 
@@ -101,7 +102,7 @@ function LeafletRouteMap({
         fillColor: "#6366f1",
         fillOpacity: 0.9,
       })
-        .bindPopup(`<b>${m.label}</b>${m.point.at ? `<br/>${new Date(m.point.at).toLocaleTimeString()}` : ""}`)
+        .bindPopup(`<b>${m.label}</b>${m.point.at ? `<br/>${formatTime(new Date(m.point.at))}` : ""}`)
         .addTo(layerRef.current!);
       bounds.push([m.point.lat, m.point.lng]);
     }

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
+import { formatDateTime } from "@/lib/dates";
 
 type Author = { id: string; firstName: string; lastName: string; role: string; profilePicture?: string | null };
 type Comment = { id: string; body: string; createdAt: string; author: { id: string; firstName: string; lastName: string; role: string } };
@@ -111,7 +112,7 @@ export function FeedPanel({ isAdmin }: { isAdmin: boolean }) {
                     {p.author.firstName} {p.author.lastName}
                     {p.author.role === "admin" && <span className="ml-1.5 text-[11px] font-semibold text-indigo-400">Admin</span>}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">{new Date(p.createdAt).toLocaleString()}</p>
+                  <p className="text-[11px] text-muted-foreground">{formatDateTime(new Date(p.createdAt))}</p>
                 </div>
                 {p.isAnnouncement && <Badge tone="info"><Megaphone className="mr-1 h-3 w-3" /> Announcement</Badge>}
               </div>

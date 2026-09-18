@@ -11,7 +11,7 @@ import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayKey } from "@/lib/dates";
 
 interface Assignee {
   id: string;
@@ -137,7 +137,7 @@ export function AssetsPanel({
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [maintaining, setMaintaining] = useState<AssetRow | null>(null);
-  const [maintenanceForm, setMaintenanceForm] = useState({ type: "service", description: "", provider: "", cost: "", performedAt: new Date().toISOString().slice(0, 10), nextDueDate: "", status: "completed", notes: "" });
+  const [maintenanceForm, setMaintenanceForm] = useState({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: "", status: "completed", notes: "" });
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
 
   const filtered = useMemo(() => {
@@ -454,7 +454,7 @@ export function AssetsPanel({
                         <Undo2 className="h-3.5 w-3.5" /> Return
                       </Button>
                     ) : null}
-                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="sm" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: new Date().toISOString().slice(0, 10), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
+                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="sm" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
                     <Button size="sm" variant="ghost" loading={historyBusy && history?.asset.id === a.id} onClick={() => openHistory(a)}>
                       <History className="h-3.5 w-3.5" />
                     </Button>
