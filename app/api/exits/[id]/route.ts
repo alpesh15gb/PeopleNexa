@@ -30,6 +30,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   } else if (action === "cancel") {
     if (request.employeeId !== session.sub && !isAdmin) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     if (request.status === "completed") return NextResponse.json({ error: "Already completed." }, { status: 400 });
+    if (!isAdmin && request.status !== "pending") return NextResponse.json({ error: "Only pending exit requests can be withdrawn. Contact HR to withdraw an approved request." }, { status: 400 });
   } else {
     return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   }
@@ -147,12 +148,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       "Resignation not accepted",
       note ? `Note from HR: ${note}` : "Your exit request was not approved. Contact HR."
     );
+    await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "exit.reject", entity: "ExitRequest", entityId: id, summary: `${request.employee.firstName} ${request.employee.lastName} exit rejected`, before: { status: "pending" }, after: { status: "rejected", note } });
     return NextResponse.json({ request: updated });
   }
 
   if (action === "complete") {
     if (request.status !== "approved") {
       return NextResponse.json({ error: "Only approved requests can be completed." }, { status: 400 });
+    }
+    const now = new Date();
+    if (startOfDay(now) < startOfDay(request.lastWorkingDay)) {
+      return NextResponse.json({ error: `This employee's last working day is ${toDateKey(request.lastWorkingDay)}. Complete the exit on or after that date, or amend the approved exit first.` }, { status: 400 });
     }
     const claimed = await prisma.exitRequest.updateMany({
       where: { id, tenantId: session.tenantId, status: "approved" },
@@ -173,32 +179,33 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       before: { status: "approved" },
       after: { status: "completed" },
     });
-    const now = new Date();
-    // Mark employee inactive (tenant-scoped).
-    await prisma.employee.updateMany({
-      where: { id: request.employeeId, tenantId: session.tenantId },
-      data: { status: "inactive" },
-    });
+    // Disable portal/device policy access. Physical device commands are handled
+    // separately by the device-access workflow and must be verified there.
+    await prisma.$transaction([
+      prisma.employee.updateMany({ where: { id: request.employeeId, tenantId: session.tenantId }, data: { status: "inactive", deviceAccessEnabled: false } }),
+      prisma.employeeDeviceAccess.deleteMany({ where: { employeeId: request.employeeId } }),
+    ]);
     // Unassign active assets: AssetAssignment has no tenantId, so scope via asset relation.
     const activeAssignments = await prisma.assetAssignment.findMany({
       where: { employeeId: request.employeeId, returnedAt: null },
-      select: { id: true, asset: { select: { tenantId: true } } },
+      select: { id: true, assetId: true, asset: { select: { tenantId: true } } },
     });
     const ownAssignmentIds = activeAssignments
       .filter((a) => a.asset.tenantId === session.tenantId)
       .map((a) => a.id);
     if (ownAssignmentIds.length > 0) {
-      await prisma.assetAssignment.updateMany({
-        where: { id: { in: ownAssignmentIds } },
-        data: { returnedAt: now },
-      });
+      const assetIds = activeAssignments.filter((assignment) => assignment.asset.tenantId === session.tenantId).map((assignment) => assignment.assetId);
+      await prisma.$transaction([
+        prisma.assetAssignment.updateMany({ where: { id: { in: ownAssignmentIds } }, data: { returnedAt: now } }),
+        prisma.asset.updateMany({ where: { id: { in: assetIds }, tenantId: session.tenantId }, data: { status: "available" } }),
+      ]);
     }
-    // Cancel future rosters (tenant-scoped, date >= today).
+    // Preserve the approved notice period; only remove roster dates after LWD.
     await prisma.rosterAssignment.deleteMany({
       where: {
         tenantId: session.tenantId,
         employeeId: request.employeeId,
-        date: { gte: startOfDay(now) },
+        date: { gt: startOfDay(request.lastWorkingDay) },
       },
     });
     // NOTE: active EmployeeLoans are intentionally left open — outstanding is
@@ -217,6 +224,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     where: { id },
     data: { status: "cancelled", note },
   });
+  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "exit.cancel", entity: "ExitRequest", entityId: id, summary: `${request.employee.firstName} ${request.employee.lastName} exit cancelled`, before: { status: request.status }, after: { status: "cancelled", note } });
   await notifyAdmins(
     session.tenantId,
     "info",

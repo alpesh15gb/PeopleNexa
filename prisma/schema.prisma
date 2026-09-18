@@ -1223,7 +1223,7 @@ model ExitRequest {
   reason          String
   resignationDate DateTime
   lastWorkingDay  DateTime
-  status          String    @default("pending") // pending | approved | completed | cancelled
+  status          String    @default("pending") // pending | approved | rejected | completed | cancelled
   note            String?
   reviewedBy      String?
   reviewedAt      DateTime?

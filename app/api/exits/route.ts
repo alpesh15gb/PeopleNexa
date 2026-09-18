@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
+import { appendAudit } from "@/lib/audit";
 
 /** GET — exit requests (admins see all, employees see their own). */
 export async function GET(req: NextRequest) {
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
     "Resignation received",
     `${request.employee.firstName} ${request.employee.lastName} has resigned — last working day ${lastWorkingDay.toISOString().slice(0, 10)}.`
   );
+  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "exit.submit", entity: "ExitRequest", entityId: request.id, summary: `${request.employee.firstName} ${request.employee.lastName} submitted an exit request`, after: { status: "pending", resignationDate: resignationDate.toISOString(), lastWorkingDay: lastWorkingDay.toISOString() } });
 
   return NextResponse.json({ request }, { status: 201 });
 }
