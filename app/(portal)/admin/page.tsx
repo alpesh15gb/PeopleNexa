@@ -366,9 +366,9 @@ export default async function AdminDashboardPage({
               {newJoiners.length === 0 ? (
                 <p className="py-4 text-center text-[13px] text-muted-foreground">No employees joined this or last month.</p>
               ) : (
-                <div className="divide-y divide-[color:var(--border)]">
-                  {newJoiners.slice(0, 10).map((employee) => (
-                    <Link key={employee.id} href="/admin/employees" className="flex items-center gap-3 py-3 transition-colors hover:text-primary">
+                <div className="max-h-[23rem] divide-y divide-[color:var(--border)] overflow-y-auto pr-1">
+                  {newJoiners.map((employee) => (
+                    <Link key={employee.id} href={`/admin/employee-master?employee=${employee.id}`} className="flex items-center gap-3 py-3 transition-colors hover:text-primary">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/[0.1] text-[11px] font-bold text-primary">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-medium">{employee.firstName} {employee.lastName}</p>
@@ -379,7 +379,6 @@ export default async function AdminDashboardPage({
                   ))}
                 </div>
               )}
-              {newJoiners.length > 10 && <Link href="/admin/employees" className="mt-3 inline-flex text-xs font-medium text-primary hover:underline">View all new joiners</Link>}
             </CardContent>
           </Card>
 
