@@ -75,7 +75,7 @@ function genPassword(): string {
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const csv = TEMPLATE_HEADERS.join(",") + "\n";
@@ -123,10 +123,10 @@ function assignmentName(value: unknown): string {
   return value != null ? String(value).trim() : "";
 }
 
-async function resolveBranch(tenantId: string, value: string): Promise<string | null> {
+async function resolveBranch(tenantId: string, value: string, locationId?: string | null): Promise<string | null> {
   if (!value) return null;
   const existing = await prisma.branch.findFirst({
-    where: { tenantId, OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
+    where: { tenantId, ...(locationId ? { locationId } : {}), OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
     select: { id: true },
   });
   if (existing) return existing.id;
@@ -137,7 +137,7 @@ async function resolveBranch(tenantId: string, value: string): Promise<string | 
     if (!clash) break;
     code = `${base.slice(0, 16)}${suffix}`.slice(0, 20);
   }
-  return (await prisma.branch.create({ data: { tenantId, name: value, code } })).id;
+  return (await prisma.branch.create({ data: { tenantId, name: value, code, locationId: locationId ?? null } })).id;
 }
 
 async function resolveDepartment(tenantId: string, value: string): Promise<string | null> {
@@ -152,7 +152,7 @@ async function resolveDepartment(tenantId: string, value: string): Promise<strin
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   let body: { rows?: unknown };
@@ -174,6 +174,10 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  const locationId = session.role === "location_manager"
+    ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
+    : null;
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const [count, tenant] = await Promise.all([
     prisma.employee.count({ where: { tenantId: session.tenantId } }),
@@ -202,6 +206,7 @@ export async function POST(req: NextRequest) {
       const existingForRow = await prisma.employee.findFirst({
         where: {
           tenantId: session.tenantId,
+          ...(locationId ? { branch: { locationId } } : {}),
           OR: [
             ...(deviceCodeInput ? [{ deviceCode: deviceCodeInput }] : []),
             ...(employeeNumberInput ? [{ employeeNumber: employeeNumberInput }] : []),
@@ -279,7 +284,7 @@ export async function POST(req: NextRequest) {
       const managerId = raw?.managerId ? String(raw.managerId).trim() : "";
 
       const [branchId, departmentId, shift, manager] = await Promise.all([
-        resolveBranch(session.tenantId, branchValue),
+        resolveBranch(session.tenantId, branchValue, locationId),
         resolveDepartment(session.tenantId, departmentValue),
         shiftId
           ? prisma.shift.findFirst({
@@ -291,6 +296,7 @@ export async function POST(req: NextRequest) {
       ]);
       if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
       if (managerId && !manager) throw new Error("Manager not found in this workspace.");
+      if (locationId && !branchId) throw new Error("A branch in your assigned location is required.");
 
       const payMode = raw?.payMode ? String(raw.payMode).trim() || "monthly" : "monthly";
       if (!PAY_MODES.has(payMode)) {

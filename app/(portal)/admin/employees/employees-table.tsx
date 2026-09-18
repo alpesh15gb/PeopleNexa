@@ -125,7 +125,7 @@ export function EmployeesTable({
   viewerRole?: string;
   isLocationManager?: boolean;
 }) {
-  const restricted = isLocationManager === true || viewerRole === "location_manager";
+  const restricted = isLocationManager === true;
   const router = useRouter();
   const toast = useToast();
   const [modal, setModal] = useState<"create" | Emp | null>(null);

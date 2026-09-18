@@ -165,13 +165,14 @@ async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/admin/attendance", request.url));
   }
   // Branch manager is scoped to their branch: dashboard + attendance +
-  // regularization + employees + leaves + punch-details report only.
+  // regularization + employee master + leaves + punch-details report only.
   if (role === "branch_manager" && isAdminRoute) {
     const allowed =
       pathname === "/admin" ||
       pathname.startsWith("/admin/attendance") ||
       pathname.startsWith("/admin/regularization") ||
-      pathname.startsWith("/admin/employees") ||
+       pathname.startsWith("/admin/employees") ||
+       pathname.startsWith("/admin/employee-master") ||
       pathname.startsWith("/admin/leaves") ||
       pathname.startsWith("/admin/reports/punch-details");
     if (!allowed) {

@@ -5,7 +5,9 @@ import { profilePictureValue } from "@/lib/profile-picture";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const locationId = session.role === "location_manager" ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId : null;
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const photos = (await req.json()).photos as Array<{ code?: unknown; profilePicture?: unknown }>;
   if (!Array.isArray(photos) || photos.length === 0 || photos.length > 10) return NextResponse.json({ error: "Upload 1 to 10 photos at a time." }, { status: 400 });
   const results: Array<{ code: string; error?: string }> = [];
@@ -13,7 +15,7 @@ export async function POST(req: NextRequest) {
     const code = String(item.code ?? "").trim();
     const photo = profilePictureValue(item.profilePicture);
     if (!code || photo.error) { results.push({ code: code || "unknown", error: photo.error ?? "Filename must be an Employee Code or Device Code." }); continue; }
-    const employee = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, OR: [{ deviceCode: code }, { employeeNumber: code }] }, select: { id: true } });
+    const employee = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}), OR: [{ deviceCode: code }, { employeeNumber: code }] }, select: { id: true } });
     if (!employee) { results.push({ code, error: "No employee matches this filename." }); continue; }
     await prisma.employee.update({ where: { id: employee.id }, data: { profilePicture: photo.value } });
     results.push({ code });

@@ -179,21 +179,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (["admin", "branch_manager", "location_manager"].includes(target.role)) {
       return NextResponse.json({ error: "Location managers cannot edit privileged accounts." }, { status: 403 });
     }
-    // Financial and privilege fields stay admin-only for location managers.
-    // Status, branch assignment, codes, and identity fields remain editable.
+    // Location Managers have the same employee-management scope within their location.
+    // Tenant-level account privileges remain admin-only.
     for (const k of [
-      "salary",
       "role",
       "loginOnly",
-      "payMode",
-      "salaryStructure",
-      "workBasisRate",
-      "bankName",
-      "accountNumber",
-      "ifscCode",
-      "pan",
-      "uan",
-      "password",
     ]) {
       delete (body as Record<string, unknown>)[k];
     }
@@ -496,12 +486,17 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
+  const locationId = session.role === "location_manager" ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId : null;
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}) } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (session.role === "location_manager" && ["admin", "branch_manager", "location_manager"].includes(employee.role)) {
+    return NextResponse.json({ error: "Location managers cannot delete privileged accounts." }, { status: 403 });
+  }
   if (employee.role === "admin") {
     return NextResponse.json({ error: "Cannot delete an admin account." }, { status: 400 });
   }

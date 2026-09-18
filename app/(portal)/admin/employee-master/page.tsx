@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
 import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
 import { EmployeeDeviceAccess } from "./employee-device-access";
+import { EmployeeMasterManagement } from "./employee-master-management";
 
 export const dynamic = "force-dynamic";
 
@@ -60,11 +61,13 @@ export default async function EmployeeMasterPage({
   const session = await requireActiveSession();
   const isAdmin = session.role === "admin";
   const isLocationManager = session.role === "location_manager";
-  if (!isAdmin && !isLocationManager) redirect("/admin");
+  const isBranchManager = session.role === "branch_manager";
+  if (!isAdmin && !isLocationManager && !isBranchManager) redirect("/admin");
   const locationId = isLocationManager
     ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
     : null;
-  const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : {};
+  const branchId = isBranchManager ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true } }))?.branchId : null;
+  const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : isBranchManager ? { branchId: branchId ?? "__unassigned_branch__" } : {};
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
   const pageSize = 50;
@@ -135,6 +138,8 @@ export default async function EmployeeMasterPage({
           </CardContent>
         </Card>
       )}
+      {isBranchManager && !branchId && <Card><CardContent className="p-6 text-sm text-muted-foreground">Your Branch Manager account has no branch assigned. Ask an administrator to assign your branch before viewing Employee Master.</CardContent></Card>}
+      <EmployeeMasterManagement branches={branches} departments={departments} shifts={shifts} viewerRole={session.role} />
       <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
         <Card className="h-fit xl:sticky xl:top-6">
           <CardHeader>
@@ -171,7 +176,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} /><EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager} canEditMaster={isAdmin || isLocationManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "", drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? formatDateIST(employee.drivingLicenseExpiresAt) : "" }} /></div>
+                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} /><EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, joiningDate: employee.joiningDate ? formatDateIST(employee.joiningDate) : "", drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? formatDateIST(employee.drivingLicenseExpiresAt) : "" }} /></div>
                 </div>
               </CardContent>
             </Card>
