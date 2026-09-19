@@ -9,7 +9,7 @@ export async function GET() {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
@@ -22,7 +22,7 @@ export async function PUT(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));

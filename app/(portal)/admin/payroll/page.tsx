@@ -70,7 +70,7 @@ export default async function AdminPayrollPage({
       <PageHeader title="Payroll" description="Generate and disburse monthly payslips" />
       <Card>
         <CardContent className="p-0">
-          <PayrollPanel month={month} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} />
+          <PayrollPanel month={month} rows={rows} totals={totals} generated={payslips.length} canManageSettings />
         </CardContent>
       </Card>
     </div>
