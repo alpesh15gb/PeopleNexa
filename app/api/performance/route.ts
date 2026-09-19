@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — KPIs + reviews (role-aware). */
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const [kpis, reviews] = await Promise.all([
     prisma.kpi.findMany({
       where: { tenantId: session.tenantId },
       orderBy: { createdAt: "asc" },
     }),
     prisma.performanceReview.findMany({
-      where: session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub },
+      where: locationId ? { tenantId: session.tenantId, employee: employeeLocationScope(locationId) } : session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true } },
         reviewer: { select: { firstName: true, lastName: true } },
@@ -68,13 +71,14 @@ export async function GET() {
 /** POST — admin creates a KPI or a review cycle. */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
   const type = body.type;
 
   if (type === "kpi") {
+    if (session.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
     const name = String(body.name ?? "").trim();
     if (!name) return NextResponse.json({ error: "KPI name is required." }, { status: 400 });
     const kpi = await prisma.kpi.create({
@@ -89,12 +93,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (type === "review") {
+    const locationId = await managerLocationId(session);
+    if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     const employeeId = String(body.employeeId ?? "");
     const period = String(body.period ?? "").trim();
     if (!employeeId || !period) {
       return NextResponse.json({ error: "Employee and period are required." }, { status: 400 });
     }
-    const emp = await prisma.employee.findFirst({ where: { id: employeeId, tenantId: session.tenantId } });
+    const emp = await prisma.employee.findFirst({ where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) } });
     if (!emp) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
 
     const kpis = await prisma.kpi.findMany({ where: { tenantId: session.tenantId, enabled: true } });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** PATCH — review actions: self-score, manager score/complete, 360 feedback. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -9,9 +10,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const action = body.action;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const review = await prisma.performanceReview.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     include: { scores: true },
   });
   if (!review) return NextResponse.json({ error: "Review not found" }, { status: 404 });
@@ -41,7 +44,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 
   if (action === "manager") {
-    if (session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 403 });
+    if (session.role !== "admin" && session.role !== "location_manager") return NextResponse.json({ error: "unauthorized" }, { status: 403 });
     if (review.status === "completed") {
       return NextResponse.json({ error: "This review is already completed." }, { status: 400 });
     }
@@ -94,10 +97,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 /** DELETE — admin removes a review cycle. */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  await prisma.performanceReview.deleteMany({ where: { id, tenantId: session.tenantId } });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  await prisma.performanceReview.deleteMany({ where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) } });
   return NextResponse.json({ success: true });
 }

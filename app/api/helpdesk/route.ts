@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const CATEGORIES = ["general", "payroll", "attendance", "device", "it", "other"];
 const PRIORITIES = ["low", "medium", "high", "urgent"];
@@ -46,7 +47,9 @@ export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const where = session.role === "admin" ? { tenantId: session.tenantId } : { requesterId: session.sub };
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const where = locationId ? { tenantId: session.tenantId, requester: employeeLocationScope(locationId) } : session.role === "admin" ? { tenantId: session.tenantId } : { requesterId: session.sub };
   const [tickets, employees] = await Promise.all([
     prisma.ticket.findMany({
       where,
@@ -58,9 +61,9 @@ export async function GET() {
       orderBy: { updatedAt: "desc" },
       take: 100,
     }),
-    session.role === "admin"
+    session.role === "admin" || session.role === "location_manager"
       ? prisma.employee.findMany({
-          where: { tenantId: session.tenantId, status: "active" },
+          where: { tenantId: session.tenantId, status: "active", ...(locationId ? employeeLocationScope(locationId) : {}) },
           select: { id: true, firstName: true, lastName: true, employeeNumber: true },
           orderBy: { employeeNumber: "asc" },
         })

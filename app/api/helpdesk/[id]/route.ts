@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee, notifyAdmins } from "@/lib/notifications";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const STATUSES = ["open", "in_progress", "resolved", "closed"];
 const PRIORITIES = ["low", "medium", "high", "urgent"];
@@ -13,12 +14,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const action = body.action;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
-  const ticket = await prisma.ticket.findFirst({ where: { id, tenantId: session.tenantId } });
+  const ticket = await prisma.ticket.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { requester: employeeLocationScope(locationId) } : {}) } });
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
   if (action === "message") {
-    if (session.role !== "admin" && ticket.requesterId !== session.sub && ticket.assigneeId !== session.sub) {
+    if (session.role !== "admin" && session.role !== "location_manager" && ticket.requesterId !== session.sub && ticket.assigneeId !== session.sub) {
       return NextResponse.json({ error: "You are not a participant in this ticket." }, { status: 403 });
     }
     const text = String(body.body ?? "").trim();
@@ -28,7 +31,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     });
     await prisma.ticket.update({ where: { id }, data: { updatedAt: new Date() } });
     // Notify the other party.
-    if (session.role === "admin") {
+    if (session.role === "admin" || session.role === "location_manager") {
       await notifyEmployee(ticket.tenantId, ticket.requesterId, "info", "Reply on your ticket", ticket.subject);
     } else {
       await notifyAdmins(ticket.tenantId, "info", "New reply on ticket", ticket.subject);
@@ -36,7 +39,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ message: msg }, { status: 201 });
   }
 
-  if (session.role !== "admin") {
+  if (session.role !== "admin" && session.role !== "location_manager") {
     return NextResponse.json({ error: "unauthorized" }, { status: 403 });
   }
 
@@ -56,7 +59,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.assigneeId = null;
     } else {
       const assignee = await prisma.employee.findFirst({
-        where: { id: raw, tenantId: session.tenantId },
+        where: { id: raw, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
         select: { id: true },
       });
       if (!assignee) return NextResponse.json({ error: "Invalid assignee." }, { status: 400 });
@@ -74,10 +77,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 /** DELETE — admin removes a ticket. */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  await prisma.ticket.deleteMany({ where: { id, tenantId: session.tenantId } });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  await prisma.ticket.deleteMany({ where: { id, tenantId: session.tenantId, ...(locationId ? { requester: employeeLocationScope(locationId) } : {}) } });
   return NextResponse.json({ success: true });
 }
