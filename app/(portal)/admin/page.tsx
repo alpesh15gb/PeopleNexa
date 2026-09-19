@@ -269,10 +269,22 @@ export default async function AdminDashboardPage({
           tone="violet"
           className={statCardClass}
         />
-      </div>
-      </Suspense>
+       </div>
+       </Suspense>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+       <Card>
+         <CardHeader>
+           <div>
+             <CardTitle>Last 31 days</CardTitle>
+             <CardDescription>Attendance trend</CardDescription>
+           </div>
+         </CardHeader>
+         <CardContent>
+           <WeekChart data={week} />
+         </CardContent>
+       </Card>
+
+       <div className="grid gap-6 lg:grid-cols-2">
         <Card><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
         <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present + count.late + count.halfDay}/{count.total} present · {count.absent + count.noRecord} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
       </div>
@@ -415,19 +427,6 @@ export default async function AdminDashboardPage({
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Week chart */}
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Last 31 days</CardTitle>
-                <CardDescription>Attendance trend</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <WeekChart data={week} />
             </CardContent>
           </Card>
 

@@ -5,7 +5,7 @@ export function WeekChart({ data }: { data: { day: string; label: string; presen
   const summary = data.map((d) => `${d.label}: ${d.present} present, ${d.late} late, ${d.absent} absent`).join("; ");
   return (
     <div>
-      <div role="img" aria-label={`Attendance trend: ${summary}`} className="flex h-36 items-end gap-1">
+      <div role="img" aria-label={`Attendance trend: ${summary}`} className="flex h-52 items-end gap-1">
         {data.map((d) => {
           const total = d.present + d.late + d.absent;
           const tip = `${d.label}: ${d.present} present, ${d.late} late, ${d.absent} absent`;
