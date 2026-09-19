@@ -21,6 +21,8 @@ export type LeavePolicySnapshot = {
     paid: boolean;
     allowsHalfDay: boolean;
     requiresApproval: boolean;
+    carryForward: boolean;
+    carryForwardLimit: number | null;
   };
 };
 
@@ -42,6 +44,8 @@ export function resolveLeavePolicy(records: LeavePolicyRecord[], locationId: str
       paid: rules.paid,
       allowsHalfDay: rules.allowsHalfDay,
       requiresApproval: rules.requiresApproval,
+      carryForward: rules.carryForward,
+      carryForwardLimit: rules.carryForwardLimit,
     },
   };
 }

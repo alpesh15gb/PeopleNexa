@@ -15,7 +15,7 @@ const resolved = resolveLeavePolicy([
   record(),
   record({ id: "location-v2", locationId: "loc-1", version: 2, effectiveFrom: new Date("2026-06-01T00:00:00.000Z"), payload: rules(8) }),
 ], "loc-1", at, "cl");
-assert.deepEqual(resolved, { configurationId: "location-v2", version: 2, scope: "location", rules: { name: "Casual Leave", code: "CL", annualEntitlement: 8, paid: true, allowsHalfDay: true, requiresApproval: false } }, "location policy overrides tenant policy");
+assert.deepEqual(resolved, { configurationId: "location-v2", version: 2, scope: "location", rules: { name: "Casual Leave", code: "CL", annualEntitlement: 8, paid: true, allowsHalfDay: true, requiresApproval: false, carryForward: false, carryForwardLimit: null } }, "location policy overrides tenant policy");
 
 assert.equal(resolveLeavePolicy([record()], "loc-1", at, "SL"), null, "an unmatched policy type retains legacy LeaveType behavior");
 console.log("leave policy resolution tests passed");

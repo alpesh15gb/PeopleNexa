@@ -148,21 +148,26 @@ export async function POST(req: NextRequest) {
               throw err;
             }
 
-            const usedRows = await tx.leaveRequest.findMany({
+              const usedRows = await tx.leaveRequest.findMany({
               where: {
                 tenantId: session.tenantId,
                 employeeId,
                 leaveTypeId,
                 status: { in: ["approved", "pending"] },
               },
-            });
+                select: { days: true, leavePolicySnapshot: true },
+              });
             // Policy selection is part of the same transaction as the request
             // creation so this exact active/effective version is snapshotted.
             const policyRecords = await tx.configurationRecord.findMany({
               where: { tenantId: session.tenantId, kind: "leave_policy", active: true },
               select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
             });
-            const policy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? null, from, leaveType.code);
+            const resolvedPolicy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? null, from, leaveType.code);
+            const allocated = resolvedPolicy ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId, leaveTypeId, policyPeriod: { configurationId: resolvedPolicy.configurationId, effectiveFrom: { lte: from }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: from } }] } }, include: { policyPeriod: { select: { id: true } } } }) : null;
+            // Activated policies retain legacy behavior until this employee has
+            // an explicit policy-period allocation.
+            const policy = allocated ? resolvedPolicy : null;
             if (halfDay && (!policy || !policy.rules.allowsHalfDay)) {
               const err = new Error(policy ? "Half-day leave is not allowed for this leave type." : "Half-day leave requires an active leave policy that allows it.") as Error & { code?: string };
               err.code = "HALF_DAY";
@@ -174,8 +179,8 @@ export async function POST(req: NextRequest) {
               throw err;
             }
             if (halfDay) days = 0.5;
-            const usedDays = usedRows.reduce((sum, r) => sum + r.days, 0);
-            const entitlement = policy?.rules.annualEntitlement ?? leaveType.maxDays;
+            const usedDays = allocated ? usedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriod.id).reduce((sum, row) => sum + row.days, 0) : usedRows.reduce((sum, row) => sum + row.days, 0);
+            const entitlement = allocated ? allocated.entitlement + allocated.carryForward : leaveType.maxDays;
             if (usedDays + days > entitlement) {
               const err = new Error(
                 `Insufficient balance — ${entitlement - usedDays} day(s) remaining.`
@@ -194,7 +199,7 @@ export async function POST(req: NextRequest) {
                 days,
                 reason: reason || null,
                 status: (policy?.rules.requiresApproval ?? leaveType.requiresApproval) ? "pending" : "approved",
-                leavePolicySnapshot: policy ?? undefined,
+                leavePolicySnapshot: policy && allocated ? { ...policy, policyPeriodId: allocated.policyPeriod.id } : undefined,
               },
               include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
             });

@@ -475,6 +475,7 @@ model Employee {
   attendance        Attendance[]
   punches           Punch[]
   leaveRequests     LeaveRequest[]
+  leavePolicyBalances LeavePolicyBalance[]
   notifications     Notification[]
   payslips          Payslip[]
   loans             EmployeeLoan[]
@@ -792,6 +793,7 @@ model LeaveType {
   updatedAt        DateTime @updatedAt
 
   requests LeaveRequest[]
+  policyBalances LeavePolicyBalance[]
 
   @@unique([tenantId, code])
 }
@@ -815,6 +817,45 @@ model LeaveRequest {
   // Null for requests created before policy activation. New policy-governed
   // requests retain the selected version and applicable rules permanently.
   leavePolicySnapshot Json?
+}
+
+// Explicit opt-in balance period. Policy drafts and activation never create one.
+model LeavePolicyPeriod {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  locationId           String?
+  scopeKey             String
+  configurationId      String
+  configurationVersion Int
+  effectiveFrom        DateTime
+  effectiveTo          DateTime?
+  policySnapshot       Json
+  openedBy             String
+  openedAt             DateTime @default(now())
+  balances             LeavePolicyBalance[]
+
+  @@unique([tenantId, scopeKey, configurationId])
+  @@index([tenantId, locationId, effectiveFrom])
+}
+
+// Allocation is deliberately separate from legacy LeaveType/request data.
+model LeavePolicyBalance {
+  id             String            @id @default(cuid())
+  tenantId       String
+  policyPeriodId String
+  policyPeriod   LeavePolicyPeriod @relation(fields: [policyPeriodId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId    String
+  leaveType      LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  entitlement    Float
+  carryForward   Float   @default(0)
+  policySnapshot Json
+  allocatedBy    String
+  allocatedAt    DateTime @default(now())
+
+  @@unique([policyPeriodId, employeeId, leaveTypeId])
+  @@index([tenantId, employeeId])
 }
 
 // ─── Holidays ──────────────────────────────────────────────────────────────
