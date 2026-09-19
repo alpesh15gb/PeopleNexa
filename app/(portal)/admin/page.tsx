@@ -154,14 +154,14 @@ export default async function AdminDashboardPage({
   let weekRows: WeekRow[];
   if (branchId || ownLocationId) {
     const rows = await prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : { status: "active", loginOnly: false, branch: { locationId: ownLocationId! } } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -30), lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : { status: "active", loginOnly: false, branch: { locationId: ownLocationId! } } },
       select: { date: true, status: true },
     });
     weekRows = rows.map((r) => ({ date: r.date, status: r.status }));
   } else {
     const grouped = await prisma.attendance.groupBy({
       by: ["date", "status"],
-      where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lt: addDays(today, 1) }, employee: { status: "active", loginOnly: false } },
+      where: { tenantId: session.tenantId, date: { gte: addDays(today, -30), lt: addDays(today, 1) }, employee: { status: "active", loginOnly: false } },
       _count: true,
     });
     weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
@@ -224,7 +224,7 @@ export default async function AdminDashboardPage({
     if (r.status === "absent") cur.absent += n;
     tally.set(key, cur);
   }
-  for (let i = 6; i >= 0; i--) {
+  for (let i = 30; i >= 0; i--) {
     const day = addDays(today, -i);
     const t = tally.get(istDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
     week.push({ day: istDateKey(day), label: istDateKey(day).slice(5), ...t });
@@ -419,7 +419,7 @@ export default async function AdminDashboardPage({
           <Card>
             <CardHeader>
               <div>
-                <CardTitle>Last 7 days</CardTitle>
+                <CardTitle>Last 31 days</CardTitle>
                 <CardDescription>Attendance trend</CardDescription>
               </div>
             </CardHeader>
