@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
-import { CONFIGURATION_KINDS, dashboardLayout, idCardTemplate, leavePolicyDraft, payrollPolicyDraft } from "@/lib/configuration";
+import { CONFIGURATION_KINDS, dashboardLayout, idCardTemplate, leavePolicyDraft, payrollPolicyDraft, resolveConfiguration } from "@/lib/configuration";
+import { getPayrollConfig } from "@/lib/payroll";
 import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
 import { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
@@ -64,9 +65,8 @@ export async function POST(request: NextRequest) {
   if (kind === "leave_policy" && !leavePolicyDraft(body.payload)) return NextResponse.json({ error: "Leave policy needs unique type codes, whole-day entitlements, and valid carry-forward limits." }, { status: 400 });
   if (kind === "payroll_policy" && !payrollPolicyDraft(body.payload)) return NextResponse.json({ error: "Payroll policy needs valid divisor, LOP, overtime, and statutory values." }, { status: 400 });
   if (body.action === "preview") {
-    const where = { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) };
-    const affectedEmployees = await prisma.employee.count({ where });
-    return NextResponse.json({ affectedEmployees, scope: locationId ? "location" : "tenant" });
+    if (kind !== "leave_policy" && kind !== "payroll_policy") return NextResponse.json({ error: "Policy preview is only available for leave and payroll drafts." }, { status: 400 });
+    return policyPreview({ tenantId: session.tenantId, kind, locationId, effectiveFrom, payload: body.payload });
   }
   const scopeKey = locationId ?? "tenant";
   const latest = await prisma.configurationRecord.aggregate({ where: { tenantId: session.tenantId, scopeKey, kind }, _max: { version: true } });
@@ -100,3 +100,31 @@ async function validIdCardTemplate(payload: unknown) { const template = idCardTe
 function logo(value: unknown) { const source = text(value); if (source && !safeLogoUrl(source)) throw new Error("Logo must be an HTTPS or PNG/JPEG data URL."); return source; }
 function cleanProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), logoUrl: logo(body.logoUrl), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
 function cleanLocationProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), logoUrl: logo(body.logoUrl), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
+
+async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payload }: { tenantId: string; kind: "leave_policy" | "payroll_policy"; locationId: string | null; effectiveFrom: Date; payload: unknown }) {
+  const [affectedEmployees, policyRecords, tenant, leaveTypes] = await Promise.all([
+    prisma.employee.count({ where: { tenantId, status: "active", loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) } }),
+    prisma.configurationRecord.findMany({ where: { tenantId, kind, active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }),
+    kind === "payroll_policy" ? prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } }) : Promise.resolve(null),
+    kind === "leave_policy" ? prisma.leaveType.findMany({ where: { tenantId }, select: { name: true, code: true, maxDays: true, isCarryForward: true, requiresApproval: true }, orderBy: { code: "asc" } }) : Promise.resolve([]),
+  ]);
+  const validRecords = policyRecords.filter((record) => kind === "leave_policy" ? leavePolicyDraft(record.payload) : payrollPolicyDraft(record.payload));
+  const configured = resolveConfiguration(validRecords, locationId, effectiveFrom);
+  const resolvedStoredSource = configured ? (configured.locationId ? "location" : "tenant") : "current default";
+  if (kind === "leave_policy") {
+    const proposed = leavePolicyDraft(payload)!;
+    const currentByCode = new Map(leaveTypes.map((type) => [type.code, type]));
+    const leaveDiff = proposed.leaveTypes.map((type) => {
+      const current = currentByCode.get(type.code);
+      return { code: type.code, name: type.name, current: current ? { name: current.name, annualEntitlement: current.maxDays, carryForward: current.isCarryForward, requiresApproval: current.requiresApproval } : null, proposed: { annualEntitlement: type.annualEntitlement, paid: type.paid, allowsHalfDay: type.allowsHalfDay, carryForward: type.carryForward, carryForwardLimit: type.carryForwardLimit, requiresApproval: type.requiresApproval } };
+    });
+    return NextResponse.json({ kind, affectedEmployees, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (LeaveType)", effectiveFrom, leaveTypes: leaveDiff });
+  }
+  const proposed = payrollPolicyDraft(payload)!;
+  const current = getPayrollConfig(tenant?.config ?? null);
+  const payrollDiff = [
+    ["Monthly divisor", 26, proposed.monthlyDivisor], ["Deduct loss of pay", current.deductAbsentDays, proposed.deductLossOfPay], ["OT multiplier", current.otMultiplier, proposed.overtimeMultiplier], ["OT basis", "basic hourly", proposed.overtimeBasis === "basic_hourly" ? "basic hourly" : "fixed hourly"],
+    ["PF enabled", current.pf.enabled, proposed.statutory.pfEnabled], ["PF wage ceiling", current.pf.wageCeiling, proposed.statutory.pfWageCeiling], ["ESIC enabled", current.esic.enabled, proposed.statutory.esicEnabled], ["ESIC gross ceiling", current.esic.grossCeiling, proposed.statutory.esicGrossCeiling], ["Professional tax enabled", current.pt.enabled, proposed.statutory.professionalTaxEnabled], ["Professional tax state", current.pt.state, proposed.statutory.professionalTaxState], ["Labour welfare fund enabled", current.lwf.enabled, proposed.statutory.labourWelfareFundEnabled], ["TDS enabled", current.tds.enabled, proposed.statutory.tdsEnabled], ["TDS regime", current.tds.regime, proposed.statutory.tdsRegime],
+  ].map(([label, current, proposed]) => ({ label, current, proposed, changed: current !== proposed }));
+  return NextResponse.json({ kind, affectedEmployees, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (Tenant.config / getPayrollConfig)", effectiveFrom, payroll: payrollDiff });
+}

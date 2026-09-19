@@ -102,7 +102,7 @@ export function resolveConfiguration<T extends { locationId: string | null; acti
   locationId: string | null,
   at = new Date()
 ): T | null {
-  return records
+  return [...records]
     .filter((record) => record.active && record.effectiveFrom <= at && (!record.effectiveTo || record.effectiveTo >= at))
     .filter((record) => record.locationId === locationId || record.locationId === null)
     .sort((a, b) => Number(b.locationId === locationId) - Number(a.locationId === locationId) || b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null;

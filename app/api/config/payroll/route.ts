@@ -19,11 +19,8 @@ export async function GET() {
 /** PUT — update payroll configuration. */
 export async function PUT(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (session?.role === "branch_manager") {
+  if (session?.role !== "admin") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
   const current = getPayrollConfig((await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }))?.config ?? null);
