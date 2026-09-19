@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/dates";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
+import { leaveRequestEntitlement } from "@/lib/leave-policy";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -126,9 +127,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         tx.leaveType.findUnique({ where: { id: request.leaveTypeId } }),
       ]);
       const total = approvedRows.reduce((sum, r) => sum + r.days, 0);
-      if (leaveType && total > leaveType.maxDays) {
+      const entitlement = leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
+      if (leaveType && entitlement !== undefined && total > entitlement) {
         const err = new Error(
-          `Approving this would exceed the ${leaveType.name} balance — ${leaveType.maxDays} day(s) allowed, ${total} day(s) would be approved.`
+          `Approving this would exceed the ${leaveType.name} balance — ${entitlement} day(s) allowed, ${total} day(s) would be approved.`
         ) as Error & { code?: string };
         err.code = "OVER_BALANCE";
         throw err;

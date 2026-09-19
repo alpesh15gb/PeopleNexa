@@ -812,6 +812,9 @@ model LeaveRequest {
   reviewedBy  String?
   reviewedAt  DateTime?
   appliedAt   DateTime  @default(now())
+  // Null for requests created before policy activation. New policy-governed
+  // requests retain the selected version and applicable rules permanently.
+  leavePolicySnapshot Json?
 }
 
 // ─── Holidays ──────────────────────────────────────────────────────────────

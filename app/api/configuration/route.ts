@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
   if (!body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) return NextResponse.json({ error: "Configuration payload must be a JSON object." }, { status: 400 });
   if (kind === "dashboard" && !dashboardLayout(body.payload)) return NextResponse.json({ error: "Dashboard layouts must contain unique known widgets with enabled, order, and size values." }, { status: 400 });
   if (kind === "id_card" && !await validIdCardTemplate(body.payload)) return NextResponse.json({ error: "An ID-card template requires reachable PNG/JPEG front and back backgrounds from HTTPS or data URLs." }, { status: 400 });
-  if (kind === "leave_policy" && !leavePolicyDraft(body.payload)) return NextResponse.json({ error: "Leave policy needs unique type codes, whole-day entitlements, and valid carry-forward limits." }, { status: 400 });
+  if (kind === "leave_policy" && !leavePolicyDraft(body.payload)) return NextResponse.json({ error: "Leave policy needs unique type codes and valid supported rules; carry-forward is not supported yet." }, { status: 400 });
   if (kind === "payroll_policy" && !payrollPolicyDraft(body.payload)) return NextResponse.json({ error: "Payroll policy needs valid divisor, LOP, overtime, and statutory values." }, { status: 400 });
   if (body.action === "preview") {
     if (kind !== "leave_policy" && kind !== "payroll_policy") return NextResponse.json({ error: "Policy preview is only available for leave and payroll drafts." }, { status: 400 });

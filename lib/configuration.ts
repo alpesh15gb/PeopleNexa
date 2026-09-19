@@ -60,7 +60,9 @@ export function leavePolicyDraft(payload: unknown): LeavePolicyDraft | null {
     const code = typeof value.code === "string" ? value.code.trim().toUpperCase() : "";
     const annualEntitlement = value.annualEntitlement;
     const carryForwardLimit = value.carryForwardLimit;
-    if (!name || name.length > 80 || !/^[A-Z0-9_-]{1,20}$/.test(code) || codes.has(code) || typeof annualEntitlement !== "number" || !Number.isInteger(annualEntitlement) || annualEntitlement < 0 || annualEntitlement > 366 || typeof value.paid !== "boolean" || typeof value.allowsHalfDay !== "boolean" || typeof value.requiresApproval !== "boolean" || typeof value.carryForward !== "boolean" || (carryForwardLimit !== null && (typeof carryForwardLimit !== "number" || !Number.isInteger(carryForwardLimit) || carryForwardLimit < 0 || carryForwardLimit > annualEntitlement))) return null;
+    // Carry-forward needs period-based balances, which the current leave model
+    // does not have. Reject it rather than storing a policy rule we cannot apply.
+    if (!name || name.length > 80 || !/^[A-Z0-9_-]{1,20}$/.test(code) || codes.has(code) || typeof annualEntitlement !== "number" || !Number.isInteger(annualEntitlement) || annualEntitlement < 0 || annualEntitlement > 366 || typeof value.paid !== "boolean" || typeof value.allowsHalfDay !== "boolean" || typeof value.requiresApproval !== "boolean" || typeof value.carryForward !== "boolean" || value.carryForward || carryForwardLimit !== null) return null;
     codes.add(code);
     parsed.push({ name, code, annualEntitlement, paid: value.paid, allowsHalfDay: value.allowsHalfDay, requiresApproval: value.requiresApproval, carryForward: value.carryForward, carryForwardLimit: carryForwardLimit as number | null });
   }

@@ -3,6 +3,8 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, toDateKey, daysBetween } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
+import { resolveLeavePolicy } from "@/lib/leave-policy";
+import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -63,6 +65,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { leaveTypeId, fromDate, toDate, reason } = body as Record<string, string>;
+    const halfDay = body.halfDay === true;
     if (!leaveTypeId || !fromDate || !toDate) {
       return NextResponse.json({ error: "Leave type and dates are required." }, { status: 400 });
     }
@@ -104,7 +107,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Leave dates are invalid. Use YYYY-MM-DD." }, { status: 400 });
     }
     if (to < from) return NextResponse.json({ error: "End date must be after start date." }, { status: 400 });
-    const days = daysBetween(from, to);
+    let days = daysBetween(from, to);
     if (!Number.isFinite(days) || days <= 0 || days > 365) {
       return NextResponse.json({ error: "Leave duration is invalid." }, { status: 400 });
     }
@@ -112,7 +115,7 @@ export async function POST(req: NextRequest) {
     // Inactive employees can't accrue new leave.
     const applicant = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId: session.tenantId },
-      select: { id: true, status: true, loginOnly: true },
+      select: { id: true, status: true, loginOnly: true, branch: { select: { locationId: true } } },
     });
     if (!applicant || applicant.status !== "active") {
       return NextResponse.json({ error: "Only active employees can request leave." }, { status: 403 });
@@ -123,7 +126,7 @@ export async function POST(req: NextRequest) {
 
     // Overlap + balance checks and the create run inside one serializable
     // transaction so concurrent submits for the same days cannot both pass.
-    let request;
+    let request: Prisma.LeaveRequestGetPayload<{ include: { leaveType: true; employee: { select: { firstName: true; lastName: true } } } }> | undefined;
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -153,10 +156,29 @@ export async function POST(req: NextRequest) {
                 status: { in: ["approved", "pending"] },
               },
             });
+            // Policy selection is part of the same transaction as the request
+            // creation so this exact active/effective version is snapshotted.
+            const policyRecords = await tx.configurationRecord.findMany({
+              where: { tenantId: session.tenantId, kind: "leave_policy", active: true },
+              select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
+            });
+            const policy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? null, from, leaveType.code);
+            if (halfDay && (!policy || !policy.rules.allowsHalfDay)) {
+              const err = new Error(policy ? "Half-day leave is not allowed for this leave type." : "Half-day leave requires an active leave policy that allows it.") as Error & { code?: string };
+              err.code = "HALF_DAY";
+              throw err;
+            }
+            if (halfDay && from.getTime() !== to.getTime()) {
+              const err = new Error("Half-day leave must be for a single date.") as Error & { code?: string };
+              err.code = "HALF_DAY";
+              throw err;
+            }
+            if (halfDay) days = 0.5;
             const usedDays = usedRows.reduce((sum, r) => sum + r.days, 0);
-            if (usedDays + days > leaveType.maxDays) {
+            const entitlement = policy?.rules.annualEntitlement ?? leaveType.maxDays;
+            if (usedDays + days > entitlement) {
               const err = new Error(
-                `Insufficient balance — ${leaveType.maxDays - usedDays} day(s) remaining.`
+                `Insufficient balance — ${entitlement - usedDays} day(s) remaining.`
               ) as Error & { code?: string };
               err.code = "BALANCE";
               throw err;
@@ -171,7 +193,8 @@ export async function POST(req: NextRequest) {
                 toDate: to,
                 days,
                 reason: reason || null,
-                status: leaveType.requiresApproval ? "pending" : "approved",
+                status: (policy?.rules.requiresApproval ?? leaveType.requiresApproval) ? "pending" : "approved",
+                leavePolicySnapshot: policy ?? undefined,
               },
               include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
             });
@@ -184,7 +207,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       const code = (e as { code?: string })?.code;
-      if (code === "OVERLAP" || code === "BALANCE") {
+      if (code === "OVERLAP" || code === "BALANCE" || code === "HALF_DAY") {
         return NextResponse.json({ error: (e as Error).message }, { status: 400 });
       }
       if (code === "P2002" || code === "P2034") {
