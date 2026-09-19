@@ -43,6 +43,7 @@ import {
   MessageSquareText,
   Wallet,
   IdCard,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 import { relativeDay, toDateKey } from "@/lib/dates";
@@ -97,6 +98,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" />, section: "Workspace" },
+  { href: "/admin/configuration", label: "Configuration", icon: <SlidersHorizontal className="h-4 w-4" />, section: "Workspace" },
   { href: "/admin/audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" />, section: "Workspace" },
 ];
 
@@ -407,7 +409,7 @@ export function Shell({
     { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, section: "Self service" },
   ];
   const locationManagerNav: NavItem[] = [
-    ...adminNav.filter((n) => !["/admin/locations", "/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/settings", "/admin/audit"].includes(n.href)),
+    ...adminNav.filter((n) => !["/admin/locations", "/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/settings", "/admin/configuration", "/admin/audit"].includes(n.href)),
   ];
   const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "location_manager" ? locationManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));

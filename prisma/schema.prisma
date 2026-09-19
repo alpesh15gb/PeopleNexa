@@ -61,6 +61,8 @@ model Tenant {
   webhooks           WebhookEndpoint[]
   taxDeclarations    TaxDeclaration[]
   payrollAdjustments PayrollAdjustment[]
+  profile            TenantProfile?
+  configurationRecords ConfigurationRecord[]
 }
 
 // ─── Super admin (platform operator, not a tenant) ─────────────────────────
@@ -259,9 +261,73 @@ model Location {
   managers Employee[] @relation("LocationManagers")
   assets   Asset[]
   cashbookEntries CashbookEntry[]
+  profile         LocationProfile?
+  configurationRecords ConfigurationRecord[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+}
+
+// ─── Tenant configuration foundation ───────────────────────────────────────
+// Profiles are descriptive master data. Configuration records are deliberately
+// separate from live tenant.config so creating or activating a record cannot
+// change running dashboard, ID-card, leave, or payroll behaviour by accident.
+
+model TenantProfile {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalName       String?
+  logoUrl         String?
+  address         String?
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  website         String?
+  taxId           String?
+  registrationNo  String?
+  legalDetails    Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model LocationProfile {
+  id              String   @id @default(cuid())
+  locationId      String   @unique
+  location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  address         String?
+  contactName     String?
+  contactEmail    String?
+  contactPhone    String?
+  logoUrl         String?
+  branding        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ConfigurationRecord {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationId    String?
+  location      Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  // "tenant" for tenant-wide records; locationId for location overrides.
+  scopeKey      String
+  kind          String   // dashboard | id_card | leave_policy | payroll_policy
+  version       Int      @default(1)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  active        Boolean  @default(false)
+  payload       Json
+  createdBy     String
+  activatedBy   String?
+  activatedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, scopeKey, kind, version])
+  @@index([tenantId, kind, active, effectiveFrom])
+  @@index([tenantId, locationId, kind])
 }
 
 model Branch {
