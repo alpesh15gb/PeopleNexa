@@ -85,7 +85,7 @@ export default async function AdminDashboardPage({
   const [employees, attendance, attendanceTotal, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
-      select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } } },
+      select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } }, profile: { select: { gender: true } } },
     }),
     prisma.attendance.findMany({
       where: attendanceWhere,
@@ -168,6 +168,9 @@ export default async function AdminDashboardPage({
   }
 
   const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendanceRecords, approvedLeaves.map((leave) => leave.employeeId));
+  const maleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "male").length;
+  const femaleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "female").length;
+  const reportedGenderTotal = maleEmployees + femaleEmployees;
   const marked = counts.marked;
   const attendancePageCount = Math.max(1, Math.ceil(attendanceTotal / attendancePageSize));
   const attendanceHref = (page: number) => {
@@ -450,6 +453,10 @@ export default async function AdminDashboardPage({
                 />
               )}
             </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><div><CardTitle>Gender ratio</CardTitle><CardDescription>Active employee headcount</CardDescription></div></CardHeader>
+            <CardContent><div className="space-y-4"><div className="h-3 overflow-hidden rounded-full bg-tint"><div className="h-full bg-sky-600" style={{ width: `${reportedGenderTotal ? (maleEmployees / reportedGenderTotal) * 100 : 0}%` }} /></div><div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-muted-foreground">Male</p><p className="mt-1 font-display text-2xl font-bold">{maleEmployees} <span className="text-sm font-medium text-muted-foreground">{reportedGenderTotal ? Math.round((maleEmployees / reportedGenderTotal) * 100) : 0}%</span></p></div><div><p className="text-muted-foreground">Female</p><p className="mt-1 font-display text-2xl font-bold">{femaleEmployees} <span className="text-sm font-medium text-muted-foreground">{reportedGenderTotal ? Math.round((femaleEmployees / reportedGenderTotal) * 100) : 0}%</span></p></div></div></div></CardContent>
           </Card>
         </div>
       </div>
