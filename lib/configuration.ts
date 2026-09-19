@@ -3,6 +3,37 @@ export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
 
 export type IdCardTemplate = { frontBackgroundUrl: string; backBackgroundUrl: string };
 
+export const DASHBOARD_WIDGETS = [
+  "total_employees", "present", "late", "permission", "absent", "pending_leaves", "pending_leave_requests",
+  "attendance_trend", "device_attendance", "project_attendance", "todays_attendance",
+  "driving_license_expiry", "birthdays", "anniversaries", "new_joiners", "departments", "gender_ratio",
+] as const;
+export type DashboardWidgetKey = (typeof DASHBOARD_WIDGETS)[number];
+export type DashboardWidgetSize = "compact" | "standard" | "wide";
+export type DashboardLayout = { widgets: Array<{ key: DashboardWidgetKey; enabled: boolean; order: number; size: DashboardWidgetSize }> };
+
+export function dashboardLayout(payload: unknown): DashboardLayout | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const widgets = (payload as Record<string, unknown>).widgets;
+  if (!Array.isArray(widgets) || widgets.length === 0 || widgets.length > DASHBOARD_WIDGETS.length) return null;
+  const seen = new Set<string>();
+  const orders = new Set<number>();
+  const parsed: DashboardLayout["widgets"] = [];
+  for (const widget of widgets) {
+    if (!widget || typeof widget !== "object" || Array.isArray(widget)) return null;
+    const value = widget as Record<string, unknown>;
+    const key = value.key;
+    const enabled = value.enabled;
+    const order = value.order;
+    const size = value.size;
+    if (typeof key !== "string" || !DASHBOARD_WIDGETS.includes(key as DashboardWidgetKey) || seen.has(key) || typeof enabled !== "boolean" || typeof order !== "number" || !Number.isInteger(order) || order < 0 || order >= DASHBOARD_WIDGETS.length || orders.has(order) || !["compact", "standard", "wide"].includes(String(size))) return null;
+    seen.add(key);
+    orders.add(order);
+    parsed.push({ key: key as DashboardWidgetKey, enabled, order, size: size as DashboardWidgetSize });
+  }
+  return { widgets: parsed.sort((a, b) => a.order - b.order) };
+}
+
 export function idCardTemplate(payload: unknown): IdCardTemplate | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;

@@ -13,6 +13,7 @@ import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 import { BranchPicker } from "./attendance/branch-picker";
 import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
+import { dashboardLayout, resolveConfiguration, type DashboardWidgetKey } from "@/lib/configuration";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function AdminDashboardPage({
   const isBranchManager = session.role === "branch_manager";
   const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
-    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
+    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true, locationId: true } } } })
     : null;
   const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
   const ownBranchId = ownScope?.branchId ?? null;
@@ -64,9 +65,17 @@ export default async function AdminDashboardPage({
   const branchFilter = isBranchManager
     ? (ownBranchId ? { id: ownBranchId, name: ownBranchName } : null)
       : branchParam
-       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true } })
+       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true, locationId: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
+  const selectedBranchLocationId = branchFilter && "locationId" in branchFilter ? branchFilter.locationId : null;
+  const dashboardLocationId = ownLocationId ?? (isBranchManager ? ownScope?.branch?.locationId ?? null : selectedBranchLocationId);
+  const activeDashboardRecords = await prisma.configurationRecord.findMany({
+    where: { tenantId: session.tenantId, kind: "dashboard", active: true },
+    select: { locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
+  });
+  // Invalid records are ignored so an existing dashboard always remains usable.
+  const activeDashboardLayout = dashboardLayout(resolveConfiguration(activeDashboardRecords.filter((record) => dashboardLayout(record.payload)), dashboardLocationId)?.payload);
   const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
   const empScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = istDateKey(today).slice(0, 7);
@@ -234,6 +243,17 @@ export default async function AdminDashboardPage({
     const dayKey = istDateKey(day);
     week.push({ day: dayKey, label: `${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}`, ...t });
   }
+  const widget = (key: DashboardWidgetKey) => activeDashboardLayout?.widgets.find((item) => item.key === key);
+  const widgetClass = (key: DashboardWidgetKey, base = "") => {
+    const setting = widget(key);
+    if (!activeDashboardLayout) return base;
+    if (!setting?.enabled) return `${base} hidden`;
+    return `${base} ${setting.size === "wide" ? "lg:col-span-2 xl:col-span-3" : setting.size === "compact" ? "max-w-sm" : ""}`;
+  };
+  const widgetStyle = (key: DashboardWidgetKey) => {
+    const setting = widget(key);
+    return activeDashboardLayout && setting ? { order: setting.order } : undefined;
+  };
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -259,22 +279,22 @@ export default async function AdminDashboardPage({
       {/* Stats */}
       <Suspense fallback={<StatsSkeleton />}>
        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} />
-        <StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} />
-        <StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} />
-        <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} />
-        <StatCard label="Absent" value={counts.absent + counts.noRecord} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />
-        <StatCard
+         <div className={widgetClass("total_employees")} style={widgetStyle("total_employees")}><StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} /></div>
+         <div className={widgetClass("present")} style={widgetStyle("present")}><StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} /></div>
+         <div className={widgetClass("late")} style={widgetStyle("late")}><StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} /></div>
+         <div className={widgetClass("permission")} style={widgetStyle("permission")}><StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} /></div>
+         <div className={widgetClass("absent")} style={widgetStyle("absent")}><StatCard label="Absent" value={counts.absent + counts.noRecord} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} /></div>
+         <div className={widgetClass("pending_leaves")} style={widgetStyle("pending_leaves")}><StatCard
           label="Pending leaves"
           value={pendingLeaveCount}
           icon={<CalendarCheck2 className="h-4.5 w-4.5" />}
           tone="violet"
           className={statCardClass}
-        />
+         /></div>
        </div>
        </Suspense>
 
-       <Card>
+       <Card className={widgetClass("attendance_trend")} style={widgetStyle("attendance_trend")}>
          <CardHeader>
            <div>
              <CardTitle>This month</CardTitle>
@@ -287,13 +307,13 @@ export default async function AdminDashboardPage({
        </Card>
 
        <div className="grid gap-6 lg:grid-cols-2">
-        <Card><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
-        <Card><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present + count.late + count.halfDay}/{count.total} present · {count.absent + count.noRecord} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
+         <Card className={widgetClass("device_attendance")} style={widgetStyle("device_attendance")}><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
+         <Card className={widgetClass("project_attendance")} style={widgetStyle("project_attendance")}><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.present + count.late + count.halfDay}/{count.total} present · {count.absent + count.noRecord} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
         {/* Today's live list */}
-        <Card className="xl:col-span-2">
+         <Card className={widgetClass("todays_attendance", "xl:col-span-2")} style={widgetStyle("todays_attendance")}>
           <CardHeader>
             <div>
               <CardTitle>Today&apos;s attendance</CardTitle>
@@ -355,7 +375,7 @@ export default async function AdminDashboardPage({
         </Card>
 
         <div className="space-y-6">
-          <Card>
+           <Card className={widgetClass("driving_license_expiry")} style={widgetStyle("driving_license_expiry")}>
             <CardHeader>
               <div>
                 <CardTitle>Driving license expiry</CardTitle>
@@ -384,7 +404,7 @@ export default async function AdminDashboardPage({
             </CardContent>
           </Card>
 
-          <Card>
+           <Card className={widgetClass("birthdays")} style={widgetStyle("birthdays")}>
             <CardHeader>
               <div><CardTitle>Today&apos;s birthdays</CardTitle><CardDescription>{birthdays.length} celebration{birthdays.length === 1 ? "" : "s"} today</CardDescription></div>
               <PartyPopper className="h-4.5 w-4.5 text-amber-500" />
@@ -394,7 +414,7 @@ export default async function AdminDashboardPage({
             </CardContent>
           </Card>
 
-          <Card>
+           <Card className={widgetClass("anniversaries")} style={widgetStyle("anniversaries")}>
             <CardHeader>
               <div><CardTitle>Today&apos;s anniversaries</CardTitle><CardDescription>{anniversaries.length} marriage {anniversaries.length === 1 ? "anniversary" : "anniversaries"} today</CardDescription></div>
               <CalendarCheck2 className="h-4.5 w-4.5 text-rose-500" />
@@ -404,7 +424,7 @@ export default async function AdminDashboardPage({
             </CardContent>
           </Card>
 
-          <Card>
+           <Card className={widgetClass("new_joiners")} style={widgetStyle("new_joiners")}>
             <CardHeader>
               <div>
                 <CardTitle>New joiners</CardTitle>
@@ -433,7 +453,7 @@ export default async function AdminDashboardPage({
           </Card>
 
           {/* Departments */}
-          <Card>
+           <Card className={widgetClass("departments")} style={widgetStyle("departments")}>
             <CardHeader>
               <div>
                 <CardTitle>By department</CardTitle>
@@ -455,7 +475,7 @@ export default async function AdminDashboardPage({
               )}
             </CardContent>
           </Card>
-          <Card>
+           <Card className={widgetClass("gender_ratio")} style={widgetStyle("gender_ratio")}>
             <CardHeader><div><CardTitle>Gender ratio</CardTitle><CardDescription>Active employee headcount</CardDescription></div></CardHeader>
             <CardContent><div className="space-y-4"><div className="h-3 overflow-hidden rounded-full bg-tint"><div className="h-full bg-sky-600" style={{ width: `${reportedGenderTotal ? (maleEmployees / reportedGenderTotal) * 100 : 0}%` }} /></div><div className="grid grid-cols-2 gap-4 text-sm"><div><p className="text-muted-foreground">Male</p><p className="mt-1 font-display text-2xl font-bold">{maleEmployees} <span className="text-sm font-medium text-muted-foreground">{reportedGenderTotal ? Math.round((maleEmployees / reportedGenderTotal) * 100) : 0}%</span></p></div><div><p className="text-muted-foreground">Female</p><p className="mt-1 font-display text-2xl font-bold">{femaleEmployees} <span className="text-sm font-medium text-muted-foreground">{reportedGenderTotal ? Math.round((femaleEmployees / reportedGenderTotal) * 100) : 0}%</span></p></div></div></div></CardContent>
           </Card>
@@ -463,7 +483,7 @@ export default async function AdminDashboardPage({
       </div>
 
       {/* Pending leaves */}
-      <Card>
+       <Card className={widgetClass("pending_leave_requests")} style={widgetStyle("pending_leave_requests")}>
         <CardHeader>
           <div>
           <CardTitle>Leave requests waiting for review</CardTitle>

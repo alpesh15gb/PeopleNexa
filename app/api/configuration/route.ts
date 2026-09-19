@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
-import { CONFIGURATION_KINDS, idCardTemplate } from "@/lib/configuration";
+import { CONFIGURATION_KINDS, dashboardLayout, idCardTemplate } from "@/lib/configuration";
 import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
 import { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
   const effectiveTo = body.effectiveTo ? new Date(String(body.effectiveTo)) : null;
   if (Number.isNaN(effectiveFrom.getTime()) || (effectiveTo && (Number.isNaN(effectiveTo.getTime()) || effectiveTo < effectiveFrom))) return NextResponse.json({ error: "Provide a valid effective date range." }, { status: 400 });
   if (!body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) return NextResponse.json({ error: "Configuration payload must be a JSON object." }, { status: 400 });
+  if (kind === "dashboard" && !dashboardLayout(body.payload)) return NextResponse.json({ error: "Dashboard layouts must contain unique known widgets with enabled, order, and size values." }, { status: 400 });
   if (kind === "id_card" && !await validIdCardTemplate(body.payload)) return NextResponse.json({ error: "An ID-card template requires reachable PNG/JPEG front and back backgrounds from HTTPS or data URLs." }, { status: 400 });
   const scopeKey = locationId ?? "tenant";
   const latest = await prisma.configurationRecord.aggregate({ where: { tenantId: session.tenantId, scopeKey, kind }, _max: { version: true } });
@@ -75,12 +76,13 @@ export async function PATCH(request: NextRequest) {
   const active = Boolean(body.active);
   const current = await prisma.configurationRecord.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!current) return NextResponse.json({ error: "Configuration record not found." }, { status: 404 });
+  if (active && current.kind === "dashboard" && !dashboardLayout(current.payload)) return NextResponse.json({ error: "This dashboard layout is invalid and cannot be activated." }, { status: 400 });
   if (active && current.kind === "id_card" && !await validIdCardTemplate(current.payload)) return NextResponse.json({ error: "This ID-card template has invalid or unreachable background assets and cannot be activated." }, { status: 400 });
   const record = await prisma.$transaction(async (tx) => {
     if (active) await tx.configurationRecord.updateMany({ where: { tenantId: session.tenantId, scopeKey: current.scopeKey, kind: current.kind, active: true, NOT: { id } }, data: { active: false } });
     return tx.configurationRecord.update({ where: { id }, data: { active, activatedBy: active ? session.sub : null, activatedAt: active ? new Date() : null } });
   });
-  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: active ? "configuration.activate" : "configuration.deactivate", entity: "ConfigurationRecord", entityId: id, summary: `${active ? "Activated" : "Deactivated"} ${record.kind} v${record.version}; no live consumer is enabled`, before: current, after: record });
+  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: active ? "configuration.activate" : "configuration.deactivate", entity: "ConfigurationRecord", entityId: id, summary: `${active ? "Activated" : "Deactivated"} ${record.kind} v${record.version}${record.kind === "dashboard" ? "; dashboard layout is live" : "; no live consumer is enabled"}`, before: current, after: record });
   return NextResponse.json({ record });
 }
 
