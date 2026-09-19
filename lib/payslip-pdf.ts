@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { loadBrandLogo } from "@/lib/company-branding";
 
 type Adjustment = { label: string; amount: number };
 type PayRow = { label: string; actual?: number; amount: number };
@@ -9,6 +10,7 @@ export type PayslipDocumentData = {
   companyName: string;
   companyAddress?: string | null;
   companyContact?: string | null;
+  companyLogoUrl?: string | null;
   month: string;
   employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null };
   payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null };
@@ -39,9 +41,9 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   const text = (content: string, x: number, y: number, options: PDFKit.Mixins.TextOptions = {}) => doc.fillColor(INK).font("Helvetica").fontSize(8).text(content, x, y, options);
   const bold = (content: string, x: number, y: number, options: PDFKit.Mixins.TextOptions = {}) => doc.fillColor(INK).font("Helvetica-Bold").fontSize(8).text(content, x, y, options);
 
-  const logo = await readFile(path.join(process.cwd(), "public", "logo.png")).catch(() => null);
+  const logo = await loadBrandLogo(data.companyLogoUrl ?? null) ?? await readFile(path.join(process.cwd(), "public", "logo.png")).catch(() => null);
   const header = (continued = false) => {
-    if (logo) doc.image(logo, LEFT + 6, 31, { fit: [54, 54] });
+    if (logo) { try { doc.image(logo, LEFT + 6, 31, { fit: [54, 54] }); } catch { /* A malformed logo must not prevent payslip delivery. */ } }
     doc.font("Helvetica-Bold").fontSize(14).fillColor(INK).text(data.companyName || "Company", LEFT + 70, 34, { width: WIDTH - 140, align: "center", ellipsis: true });
     const address = [data.companyAddress, data.companyContact].filter(Boolean).join("  |  ") || "";
     if (address) text(address, LEFT + 70, 53, { width: WIDTH - 140, align: "center", ellipsis: true });
