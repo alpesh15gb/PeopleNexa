@@ -97,11 +97,13 @@ export function PayrollPanel({
   rows,
   totals,
   generated,
+  canManageSettings,
 }: {
   month: string;
   rows: Row[];
   totals: { gross: number; deductions: number; net: number; paid: number };
   generated: number;
+  canManageSettings: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -376,9 +378,9 @@ export function PayrollPanel({
           <Button size="sm" variant="ghost" onClick={() => setAdjustmentsOpen(true)}>
             <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" /> Adjustments
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
+          {canManageSettings && <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
             <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Settings
-          </Button>
+          </Button>}
           <Select value={bank} onChange={(e) => setBank(e.target.value)} aria-label="Bank format" className="w-full sm:w-auto lg:w-52">
             {BANKS.map((b) => (
               <option key={b.key} value={b.key}>{b.label}</option>
@@ -537,7 +539,7 @@ export function PayrollPanel({
       </Table>
 
       <PayslipModal data={viewing} onClose={() => setViewing(null)} />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {canManageSettings && <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
       <AdjustmentsModal open={adjustmentsOpen} onClose={() => setAdjustmentsOpen(false)} month={month} rows={rows} />
 
       {/* Single-payslip Mark paid (paidVia + paymentRef) */}
