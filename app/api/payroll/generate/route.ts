@@ -4,13 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
 import { sendWhatsApp } from "@/lib/whatsapp";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -20,9 +21,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "active", loginOnly: false },
+    where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
     select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, phone: true },
   });
 

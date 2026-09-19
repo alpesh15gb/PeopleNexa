@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { round2 } from "@/lib/utils";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /**
  * Tally-ready salary journal CSV.
@@ -15,15 +16,17 @@ export async function GET(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
-  const payslips = await prisma.payslip.findMany({ where: { tenantId: session.tenantId, month } });
+  const payslips = await prisma.payslip.findMany({ where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) } });
   if (payslips.length === 0) {
     return NextResponse.json({ error: `No payslips found for ${month}. Generate payslips first.` }, { status: 400 });
   }

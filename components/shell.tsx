@@ -407,7 +407,7 @@ export function Shell({
     { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, section: "Self service" },
   ];
   const locationManagerNav: NavItem[] = [
-    ...adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/employee-master" || n.href === "/admin/id-cards" || n.href === "/admin/departments" || n.href === "/admin/branches" || n.href === "/admin/devices" || n.href === "/admin/leaves" || n.href === "/admin/reports"),
+    ...adminNav.filter((n) => !["/admin/locations", "/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/settings", "/admin/audit"].includes(n.href)),
   ];
   const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "location_manager" ? locationManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
   const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));

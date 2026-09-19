@@ -6,15 +6,19 @@ import { pathDistanceKm } from "@/lib/geo";
 import { shiftWindow } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { clipToDuty } from "@/lib/journey";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — day routes for one employee (or all active employees) + summary. */
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const dateKey = req.nextUrl.searchParams.get("date") || todayKey();
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
   if (!isDateKey(dateKey)) return NextResponse.json({ error: "date must use a real YYYY-MM-DD calendar date." }, { status: 400 });
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
@@ -22,6 +26,7 @@ export async function GET(req: NextRequest) {
   const where = {
     tenantId: session.tenantId,
     ...(employeeId ? { employeeId } : {}),
+    ...(locationId ? { employee: employeeScope } : {}),
     at: { gte: dayStart, lt: dayEnd },
   };
 
@@ -32,12 +37,12 @@ export async function GET(req: NextRequest) {
       include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true, shift: true } } },
     }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...employeeScope },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true, shift: true },
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(locationId ? { employee: employeeScope } : {}) },
       select: { employeeId: true, punchInTime: true, punchOutTime: true },
     }),
   ]);

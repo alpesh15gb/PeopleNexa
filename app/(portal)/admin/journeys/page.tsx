@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function JourneysPage() {
   const session = await getSession();
-  if (!session || session.role !== "admin") redirect("/login");
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) redirect("/login");
 
   const dateKey = todayKey();
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);

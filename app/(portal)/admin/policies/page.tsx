@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PoliciesPage() {
   const session = await getSession();
-  if (!session || session.role !== "admin") redirect("/login");
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) redirect("/login");
 
   const policies = await prisma.policy.findMany({
     where: { tenantId: session.tenantId, active: true },

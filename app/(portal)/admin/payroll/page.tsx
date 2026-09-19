@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { monthKey } from "@/lib/dates";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { PayrollPanel } from "./payroll-panel";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +13,16 @@ export default async function AdminPayrollPage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const session = await requireSession();
+  if (session.role !== "admin" && session.role !== "location_manager") return null;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return null;
+  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
   const { month: monthParam } = await searchParams;
   const month = monthParam || monthKey(new Date());
 
   const [employees, payslips] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...employeeScope },
       select: {
         id: true,
         employeeNumber: true,
@@ -33,7 +38,7 @@ export default async function AdminPayrollPage({
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month },
+      where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
     }),
   ]);

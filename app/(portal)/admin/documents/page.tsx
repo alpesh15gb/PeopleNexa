@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DocumentsPage() {
   const session = await getSession();
-  if (!session || session.role !== "admin") redirect("/login");
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) redirect("/login");
 
   const [docs, employees] = await Promise.all([
     prisma.document.findMany({

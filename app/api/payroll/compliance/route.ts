@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { formatDateIST, isMonthKey, monthKeyIST } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
 import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const csv = (rows: (string | number)[][]) =>
   rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
@@ -14,10 +15,13 @@ export async function GET(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = locationId ? { employee: employeeLocationScope(locationId) } : {};
   const type = String(req.nextUrl.searchParams.get("type") ?? "ecr");
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest) {
 
   if (type === "ecr") {
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month },
+      where: { tenantId: session.tenantId, month, ...employeeScope },
       include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, pan: true, joiningDate: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
@@ -72,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   if (type === "form16") {
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month: { in: fiscalYearMonths(month) } },
+      where: { tenantId: session.tenantId, month: { in: fiscalYearMonths(month) }, ...employeeScope },
       include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, pan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
@@ -115,7 +119,7 @@ export async function GET(req: NextRequest) {
   if (type === "form24q") {
     const months = quarterMonths(month);
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month: { in: months } },
+      where: { tenantId: session.tenantId, month: { in: months }, ...employeeScope },
       include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, pan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });

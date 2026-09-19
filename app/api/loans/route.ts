@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { monthKeyIST, isMonthKey } from "@/lib/dates";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const employeeId = req.nextUrl.searchParams.get("employeeId");
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const loans = await prisma.employeeLoan.findMany({
-    where: { tenantId: session.tenantId, ...(employeeId ? { employeeId } : {}) },
+    where: { tenantId: session.tenantId, ...(employeeId ? { employeeId } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -23,10 +26,12 @@ export async function POST(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const employeeId = String(body.employeeId ?? "");
   const type = body.type === "loan" ? "loan" : "advance";
@@ -43,7 +48,7 @@ export async function POST(req: NextRequest) {
   }
 
   const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, tenantId: session.tenantId },
+    where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 

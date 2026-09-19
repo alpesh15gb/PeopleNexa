@@ -2,20 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — adjustments for a month (admin). */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const rawMonth = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(rawMonth)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
   const month = rawMonth;
   const adjustments = await prisma.payrollAdjustment.findMany({
-    where: { tenantId: session.tenantId, month },
+    where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -28,9 +31,11 @@ export async function POST(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const month = String(body.month ?? monthKeyIST(new Date()));
   if (!isMonthKey(month)) {
@@ -54,7 +59,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Deduction adjustments must be a negative amount." }, { status: 400 });
   }
   const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, tenantId: session.tenantId },
+    where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
     select: { id: true },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 400 });

@@ -12,6 +12,7 @@ import {
 } from "@/lib/payroll";
 import { appendAudit } from "@/lib/audit";
 import { monthKeyIST } from "@/lib/dates";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** POST — recompute a single payslip from fresh attendance/adjustments/config (admin). */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -19,13 +20,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const existing = await prisma.payslip.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (existing.status === "paid") {
@@ -38,7 +41,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const [tenant, employee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.employee.findFirst({
-      where: { id: existing.employeeId, tenantId: session.tenantId },
+      where: { id: existing.employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
       select: { id: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true },
     }),
   ]);

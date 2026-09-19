@@ -180,7 +180,7 @@ async function proxy(request: NextRequest) {
     }
   }
   if (role === "location_manager" && isAdminRoute) {
-    const allowed = pathname === "/admin" || pathname.startsWith("/admin/attendance") || pathname.startsWith("/admin/regularization") || pathname.startsWith("/admin/employees") || pathname.startsWith("/admin/employee-master") || pathname.startsWith("/admin/id-cards") || pathname.startsWith("/admin/departments") || pathname.startsWith("/admin/branches") || pathname.startsWith("/admin/devices") || pathname.startsWith("/admin/leaves") || pathname.startsWith("/admin/reports");
+    const allowed = pathname === "/admin" || ["attendance", "regularization", "employees", "employee-master", "id-cards", "departments", "branches", "devices", "leaves", "reports", "payroll", "loans", "expenses", "cashbook", "assets", "documents", "helpdesk", "onboarding", "performance", "policies", "shifts", "rosters", "holidays", "journeys", "exits"].some((segment) => pathname.startsWith(`/admin/${segment}`));
     if (!allowed) return NextResponse.redirect(new URL("/admin", request.url));
   }
   if (isAdminRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {

@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -23,9 +24,12 @@ export async function GET(req: NextRequest) {
   const payslipStatusFilter =
     statusParam === "paid" ? "paid" : statusParam === "draft" || statusParam === "unpaid" ? "draft" : undefined;
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
   const [employees, payslips] = await Promise.all([
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, ...employeeScope },
       select: {
         id: true,
         employeeNumber: true,
@@ -45,6 +49,7 @@ export async function GET(req: NextRequest) {
         tenantId: session.tenantId,
         month,
         ...(payslipStatusFilter ? { status: payslipStatusFilter } : {}),
+        ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
       },
       // paidVia / paidAt / paymentRef are scalar fields so they are auto-included here.
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },

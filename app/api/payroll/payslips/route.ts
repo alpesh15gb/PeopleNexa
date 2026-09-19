@@ -4,6 +4,7 @@ import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
 import { renderPayslipPdf } from "@/lib/payslip-pdf";
 import { requireActiveSession } from "@/lib/session";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,9 @@ const safeName = (value: string) => value.replace(/[^a-z0-9_-]/gi, "_");
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   const ids = [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
   const [tenant, slips] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...(ids.length ? { employeeId: { in: ids } } : {}) },
+      where: { tenantId: session.tenantId, month, ...(ids.length ? { employeeId: { in: ids } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     }),
