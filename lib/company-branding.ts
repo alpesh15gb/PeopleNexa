@@ -1,5 +1,6 @@
 type Profile = {
   legalName?: string | null;
+  displayName?: string | null;
   logoUrl?: string | null;
   address?: string | null;
   contactName?: string | null;
@@ -50,7 +51,7 @@ function pick<T>(locationValue: T | null, tenantValue: T | null, fallbackValue: 
 export function resolveCompanyBranding(tenant: Tenant, location?: Location): CompanyBranding {
   const locationProfile = location?.profile;
   const tenantProfile = tenant?.profile;
-  const name = pick(null, text(tenantProfile?.legalName, 160), text(tenant?.name, 160));
+  const name = pick(text(locationProfile?.displayName, 160), text(tenantProfile?.displayName, 160) ?? text(tenantProfile?.legalName, 160), text(tenant?.name, 160));
   const logo = pick(safeLogoUrl(locationProfile?.logoUrl), safeLogoUrl(tenantProfile?.logoUrl), null);
   const address = pick(text(locationProfile?.address, 400), text(tenantProfile?.address, 400), text(tenant?.address, 400));
   const contactName = pick(text(locationProfile?.contactName, 120), text(tenantProfile?.contactName, 120), null);

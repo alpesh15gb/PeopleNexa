@@ -278,6 +278,7 @@ model TenantProfile {
   tenantId        String   @unique
   tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   legalName       String?
+  displayName     String?
   logoUrl         String?
   address         String?
   contactName     String?
@@ -295,11 +296,17 @@ model LocationProfile {
   id              String   @id @default(cuid())
   locationId      String   @unique
   location        Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  legalName       String?
+  displayName     String?
   address         String?
   contactName     String?
   contactEmail    String?
   contactPhone    String?
   logoUrl         String?
+  website         String?
+  taxId           String?
+  registrationNo  String?
+  legalDetails    Json?
   branding        Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

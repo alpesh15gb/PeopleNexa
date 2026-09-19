@@ -2,7 +2,8 @@ import PDFDocument from "pdfkit";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { idCardDetails } from "@/lib/id-card-content";
-import { loadBrandLogo, type CompanyBranding } from "@/lib/company-branding";
+import { loadBrandLogo, safeLogoUrl, type CompanyBranding } from "@/lib/company-branding";
+import type { IdCardTemplate } from "@/lib/configuration";
 
 export type IdCardData = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
 
@@ -13,8 +14,8 @@ const height = width * (1004 / 591);
 const photoFrame = { x: width * 0.28, y: height * 0.23, width: width * 0.37, height: height * 0.295, radius: 4 };
 function photo(value: string | null) { if (!value?.startsWith("data:image/")) return null; const encoded = value.split(",", 2)[1]; return encoded ? Buffer.from(encoded, "base64") : null; }
 
-export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 50 }, branding?: CompanyBranding): Promise<Buffer> {
-  const [front, back] = await Promise.all([readFile(path.join(process.cwd(), "public", "id-cards", "1.png")), readFile(path.join(process.cwd(), "public", "id-cards", "2.png"))]);
+export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 50 }, branding?: CompanyBranding, template?: IdCardTemplate | null): Promise<Buffer> {
+  const [front, back] = await Promise.all([cardBackground(template?.frontBackgroundUrl, "1.png"), cardBackground(template?.backBackgroundUrl, "2.png")]);
   const doc = new PDFDocument({ size: [width, height], margin: 0 });
   doc.registerFont("CanvaSans", path.join(process.cwd(), "canva-sans-regular.otf"));
   const chunks: Buffer[] = [];
@@ -31,6 +32,11 @@ export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 5
   doc.addPage({ size: [width, height], margin: 0 }); doc.image(back, 0, 0, { width, height });
   if (branding?.hasConfiguredValues) await drawBranding(doc, branding);
   doc.end(); return done;
+}
+
+async function cardBackground(source: string | undefined, fallback: string) {
+  const image = await loadBrandLogo(safeLogoUrl(source));
+  return image ?? readFile(path.join(process.cwd(), "public", "id-cards", fallback));
 }
 
 async function drawBranding(doc: PDFKit.PDFDocument, branding: CompanyBranding) {

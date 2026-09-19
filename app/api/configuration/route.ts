@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
-import { CONFIGURATION_KINDS } from "@/lib/configuration";
+import { CONFIGURATION_KINDS, idCardTemplate } from "@/lib/configuration";
+import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
+import { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
 
 async function requireConfigurationAdmin() {
@@ -26,7 +28,7 @@ export async function PUT(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const action = String(body.action ?? "");
   if (action === "tenant-profile") {
-    const data = cleanProfile(body);
+    let data; try { data = cleanProfile(body); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid company profile." }, { status: 400 }); }
     const previous = await prisma.tenantProfile.findUnique({ where: { tenantId: session.tenantId } });
     const profile = await prisma.tenantProfile.upsert({ where: { tenantId: session.tenantId }, create: { tenantId: session.tenantId, ...data }, update: data });
     await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "configuration.profile.update", entity: "TenantProfile", entityId: profile.id, summary: "Updated tenant master profile", before: previous ?? undefined, after: profile });
@@ -36,7 +38,7 @@ export async function PUT(request: NextRequest) {
     const locationId = String(body.locationId ?? "");
     const location = await prisma.location.findFirst({ where: { id: locationId, tenantId: session.tenantId }, select: { id: true } });
     if (!location) return NextResponse.json({ error: "Location not found." }, { status: 404 });
-    const data = cleanLocationProfile(body);
+    let data; try { data = cleanLocationProfile(body); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid location profile." }, { status: 400 }); }
     const previous = await prisma.locationProfile.findUnique({ where: { locationId } });
     const profile = await prisma.locationProfile.upsert({ where: { locationId }, create: { locationId, ...data }, update: data });
     await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "configuration.location_profile.update", entity: "LocationProfile", entityId: profile.id, summary: "Updated location master profile", before: previous ?? undefined, after: profile });
@@ -57,6 +59,7 @@ export async function POST(request: NextRequest) {
   const effectiveTo = body.effectiveTo ? new Date(String(body.effectiveTo)) : null;
   if (Number.isNaN(effectiveFrom.getTime()) || (effectiveTo && (Number.isNaN(effectiveTo.getTime()) || effectiveTo < effectiveFrom))) return NextResponse.json({ error: "Provide a valid effective date range." }, { status: 400 });
   if (!body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) return NextResponse.json({ error: "Configuration payload must be a JSON object." }, { status: 400 });
+  if (kind === "id_card" && !await validIdCardTemplate(body.payload)) return NextResponse.json({ error: "An ID-card template requires reachable PNG/JPEG front and back backgrounds from HTTPS or data URLs." }, { status: 400 });
   const scopeKey = locationId ?? "tenant";
   const latest = await prisma.configurationRecord.aggregate({ where: { tenantId: session.tenantId, scopeKey, kind }, _max: { version: true } });
   const record = await prisma.configurationRecord.create({ data: { tenantId: session.tenantId, locationId, scopeKey, kind, version: (latest._max.version ?? 0) + 1, effectiveFrom, effectiveTo, payload: body.payload, createdBy: session.sub } });
@@ -72,6 +75,7 @@ export async function PATCH(request: NextRequest) {
   const active = Boolean(body.active);
   const current = await prisma.configurationRecord.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!current) return NextResponse.json({ error: "Configuration record not found." }, { status: 404 });
+  if (active && current.kind === "id_card" && !await validIdCardTemplate(current.payload)) return NextResponse.json({ error: "This ID-card template has invalid or unreachable background assets and cannot be activated." }, { status: 400 });
   const record = await prisma.$transaction(async (tx) => {
     if (active) await tx.configurationRecord.updateMany({ where: { tenantId: session.tenantId, scopeKey: current.scopeKey, kind: current.kind, active: true, NOT: { id } }, data: { active: false } });
     return tx.configurationRecord.update({ where: { id }, data: { active, activatedBy: active ? session.sub : null, activatedAt: active ? new Date() : null } });
@@ -81,5 +85,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 function text(value: unknown) { return String(value ?? "").trim() || null; }
-function cleanProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), logoUrl: text(body.logoUrl), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo) }; }
-function cleanLocationProfile(body: Record<string, unknown>) { return { address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), logoUrl: text(body.logoUrl) }; }
+async function validIdCardTemplate(payload: unknown) { const template = idCardTemplate(payload); return Boolean(template && await loadBrandLogo(safeLogoUrl(template.frontBackgroundUrl)) && await loadBrandLogo(safeLogoUrl(template.backBackgroundUrl))); }
+function logo(value: unknown) { const source = text(value); if (source && !safeLogoUrl(source)) throw new Error("Logo must be an HTTPS or PNG/JPEG data URL."); return source; }
+function cleanProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), logoUrl: logo(body.logoUrl), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
+function cleanLocationProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), logoUrl: logo(body.logoUrl), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
