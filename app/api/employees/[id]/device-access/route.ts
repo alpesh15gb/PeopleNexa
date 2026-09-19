@@ -25,11 +25,22 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     prisma.device.findMany({ where: { tenantId: session.tenantId, status: "active", config: { path: ["ebioserver"], equals: true }, ...locationScope }, select: { id: true, name: true, serialNumber: true }, orderBy: { name: "asc" } }),
     prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId }, select: { deviceId: true, allowed: true, commandStatus: true, lastCommandAt: true, lastResponse: true, lastError: true } }),
   ]);
+  let accessAvailable = false;
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
+    const profile = tenant ? getEbioserverConfig(tenant) : null;
+    accessAvailable = Boolean(profile?.enabled && profile.url && getEbioserverPassword(profile));
+  } catch {
+    // An unreadable encrypted profile is not a reason to block core HR flows.
+  }
   const state = new Map(access.map((row) => [row.deviceId, row]));
   return NextResponse.json({
     deviceCode: employee.deviceCode,
     enabled: employee.deviceAccessEnabled,
     status: employee.status,
+    accessAvailable,
+    provisioning: "access_only",
+    provisioningNote: "This eBioserver connection supports access commands for existing device users only; it cannot create or name a user on a machine.",
     mode: employee.status === "inactive" ? "blocked" : employee.deviceAccessEnabled ? "restricted" : "all",
     devices: devices.map((device) => {
       const policy = state.get(device.id) ?? { allowed: employee.status === "active" && !employee.deviceAccessEnabled, commandStatus: employee.status === "inactive" ? "pending" : employee.deviceAccessEnabled ? "pending" : "unrestricted", lastCommandAt: null, lastResponse: null, lastError: null };
