@@ -930,6 +930,10 @@ model Payslip {
   netSalary  Float
   status     String    @default("draft") // draft | paid
   note       String?
+  // Immutable policy/configuration inputs for drafts generated after policy activation.
+  payrollConfigurationId      String?
+  payrollConfigurationVersion Int?
+  payrollPolicyRules          Json?
   // Payout tracking (bulk/online/offline payment reconciliation).
   paidVia    String? // cash | upi | bank | other
   paidAt     DateTime?

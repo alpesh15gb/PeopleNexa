@@ -10,6 +10,7 @@ import {
   payrollEmployeeForMonth,
   loanDeductionForMonth,
 } from "@/lib/payroll";
+import { payrollConfigFromSnapshot } from "@/lib/payroll-policy";
 import { appendAudit } from "@/lib/audit";
 import { monthKeyIST } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
@@ -49,7 +50,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Employee salary not found." }, { status: 400 });
   }
 
-  const config = getPayrollConfig(tenant?.config ?? null);
+  // Never resolve a currently active policy here. Existing post-activation
+  // drafts use their saved inputs; older drafts retain legacy Tenant.config.
+  const config = payrollConfigFromSnapshot(existing.payrollPolicyRules) ?? getPayrollConfig(tenant?.config ?? null);
   const summary = await attendanceSummary(
     session.tenantId,
     { id: employee.id, shiftId: employee.shiftId, joiningDate: employee.joiningDate },

@@ -5,6 +5,7 @@ import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -23,11 +24,17 @@ export async function POST(req: NextRequest) {
 
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
-  const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
-    select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, phone: true },
-  });
+  const [tenant, policyRecords, employees] = await Promise.all([
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+    prisma.configurationRecord.findMany({
+      where: { tenantId: session.tenantId, kind: "payroll_policy", active: true },
+      select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
+    }),
+    prisma.employee.findMany({
+      where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
+      select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, phone: true },
+    }),
+  ]);
 
   const withSalary = employees
     .filter((e) => e.salary != null && e.salary > 0)
@@ -39,6 +46,7 @@ export async function POST(req: NextRequest) {
       workBasisRate: e.workBasisRate,
       shiftId: e.shiftId,
       joiningDate: e.joiningDate,
+      locationId: e.locationId,
     }));
   let created = 0;
   let totalLoanApplied = 0;
@@ -52,7 +60,8 @@ export async function POST(req: NextRequest) {
 
   for (const emp of withSalary) {
     try {
-      const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month);
+      const policySnapshot = resolvePayrollPolicy(policyRecords, tenant?.config ?? null, emp.locationId, month);
+      const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month, policySnapshot);
       if (res.created) created++;
       totalLoanApplied += res.loanApplied ?? 0;
         const source = employees.find((candidate) => candidate.id === emp.id);

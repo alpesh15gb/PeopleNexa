@@ -3,6 +3,7 @@ import type { Prisma } from "../generated/prisma/client";
 import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
+import type { PayrollPolicySnapshot } from "./payroll-policy";
 
 // ─── Payroll configuration (per tenant; stored under tenant.config.payroll) ─
 
@@ -641,7 +642,8 @@ export async function generatePayslipForEmployee(
     shiftId: string | null;
     joiningDate?: Date | null;
   },
-  month: string
+  month: string,
+  policySnapshot?: PayrollPolicySnapshot
 ): Promise<{ created: boolean; netSalary?: number; loanApplied?: number; skipped?: string }> {
   // Skip employees who join on/after the month's exclusive end.
   const { start: mStart, end: mEnd } = monthRange(month);
@@ -654,7 +656,7 @@ export async function generatePayslipForEmployee(
   // Daily/hourly paths stay attendance-driven via baseForPayMode.
   const payEmployee = payrollEmployeeForMonth(employee, month);
 
-  const config = getPayrollConfig(tenantConfig);
+  const config = policySnapshot?.appliedRules.payrollConfig ?? getPayrollConfig(tenantConfig);
   const summary = await attendanceSummary(tenantId, employee, month);
 
   const [loans, adjustments, taxDecl] = await Promise.all([
@@ -721,6 +723,9 @@ export async function generatePayslipForEmployee(
           overtimeHours: result.overtimeHours,
           workedHours: result.workedHours,
           netSalary: result.netSalary,
+          payrollConfigurationId: policySnapshot?.configurationId,
+          payrollConfigurationVersion: policySnapshot?.configurationVersion,
+          payrollPolicyRules: policySnapshot?.appliedRules as unknown as Prisma.InputJsonValue | undefined,
         },
       });
     } catch (err: unknown) {

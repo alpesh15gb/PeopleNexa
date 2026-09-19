@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test:payroll": "tsx scripts/test-payroll-lop.ts",
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
-    "test:leave-policy": "tsx scripts/test-leave-policy.ts"
+    "test:leave-policy": "tsx scripts/test-leave-policy.ts",
+    "test:payroll-policy": "tsx scripts/test-payroll-policy.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
