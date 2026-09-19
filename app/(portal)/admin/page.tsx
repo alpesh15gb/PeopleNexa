@@ -231,7 +231,8 @@ export default async function AdminDashboardPage({
   for (let i = monthDayCount; i >= 0; i--) {
     const day = addDays(today, -i);
     const t = tally.get(istDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
-    week.push({ day: istDateKey(day), label: istDateKey(day).slice(5), ...t });
+    const dayKey = istDateKey(day);
+    week.push({ day: dayKey, label: `${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}`, ...t });
   }
 
   return (
@@ -280,7 +281,7 @@ export default async function AdminDashboardPage({
              <CardDescription>Daily attendance trend through {formatDate(today)}</CardDescription>
            </div>
          </CardHeader>
-         <CardContent>
+         <CardContent className="pt-0">
            <WeekChart data={week} />
          </CardContent>
        </Card>
