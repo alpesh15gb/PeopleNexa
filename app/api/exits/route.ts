@@ -4,16 +4,19 @@ import { prisma } from "@/lib/prisma";
 import { formatDateIST, fromDateKey } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — exit requests (admins see all, employees see their own). */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const requests = await prisma.exitRequest.findMany({
     where: {
       tenantId: session.tenantId,
-      ...(session.role !== "admin" ? { employeeId: session.sub } : {}),
+      ...(locationId ? { employee: employeeLocationScope(locationId) } : session.role !== "admin" ? { employeeId: session.sub } : {}),
     },
     include: {
       employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, salary: true, salaryStructure: true } },

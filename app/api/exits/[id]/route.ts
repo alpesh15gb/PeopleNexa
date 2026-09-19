@@ -7,6 +7,7 @@ import { formatDateIST, startOfDay } from "@/lib/dates";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** PATCH — { action: "approve" | "reject" | "complete" | "cancel", note? } */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -16,16 +17,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const body = await req.json().catch(() => ({}));
   const action = String(body.action ?? "");
   const note = body.note ? String(body.note) : null;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const request = await prisma.exitRequest.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     include: {
       employee: { select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, phone: true } },
     },
   });
   if (!request) return NextResponse.json({ error: "Request not found." }, { status: 404 });
 
-  const isAdmin = session.role === "admin";
+  const isAdmin = session.role === "admin" || session.role === "location_manager";
   if (action === "approve" || action === "reject" || action === "complete") {
     if (!isAdmin) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   } else if (action === "cancel") {

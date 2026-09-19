@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { managerLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const asset = await prisma.asset.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) },
     include: {
       assignments: {
         include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
@@ -29,12 +32,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
-  const existing = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId } });
+  const existing = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) } });
   if (!existing) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   }
@@ -86,12 +91,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
-  const existing = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId } });
+  const existing = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) } });
   if (!existing) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   }

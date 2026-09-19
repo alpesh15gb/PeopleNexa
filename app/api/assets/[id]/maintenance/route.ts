@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
+import { managerLocationId } from "@/lib/location-scope";
 
 const maintenanceStatuses = ["scheduled", "in_progress", "completed"];
 const maintenanceTypes = ["service", "repair", "inspection", "other"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await params;
-  const asset = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId } });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const asset = await prisma.asset.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) } });
   if (!asset) return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   if (asset.status === "assigned") {
     return NextResponse.json({ error: "Return the asset before starting maintenance." }, { status: 400 });

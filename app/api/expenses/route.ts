@@ -3,6 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
 import { dispatchWebhook } from "@/lib/webhooks";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const CATEGORIES = ["travel", "food", "fuel", "mobile", "medical", "other"];
 
@@ -65,11 +66,13 @@ export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const where = session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub };
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const where = locationId ? { tenantId: session.tenantId, employee: employeeLocationScope(locationId) } : session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub };
   const [claims, pending, approved, settled] = await Promise.all([
     prisma.expenseClaim.findMany({
       where,
-      include: session.role === "admin"
+      include: (session.role === "admin" || session.role === "location_manager")
         ? { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } }
         : undefined,
       orderBy: { createdAt: "desc" },

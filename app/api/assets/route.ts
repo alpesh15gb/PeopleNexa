@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { formatDateIST } from "@/lib/dates";
+import { managerLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const scope = locationId ? { locationId } : {};
   const status = req.nextUrl.searchParams.get("status") || undefined;
   const category = req.nextUrl.searchParams.get("category") || undefined;
   const q = req.nextUrl.searchParams.get("q")?.trim() || undefined;
@@ -17,6 +21,7 @@ export async function GET(req: NextRequest) {
   const assets = await prisma.asset.findMany({
     where: {
       tenantId: session.tenantId,
+      ...scope,
       ...(status ? { status } : {}),
       ...(category ? { category } : {}),
       ...(q
@@ -45,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   const grouped = await prisma.asset.groupBy({
     by: ["status"],
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...scope },
     _count: { _all: true },
   });
   const counts = {
@@ -61,7 +66,7 @@ export async function GET(req: NextRequest) {
       (counts as Record<string, number>)[g.status] = g._count._all;
     }
   }
-  counts.total = (await prisma.asset.count({ where: { tenantId: session.tenantId } }));
+  counts.total = await prisma.asset.count({ where: { tenantId: session.tenantId, ...scope } });
   if (format === "csv") {
     const quote = (value: unknown) => { const text = value == null ? "" : String(value); return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
     const lines = ["Asset Name,Category,Asset Tag,Serial Number,Photo URL,Value,Purchase Date,Condition,Warranty Expiry,Maintenance Due,Status,Assignee,Employee Number,Assigned Date,Last Maintenance,Last Maintenance Cost,Notes", ...assets.map((asset) => [asset.name, asset.category, asset.tag, asset.serialNumber, asset.photoUrl, asset.value, formatDateIST(asset.purchaseDate), asset.condition, formatDateIST(asset.warrantyExpiry), formatDateIST(asset.maintenanceDue), asset.status, asset.assignments[0]?.employee ? `${asset.assignments[0].employee.firstName} ${asset.assignments[0].employee.lastName}` : "", asset.assignments[0]?.employee?.employeeNumber, formatDateIST(asset.assignments[0]?.assignedAt), formatDateIST(asset.maintenanceRecords[0]?.performedAt), asset.maintenanceRecords[0]?.cost, asset.notes].map(quote).join(","))];
@@ -91,11 +96,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   try {
+    const locationId = await managerLocationId(session);
+    if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     const body = await req.json();
     const name = String(body.name ?? "").trim();
     const category = String(body.category ?? "other").trim();
@@ -123,6 +130,7 @@ export async function POST(req: NextRequest) {
     const asset = await prisma.asset.create({
       data: {
         tenantId: session.tenantId,
+        locationId,
         name,
         category,
         tag,

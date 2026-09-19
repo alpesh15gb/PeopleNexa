@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { managerLocationId } from "@/lib/location-scope";
 
 const CATEGORIES = ["salary", "advance", "vendor", "expense", "other"] as const;
 const MODES = ["cash", "upi", "bank", "other"] as const;
@@ -8,12 +9,14 @@ const MODES = ["cash", "upi", "bank", "other"] as const;
 /** PATCH — admin edits note / category / paymentMode only (amount, type, date are immutable). */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const existing = await prisma.cashbookEntry.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) },
   });
   if (!existing) return NextResponse.json({ error: "Entry not found" }, { status: 404 });
 
@@ -59,12 +62,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 /** DELETE — admin removes an entry (tenant-scoped). */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const existing = await prisma.cashbookEntry.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) },
   });
   if (!existing) return NextResponse.json({ error: "Entry not found" }, { status: 404 });
 

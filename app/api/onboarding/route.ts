@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey } from "@/lib/dates";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — tasks for the tenant (admins see all grouped, employees see their own). */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const tasks = await prisma.onboardingTask.findMany({
     where: {
       tenantId: session.tenantId,
-      ...(session.role !== "admin" ? { employeeId: session.sub } : {}),
+      ...(locationId ? { employee: employeeLocationScope(locationId) } : session.role !== "admin" ? { employeeId: session.sub } : {}),
     },
     include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
     orderBy: [{ employeeId: "asc" }, { createdAt: "asc" }],
@@ -36,10 +39,12 @@ const DEFAULT_TASKS = [
 export async function POST(req: NextRequest) {
   try {
     const session = await requireActiveSession().catch(() => null);
-    if (!session || session.role !== "admin") {
+    if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));
+    const locationId = await managerLocationId(session);
+    if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     const employeeId = String(body.employeeId ?? "");
     const names: string[] = Array.isArray(body.names)
       ? body.names.map((s: unknown) => String(s ?? "").trim()).filter(Boolean)
@@ -53,7 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Each task must be 200 characters or less." }, { status: 400 });
 
     const employee = await prisma.employee.findFirst({
-      where: { id: employeeId, tenantId: session.tenantId },
+       where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
       select: { id: true, status: true },
     });
     if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });

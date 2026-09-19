@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { istDateKey, parseIST } from "@/lib/ist";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const DATE_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
@@ -18,10 +19,13 @@ function parseDateKeyAsIST(key: string): Date | null {
 /** GET — assignments for a week (or date range) + employees + shifts for the UI. */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const fromKey = req.nextUrl.searchParams.get("from") || istDateKey(new Date());
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
   const toKey = req.nextUrl.searchParams.get("to") || fromKey;
   const fromDay = parseDateKeyAsIST(fromKey);
   const toDay = parseDateKeyAsIST(toKey);
@@ -31,12 +35,12 @@ export async function GET(req: NextRequest) {
 
   const [assignments, employees, shifts] = await Promise.all([
     prisma.rosterAssignment.findMany({
-      where: { tenantId: session.tenantId, date: { gte: fromDay, lte: toDay } },
+      where: { tenantId: session.tenantId, date: { gte: fromDay, lte: toDay }, ...(locationId ? { employee: employeeScope } : {}) },
       include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } }, shift: { select: { id: true, name: true, startTime: true, endTime: true } } },
       orderBy: { date: "asc" },
     }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active" },
+      where: { tenantId: session.tenantId, status: "active", ...employeeScope },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true, department: { select: { id: true, name: true } }, shift: { select: { id: true, name: true } } },
       orderBy: { employeeNumber: "asc" },
     }),
@@ -68,10 +72,13 @@ export async function POST(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
   const shiftId = String(body.shiftId ?? "");
   const fromDay = parseDateKeyAsIST(String(body.dateFrom ?? ""));
   const toDay = parseDateKeyAsIST(String(body.dateTo ?? ""));
@@ -89,7 +96,7 @@ export async function POST(req: NextRequest) {
     employeeIds = body.employeeIds.map(String);
   } else if (body.departmentId) {
     const emps = await prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", departmentId: body.departmentId },
+       where: { tenantId: session.tenantId, status: "active", departmentId: body.departmentId, ...employeeScope },
       select: { id: true },
     });
     employeeIds = emps.map((e) => e.id);
@@ -99,7 +106,7 @@ export async function POST(req: NextRequest) {
   // Validate that every employee belongs to this tenant (avoid FK errors).
   // Login-only manager accounts work no shifts — filter them out.
   const validEmps = await prisma.employee.findMany({
-    where: { id: { in: employeeIds }, tenantId: session.tenantId, loginOnly: false },
+    where: { id: { in: employeeIds }, tenantId: session.tenantId, loginOnly: false, ...employeeScope },
     select: { id: true },
   });
   const validIds = new Set(validEmps.map((e) => e.id));
@@ -205,10 +212,12 @@ export async function POST(req: NextRequest) {
 /** DELETE — remove assignments for employees over a date range. */
 export async function DELETE(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const q = req.nextUrl.searchParams;
 
   const rawIds: unknown =
@@ -229,7 +238,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const validEmps = await prisma.employee.findMany({
-    where: { id: { in: employeeIds }, tenantId: session.tenantId },
+    where: { id: { in: employeeIds }, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
     select: { id: true },
   });
   const validIds = validEmps.map((e) => e.id);

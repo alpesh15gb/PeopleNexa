@@ -257,6 +257,8 @@ model Location {
 
   branches Branch[]
   managers Employee[] @relation("LocationManagers")
+  assets   Asset[]
+  cashbookEntries CashbookEntry[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -870,6 +872,8 @@ model Payslip {
 model CashbookEntry {
   id          String   @id @default(cuid())
   tenantId    String
+  locationId  String?
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   date        DateTime
   type        String // cash_in | cash_out
   category    String // salary | advance | vendor | expense | other
@@ -880,6 +884,7 @@ model CashbookEntry {
   createdAt   DateTime @default(now())
 
   @@index([tenantId, date])
+  @@index([tenantId, locationId, date])
 }
 
 // ─── Loans & advances ──────────────────────────────────────────────────────
@@ -934,6 +939,8 @@ model Asset {
   id           String    @id @default(cuid())
   tenantId     String
   tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationId   String?
+  location     Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   name         String
   category     String    @default("other") // laptop | phone | id_card | vehicle | device | furniture | other
   tag          String? // asset tag, e.g. AST-001
@@ -954,6 +961,7 @@ model Asset {
 
   @@unique([tenantId, tag])
   @@index([tenantId, status])
+  @@index([tenantId, locationId])
   @@index([tenantId, maintenanceDue])
 }
 

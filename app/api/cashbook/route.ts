@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey } from "@/lib/dates";
+import { managerLocationId } from "@/lib/location-scope";
 
 const TYPES = ["cash_in", "cash_out"] as const;
 const CATEGORIES = ["salary", "advance", "vendor", "expense", "other"] as const;
@@ -20,10 +21,12 @@ function monthRange(month: string): { gte: Date; lt: Date } {
 /** GET — admin lists entries for a month (?month=YYYY-MM), tenant-scoped, newest first. */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month");
   let dateFilter: { gte: Date; lt: Date } | undefined;
   if (month !== null && month !== "") {
@@ -37,6 +40,7 @@ export async function GET(req: NextRequest) {
   const entries = await prisma.cashbookEntry.findMany({
     where: {
       tenantId: session.tenantId,
+      ...(locationId ? { locationId } : {}),
       ...(dateFilter ? { date: dateFilter } : {}),
     },
     orderBy: { date: "desc" },
@@ -55,10 +59,12 @@ export async function GET(req: NextRequest) {
 /** POST — admin records a cash-in / cash-out entry. */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
 
   const date = new Date(body.date);
@@ -99,6 +105,7 @@ export async function POST(req: NextRequest) {
   const entry = await prisma.cashbookEntry.create({
     data: {
       tenantId: session.tenantId,
+      locationId,
       date,
       type,
       category,

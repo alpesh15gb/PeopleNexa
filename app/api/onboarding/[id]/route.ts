@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** PATCH — mark a task done (employee or admin) or reopen it. DELETE — admin only. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -8,13 +9,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
   const task = await prisma.onboardingTask.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     select: { id: true, employeeId: true },
   });
   if (!task) return NextResponse.json({ error: "Task not found." }, { status: 404 });
-  if (session.role !== "admin" && task.employeeId !== session.sub) {
+  if (session.role !== "admin" && session.role !== "location_manager" && task.employeeId !== session.sub) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -31,12 +34,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") {
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const task = await prisma.onboardingTask.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
     select: { id: true },
   });
   if (!task) return NextResponse.json({ error: "Task not found." }, { status: 404 });
