@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const ids = [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
   if (ids.length > 500) return NextResponse.json({ error: "Select at most 500 employees at once." }, { status: 400 });
   const [tenant, slips] = await Promise.all([
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true } }),
     prisma.payslip.findMany({
       where: { tenantId: session.tenantId, month, ...(ids.length ? { employeeId: { in: ids } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true } } },
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
   const pdfs = await Promise.all(slips.map(async (slip) => ({
     name: `${safeName(slip.employee.employeeNumber)}-${safeName(`${slip.employee.firstName}-${slip.employee.lastName}`)}-${month}.pdf`,
-    data: await renderPayslipPdf({ companyName: tenant?.name ?? "Company", month, employee: slip.employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, adjustmentEarnings: 0 } }),
+    data: await renderPayslipPdf({ companyName: tenant?.name ?? "Company", companyAddress: tenant?.address, companyContact: [tenant?.phone, tenant?.email].filter(Boolean).join(" | ") || null, month, employee: slip.employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, adjustmentEarnings: 0 } }),
   })));
   if (pdfs.length === 1) return new NextResponse(new Uint8Array(pdfs[0].data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdfs[0].name}"` } });
   const zip = new JSZip(); pdfs.forEach((pdf) => zip.file(pdf.name, pdf.data));
