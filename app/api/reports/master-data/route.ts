@@ -18,8 +18,9 @@ function safeCell(value: Cell): string | number | boolean {
 function address(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const record = value as Record<string, unknown>;
-  return ["flatHouseWingNumber", "streetLocalityArea", "landmark", "state", "country"]
-    .map((key) => record[key] == null ? "" : String(record[key]).replace(/^Select\.\.\.\s*/i, "").trim())
+  const addressLine = record.addressLine ?? record.line1 ?? [record.flatHouseWingNumber, record.streetLocalityArea].filter((part) => part != null && String(part).trim()).join(", ");
+  return [addressLine, record.landmark, record.city ?? record.district ?? record.town, record.state, record.postalCode ?? record.pinCode ?? record.pincode ?? record.zipCode, record.country]
+    .map((part) => part == null ? "" : String(part).replace(/^Select\.\.\.\s*/i, "").trim())
     .filter(Boolean)
     .join(", ");
 }

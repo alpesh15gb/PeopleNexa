@@ -133,7 +133,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     for (const field of ["dateOfBirthCertificate", "actualDateOfBirth", "marriageDate"]) { const value = date(raw[field], field); if (fail(value)) return value; values[field] = value as never; }
     for (const field of ["currentAddress", "permanentAddress"]) {
       const value = raw[field];
-      if (value != null && (typeof value !== "object" || Array.isArray(value) || JSON.stringify(value).length > 10_000)) return { error: `${field} must be an address object.` };
+      if (value != null && (typeof value !== "object" || Array.isArray(value) || JSON.stringify(value).length > 10_000)) return { error: `${field === "currentAddress" ? "Current" : "Permanent"} address must contain address fields.` };
       values[field] = (value ?? null) as never;
     }
     return values;

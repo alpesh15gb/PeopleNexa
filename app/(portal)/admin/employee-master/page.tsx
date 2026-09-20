@@ -22,8 +22,9 @@ function displayValue(value: unknown): string {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return String(parsed);
   const address = parsed as Record<string, unknown>;
-  const parts = ["flatHouseWingNumber", "streetLocalityArea", "landmark", "state", "country"]
-    .map((key) => address[key] == null ? "" : String(address[key]).replace(/^Select\.\.\.\s*/i, "").trim())
+  const addressLine = address.addressLine ?? address.line1 ?? [address.flatHouseWingNumber, address.streetLocalityArea].filter((part) => part != null && String(part).trim()).join(", ");
+  const parts = [addressLine, address.landmark, address.city ?? address.district ?? address.town, address.state, address.postalCode ?? address.pinCode ?? address.pincode ?? address.zipCode, address.country]
+    .map((part) => part == null ? "" : String(part).replace(/^Select\.\.\.\s*/i, "").trim())
     .filter(Boolean);
   return parts.length ? parts.join(", ") : "—";
 }
