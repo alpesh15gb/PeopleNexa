@@ -1,3 +1,5 @@
+import { parseMediaUrl } from "@/lib/media-url";
+
 export const CONFIGURATION_KINDS = ["dashboard", "id_card", "leave_policy", "payroll_policy"] as const;
 export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
 
@@ -118,6 +120,7 @@ function parsePayrollComponents(input: unknown, decimal: (input: unknown, min: n
 
 function isSafeImageUrl(value: string) {
   const source = value.trim();
+  if (parseMediaUrl(source)) return true;
   if (/^data:image\/(png|jpe?g);base64,[a-z0-9+/=\s]+$/i.test(source)) return source.slice(source.indexOf(",") + 1).replace(/\s/g, "").length <= 6_666_668;
   if (source.length > 2_048) return false;
   try { const url = new URL(source); return url.protocol === "https:" && !url.username && !url.password && !url.port && !isPrivateHost(url.hostname); } catch { return false; }
