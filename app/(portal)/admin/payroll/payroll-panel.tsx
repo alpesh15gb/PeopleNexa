@@ -61,6 +61,7 @@ interface Payslip {
   overtimeHours: number;
   workedHours: number;
   adjustments: { label: string; amount: number }[] | null;
+  salaryBreakdown?: { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] | null;
 }
 
 interface Row {
@@ -637,13 +638,15 @@ function PayslipModal({
   const emp = data?.employee;
   if (!p || !emp) return null;
 
+  const configuredEarnings = (p.salaryBreakdown ?? []).filter((component) => component.kind === "earning" && component.visibleOnPayslip).map((component) => ({ label: component.label, value: component.amount, strong: false }));
+  const configuredDeductions = (p.salaryBreakdown ?? []).filter((component) => component.kind === "deduction" && component.visibleOnPayslip).map((component) => ({ label: component.label, value: component.amount }));
   const earnings = [
-    { label: "Basic salary", value: p.basicSalary || p.baseSalary * 0.5, strong: false },
-    { label: "Allowances", value: p.allowances, strong: false },
+    ...(configuredEarnings.length ? configuredEarnings : [{ label: "Basic salary", value: p.basicSalary || p.baseSalary * 0.5, strong: false }, { label: "Allowances", value: p.allowances, strong: false }]),
     ...(p.overtimePay > 0 ? [{ label: `Overtime (${p.overtimeHours} h)`, value: p.overtimePay, strong: false }] : []),
     ...(p.adjustments?.filter((a) => a.amount > 0).map((a) => ({ label: a.label, value: a.amount, strong: false })) ?? []),
   ];
   const deductions = [
+    ...configuredDeductions,
     { label: "EPF (employee)", value: p.pfEmployee },
     { label: "ESIC (employee)", value: p.esicEmployee },
     { label: "Professional tax", value: p.professionalTax },

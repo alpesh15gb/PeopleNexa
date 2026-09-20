@@ -46,7 +46,7 @@ export default async function AdminPayrollPage({
   const slipByEmp = new Map(
     payslips.map((p) => [
       p.employee.id,
-      { ...p, adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null },
+       { ...p, adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null, salaryBreakdown: Array.isArray(p.salaryBreakdown) ? p.salaryBreakdown as unknown as { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null },
     ])
   );
   const rows = employees.map((emp) => ({

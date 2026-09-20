@@ -981,6 +981,7 @@ model Payslip {
   payrollConfigurationId      String?
   payrollConfigurationVersion Int?
   payrollPolicyRules          Json?
+  salaryBreakdown             Json?
   // Payout tracking (bulk/online/offline payment reconciliation).
   paidVia    String? // cash | upi | bank | other
   paidAt     DateTime?

@@ -4,6 +4,7 @@ import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
 import type { PayrollPolicySnapshot } from "./payroll-policy";
+import type { PayrollComponentRule } from "./configuration";
 
 // ─── Payroll configuration (per tenant; stored under tenant.config.payroll) ─
 
@@ -18,6 +19,7 @@ export interface PayrollConfig {
   pt: { enabled: boolean; state: string };
   lwf: { enabled: boolean }; // Labour Welfare Fund — uses the same statutory state as PT
   tds: { enabled: boolean; regime: "new" | "old" };
+  components?: PayrollComponentRule[];
 }
 
 export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
@@ -69,6 +71,7 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     pt: { ...DEFAULT_PAYROLL_CONFIG.pt, ...p.pt },
     lwf: { ...DEFAULT_PAYROLL_CONFIG.lwf, ...p.lwf },
     tds: { ...DEFAULT_PAYROLL_CONFIG.tds, ...p.tds },
+    components: Array.isArray(p.components) ? p.components as PayrollComponentRule[] : undefined,
   };
 }
 
@@ -463,6 +466,7 @@ export interface PayrollResult {
   onLeaveDays: number;
   divisorUsed: number;
   adjustments: { label: string; amount: number }[];
+  salaryBreakdown: { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[];
 }
 
 /** Compute the base amount for the employee's pay mode. */
@@ -524,6 +528,11 @@ export function computePayroll(
   const base = baseForPayMode(mode, rate, summary);
 
   let { basic, allowances } = splitSalary(base, employee.salaryStructure, config);
+  const configured = calculatePolicyComponents(config.components, base);
+  if (configured) {
+    basic = configured.basic;
+    allowances = configured.allowances;
+  }
   // Non-monthly workers without an explicit structure: the whole base is basic
   // (no artificial HRA/special allowance split on a daily/hourly wage).
   if (!employee.salaryStructure && mode !== "monthly") {
@@ -558,7 +567,7 @@ export function computePayroll(
   }
 
   const adj = splitAdjustments(adjustments);
-  const gross = round2(base + overtimePay + adj.earnings);
+  const gross = round2((configured?.grossEarnings ?? base) + overtimePay + adj.earnings);
 
   // Gratuity: employer contribution, 4.81% of basic (Payment of Gratuity Act).
   const gratuity = round2(basic * 0.0481);
@@ -585,12 +594,13 @@ export function computePayroll(
   const tds = config.tds.enabled ? calcTDS(earnedGross, config.tds.regime, investments) : 0;
 
   // Cap loan deduction so net can never go negative because of loans alone.
-  const statutoryAndOther = pfEmployee + esicEmployee + pt + lwf + tds + lateFines + absentDeduction + adj.deductions;
+  const configuredDeductions = configured?.deductions ?? 0;
+  const statutoryAndOther = pfEmployee + esicEmployee + pt + lwf + tds + lateFines + absentDeduction + adj.deductions + configuredDeductions;
   const maxLoan = Math.max(0, gross - statutoryAndOther);
   const cappedLoan = round2(Math.min(Math.max(loanDeduction, 0), maxLoan));
 
   const deductions = round2(
-    pfEmployee + esicEmployee + pt + lwf + tds + lateFines + cappedLoan + absentDeduction + adj.deductions
+    pfEmployee + esicEmployee + pt + lwf + tds + lateFines + cappedLoan + absentDeduction + adj.deductions + configuredDeductions
   );
   const netSalary = Math.max(0, round2(gross - deductions));
 
@@ -625,7 +635,30 @@ export function computePayroll(
     onLeaveDays: summary.onLeaveDays,
     divisorUsed,
     adjustments: adj.list,
+    salaryBreakdown: configured?.rows ?? [],
   };
+}
+
+function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, ctc: number) {
+  if (!rules?.length) return null;
+  const values = new Map<string, number>();
+  const rows: PayrollResult["salaryBreakdown"] = [];
+  for (const rule of rules) {
+    const eligible = (rule.minCtc === null || ctc >= rule.minCtc) && (rule.maxCtc === null || ctc <= rule.maxCtc);
+    let amount = 0;
+    if (eligible) {
+      if (rule.formula === "fixed") amount = rule.amount;
+      else if (rule.formula === "percent_of_ctc") amount = ctc * rule.amount / 100;
+      else if (rule.formula === "percent_of_component") amount = (values.get(rule.basisComponentCode!) ?? 0) * rule.amount / 100;
+      else amount = rule.bands?.find((band) => ctc >= band.minCtc && (band.maxCtc === null || ctc <= band.maxCtc))?.amount ?? 0;
+    }
+    amount = round2(amount); values.set(rule.code, amount);
+    rows.push({ label: rule.label, amount, kind: rule.kind, includeInGross: rule.includeInGross, visibleOnPayslip: rule.visibleOnPayslip });
+  }
+  const wageBase = rules.find((rule) => rule.pfWageBase);
+  const grossEarnings = round2(rows.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.amount, 0));
+  const allowances = round2(rows.filter((row, index) => row.kind === "earning" && rules[index].code !== wageBase?.code).reduce((sum, row) => sum + row.amount, 0));
+  return { basic: wageBase ? values.get(wageBase.code) ?? 0 : 0, allowances, grossEarnings, deductions: round2(rows.filter((row) => row.kind === "deduction").reduce((sum, row) => sum + row.amount, 0)), rows };
 }
 
 // ─── One-click generator used by the API route and the seed ─────────────────
@@ -716,6 +749,7 @@ export async function generatePayslipForEmployee(
           onLeaveDays: result.onLeaveDays,
           deductions: result.deductions,
           adjustments: result.adjustments.length > 0 ? (result.adjustments as unknown as Prisma.InputJsonValue) : undefined,
+          salaryBreakdown: result.salaryBreakdown.length > 0 ? (result.salaryBreakdown as unknown as Prisma.InputJsonValue) : undefined,
           presentDays: result.presentDays,
           lateDays: result.lateDays,
           halfDays: result.halfDays,

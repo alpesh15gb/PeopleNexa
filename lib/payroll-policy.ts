@@ -43,6 +43,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     pt: { enabled: draft.statutory.professionalTaxEnabled, state: draft.statutory.professionalTaxState },
     lwf: { enabled: draft.statutory.labourWelfareFundEnabled },
     tds: { enabled: draft.statutory.tdsEnabled, regime: draft.statutory.tdsRegime },
+    components: draft.components,
   };
   return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: "payroll_policy", payrollConfig } };
 }

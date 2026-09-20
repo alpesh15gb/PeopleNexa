@@ -4,6 +4,7 @@ import path from "node:path";
 import { loadBrandLogo } from "@/lib/company-branding";
 
 type Adjustment = { label: string; amount: number };
+type SalaryComponent = { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean };
 type PayRow = { label: string; actual?: number; amount: number };
 
 export type PayslipDocumentData = {
@@ -13,7 +14,7 @@ export type PayslipDocumentData = {
   companyLogoUrl?: string | null;
   month: string;
   employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null };
-  payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null };
+  payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null; salaryBreakdown?: SalaryComponent[] | null };
 };
 
 const PAGE_WIDTH = 595.28;
@@ -89,13 +90,15 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   dayMetric(LEFT + 402, "LOPS", lops);
   y += 43;
 
+  const configuredEarnings = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "earning" && component.visibleOnPayslip).map((component) => ({ label: component.label, amount: component.amount }));
+  const configuredDeductions = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "deduction" && component.visibleOnPayslip).map((component) => ({ label: component.label, amount: component.amount }));
   const earnings: PayRow[] = [
-    { label: "Basic Salary", actual: data.payslip.basicSalary, amount: data.payslip.basicSalary },
-    { label: "Allowances", actual: data.payslip.allowances, amount: data.payslip.allowances },
+    ...(configuredEarnings.length ? configuredEarnings : [{ label: "Basic Salary", actual: data.payslip.basicSalary, amount: data.payslip.basicSalary }, { label: "Allowances", actual: data.payslip.allowances, amount: data.payslip.allowances }]),
     { label: "Overtime Pay", amount: data.payslip.overtimePay },
     ...(data.payslip.adjustments ?? []).filter((adjustment) => adjustment.amount > 0).map((adjustment) => ({ label: adjustment.label, amount: adjustment.amount })),
   ].filter((row) => row.amount > 0);
   const deductions: PayRow[] = [
+    ...configuredDeductions,
     { label: "EPF", amount: data.payslip.pfEmployee },
     { label: "ESIC", amount: data.payslip.esicEmployee },
     { label: "Professional Tax", amount: data.payslip.professionalTax },
