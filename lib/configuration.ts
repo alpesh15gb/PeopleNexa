@@ -3,7 +3,7 @@ import { parseMediaUrl } from "@/lib/media-url";
 export const CONFIGURATION_KINDS = ["dashboard", "id_card", "leave_policy", "payroll_policy"] as const;
 export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
 
-export type IdCardTemplate = { frontBackgroundUrl: string; backBackgroundUrl: string };
+export type IdCardTemplate = { frontBackgroundUrl: string; backBackgroundUrl: string; frontContentPanel: "clean" | "preserve" };
 
 export type WorkedDayAccrual = { source: "attendance_status"; tiers: Array<{ minDays: number; maxDays: number; daysEarned: number }>; joiningMonthClaimDeferral: "none" | "next_month" };
 export type LeavePolicyDraft = { leaveTypes: Array<{ name: string; code: string; annualEntitlement: number; paid: boolean; allowsHalfDay: boolean; requiresApproval: boolean; carryForward: boolean; carryForwardLimit: number | null; workedDayAccrual?: WorkedDayAccrual }> };
@@ -46,9 +46,10 @@ export function idCardTemplate(payload: unknown): IdCardTemplate | null {
   const record = payload as Record<string, unknown>;
   const frontBackgroundUrl = typeof record.frontBackgroundUrl === "string" ? record.frontBackgroundUrl : "";
   const backBackgroundUrl = typeof record.backBackgroundUrl === "string" ? record.backBackgroundUrl : "";
+  const frontContentPanel = record.frontContentPanel === undefined ? "clean" : record.frontContentPanel;
   // Lazy import avoidance keeps this shared resolver usable in client code.
-  if (!isSafeImageUrl(frontBackgroundUrl) || !isSafeImageUrl(backBackgroundUrl)) return null;
-  return { frontBackgroundUrl, backBackgroundUrl };
+  if (!isSafeImageUrl(frontBackgroundUrl) || !isSafeImageUrl(backBackgroundUrl) || !["clean", "preserve"].includes(String(frontContentPanel))) return null;
+  return { frontBackgroundUrl, backBackgroundUrl, frontContentPanel: frontContentPanel as IdCardTemplate["frontContentPanel"] };
 }
 
 export function leavePolicyDraft(payload: unknown): LeavePolicyDraft | null {

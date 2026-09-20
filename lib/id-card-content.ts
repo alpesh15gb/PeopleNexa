@@ -14,8 +14,8 @@ export const ID_CARD_LAYOUT = {
   photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295 },
   fields: { x: 0.06, y: 0.535, width: 0.88, height: 0.276, rowHeight: 0.041, gap: 0.006 },
   footer: { x: 0, y: 0.85, width: 1, height: 0.15 },
-  // The supplied legacy front artwork has employee rows baked into this area.
-  legacyEmployeeRegion: { x: 0.03, y: 0.525, width: 0.94, height: 0.325 },
+  // This bounded area is owned by dynamic photo and employee content, not template artwork.
+  frontContentPanel: { x: 0, y: 0.22, width: 1, height: 0.63 },
 } as const;
 
 const ellipsis = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
