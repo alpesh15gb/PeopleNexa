@@ -7,6 +7,8 @@ import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
 import { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
 import { carryForwardCandidate } from "@/lib/leave-policy-period";
+import { monthlyWorkedDayAccrual, workedDaysForMonth } from "@/lib/leave-accrual";
+import { monthKeyIST } from "@/lib/dates";
 
 async function requireConfigurationAdmin() {
   const session = await requireActiveSession().catch(() => null);
@@ -82,10 +84,12 @@ async function openLeavePeriod(session: { tenantId: string; sub: string; role: s
   const draft = leavePolicyDraft(configuration?.payload);
   if (!configuration || !draft) return NextResponse.json({ error: "An active valid leave policy is required." }, { status: 400 });
   const scopeKey = configuration.locationId ?? "tenant";
-  const employees = await prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(configuration.locationId ? { branch: { locationId: configuration.locationId } } : {}) }, select: { id: true } });
+  const employees = await prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(configuration.locationId ? { branch: { locationId: configuration.locationId } } : {}) }, select: { id: true, joiningDate: true } });
   const leaveTypes = await prisma.leaveType.findMany({ where: { tenantId: session.tenantId }, select: { id: true, code: true, maxDays: true } });
   const typeByCode = new Map(leaveTypes.map((type) => [type.code, type]));
   const requests = await prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employees.map((employee) => employee.id) }, status: { in: ["approved", "pending"] } }, select: { employeeId: true, leaveTypeId: true, days: true } });
+  const accrualMonth = monthKeyIST(configuration.effectiveFrom);
+  const attendance = await prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employees.map((employee) => employee.id) } }, select: { employeeId: true, date: true, status: true } });
   const used = new Map<string, number>();
   for (const request of requests) used.set(`${request.employeeId}:${request.leaveTypeId}`, (used.get(`${request.employeeId}:${request.leaveTypeId}`) ?? 0) + request.days);
   try {
@@ -98,7 +102,8 @@ async function openLeavePeriod(session: { tenantId: string; sub: string; role: s
         if (!leaveType) return [];
         const legacyRemaining = Math.max(leaveType.maxDays - (used.get(`${employee.id}:${leaveType.id}`) ?? 0), 0);
         const carryForward = carryForwardCandidate(legacyRemaining, rules.carryForward, rules.carryForwardLimit);
-        return [{ tenantId: session.tenantId, policyPeriodId: created.id, employeeId: employee.id, leaveTypeId: leaveType.id, entitlement: rules.annualEntitlement, carryForward, policySnapshot: { configurationId: configuration.id, version: configuration.version, scope: configuration.locationId ? "location" : "tenant", rules }, allocatedBy: session.sub }];
+        const accrual = rules.workedDayAccrual ? monthlyWorkedDayAccrual(rules.workedDayAccrual, workedDaysForMonth(attendance.filter((row) => row.employeeId === employee.id), accrualMonth), employee.joiningDate, accrualMonth) : null;
+        return [{ tenantId: session.tenantId, policyPeriodId: created.id, employeeId: employee.id, leaveTypeId: leaveType.id, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, carryForward, policySnapshot: { configurationId: configuration.id, version: configuration.version, scope: configuration.locationId ? "location" : "tenant", rules, ...(accrual ? { accrual: { ...accrual, availableOn: accrual.availableOn.toISOString(), month: accrualMonth } } : {}) }, allocatedBy: session.sub }];
       }));
       if (data.length) await tx.leavePolicyBalance.createMany({ data, skipDuplicates: true });
       return { period: created, created: true };
@@ -139,7 +144,7 @@ function cleanLocationProfile(body: Record<string, unknown>) { return { legalNam
 
 async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payload }: { tenantId: string; kind: "leave_policy" | "payroll_policy"; locationId: string | null; effectiveFrom: Date; payload: unknown }) {
   const [affectedEmployees, policyRecords, tenant, leaveTypes, requests] = await Promise.all([
-    prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, firstName: true, lastName: true } }),
+    prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, firstName: true, lastName: true, joiningDate: true } }),
     prisma.configurationRecord.findMany({ where: { tenantId, kind, active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }),
     kind === "payroll_policy" ? prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } }) : Promise.resolve(null),
     kind === "leave_policy" ? prisma.leaveType.findMany({ where: { tenantId }, select: { id: true, name: true, code: true, maxDays: true, isCarryForward: true, requiresApproval: true }, orderBy: { code: "asc" } }) : Promise.resolve([]),
@@ -156,12 +161,15 @@ async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payloa
       return { code: type.code, name: type.name, current: current ? { name: current.name, annualEntitlement: current.maxDays, carryForward: current.isCarryForward, requiresApproval: current.requiresApproval } : null, proposed: { annualEntitlement: type.annualEntitlement, paid: type.paid, allowsHalfDay: type.allowsHalfDay, carryForward: type.carryForward, carryForwardLimit: type.carryForwardLimit, requiresApproval: type.requiresApproval } };
     });
     const typeByCode = new Map(leaveTypes.map((type) => [type.code, type]));
+    const attendance = await prisma.attendance.findMany({ where: { tenantId, employeeId: { in: affectedEmployees.map((employee) => employee.id) } }, select: { employeeId: true, date: true, status: true } });
+    const accrualMonth = monthKeyIST(effectiveFrom);
     const eligibleEmployees = affectedEmployees.flatMap((employee) => proposed.leaveTypes.flatMap((rules) => {
       const leaveType = typeByCode.get(rules.code);
       if (!leaveType) return [];
       const used = requests.filter((request) => request.employeeId === employee.id && request.leaveTypeId === leaveType.id).reduce((sum, request) => sum + request.days, 0);
       const legacyBalance = Math.max(leaveType.maxDays - used, 0);
-      return [{ employeeId: employee.id, employee: `${employee.firstName} ${employee.lastName}`, leaveType: rules.code, entitlement: rules.annualEntitlement, legacyBalance, carryForwardCandidate: carryForwardCandidate(legacyBalance, rules.carryForward, rules.carryForwardLimit) }];
+      const accrual = rules.workedDayAccrual ? monthlyWorkedDayAccrual(rules.workedDayAccrual, workedDaysForMonth(attendance.filter((row) => row.employeeId === employee.id), accrualMonth), employee.joiningDate, accrualMonth) : null;
+      return [{ employeeId: employee.id, employee: `${employee.firstName} ${employee.lastName}`, leaveType: rules.code, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, legacyBalance, carryForwardCandidate: carryForwardCandidate(legacyBalance, rules.carryForward, rules.carryForwardLimit), workedDays: accrual?.workedDays ?? null, accrued: accrual?.accrued ?? null, availableOn: accrual?.availableOn.toISOString() ?? null, deferral: accrual?.deferred ?? false }];
     }));
     return NextResponse.json({ kind, affectedEmployees: affectedEmployees.length, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (LeaveType)", effectiveFrom, leaveTypes: leaveDiff, eligibleEmployees });
   }

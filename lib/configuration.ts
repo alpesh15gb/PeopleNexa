@@ -3,7 +3,8 @@ export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
 
 export type IdCardTemplate = { frontBackgroundUrl: string; backBackgroundUrl: string };
 
-export type LeavePolicyDraft = { leaveTypes: Array<{ name: string; code: string; annualEntitlement: number; paid: boolean; allowsHalfDay: boolean; requiresApproval: boolean; carryForward: boolean; carryForwardLimit: number | null }> };
+export type WorkedDayAccrual = { source: "attendance_status"; tiers: Array<{ minDays: number; maxDays: number; daysEarned: number }>; joiningMonthClaimDeferral: "none" | "next_month" };
+export type LeavePolicyDraft = { leaveTypes: Array<{ name: string; code: string; annualEntitlement: number; paid: boolean; allowsHalfDay: boolean; requiresApproval: boolean; carryForward: boolean; carryForwardLimit: number | null; workedDayAccrual?: WorkedDayAccrual }> };
 export type PayrollComponentRule = { code: string; label: string; kind: "earning" | "deduction"; formula: "fixed" | "percent_of_ctc" | "percent_of_component" | "salary_band_fixed"; amount: number; basisComponentCode?: string; bands?: Array<{ minCtc: number; maxCtc: number | null; amount: number }>; minCtc: number | null; maxCtc: number | null; includeInGross: boolean; visibleOnPayslip: boolean; pfWageBase: boolean };
 export type PayrollPolicyDraft = { monthlyDivisor: number; deductLossOfPay: boolean; overtimeMultiplier: number; overtimeBasis: "basic_hourly" | "fixed_hourly"; statutory: { pfEnabled: boolean; pfWageCeiling: number; esicEnabled: boolean; esicGrossCeiling: number; professionalTaxEnabled: boolean; professionalTaxState: string; labourWelfareFundEnabled: boolean; tdsEnabled: boolean; tdsRegime: "new" | "old" }; components?: PayrollComponentRule[] };
 
@@ -61,11 +62,28 @@ export function leavePolicyDraft(payload: unknown): LeavePolicyDraft | null {
     const code = typeof value.code === "string" ? value.code.trim().toUpperCase() : "";
     const annualEntitlement = value.annualEntitlement;
     const carryForwardLimit = value.carryForwardLimit;
-    if (!name || name.length > 80 || !/^[A-Z0-9_-]{1,20}$/.test(code) || codes.has(code) || typeof annualEntitlement !== "number" || !Number.isInteger(annualEntitlement) || annualEntitlement < 0 || annualEntitlement > 366 || typeof value.paid !== "boolean" || typeof value.allowsHalfDay !== "boolean" || typeof value.requiresApproval !== "boolean" || typeof value.carryForward !== "boolean" || (value.carryForward ? (typeof carryForwardLimit !== "number" || !Number.isInteger(carryForwardLimit) || carryForwardLimit < 0 || carryForwardLimit > 366) : carryForwardLimit !== null)) return null;
+    const workedDayAccrual = parseWorkedDayAccrual(value.workedDayAccrual);
+    if (!name || name.length > 80 || !/^[A-Z0-9_-]{1,20}$/.test(code) || codes.has(code) || typeof annualEntitlement !== "number" || !Number.isInteger(annualEntitlement) || annualEntitlement < 0 || annualEntitlement > 366 || typeof value.paid !== "boolean" || typeof value.allowsHalfDay !== "boolean" || typeof value.requiresApproval !== "boolean" || typeof value.carryForward !== "boolean" || (value.carryForward ? (typeof carryForwardLimit !== "number" || !Number.isInteger(carryForwardLimit) || carryForwardLimit < 0 || carryForwardLimit > 366) : carryForwardLimit !== null) || (value.workedDayAccrual !== undefined && !workedDayAccrual)) return null;
     codes.add(code);
-    parsed.push({ name, code, annualEntitlement, paid: value.paid, allowsHalfDay: value.allowsHalfDay, requiresApproval: value.requiresApproval, carryForward: value.carryForward, carryForwardLimit: carryForwardLimit as number | null });
+    parsed.push({ name, code, annualEntitlement, paid: value.paid, allowsHalfDay: value.allowsHalfDay, requiresApproval: value.requiresApproval, carryForward: value.carryForward, carryForwardLimit: carryForwardLimit as number | null, ...(workedDayAccrual ? { workedDayAccrual } : {}) });
   }
   return { leaveTypes: parsed };
+}
+
+function parseWorkedDayAccrual(input: unknown): WorkedDayAccrual | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const value = input as Record<string, unknown>;
+  if (value.source !== "attendance_status" || !["none", "next_month"].includes(String(value.joiningMonthClaimDeferral)) || !Array.isArray(value.tiers) || value.tiers.length === 0 || value.tiers.length > 31) return null;
+  const tiers: WorkedDayAccrual["tiers"] = [];
+  for (const tier of value.tiers) {
+    if (!tier || typeof tier !== "object" || Array.isArray(tier)) return null;
+    const row = tier as Record<string, unknown>;
+    if (![row.minDays, row.maxDays, row.daysEarned].every(Number.isInteger) || (row.minDays as number) < 0 || (row.maxDays as number) > 31 || (row.minDays as number) > (row.maxDays as number) || (row.daysEarned as number) < 0 || (row.daysEarned as number) > 31) return null;
+    tiers.push({ minDays: row.minDays as number, maxDays: row.maxDays as number, daysEarned: row.daysEarned as number });
+  }
+  tiers.sort((a, b) => a.minDays - b.minDays);
+  if (tiers.some((tier, index) => index > 0 && tiers[index - 1].maxDays >= tier.minDays)) return null;
+  return { source: "attendance_status", tiers, joiningMonthClaimDeferral: value.joiningMonthClaimDeferral as WorkedDayAccrual["joiningMonthClaimDeferral"] };
 }
 
 export function payrollPolicyDraft(payload: unknown): PayrollPolicyDraft | null {

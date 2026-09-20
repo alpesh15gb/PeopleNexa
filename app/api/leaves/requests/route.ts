@@ -168,6 +168,14 @@ export async function POST(req: NextRequest) {
             // Activated policies retain legacy behavior until this employee has
             // an explicit policy-period allocation.
             const policy = allocated ? resolvedPolicy : null;
+            const allocationSnapshot = allocated?.policySnapshot && typeof allocated.policySnapshot === "object" ? allocated.policySnapshot as Record<string, unknown> : null;
+            const accrual = allocationSnapshot?.accrual && typeof allocationSnapshot.accrual === "object" ? allocationSnapshot.accrual as Record<string, unknown> : null;
+            const availableOn = typeof accrual?.availableOn === "string" ? new Date(accrual.availableOn) : null;
+            if (availableOn && from < availableOn) {
+              const err = new Error(`This earned leave is available from ${availableOn.toISOString().slice(0, 10)}. The joining-month claim deferral is recorded with this policy-period allocation.`) as Error & { code?: string };
+              err.code = "NOT_AVAILABLE";
+              throw err;
+            }
             if (halfDay && (!policy || !policy.rules.allowsHalfDay)) {
               const err = new Error(policy ? "Half-day leave is not allowed for this leave type." : "Half-day leave requires an active leave policy that allows it.") as Error & { code?: string };
               err.code = "HALF_DAY";
@@ -199,7 +207,7 @@ export async function POST(req: NextRequest) {
                 days,
                 reason: reason || null,
                 status: (policy?.rules.requiresApproval ?? leaveType.requiresApproval) ? "pending" : "approved",
-                leavePolicySnapshot: policy && allocated ? { ...policy, policyPeriodId: allocated.policyPeriod.id } : undefined,
+                leavePolicySnapshot: policy && allocated ? { ...policy, policyPeriodId: allocated.policyPeriod.id, ...(accrual ? { accrual } : {}) } as Prisma.InputJsonValue : undefined,
               },
               include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
             });
@@ -212,7 +220,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       const code = (e as { code?: string })?.code;
-      if (code === "OVERLAP" || code === "BALANCE" || code === "HALF_DAY") {
+      if (code === "OVERLAP" || code === "BALANCE" || code === "HALF_DAY" || code === "NOT_AVAILABLE") {
         return NextResponse.json({ error: (e as Error).message }, { status: 400 });
       }
       if (code === "P2002" || code === "P2034") {
