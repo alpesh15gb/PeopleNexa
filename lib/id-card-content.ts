@@ -10,8 +10,12 @@ export type IdCardEmployeeContent = {
 
 export const ID_CARD_ARTBOARD = { width: 591, height: 1004 } as const;
 export const ID_CARD_LAYOUT = {
+  header: { x: 0, y: 0, width: 1, height: 0.22 },
   photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295 },
-  fields: { x: 0.06, y: 0.535, width: 0.88, rowHeight: 0.041, gap: 0.006 },
+  fields: { x: 0.06, y: 0.535, width: 0.88, height: 0.276, rowHeight: 0.041, gap: 0.006 },
+  footer: { x: 0, y: 0.85, width: 1, height: 0.15 },
+  // The supplied legacy front artwork has employee rows baked into this area.
+  legacyEmployeeRegion: { x: 0.03, y: 0.525, width: 0.94, height: 0.325 },
 } as const;
 
 const ellipsis = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
@@ -28,6 +32,11 @@ export function idCardDetails(employee: IdCardEmployeeContent) {
     ["Blood Group", ellipsis(employee.profile?.bloodGroup ?? "-", 16)],
     ["Contact", ellipsis(employee.phone ?? "-", 20)],
   ] as const;
+}
+
+export function idCardFieldsHeight() {
+  const fieldCount = idCardDetails({ employeeNumber: "", firstName: "", lastName: "", position: null, joiningDate: null, phone: null, profile: null }).length;
+  return fieldCount * ID_CARD_LAYOUT.fields.rowHeight + (fieldCount - 1) * ID_CARD_LAYOUT.fields.gap;
 }
 
 export function photoPosition(value: string | null) {

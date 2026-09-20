@@ -22,6 +22,7 @@ export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 5
   const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
   drawBackground(doc, front);
   if (branding?.hasConfiguredValues) await drawBranding(doc, branding);
+  drawLegacyEmployeeMask(doc);
   const image = photo(employee.profilePicture);
   if (image) { try { const source = (doc as unknown as { openImage: (value: Buffer) => { width: number; height: number } }).openImage(image); const scale = Math.max(photoFrame.width / source.width, photoFrame.height / source.height); const imageWidth = source.width * scale; const imageHeight = source.height * scale; const imageX = photoFrame.x - (imageWidth - photoFrame.width) * (crop.x / 100); const imageY = photoFrame.y - (imageHeight - photoFrame.height) * (crop.y / 100); doc.save().roundedRect(photoFrame.x, photoFrame.y, photoFrame.width, photoFrame.height, photoFrame.radius).clip().image(image, imageX, imageY, { width: imageWidth, height: imageHeight }).restore(); } catch { /* The supplied template remains usable when a legacy photo is invalid. */ } }
   doc.roundedRect(photoFrame.x, photoFrame.y, photoFrame.width, photoFrame.height, photoFrame.radius).lineWidth(1.5).strokeColor("#ef7600").stroke();
@@ -37,7 +38,6 @@ export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 5
     doc.text(`: ${value}`, fieldsX + fieldsWidth * 0.34, y, { width: fieldsWidth * 0.66, height: rowHeight, lineBreak: false, ellipsis: true });
   });
   doc.addPage({ size: [width, height], margin: 0 }); drawBackground(doc, back);
-  if (branding?.hasConfiguredValues) await drawBranding(doc, branding);
   doc.end(); return done;
 }
 
@@ -54,13 +54,22 @@ function drawBackground(doc: PDFKit.PDFDocument, image: Buffer) {
   doc.image(image, (width - imageWidth) / 2, (height - imageHeight) / 2, { width: imageWidth, height: imageHeight });
 }
 
+function drawLegacyEmployeeMask(doc: PDFKit.PDFDocument) {
+  doc.rect(
+    width * ID_CARD_LAYOUT.legacyEmployeeRegion.x,
+    height * ID_CARD_LAYOUT.legacyEmployeeRegion.y,
+    width * ID_CARD_LAYOUT.legacyEmployeeRegion.width,
+    height * ID_CARD_LAYOUT.legacyEmployeeRegion.height,
+  ).fill("white");
+}
+
 async function drawBranding(doc: PDFKit.PDFDocument, branding: CompanyBranding) {
-  // Overlay only configured branding; legacy cards retain their supplied artwork exactly.
-  doc.rect(0, 0, width, 57).fill("white");
+  // Branding belongs to the front header/footer; the back artwork owns its instructions.
+  doc.rect(width * ID_CARD_LAYOUT.header.x, height * ID_CARD_LAYOUT.header.y, width * ID_CARD_LAYOUT.header.width, height * ID_CARD_LAYOUT.header.height).fill("white");
   const logo = await loadBrandLogo(branding.logoUrl);
   if (logo) { try { doc.image(logo, 9, 7, { fit: [34, 34] }); } catch { /* Invalid remote image must not prevent card generation. */ } }
   doc.font("Helvetica-Bold").fontSize(8).fillColor(brown).text(branding.companyName, logo ? 49 : 9, 17, { width: logo ? 95 : 135, align: "center", ellipsis: true });
-  doc.rect(0, height - 38, width, 38).fill("white");
+  doc.rect(width * ID_CARD_LAYOUT.footer.x, height * ID_CARD_LAYOUT.footer.y, width * ID_CARD_LAYOUT.footer.width, height * ID_CARD_LAYOUT.footer.height).fill("white");
   const contact = [branding.address, branding.contact].filter(Boolean).join(" | ");
   if (contact) doc.font("Helvetica").fontSize(5.5).fillColor(brown).text(contact, 7, height - 29, { width: width - 14, align: "center", ellipsis: true, height: 21 });
 }
