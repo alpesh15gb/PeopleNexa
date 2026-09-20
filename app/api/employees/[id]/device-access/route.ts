@@ -175,9 +175,15 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
     try {
       const response = await setEbioUserDeviceAccess(profile, device.serialNumber, employee.deviceCode, allowed);
-      await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "sent", lastCommandAt: new Date(), lastResponse: response, lastError: null } });
       const provisionFailure = requestedAllowed && locationCode && failedLocations.has(locationCode);
-      results.push({ deviceId: device.id, name: device.name, allowed, status: provisionFailure ? "failed" : "sent", response, error: provisionFailure ? `Provisioning failed for eBio location ${locationCode}; device remains blocked.` : undefined });
+      const error = provisionFailure ? `Provisioning failed for eBio location ${locationCode}; device remains blocked.` : null;
+      await prisma.employeeDeviceAccess.update({
+        where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } },
+        // The block command was accepted, but the requested access did not
+        // complete, so preserve the provisioning failure as the device state.
+        data: { commandStatus: provisionFailure ? "failed" : "sent", lastCommandAt: new Date(), lastResponse: response, lastError: error },
+      });
+      results.push({ deviceId: device.id, name: device.name, allowed, status: provisionFailure ? "failed" : "sent", response, error: error ?? undefined });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Command failed";
       await prisma.employeeDeviceAccess.update({ where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } }, data: { commandStatus: "failed", lastCommandAt: new Date(), lastResponse: null, lastError: message } });
