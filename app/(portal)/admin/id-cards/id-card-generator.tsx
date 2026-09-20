@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { idCardDetails } from "@/lib/id-card-content";
-import { safeLogoUrl, type CompanyBranding } from "@/lib/company-branding";
+import { safeLogoUrl } from "@/lib/branding-url";
+import type { CompanyBranding } from "@/lib/company-branding";
 import type { IdCardTemplate } from "@/lib/configuration";
 
 type Employee = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };

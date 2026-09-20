@@ -29,6 +29,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV UPLOADS_DIR=/data/uploads
 
 # Traced production server + its pruned node_modules.
 COPY --from=build /app/.next/standalone ./

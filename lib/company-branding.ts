@@ -1,3 +1,8 @@
+import { readTenantMedia } from "@/lib/tenant-media";
+import { safeLogoUrl } from "@/lib/branding-url";
+
+export { safeLogoUrl } from "@/lib/branding-url";
+
 type Profile = {
   legalName?: string | null;
   displayName?: string | null;
@@ -17,30 +22,6 @@ const text = (value: string | null | undefined, limit: number) => {
   const result = value?.trim();
   return result && result.length <= limit ? result : null;
 };
-
-export function safeLogoUrl(value: string | null | undefined) {
-  const source = value?.trim();
-  if (!source) return null;
-  if (/^data:image\/(png|jpe?g);base64,[a-z0-9+/=\s]+$/i.test(source)) {
-    const payload = source.slice(source.indexOf(",") + 1).replace(/\s/g, "");
-    return payload.length <= 6_666_668 ? source : null;
-  }
-  if (source.length > 2_048) return null;
-  try {
-    const url = new URL(source);
-    if (url.protocol !== "https:" || url.username || url.password || url.port || isPrivateHost(url.hostname)) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function isPrivateHost(hostname: string) {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
-  const octets = host.split(".").map(Number);
-  return octets.length === 4 && octets.every(Number.isInteger) && (octets[0] === 10 || octets[0] === 127 || octets[0] === 0 || (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168));
-}
 
 function pick<T>(locationValue: T | null, tenantValue: T | null, fallbackValue: T | null) {
   if (locationValue !== null) return { value: locationValue, configured: true };
@@ -74,6 +55,8 @@ function validPhone(value: string | null | undefined) {
 export async function loadBrandLogo(source: string | null) {
   if (!source) return null;
   try {
+    const stored = await readTenantMedia(source);
+    if (stored) return imageBuffer(stored);
     if (source.startsWith("data:")) return imageBuffer(Buffer.from(source.slice(source.indexOf(",") + 1).replace(/\s/g, ""), "base64"));
     const response = await fetch(source, { redirect: "error", signal: AbortSignal.timeout(5_000) });
     const length = Number(response.headers.get("content-length"));

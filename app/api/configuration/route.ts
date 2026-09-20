@@ -9,6 +9,7 @@ import { requireActiveSession } from "@/lib/session";
 import { carryForwardCandidate } from "@/lib/leave-policy-period";
 import { monthlyWorkedDayAccrual, workedDaysForMonth } from "@/lib/leave-accrual";
 import { monthKeyIST } from "@/lib/dates";
+import { mediaAllowedForScope } from "@/lib/tenant-media";
 
 async function requireConfigurationAdmin() {
   const session = await requireActiveSession().catch(() => null);
@@ -32,7 +33,7 @@ export async function PUT(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const action = String(body.action ?? "");
   if (action === "tenant-profile") {
-    let data; try { data = cleanProfile(body); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid company profile." }, { status: 400 }); }
+    let data; try { data = cleanProfile(body, session.tenantId); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid company profile." }, { status: 400 }); }
     const previous = await prisma.tenantProfile.findUnique({ where: { tenantId: session.tenantId } });
     const profile = await prisma.tenantProfile.upsert({ where: { tenantId: session.tenantId }, create: { tenantId: session.tenantId, ...data }, update: data });
     await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "configuration.profile.update", entity: "TenantProfile", entityId: profile.id, summary: "Updated tenant master profile", before: previous ?? undefined, after: profile });
@@ -42,7 +43,7 @@ export async function PUT(request: NextRequest) {
     const locationId = String(body.locationId ?? "");
     const location = await prisma.location.findFirst({ where: { id: locationId, tenantId: session.tenantId }, select: { id: true } });
     if (!location) return NextResponse.json({ error: "Location not found." }, { status: 404 });
-    let data; try { data = cleanLocationProfile(body); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid location profile." }, { status: 400 }); }
+    let data; try { data = cleanLocationProfile(body, session.tenantId, locationId); } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid location profile." }, { status: 400 }); }
     const previous = await prisma.locationProfile.findUnique({ where: { locationId } });
     const profile = await prisma.locationProfile.upsert({ where: { locationId }, create: { locationId, ...data }, update: data });
     await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "configuration.location_profile.update", entity: "LocationProfile", entityId: profile.id, summary: "Updated location master profile", before: previous ?? undefined, after: profile });
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
   if (Number.isNaN(effectiveFrom.getTime()) || (effectiveTo && (Number.isNaN(effectiveTo.getTime()) || effectiveTo < effectiveFrom))) return NextResponse.json({ error: "Provide a valid effective date range." }, { status: 400 });
   if (!body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) return NextResponse.json({ error: "Configuration payload must be a JSON object." }, { status: 400 });
   if (kind === "dashboard" && !dashboardLayout(body.payload)) return NextResponse.json({ error: "Dashboard layouts must contain unique known widgets with enabled, order, and size values." }, { status: 400 });
-  if (kind === "id_card" && !await validIdCardTemplate(body.payload)) return NextResponse.json({ error: "An ID-card template requires reachable PNG/JPEG front and back backgrounds from HTTPS or data URLs." }, { status: 400 });
+  if (kind === "id_card" && !await validIdCardTemplate(body.payload, session.tenantId, locationId)) return NextResponse.json({ error: "An ID-card template requires valid PNG/JPEG front and back backgrounds." }, { status: 400 });
   if (kind === "leave_policy" && !leavePolicyDraft(body.payload)) return NextResponse.json({ error: "Leave policy needs unique type codes and valid entitlement, paid, and carry-forward rules." }, { status: 400 });
   if (kind === "payroll_policy" && !payrollPolicyDraft(body.payload)) return NextResponse.json({ error: "Payroll policy needs valid divisor, LOP, overtime, and statutory values." }, { status: 400 });
   if (body.action === "preview") {
@@ -125,7 +126,7 @@ export async function PATCH(request: NextRequest) {
   const current = await prisma.configurationRecord.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!current) return NextResponse.json({ error: "Configuration record not found." }, { status: 404 });
   if (active && current.kind === "dashboard" && !dashboardLayout(current.payload)) return NextResponse.json({ error: "This dashboard layout is invalid and cannot be activated." }, { status: 400 });
-  if (active && current.kind === "id_card" && !await validIdCardTemplate(current.payload)) return NextResponse.json({ error: "This ID-card template has invalid or unreachable background assets and cannot be activated." }, { status: 400 });
+  if (active && current.kind === "id_card" && !await validIdCardTemplate(current.payload, session.tenantId, current.locationId)) return NextResponse.json({ error: "This ID-card template has invalid or unreachable background assets and cannot be activated." }, { status: 400 });
   if (active && current.kind === "leave_policy" && !leavePolicyDraft(current.payload)) return NextResponse.json({ error: "This leave policy draft is invalid and cannot be activated." }, { status: 400 });
   if (active && current.kind === "payroll_policy" && !payrollPolicyDraft(current.payload)) return NextResponse.json({ error: "This payroll policy draft is invalid and cannot be activated." }, { status: 400 });
   const record = await prisma.$transaction(async (tx) => {
@@ -137,10 +138,10 @@ export async function PATCH(request: NextRequest) {
 }
 
 function text(value: unknown) { return String(value ?? "").trim() || null; }
-async function validIdCardTemplate(payload: unknown) { const template = idCardTemplate(payload); return Boolean(template && await loadBrandLogo(safeLogoUrl(template.frontBackgroundUrl)) && await loadBrandLogo(safeLogoUrl(template.backBackgroundUrl))); }
-function logo(value: unknown) { const source = text(value); if (source && !safeLogoUrl(source)) throw new Error("Logo must be an HTTPS or PNG/JPEG data URL."); return source; }
-function cleanProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), logoUrl: logo(body.logoUrl), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
-function cleanLocationProfile(body: Record<string, unknown>) { return { legalName: text(body.legalName), displayName: text(body.displayName), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), logoUrl: logo(body.logoUrl), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
+async function validIdCardTemplate(payload: unknown, tenantId: string, locationId: string | null) { const template = idCardTemplate(payload); return Boolean(template && mediaAllowedForScope(template.frontBackgroundUrl, tenantId, locationId) && mediaAllowedForScope(template.backBackgroundUrl, tenantId, locationId) && await loadBrandLogo(safeLogoUrl(template.frontBackgroundUrl)) && await loadBrandLogo(safeLogoUrl(template.backBackgroundUrl))); }
+function logo(value: unknown, tenantId: string, locationId: string | null) { const source = text(value); if (source && (!safeLogoUrl(source) || !mediaAllowedForScope(source, tenantId, locationId))) throw new Error("Logo must be a valid image URL or an uploaded image in this scope."); return source; }
+function cleanProfile(body: Record<string, unknown>, tenantId: string) { return { legalName: text(body.legalName), displayName: text(body.displayName), logoUrl: logo(body.logoUrl, tenantId, null), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
+function cleanLocationProfile(body: Record<string, unknown>, tenantId: string, locationId: string) { return { legalName: text(body.legalName), displayName: text(body.displayName), address: text(body.address), contactName: text(body.contactName), contactEmail: text(body.contactEmail), contactPhone: text(body.contactPhone), logoUrl: logo(body.logoUrl, tenantId, locationId), website: text(body.website), taxId: text(body.taxId), registrationNo: text(body.registrationNo), legalDetails: text(body.legalDetails) ? { notes: text(body.legalDetails) } : Prisma.JsonNull }; }
 
 async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payload }: { tenantId: string; kind: "leave_policy" | "payroll_policy"; locationId: string | null; effectiveFrom: Date; payload: unknown }) {
   const [affectedEmployees, policyRecords, tenant, leaveTypes, requests] = await Promise.all([

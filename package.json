@@ -11,7 +11,8 @@
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
     "test:leave-policy": "tsx scripts/test-leave-policy.ts",
     "test:leave-policy-period": "tsx scripts/test-leave-policy-period.ts",
-    "test:payroll-policy": "tsx scripts/test-payroll-policy.ts"
+    "test:payroll-policy": "tsx scripts/test-payroll-policy.ts",
+    "test:tenant-media": "tsx scripts/test-tenant-media.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

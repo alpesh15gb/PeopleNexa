@@ -50,6 +50,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # Tenant media must survive container rebuilds and image upgrades.
+      - uploads:/data/uploads
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -63,6 +66,7 @@ services:
 
 volumes:
   pgdata:
+  uploads:
 
 networks:
   internal:
