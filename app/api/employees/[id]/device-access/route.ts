@@ -4,12 +4,12 @@ import { requireActiveSession } from "@/lib/session";
 import { appendAudit } from "@/lib/audit";
 import { getEbioserverConfig, getEbioserverPassword, setEbioUserDeviceAccess, updateEbioEmployee } from "@/lib/ebioserver";
 
-type EbioDeviceConfig = { ebioserver?: { locationCode?: unknown } };
+type EbioDeviceConfig = { ebioserver?: boolean; locationCode?: unknown };
 
 // Do not infer eBio's documented location code from a device name, worksite,
 // or PeopleNexa branch. Provisioning requires this explicit device mapping.
 function ebioLocationCode(config: unknown): string | null {
-  const value = (config as EbioDeviceConfig | null)?.ebioserver?.locationCode;
+  const value = (config as EbioDeviceConfig | null)?.locationCode;
   if (typeof value !== "string") return null;
   const code = value.trim();
   return code && code.length <= 100 && !code.includes(",") ? code : null;
@@ -87,6 +87,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const devices = await prisma.device.findMany({ where: { tenantId: session.tenantId, status: "active", config: { path: ["ebioserver"], equals: true }, ...locationScope }, select: { id: true, serialNumber: true, name: true, config: true } });
   if (deviceIds.some((deviceId) => !devices.some((device) => device.id === deviceId))) return NextResponse.json({ error: "Invalid device selection." }, { status: 400 });
   const selected = new Set(deviceIds);
+  const unmappedDevices = devices.filter((device) => (body.mode === "all" || selected.has(device.id)) && !ebioLocationCode(device.config));
+  if (unmappedDevices.length) {
+    return NextResponse.json({
+      error: `Cannot provision ${unmappedDevices.map((device) => device.name).join(", ")}: its eBio location code is missing. Run Settings > eBioserver > Sync topology, then retry.`,
+    }, { status: 409 });
+  }
   const previous = await prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId, allowed: true }, select: { deviceId: true } });
 
   // Persist the desired policy first, but mark every machine pending until eBio

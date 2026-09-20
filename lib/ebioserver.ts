@@ -259,9 +259,18 @@ export async function syncEbioWorksites(tenantId: string, profile: EbioserverPro
     if (device && device.tenantId !== tenantId) { summary.skipped++; continue; }
     if (device) {
       if (device.branchId && device.branchId !== branchId) legacyBranchIds.add(device.branchId);
-      await prisma.device.update({ where: { id: device.id }, data: { ebioLocation: worksiteName, branchId } });
+      await prisma.device.update({
+        where: { id: device.id },
+        data: {
+          ebioLocation: worksiteName,
+          branchId,
+          // DeviceName is eBio's group/location code, which UpdateEmployee
+          // requires as EmployeeLocation. LocationName is only the worksite.
+          config: { ebioserver: true, location: worksiteName, locationCode: locationName },
+        },
+      });
     } else {
-      await prisma.device.create({ data: { tenantId, name: `${locationName} (${worksiteName})`, serialNumber: item.serialNumber, type: "biometric", protocol: "json", ebioLocation: worksiteName, branchId, config: { ebioserver: true, location: worksiteName } } });
+      await prisma.device.create({ data: { tenantId, name: `${locationName} (${worksiteName})`, serialNumber: item.serialNumber, type: "biometric", protocol: "json", ebioLocation: worksiteName, branchId, config: { ebioserver: true, location: worksiteName, locationCode: locationName } } });
     }
     summary.devices++;
   }
@@ -471,7 +480,7 @@ export async function backfillDays(
             type: "biometric",
             protocol: "json",
             ebioLocation: d.location,
-            config: { ebioserver: true, location: d.location },
+            config: { ebioserver: true, location: d.location, locationCode: d.deviceName },
           },
         });
       } else if (device.tenantId !== tenantId) {
@@ -609,7 +618,7 @@ export async function pullTenant(
             type: "biometric",
             protocol: "json",
             ebioLocation: d.location,
-            config: { ebioserver: true, location: d.location },
+            config: { ebioserver: true, location: d.location, locationCode: d.deviceName },
           },
         });
         newlyRegistered = true;
