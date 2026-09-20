@@ -440,6 +440,9 @@ model Employee {
   uan                     String?
   aadhaarNumber           String?
   drivingLicenseNumber    String?
+  // Transport / non_transport / no_license. Null preserves legacy records
+  // whose existing license type cannot be classified safely.
+  drivingLicenseClassification String?
   drivingLicenseType      String?
   drivingLicenseExpiresAt DateTime?
 

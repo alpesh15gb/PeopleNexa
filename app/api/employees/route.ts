@@ -29,6 +29,8 @@ const select = {
   workBasisRate: true,
   aadhaarNumber: true,
   drivingLicenseNumber: true,
+  drivingLicenseClassification: true,
+  drivingLicenseType: true,
   drivingLicenseExpiresAt: true,
   profilePicture: true,
   managerId: true,
@@ -56,6 +58,8 @@ const safeSelect = {
   managerId: true,
   aadhaarNumber: true,
   drivingLicenseNumber: true,
+  drivingLicenseClassification: true,
+  drivingLicenseType: true,
   drivingLicenseExpiresAt: true,
   bankName: true,
   accountNumber: true,
@@ -74,6 +78,7 @@ const safeSelect = {
 
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
+const LICENSE_CLASSIFICATIONS = new Set(["transport", "non_transport", "no_license"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -199,10 +204,12 @@ export async function POST(req: NextRequest) {
     const aadhaarNumber = body.aadhaarNumber != null && String(body.aadhaarNumber).trim() !== "" ? String(body.aadhaarNumber).replace(/[\s-]/g, "") : null;
     const drivingLicenseNumber = body.drivingLicenseNumber != null && String(body.drivingLicenseNumber).trim() !== "" ? String(body.drivingLicenseNumber).trim().toUpperCase() : null;
     const drivingLicenseType = body.drivingLicenseType != null && String(body.drivingLicenseType).trim() !== "" ? String(body.drivingLicenseType).trim().toLowerCase() : null;
+    const drivingLicenseClassification = body.drivingLicenseClassification != null && String(body.drivingLicenseClassification).trim() !== "" ? String(body.drivingLicenseClassification).trim().toLowerCase() : null;
     const drivingLicenseExpiresAt = dateInput(body.drivingLicenseExpiresAt);
     if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
     if (drivingLicenseNumber && (drivingLicenseNumber.length < 8 || drivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
     if (drivingLicenseType && !LICENSE_TYPES.has(drivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });
+    if (drivingLicenseClassification && !LICENSE_CLASSIFICATIONS.has(drivingLicenseClassification)) return NextResponse.json({ error: "Driving licence classification must be transport, non-transport, or no licence." }, { status: 400 });
     if (drivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
@@ -313,7 +320,7 @@ export async function POST(req: NextRequest) {
       body.branchId ? prisma.branch.findFirst({ where: { id: String(body.branchId), tenantId: session.tenantId }, select: { id: true, locationId: true } }) : null,
       body.departmentId ? prisma.department.findFirst({ where: { id: String(body.departmentId), tenantId: session.tenantId }, select: { id: true } }) : null,
       body.shiftId ? prisma.shift.findFirst({ where: { id: String(body.shiftId), tenantId: session.tenantId }, select: { id: true } }) : null,
-      body.managerId ? prisma.employee.findFirst({ where: { id: String(body.managerId), tenantId: session.tenantId }, select: { id: true, branch: { select: { locationId: true } } } }) : null,
+      body.managerId ? prisma.employee.findFirst({ where: { id: String(body.managerId), tenantId: session.tenantId, loginOnly: false, status: "active" }, select: { id: true, branch: { select: { locationId: true } } } }) : null,
     ]);
     if (body.branchId && !branch) return NextResponse.json({ error: "Branch not found in this workspace." }, { status: 400 });
     if (body.departmentId && !department) return NextResponse.json({ error: "Department not found in this workspace." }, { status: 400 });
@@ -372,9 +379,10 @@ export async function POST(req: NextRequest) {
           managerId: loginOnly ? null : body.managerId || null,
            salaryStructure: loginOnly ? null : body.salaryStructure || null,
            aadhaarNumber: loginOnly ? null : aadhaarNumber,
-             drivingLicenseNumber: loginOnly ? null : drivingLicenseNumber,
-             drivingLicenseType: loginOnly ? null : drivingLicenseType,
-             drivingLicenseExpiresAt: loginOnly ? null : drivingLicenseExpiresAt,
+              drivingLicenseNumber: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseNumber,
+              drivingLicenseClassification: loginOnly ? null : drivingLicenseClassification,
+              drivingLicenseType: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseType,
+              drivingLicenseExpiresAt: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseExpiresAt,
             profilePicture: photo.value,
             education: loginOnly ? undefined : { create: history.education },
             workExperience: loginOnly ? undefined : { create: history.experience },

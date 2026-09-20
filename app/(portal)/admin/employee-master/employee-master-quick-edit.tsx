@@ -40,6 +40,7 @@ type EmployeeForm = {
   joiningDate: string;
   profilePicture?: string | null;
   drivingLicenseNumber?: string | null;
+  drivingLicenseClassification?: string | null;
   drivingLicenseType?: string | null;
   drivingLicenseExpiresAt?: string;
 };
@@ -66,6 +67,7 @@ type EmployeeMasterLookups = {
   }>;
   positions: string[];
   subdepartments: string[];
+  subdepartmentsByDepartment: Record<string, string[]>;
 };
 const emptyLookups: EmployeeMasterLookups = {
   branches: [],
@@ -74,6 +76,7 @@ const emptyLookups: EmployeeMasterLookups = {
   managers: [],
   positions: [],
   subdepartments: [],
+  subdepartmentsByDepartment: {},
 };
 const EmployeeMasterLookupsContext =
   createContext<EmployeeMasterLookups>(emptyLookups);
@@ -195,12 +198,14 @@ function SelectField({
   onChange,
   options,
   placeholder,
+  emptyMessage,
 }: {
   label: string;
   value: unknown;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
   placeholder: string;
+  emptyMessage?: string;
 }) {
   const current = stringValue(value);
   const visibleOptions =
@@ -215,6 +220,7 @@ function SelectField({
         className={inputClass}
       >
         <option value="">{placeholder}</option>
+        {!options.length && emptyMessage && <option value="" disabled>{emptyMessage}</option>}
         {visibleOptions.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
@@ -230,11 +236,13 @@ function CustomSelectField({
   value,
   onChange,
   options,
+  emptyMessage,
 }: {
   label: string;
   value: unknown;
   onChange?: (value: string) => void;
   options: string[];
+  emptyMessage?: string;
 }) {
   const text = stringValue(value);
   const [uncontrolledValue, setUncontrolledValue] = useState(text);
@@ -260,6 +268,7 @@ function CustomSelectField({
           className={inputClass}
         >
           <option value="">{`Select ${label.toLowerCase()}`}</option>
+          {!options.length && emptyMessage && <option value="" disabled>{emptyMessage}</option>}
           {current && !options.includes(current) && (
             <option value={current}>Current value: {current}</option>
           )}
@@ -376,6 +385,7 @@ function EmployeeFields({
           value={controlled?.position}
           onChange={(next) => setControlled?.("position", next)}
           options={positionOptions}
+          emptyMessage="No saved positions are available in your permitted scope. Enter a custom position."
         />
       ) : (
         <Field label="Position">
@@ -619,6 +629,7 @@ function OfficialLookupFields({
             value: manager.id,
             label: `${manager.firstName} ${manager.lastName} (${manager.employeeNumber})`,
           }))}
+        emptyMessage="No eligible active employees are available in your permitted scope"
       />
       <SelectField
         label="Pay mode"
@@ -640,13 +651,32 @@ function LicenseFields({
 }) {
   return (
     <>
+      <SelectField
+        label="Licence classification"
+        value={core.drivingLicenseClassification}
+        onChange={(value) => {
+          updateCore("drivingLicenseClassification", value);
+          if (value === "no_license") {
+            updateCore("drivingLicenseNumber", "");
+            updateCore("drivingLicenseType", "");
+            updateCore("drivingLicenseExpiresAt", "");
+          }
+        }}
+        placeholder="Not recorded (optional)"
+        options={[
+          { value: "transport", label: "Transport" },
+          { value: "non_transport", label: "Non-transport" },
+          { value: "no_license", label: "No licence / not applicable" },
+        ]}
+      />
+      {core.drivingLicenseClassification !== "no_license" && <>
       <TextField
         label="Driving licence number"
         value={core.drivingLicenseNumber}
         onChange={(value) => updateCore("drivingLicenseNumber", value)}
       />
       <SelectField
-        label="Licence type"
+        label="Licence type / category"
         value={core.drivingLicenseType}
         onChange={(value) => updateCore("drivingLicenseType", value)}
         placeholder="Select licence type"
@@ -663,6 +693,7 @@ function LicenseFields({
         value={core.drivingLicenseExpiresAt}
         onChange={(value) => updateCore("drivingLicenseExpiresAt", value)}
       />
+      </>}
       <Field
         label="Set or reset password"
         hint="Optional. Leave blank to keep the current password."
@@ -761,32 +792,39 @@ function Editor({
   const router = useRouter();
   const [master, setMaster] = useState<Master | null>(null);
   const [core, setCore] = useState<Row>({ ...initial });
+  const [loadedLookups, setLoadedLookups] = useState<EmployeeMasterLookups>(lookups);
   const [active, setActive] = useState("official");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/employees/${id}/master`)
-      .then(async (response) => {
+    setLoadError(null);
+    Promise.all([
+      fetch(`/api/employees/${id}/master`).then(async (response) => {
         const data = await response.json().catch(() => ({}));
         if (!response.ok)
           throw new Error(data.error ?? "Could not load employee master.");
-        if (!cancelled) {
-          const employee = normalizeDates(data.employee);
-          setMaster(employee);
-          setCore(employee);
-        }
+        return data.employee;
+      }),
+      fetch("/api/employees/master-options").then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok)
+          throw new Error(data.error ?? "Could not load master options.");
+        return data as EmployeeMasterLookups;
+      }),
+    ])
+      .then(([employee, nextLookups]) => {
+        if (cancelled) return;
+        const normalized = normalizeDates(employee);
+        setMaster(normalized);
+        setCore(normalized);
+        setLoadedLookups(nextLookups);
       })
       .catch((error) => {
-        if (!cancelled)
-          toast(
-            "error",
-            error instanceof Error
-              ? error.message
-              : "Could not load employee master.",
-          );
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Could not load employee master options.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -794,7 +832,8 @@ function Editor({
     return () => {
       cancelled = true;
     };
-  }, [id, toast]);
+  };
+  useEffect(() => load(), [id]);
 
   const updateCore = (key: string, value: string) =>
     setCore((current) => ({ ...current, [key]: value }));
@@ -881,6 +920,7 @@ function Editor({
         managerId: core.managerId || null,
         profilePicture: core.profilePicture ?? null,
         drivingLicenseNumber: core.drivingLicenseNumber || null,
+        drivingLicenseClassification: core.drivingLicenseClassification || null,
         drivingLicenseType: core.drivingLicenseType || null,
         drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null,
         ...(core.password ? { password: core.password } : {}),
@@ -949,7 +989,7 @@ function Editor({
   const profile = master?.profile ?? {};
   const employment = master?.employmentProfile ?? {};
   return (
-    <EmployeeMasterLookupsContext.Provider value={lookups}>
+    <EmployeeMasterLookupsContext.Provider value={loadedLookups}>
       <Modal
         open
         onClose={onClose}
@@ -957,9 +997,14 @@ function Editor({
         title="Employee master editor"
         description="Update core information and structured HR records in one place."
       >
-        {loading || !master ? (
+        {loading ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
-            Loading employee master...
+            Loading employee master and available options...
+          </div>
+        ) : loadError || !master ? (
+          <div className="space-y-4 py-16 text-center text-sm text-muted-foreground">
+            <p>{loadError ?? "Could not load employee master."}</p>
+            <Button type="button" variant="outline" onClick={load}>Retry loading details</Button>
           </div>
         ) : (
           <form
@@ -1068,12 +1113,12 @@ function Editor({
                         )
                       }
                     />
-                    <TextField
+                    <CustomSelectField
                       label="Sub department"
                       value={employment.subDepartment}
-                      onChange={(value) =>
-                        updateGroup("employmentProfile", "subDepartment", value)
-                      }
+                      onChange={(value) => updateGroup("employmentProfile", "subDepartment", value)}
+                      options={loadedLookups.subdepartmentsByDepartment[stringValue(core.departmentId)] ?? []}
+                      emptyMessage={core.departmentId ? "No subdepartments exist for this department. Enter a custom value if needed." : "Select a department to view its subdepartments. Enter a custom value if needed."}
                     />
                     <TextField
                       label="Grade"
