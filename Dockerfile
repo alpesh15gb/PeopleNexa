@@ -2,7 +2,7 @@
 #
 # PeopleNexa — multi-stage build.
 #   deps   : install all packages (incl. devDeps for prisma CLI + seed tooling)
-#   build  : prisma generate + next build (standalone output)
+#   build  : npm build workflow (Prisma generation + Next standalone output)
 #   runner : traced server + static assets + prisma CLI (for boot-time migrate deploy)
 #
 # Build-time DATABASE_URL is only needed because prisma.config.ts requires it
@@ -21,7 +21,6 @@ COPY . .
 ARG DATABASE_URL=postgresql://build:build@localhost:5432/peoplenexa
 ENV DATABASE_URL=$DATABASE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx prisma generate
 RUN npm run build
 
 FROM node:22-alpine AS runner
