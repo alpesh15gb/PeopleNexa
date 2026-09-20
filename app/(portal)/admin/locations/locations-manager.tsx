@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 
 type Branch = { id: string; name: string; code: string; locationId: string | null };
-type Location = { id: string; name: string; code: string; branches: Pick<Branch, "id" | "name" | "code">[]; managers: { id: string; firstName: string; lastName: string; email: string }[] };
+type Location = { id: string; name: string; code: string; branches: Pick<Branch, "id" | "name" | "code">[]; managers: { id: string; firstName: string; lastName: string; email: string | null }[] };
 
 export function LocationsManager({ locations, branches }: { locations: Location[]; branches: Branch[] }) {
   const router = useRouter();

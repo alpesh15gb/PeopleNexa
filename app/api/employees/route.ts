@@ -210,9 +210,8 @@ export async function POST(req: NextRequest) {
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
     const lastName = lastNameRaw.trim();
-    if (!firstName || !email || !body.password) {
-      return NextResponse.json({ error: "First name, email and password are required." }, { status: 400 });
-    }
+    const password = body.password != null ? String(body.password).trim() : "";
+    if (!firstName) return NextResponse.json({ error: "First name is required." }, { status: 400 });
     if (lastNameRaw !== "" && !lastName) {
       return NextResponse.json({ error: "Last name cannot be empty." }, { status: 400 });
     }
@@ -222,17 +221,17 @@ export async function POST(req: NextRequest) {
     if (body.position !== undefined && body.position !== null && body.position !== "" && String(body.position).length > 100) {
       return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
     }
-    if (String(body.password).length < 12) {
+    if (email && password && password.length < 12) {
       return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
     }
     const deviceCode = body.deviceCode != null && String(body.deviceCode).trim() !== "" ? String(body.deviceCode).trim() : null;
     if (deviceCode && deviceCode.length > 100) return NextResponse.json({ error: "Device Code must be at most 100 characters." }, { status: 400 });
     const requestedEmployeeCode = body.employeeNumber != null && String(body.employeeNumber).trim() !== "" ? String(body.employeeNumber).trim() : null;
     if (requestedEmployeeCode && requestedEmployeeCode.length > 100) return NextResponse.json({ error: "Employee Code must be at most 100 characters." }, { status: 400 });
-    const exists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } });
+    const exists = email ? await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email } }) : null;
     if (exists) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
     if (deviceCode) {
       const deviceCodeExists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode }, select: { id: true } });
@@ -247,6 +246,9 @@ export async function POST(req: NextRequest) {
     // branch manager). Just name + email + password + branch; forced to the
     // branch_manager role, excluded from seats/payroll/attendance/leave.
     const loginOnly = body.loginOnly === true;
+    if (loginOnly && (!email || !password)) {
+      return NextResponse.json({ error: "A manager login requires an email and password." }, { status: 400 });
+    }
     if (loginOnly && !body.branchId) {
       return NextResponse.json({ error: "A branch is required for a manager login." }, { status: 400 });
     }
@@ -349,9 +351,9 @@ export async function POST(req: NextRequest) {
           deviceCode: loginOnly ? null : deviceCode,
           firstName,
           lastName,
-          email,
+          email: email || null,
           phone,
-          password: await hashPassword(String(body.password)),
+          password: email && password ? await hashPassword(password) : null,
           role: loginOnly ? "branch_manager" : "employee",
           loginOnly,
           position: loginOnly ? null : (body.position ?? null),
@@ -396,7 +398,7 @@ export async function POST(req: NextRequest) {
       lastName: employee.lastName,
       email: employee.email,
     });
-    return NextResponse.json({ employee }, { status: 201 });
+    return NextResponse.json({ employee, loginCreated: Boolean(email && password) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create employee." }, { status: 500 });
   }

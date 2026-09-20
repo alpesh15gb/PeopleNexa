@@ -411,9 +411,11 @@ model Employee {
   deviceAccessEnabled Boolean   @default(false)
   firstName           String
   lastName            String
-  email               String
+  // Login credentials are optional: employees can exist for HR and attendance
+  // without portal access.
+  email               String?
   phone               String?
-  password            String // bcrypt hash
+  password            String? // bcrypt hash; present only when login access is provisioned
   role                String    @default("employee") // admin | supervisor | employee
   status              String    @default("active") // active | inactive
   // Login-only accounts (e.g. branch managers who are not staff): can sign

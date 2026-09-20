@@ -190,16 +190,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
 
-  const email = body.email !== undefined ? String(body.email).toLowerCase().trim() : employee.email;
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return NextResponse.json({ error: "A valid email address is required." }, { status: 400 });
-  }
-  if (email !== employee.email) {
+  const email = body.email !== undefined ? String(body.email).toLowerCase().trim() || null : employee.email;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
+  if (email && email !== employee.email) {
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email, NOT: { id } } });
     if (duplicate) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
   }
   const password = body.password !== undefined ? String(body.password).trim() : "";
-  if (password && password.length < 12) {
+  if (email && password && password.length < 12) {
     return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
   }
   if (body.status !== undefined && body.status !== "active" && body.status !== "inactive") {
@@ -243,8 +241,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       }
     }
   }
-  const isUnprovisionedDeviceAccount = employee.email.endsWith("@device.local");
-  if (requestedStatus === "active" && employee.status !== "active" && isUnprovisionedDeviceAccount && (email.endsWith("@device.local") || !password)) {
+  const isUnprovisionedDeviceAccount = employee.email?.endsWith("@device.local") ?? false;
+  if (requestedStatus === "active" && employee.status !== "active" && isUnprovisionedDeviceAccount && (email?.endsWith("@device.local") || !password)) {
     return NextResponse.json({ error: "Provision a real email and a new password before activating this imported account." }, { status: 400 });
   }
 
@@ -395,6 +393,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (nextRole === "branch_manager" && !nextBranchId) {
     return NextResponse.json({ error: "A branch manager must be assigned to a branch." }, { status: 400 });
   }
+  if (nextRole === "branch_manager" && (!email || (!employee.password && !password))) {
+    return NextResponse.json({ error: "A branch manager requires an email and password." }, { status: 400 });
+  }
   if (wantManager) {
     const cycle = await wouldCreateManagerCycle(id, String(wantManager), session.tenantId);
     if (cycle) {
@@ -412,7 +413,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        firstName: nextFirstName,
       lastName: nextLastName,
       email,
-      ...(password ? { password: await hashPassword(password) } : {}),
+       ...(email && password ? { password: await hashPassword(password) } : {}),
       phone: nextPhone,
       position: body.position ?? employee.position,
       role: nextRole,

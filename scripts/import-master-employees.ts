@@ -121,7 +121,7 @@ async function main() {
   });
   const byEmployeeNumber = new Map(existing.map((employee) => [employee.employeeNumber, employee]));
   const byDeviceCode = new Map(existing.filter((employee) => employee.deviceCode).map((employee) => [employee.deviceCode!, employee]));
-  const byEmail = new Map(existing.map((employee) => [employee.email.toLowerCase(), employee]));
+  const byEmail = new Map(existing.flatMap((employee) => employee.email ? [[employee.email.toLowerCase(), employee] as const] : []));
   const seenEmployeeNumbers = new Set<string>();
   const seenDeviceCodes = new Set<string>();
   const seenEmails = new Set<string>();

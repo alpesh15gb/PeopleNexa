@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const employee = await prisma.employee.findFirst({
       where: { tenantId: tenant.id, email },
     });
-    if (!employee || !(await verifyPassword(password, employee.password))) {
+    if (!employee?.password || !(await verifyPassword(password, employee.password))) {
       return NextResponse.json({ success: false, error: "Invalid email or password." }, { status: 401 });
     }
     if (employee.status !== "active") {
