@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 
-type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; status?: string; joiningDate: string; profilePicture?: string | null; drivingLicenseNumber?: string | null; drivingLicenseType?: string | null; drivingLicenseExpiresAt?: string };
+type EmployeeForm = { id?: string; employeeNumber?: string | null; deviceCode?: string | null; firstName: string; lastName: string; email: string; phone: string | null; position: string | null; status?: string; payMode?: string | null; joiningDate: string; profilePicture?: string | null; drivingLicenseNumber?: string | null; drivingLicenseType?: string | null; drivingLicenseExpiresAt?: string };
 type Row = Record<string, unknown>;
 type Master = Row & { profile?: Row | null; employmentProfile?: Row | null; dependents?: Row[]; education?: Row[]; workExperience?: Row[]; references?: Row[]; bankAccounts?: Row[]; documents?: Row[] };
 type EmployeeMasterLookups = { branches: Array<{ id: string; name: string }>; departments: Array<{ id: string; name: string }>; shifts: Array<{ id: string; name: string }>; managers: Array<{ id: string; firstName: string; lastName: string; employeeNumber: string }>; positions: string[]; subdepartments: string[] };
@@ -16,6 +16,12 @@ const emptyLookups: EmployeeMasterLookups = { branches: [], departments: [], shi
 const EmployeeMasterLookupsContext = createContext<EmployeeMasterLookups>(emptyLookups);
 
 const inputClass = "h-11 w-full rounded-[11px] border border-input bg-card px-3.5 text-sm text-foreground outline-none transition focus:border-primary/70 focus:ring-4 focus:ring-ring/15";
+const employmentModes = ["Full time", "Part time", "Contract", "Internship", "Consultant"];
+const employmentNatures = ["Permanent", "Temporary", "Fixed term", "Probation", "Trainee"];
+const salaryPaymentModes = ["Bank transfer", "Cash", "Cheque"];
+const maritalStatuses = ["Single", "Married", "Divorced", "Widowed", "Separated"];
+const bloodGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+const payModes = [{ value: "monthly", label: "Monthly" }, { value: "daily", label: "Daily wage" }, { value: "weekly", label: "Weekly wage" }, { value: "hourly", label: "Hourly" }, { value: "work_basis", label: "Work-basis / piece" }];
 const sections = [
   ["official", "Official", Building2], ["personal", "Personal", UserRound], ["dependents", "Dependents", UsersRound], ["education", "Education", GraduationCap], ["experience", "Experience", Building2], ["references", "References", UsersRound], ["banking", "Bank accounts", CreditCard], ["documents", "Documents", FileText],
 ] as const;
@@ -56,26 +62,46 @@ function normalizeDates(master: Master): Master {
 }
 
 function SelectField({ label, value, onChange, options, placeholder }: { label: string; value: unknown; onChange: (value: string) => void; options: Array<{ value: string; label: string }>; placeholder: string }) {
-  return <Field label={label}><select value={stringValue(value)} onChange={(event) => onChange(event.target.value)} className={inputClass}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>;
+  const current = stringValue(value);
+  const visibleOptions = current && !options.some((option) => option.value === current) ? [{ value: current, label: `Current value: ${current}` }, ...options] : options;
+  return <Field label={label}><select value={current} onChange={(event) => onChange(event.target.value)} className={inputClass}><option value="">{placeholder}</option>{visibleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field>;
 }
 
-function CustomSelectField({ label, value, onChange, options }: { label: string; value: unknown; onChange: (value: string) => void; options: string[] }) {
+function CustomSelectField({ label, value, onChange, options }: { label: string; value: unknown; onChange?: (value: string) => void; options: string[] }) {
   const text = stringValue(value);
+  const [uncontrolledValue, setUncontrolledValue] = useState(text);
   const [custom, setCustom] = useState(() => options.length === 0 || (Boolean(text) && !options.includes(text)));
-  return <div className="space-y-3"><SelectField label={label} value={custom ? "__custom__" : text} onChange={(next) => { setCustom(next === "__custom__"); onChange(next === "__custom__" ? "" : next); }} placeholder={`Select ${label.toLowerCase()}`} options={[...options.map((option) => ({ value: option, label: option })), { value: "__custom__", label: "Custom entry" }]} />{custom && <TextField label={`Custom ${label.toLowerCase()}`} value={text} onChange={onChange} />}</div>;
+  const current = onChange ? text : uncontrolledValue;
+  const update = (next: string) => { if (onChange) onChange(next); else setUncontrolledValue(next); };
+  return <div className="space-y-3">
+    <Field label={label}>
+      <select name={label === "Position" && !custom ? "position" : undefined} value={custom ? "__custom__" : current} onChange={(event) => { const next = event.target.value; setCustom(next === "__custom__"); update(next === "__custom__" ? "" : next); }} className={inputClass}>
+        <option value="">{`Select ${label.toLowerCase()}`}</option>
+        {current && !options.includes(current) && <option value={current}>Current value: {current}</option>}
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        <option value="__custom__">Custom entry</option>
+      </select>
+    </Field>
+    {custom && <Field label={`Custom ${label.toLowerCase()}`}><Input name={label === "Position" ? "position" : undefined} value={current} onChange={(event) => update(event.target.value)} /></Field>}
+  </div>;
 }
 
 function EmployeeFields({ employee, includeCodes = false, controlled, setControlled, positionChoices }: { employee: EmployeeForm; includeCodes?: boolean; controlled?: Row; setControlled?: (key: string, value: string) => void; positionChoices?: string[] }) {
   const lookups = useContext(EmployeeMasterLookupsContext);
   const value = (key: string) => controlled ? stringValue(controlled[key]) : undefined;
   const change = (key: string) => (event: React.ChangeEvent<HTMLInputElement>) => setControlled?.(key, event.target.value);
-  const positionOptions = positionChoices ?? (controlled ? lookups.positions : undefined);
+  const positionOptions = positionChoices ?? (controlled || includeCodes ? lookups.positions : undefined);
   return <><Field label="First name"><Input name="firstName" required value={value("firstName")} onChange={change("firstName")} defaultValue={controlled ? undefined : employee.firstName} /></Field><Field label="Last name"><Input name="lastName" value={value("lastName")} onChange={change("lastName")} defaultValue={controlled ? undefined : employee.lastName} /></Field>{includeCodes && <Field label="Employee code"><Input name="employeeNumber" required value={value("employeeNumber")} onChange={change("employeeNumber")} defaultValue={controlled ? undefined : employee.employeeNumber ?? ""} /></Field>}{includeCodes && <Field label="Device code"><Input name="deviceCode" placeholder="Biometric enrollment ID" value={value("deviceCode")} onChange={change("deviceCode")} defaultValue={controlled ? undefined : employee.deviceCode ?? ""} /></Field>}<Field label="Work email"><Input name="email" type="email" required value={value("email")} onChange={change("email")} defaultValue={controlled ? undefined : employee.email} /></Field><Field label="Phone"><Input name="phone" type="tel" value={value("phone")} onChange={change("phone")} defaultValue={controlled ? undefined : employee.phone ?? ""} /></Field>{positionOptions ? <CustomSelectField label="Position" value={controlled?.position} onChange={(next) => setControlled?.("position", next)} options={positionOptions} /> : <Field label="Position"><Input name="position" value={value("position")} onChange={change("position")} defaultValue={controlled ? undefined : employee.position ?? ""} /></Field>}<Field label="Joining date"><Input name="joiningDate" type="date" value={controlled ? dateValue(controlled.joiningDate) : undefined} onChange={change("joiningDate")} defaultValue={controlled ? undefined : employee.joiningDate} /></Field></>;
 }
 
 function TextField({ label, value, onChange, type = "text", required = false }: { label: string; value: unknown; onChange: (value: string) => void; type?: string; required?: boolean }) {
   const lookups = useContext(EmployeeMasterLookupsContext);
   if (label === "Gender") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select gender" options={[{ value: "Male", label: "Male" }, { value: "Female", label: "Female" }, { value: "Other", label: "Other" }, { value: "Prefer not to say", label: "Prefer not to say" }]} />;
+  if (label === "Marital status") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select marital status" options={maritalStatuses.map((status) => ({ value: status, label: status }))} />;
+  if (label === "Blood group") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select blood group" options={bloodGroups.map((group) => ({ value: group, label: group }))} />;
+  if (label === "Employment mode") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select employment mode" options={employmentModes.map((mode) => ({ value: mode, label: mode }))} />;
+  if (label === "Nature of employment") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select employment nature" options={employmentNatures.map((nature) => ({ value: nature, label: nature }))} />;
+  if (label === "Salary payment mode") return <SelectField label={label} value={value} onChange={onChange} placeholder="Select salary payment mode" options={salaryPaymentModes.map((mode) => ({ value: mode, label: mode }))} />;
   if (label === "Sub department") return <CustomSelectField label={label} value={value} onChange={onChange} options={lookups.subdepartments} />;
   return <Field label={label}><Input type={type} required={required} value={type === "date" ? dateValue(value) : stringValue(value)} onChange={(event) => onChange(event.target.value)} /></Field>;
 }
@@ -90,7 +116,7 @@ function AddressFields({ title, value, onChange }: { title: string; value: unkno
 
 function OfficialLookupFields({ core, updateCore, employeeId }: { core: Row; updateCore: (key: string, value: string) => void; employeeId: string }) {
   const lookups = useContext(EmployeeMasterLookupsContext);
-  return <><SelectField label="Branch" value={core.branchId} onChange={(value) => updateCore("branchId", value)} placeholder="Unassigned" options={lookups.branches.map((branch) => ({ value: branch.id, label: branch.name }))} /><SelectField label="Department" value={core.departmentId} onChange={(value) => updateCore("departmentId", value)} placeholder="Unassigned" options={lookups.departments.map((department) => ({ value: department.id, label: department.name }))} /><SelectField label="Shift" value={core.shiftId} onChange={(value) => updateCore("shiftId", value)} placeholder="Unassigned" options={lookups.shifts.map((shift) => ({ value: shift.id, label: shift.name }))} /><SelectField label="Reporting manager" value={core.managerId} onChange={(value) => updateCore("managerId", value)} placeholder="No manager" options={lookups.managers.filter((manager) => manager.id !== employeeId).map((manager) => ({ value: manager.id, label: `${manager.firstName} ${manager.lastName} (${manager.employeeNumber})` }))} /></>;
+  return <><SelectField label="Branch" value={core.branchId} onChange={(value) => updateCore("branchId", value)} placeholder="Unassigned" options={lookups.branches.map((branch) => ({ value: branch.id, label: branch.name }))} /><SelectField label="Department" value={core.departmentId} onChange={(value) => updateCore("departmentId", value)} placeholder="Unassigned" options={lookups.departments.map((department) => ({ value: department.id, label: department.name }))} /><SelectField label="Shift" value={core.shiftId} onChange={(value) => updateCore("shiftId", value)} placeholder="Unassigned" options={lookups.shifts.map((shift) => ({ value: shift.id, label: shift.name }))} /><SelectField label="Reporting manager" value={core.managerId} onChange={(value) => updateCore("managerId", value)} placeholder="No manager" options={lookups.managers.filter((manager) => manager.id !== employeeId).map((manager) => ({ value: manager.id, label: `${manager.firstName} ${manager.lastName} (${manager.employeeNumber})` }))} /><SelectField label="Pay mode" value={core.payMode} onChange={(value) => updateCore("payMode", value)} placeholder="Select pay mode" options={payModes} /></>;
 }
 
 function LicenseFields({ core, updateCore }: { core: Row; updateCore: (key: string, value: string) => void }) {
@@ -151,7 +177,7 @@ function Editor({ id, initial, onClose, canEditEmail, lookups = emptyLookups }: 
         if (typeof postalCode === "string" && postalCode.trim() && !/^[A-Za-z0-9][A-Za-z0-9 -]{0,18}$/.test(postalCode.trim())) throw new Error(`${label} postal code can use only letters, numbers, spaces, and hyphens.`);
         profile[address] = value;
       }
-      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, status: core.status, joiningDate: core.joiningDate || null, branchId: core.branchId || null, departmentId: core.departmentId || null, shiftId: core.shiftId || null, managerId: core.managerId || null, profilePicture: core.profilePicture ?? null, drivingLicenseNumber: core.drivingLicenseNumber || null, drivingLicenseType: core.drivingLicenseType || null, drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null, ...(core.password ? { password: core.password } : {}) };
+      const corePayload: Row = { employeeNumber: core.employeeNumber, deviceCode: core.deviceCode, firstName: core.firstName, lastName: core.lastName, phone: core.phone, position: core.position, status: core.status, payMode: core.payMode, joiningDate: core.joiningDate || null, branchId: core.branchId || null, departmentId: core.departmentId || null, shiftId: core.shiftId || null, managerId: core.managerId || null, profilePicture: core.profilePicture ?? null, drivingLicenseNumber: core.drivingLicenseNumber || null, drivingLicenseType: core.drivingLicenseType || null, drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null, ...(core.password ? { password: core.password } : {}) };
       if (canEditEmail) corePayload.email = core.email;
       const coreResponse = await fetch(`/api/employees/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corePayload) });
       const coreData = await coreResponse.json().catch(() => ({}));
@@ -206,7 +232,11 @@ export function EmployeeMasterQuickEdit({ employee, canEditEmail, canEditMaster,
   return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Pencil className="h-3.5 w-3.5" /> Edit employee</Button><Modal open={open} onClose={() => setOpen(false)} title="Edit employee"><form onSubmit={quickSave} className="grid gap-4 sm:grid-cols-2"><EmployeeFields employee={employee} /><div className="col-span-full flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" loading={saving}>Save changes</Button></div></form></Modal></>;
 }
 
-export function EmployeeMasterCreate({ branches, requireBranch }: { branches: Array<{ id: string; name: string }>; requireBranch: boolean }) {
+export function EmployeeMasterCreate({ branches, positions, requireBranch }: { branches: Array<{ id: string; name: string }>; positions: string[]; requireBranch: boolean }) {
+  return <EmployeeMasterLookupsContext.Provider value={{ ...emptyLookups, branches, positions }}><EmployeeMasterCreateContent branches={branches} requireBranch={requireBranch} /></EmployeeMasterLookupsContext.Provider>;
+}
+
+function EmployeeMasterCreateContent({ branches, requireBranch }: { branches: Array<{ id: string; name: string }>; requireBranch: boolean }) {
   const [open, setOpen] = useState(false); const [created, setCreated] = useState<EmployeeForm | null>(null); const [editCreated, setEditCreated] = useState(false); const [saving, setSaving] = useState(false); const [accessOpen, setAccessOpen] = useState(false); const [accessLoading, setAccessLoading] = useState(false); const [accessSaving, setAccessSaving] = useState(false); const [accessAvailable, setAccessAvailable] = useState(false); const [accessDevices, setAccessDevices] = useState<Array<{ id: string; name: string; serialNumber: string }>>([]); const [accessMode, setAccessMode] = useState<"none" | "all" | "selected">("none"); const [accessSelected, setAccessSelected] = useState<string[]>([]); const [accessResults, setAccessResults] = useState<Array<{ deviceId: string; name: string; allowed: boolean; status: "sent" | "failed"; error?: string }>>([]); const toast = useToast(); const router = useRouter();
   const finishLater = () => { if (!created) return; const id = created.id; setCreated(null); setEditCreated(false); router.push(`/admin/employee-master?employee=${id}`); router.refresh(); };
   async function loadAccess(employee: EmployeeForm) { setAccessLoading(true); setAccessResults([]); try { const response = await fetch(`/api/employees/${employee.id}/device-access`); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error ?? "Could not load biometric devices."); if (!data.accessAvailable || !data.devices?.length) { toast("success", "Employee created. Biometric setup is unavailable for this location, so no device policy was applied."); return; } setAccessDevices(data.devices); setAccessAvailable(true); setAccessOpen(true); } catch (error) { toast("error", error instanceof Error ? error.message : "Employee created, but biometric setup could not be loaded."); } finally { setAccessLoading(false); } }
