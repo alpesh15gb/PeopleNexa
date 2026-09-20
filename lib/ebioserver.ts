@@ -854,6 +854,37 @@ export async function setEbioUserDeviceAccess(profile: EbioserverProfile, serial
   return resultString(result);
 }
 
+export type EbioEmployeeUpdate = {
+  employeeCode: string;
+  employeeName: string;
+  employeeLocation: string;
+  employeeRole: string;
+  employeeVerificationType: string;
+};
+
+export type EbioEmployeeUpdateResult = { ok: boolean; response: string; error?: string };
+
+/**
+ * Add or update an employee at one documented eBio location code. The manual
+ * specifies UserName/Password as SOAP arguments and a string success/error
+ * result; an empty or unrecognised acknowledgement is never safe to unblock.
+ */
+export async function updateEbioEmployee(profile: EbioserverProfile, employee: EbioEmployeeUpdate): Promise<EbioEmployeeUpdateResult> {
+  const client = await createClient(profile);
+  const response = resultString(await call<unknown>(client, "UpdateEmployee", {
+    ...authArgs(profile),
+    EmployeeCode: employee.employeeCode,
+    EmployeeName: employee.employeeName,
+    EmployeeLocation: employee.employeeLocation,
+    EmployeeRole: employee.employeeRole,
+    EmployeeVerificationType: employee.employeeVerificationType,
+  })).trim();
+  if (!response) return { ok: false, response, error: "eBio returned an empty UpdateEmployee result." };
+  if (/error|fail|invalid|denied|unauthori[sz]ed|not\s+(?:found|allowed|exist|success)/i.test(response)) return { ok: false, response, error: response };
+  if (/success|succeed|updated|added|created/i.test(response)) return { ok: true, response };
+  return { ok: false, response, error: `Unrecognised eBio UpdateEmployee result: ${response}` };
+}
+
 export type EbioAccessEnforcementResult = {
   deviceId: string;
   name: string;

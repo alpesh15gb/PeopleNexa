@@ -497,6 +497,7 @@ model Employee {
   exitRequests      ExitRequest[]
   transfers         EmployeeTransfer[]
   deviceAccess      EmployeeDeviceAccess[]
+  ebioProvisioning  EbioEmployeeProvision[]
   education         EmployeeEducation[]
   workExperience    EmployeeWorkExperience[]
   profile           EmployeeProfile?
@@ -1052,6 +1053,25 @@ model EmployeeDeviceAccess {
   @@unique([employeeId, deviceId])
   @@index([tenantId, deviceId])
   @@index([employeeId, commandStatus])
+}
+
+// One UpdateEmployee outcome per documented eBio location code. Device policy
+// rows remain per machine because BlockUnBlockUser is a device command.
+model EbioEmployeeProvision {
+  id            String   @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  locationCode  String
+  status        String   @default("pending") // sent | failed
+  lastAttemptAt DateTime?
+  lastResponse  String?
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([employeeId, locationCode])
+  @@index([tenantId, employeeId])
 }
 
 // ─── Asset tracking ────────────────────────────────────────────────────────
