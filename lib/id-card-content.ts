@@ -8,6 +8,12 @@ export type IdCardEmployeeContent = {
   profile: { bloodGroup: string | null } | null;
 };
 
+export const ID_CARD_ARTBOARD = { width: 591, height: 1004 } as const;
+export const ID_CARD_LAYOUT = {
+  photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295 },
+  fields: { x: 0.06, y: 0.535, width: 0.88, rowHeight: 0.041, gap: 0.006 },
+} as const;
+
 const ellipsis = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
 
 export function idCardDetails(employee: IdCardEmployeeContent) {
