@@ -5,6 +5,7 @@ import {
   shouldProvisionEmployeeLogin,
 } from "../lib/employee-input";
 import { optionalDateInput } from "../lib/dates";
+import { shouldShowSpouseDetails, updateMaritalStatus } from "../lib/employee-spouse";
 
 // The Position select submits its label; the API must retain it independently
 // of whether it exists in the current scoped options list.
@@ -30,5 +31,13 @@ assert.equal(optionalDateInput("Invalid Date"), "invalid");
 const storedExpiry = optionalDateInput("2030-12-31T00:00:00.000Z");
 assert.ok(storedExpiry instanceof Date);
 assert.equal(storedExpiry.toISOString(), "2030-12-31T00:00:00.000Z");
+
+// Changing the status hides, rather than clears, saved spouse details.
+const spouseProfile = { maritalStatus: "Married", spouseName: "Alex", spouseContactNumber: "+919876543210" };
+assert.equal(shouldShowSpouseDetails(spouseProfile.maritalStatus), true);
+const unmarriedProfile = updateMaritalStatus(spouseProfile, "Single");
+assert.equal(shouldShowSpouseDetails(unmarriedProfile.maritalStatus), false);
+assert.equal(unmarriedProfile.spouseName, "Alex");
+assert.equal(unmarriedProfile.spouseContactNumber, "+919876543210");
 
 console.log("employee master position/licence workflow tests passed");

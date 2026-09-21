@@ -26,6 +26,7 @@ import { Field, Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
+import { shouldShowSpouseDetails, updateMaritalStatus } from "@/lib/employee-spouse";
 
 type EmployeeForm = {
   id?: string;
@@ -867,7 +868,12 @@ function Editor({
   ) =>
     setMaster((current) =>
       current
-        ? { ...current, [group]: { ...(current[group] ?? {}), [key]: value } }
+        ? {
+            ...current,
+            [group]: group === "profile" && key === "maritalStatus"
+              ? updateMaritalStatus(current.profile ?? {}, String(value))
+              : { ...(current[group] ?? {}), [key]: value },
+          }
         : current,
     );
   const rows = (key: keyof Master) =>
@@ -1260,6 +1266,21 @@ function Editor({
                         updateGroup("profile", "maritalStatus", value)
                       }
                     />
+                    {shouldShowSpouseDetails(profile.maritalStatus) && (
+                      <>
+                        <TextField
+                          label="Spouse name"
+                          value={profile.spouseName}
+                          onChange={(value) => updateGroup("profile", "spouseName", value)}
+                        />
+                        <TextField
+                          label="Spouse contact number"
+                          type="tel"
+                          value={profile.spouseContactNumber}
+                          onChange={(value) => updateGroup("profile", "spouseContactNumber", value)}
+                        />
+                      </>
+                    )}
                     <TextField
                       label="Date of birth"
                       type="date"

@@ -128,8 +128,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     return rows;
   };
   const parseProfile = (raw: Record<string, unknown>) => {
-    const values = optionalTextFields(raw, ["middleName", "nameAsOnAadhaar", "nickName", "gender", "celebrateDatePreference", "maritalStatus", "spouseName", "bloodGroup", "whatsappNumber", "otherMobile", "personalEmail", "placeOfBirth", "nationality", "citizenship", "fatherName", "motherName", "emergencyContactName", "emergencyContactNumber", "emergencyContactRelation"]);
+    const values = optionalTextFields(raw, ["middleName", "nameAsOnAadhaar", "nickName", "gender", "celebrateDatePreference", "maritalStatus", "bloodGroup", "whatsappNumber", "otherMobile", "personalEmail", "placeOfBirth", "nationality", "citizenship", "fatherName", "motherName", "emergencyContactName", "emergencyContactNumber", "emergencyContactRelation"]);
     if (fail(values)) return values;
+    if (Object.hasOwn(raw, "spouseName")) {
+      const spouseName = text(raw.spouseName, "spouseName");
+      if (fail(spouseName)) return spouseName;
+      if (spouseName && spouseName.length > 200) return { error: "spouseName must be 200 characters or fewer." };
+      values.spouseName = spouseName;
+    }
+    if (Object.hasOwn(raw, "spouseContactNumber")) {
+      const spouseContactNumber = text(raw.spouseContactNumber, "spouseContactNumber");
+      if (fail(spouseContactNumber)) return spouseContactNumber;
+      if (spouseContactNumber && !PHONE_RE.test(spouseContactNumber)) return { error: "spouseContactNumber must be a valid phone number." };
+      values.spouseContactNumber = spouseContactNumber;
+    }
     for (const field of ["dateOfBirthCertificate", "actualDateOfBirth", "marriageDate"]) { const value = date(raw[field], field); if (fail(value)) return value; values[field] = value as never; }
     for (const field of ["currentAddress", "permanentAddress"]) {
       const value = raw[field];

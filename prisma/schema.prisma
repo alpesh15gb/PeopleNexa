@@ -578,6 +578,7 @@ model EmployeeProfile {
   celebrateDatePreference    String?
   maritalStatus              String?
   spouseName                 String?
+  spouseContactNumber        String?
   marriageDate               DateTime?
   bloodGroup                 String?
   whatsappNumber             String?
