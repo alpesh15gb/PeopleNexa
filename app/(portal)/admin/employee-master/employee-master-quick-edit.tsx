@@ -765,16 +765,6 @@ function OfficialLookupFields({
         }))}
       />
       <SelectField
-        label="Department"
-        value={core.departmentId}
-        onChange={(value) => updateCore("departmentId", value)}
-        placeholder="Unassigned"
-        options={lookups.departments.map((department) => ({
-          value: department.id,
-          label: department.name,
-        }))}
-      />
-      <SelectField
         label="Shift"
         value={core.shiftId}
         onChange={(value) => updateCore("shiftId", value)}
@@ -1344,6 +1334,16 @@ function Editor({
                           value,
                         )
                       }
+                    />
+                    <SelectField
+                      label="Department"
+                      value={core.departmentId}
+                      onChange={(value) => updateCore("departmentId", value)}
+                      placeholder="Unassigned"
+                      options={loadedLookups.departments.map((department) => ({
+                        value: department.id,
+                        label: department.name,
+                      }))}
                     />
                     <CustomSelectField
                       label="Sub department"
