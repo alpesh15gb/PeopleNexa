@@ -270,6 +270,13 @@ select option {
   box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4), 0 8px 40px -8px rgba(96, 165, 250, 0.45);
 }
 
+/* Masks a sensitive identifier in place while keeping the field a text input,
+   so the browser never offers to autofill or save it as a credential.
+   Blink/WebKit only — Firefox falls back to showing the value. */
+.mask-secret {
+  -webkit-text-security: disc;
+}
+
 /* ── Elevation scale (MASTER.md shadow depths) ─────────────────────────── */
 .elev-1 {
   box-shadow: var(--shadow-sm);

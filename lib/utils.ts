@@ -16,3 +16,19 @@ export function formatMoney(n: number) {
 export function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
+
+// Read-only views mask statutory identifiers; the edit form reveals them on
+// demand. These fail closed: a malformed legacy value is still masked rather
+// than displayed in full, so an unexpected shape can never leak the identifier.
+export function maskAadhaar(value?: string | null) {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (!digits) return "—";
+  return digits.length > 4 ? `XXXX XXXX ${digits.slice(-4)}` : "XXXX";
+}
+
+export function maskPan(value?: string | null) {
+  const pan = (value ?? "").trim().toUpperCase();
+  if (!pan) return "—";
+  if (pan.length < 6) return "*****";
+  return `${pan.slice(0, 5)}***${pan.slice(-2)}`;
+}

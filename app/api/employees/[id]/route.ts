@@ -40,7 +40,7 @@ async function wouldCreateManagerCycle(
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
 const LICENSE_CLASSIFICATIONS = new Set(["transport", "non_transport", "no_license"]);
-const PHONE_RE = /^\+?[0-9]{7,15}$/;
+const PHONE_RE = /^\+?[0-9]{10,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const UAN_RE = /^\d{12}$/;
@@ -316,9 +316,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (body.phone === null || String(body.phone).trim() === "") {
       nextPhone = null;
     } else {
-      nextPhone = String(body.phone).trim();
-      if (!PHONE_RE.test(nextPhone.replace(/[\s-]/g, ""))) {
-        return NextResponse.json({ error: "Enter a valid phone number." }, { status: 400 });
+      nextPhone = String(body.phone).replace(/[\s-]/g, "").trim();
+      // Validate only on a real change, compared against the normalized stored
+      // value, so a legacy short or formatted number never blocks an unrelated
+      // edit — it is simply re-saved in normalized form.
+      const currentPhone = (employee.phone ?? "").replace(/[\s-]/g, "").trim();
+      if (nextPhone !== currentPhone && !PHONE_RE.test(nextPhone)) {
+        return NextResponse.json({ error: "Enter a valid phone number (10-15 digits)." }, { status: 400 });
       }
     }
   }

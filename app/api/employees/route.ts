@@ -81,7 +81,7 @@ const safeSelect = {
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
 const LICENSE_CLASSIFICATIONS = new Set(["transport", "non_transport", "no_license"]);
-const PHONE_RE = /^\+?[0-9]{7,15}$/;
+const PHONE_RE = /^\+?[0-9]{10,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const UAN_RE = /^\d{12}$/;
@@ -164,8 +164,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const history = employeeHistory(body.history);
     if ("error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
-    // Location managers create staff only inside their assigned location.
-    // Financial/privileged fields stay admin-only and are stripped here.
+    // Location managers create staff only inside their assigned location, with
+    // the same data fields an admin can set. Privilege escalation stays
+    // admin-only: role and loginOnly are stripped here, matching the edit route
+    // so a field accepted on create is also accepted on update.
     let locationId: string | null = null;
     if (session.role === "location_manager") {
       const manager = await prisma.employee.findFirst({
@@ -180,19 +182,7 @@ export async function POST(req: NextRequest) {
       if (!body.branchId) {
         return NextResponse.json({ error: "A branch in your location is required." }, { status: 400 });
       }
-      for (const k of [
-        "role",
-        "loginOnly",
-        "salary",
-        "payMode",
-        "workBasisRate",
-        "salaryStructure",
-        "bankName",
-        "accountNumber",
-        "ifscCode",
-        "pan",
-        "uan",
-      ]) {
+      for (const k of ["role", "loginOnly"]) {
         delete (body as Record<string, unknown>)[k];
       }
     }
@@ -286,9 +276,11 @@ export async function POST(req: NextRequest) {
     }
     let phone: string | null = null;
     if (body.phone != null && String(body.phone).trim() !== "") {
-      phone = String(body.phone).trim();
-      if (!PHONE_RE.test(phone.replace(/[\s-]/g, ""))) {
-        return NextResponse.json({ error: "Enter a valid phone number." }, { status: 400 });
+      // Persist the normalized form so the column stays comparable, matching
+      // how Aadhaar / PAN / UAN / IFSC are already normalized before saving.
+      phone = String(body.phone).replace(/[\s-]/g, "").trim();
+      if (!PHONE_RE.test(phone)) {
+        return NextResponse.json({ error: "Enter a valid phone number (10-15 digits)." }, { status: 400 });
       }
     }
     const pan = body.pan != null && String(body.pan).trim() !== "" ? String(body.pan).trim().toUpperCase() : null;

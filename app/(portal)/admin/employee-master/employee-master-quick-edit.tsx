@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type FormEvent,
@@ -14,6 +15,8 @@ import {
   Building2,
   ChevronRight,
   CreditCard,
+  Eye,
+  EyeOff,
   FileText,
   GraduationCap,
   Pencil,
@@ -52,6 +55,8 @@ type EmployeeForm = {
   payMode?: string | null;
   joiningDate: string;
   profilePicture?: string | null;
+  aadhaarNumber?: string | null;
+  pan?: string | null;
   drivingLicenseNumber?: string | null;
   drivingLicenseClassification?: string | null;
   drivingLicenseType?: string | null;
@@ -313,18 +318,99 @@ function CustomSelectField({
   );
 }
 
+// Statutory identifiers are masked by default and revealed on demand.
+// Deliberately NOT type="password": a password field invites the browser to
+// autofill a saved password into the Aadhaar/PAN input, or to capture the
+// identifier as a credential. The input also stays mounted while masked so an
+// uncontrolled form always submits the key and never clears a stored value.
+function MaskedInput({
+  label,
+  name,
+  hint,
+  value,
+  onChange,
+  defaultValue,
+  maxLength,
+  inputMode,
+  placeholder,
+  disabled,
+}: {
+  label: string;
+  name?: string;
+  hint?: string;
+  value?: string;
+  onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  defaultValue?: string;
+  maxLength?: number;
+  inputMode?: "text" | "numeric";
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const id = useId();
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor={id}
+        className="block text-[12px] font-semibold tracking-[0.01em] text-foreground/75"
+      >
+        {label}
+      </label>
+      <div className="relative">
+        <Input
+          id={id}
+          name={name}
+          type="text"
+          value={value}
+          onChange={onChange}
+          defaultValue={defaultValue}
+          maxLength={maxLength}
+          inputMode={inputMode}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          spellCheck={false}
+          className={revealed ? "pr-12" : "pr-12 mask-secret"}
+        />
+        <button
+          type="button"
+          onClick={() => setRevealed((current) => !current)}
+          disabled={disabled}
+          aria-label={revealed ? `Hide ${label}` : `Show ${label}`}
+          aria-pressed={revealed}
+          title={revealed ? `Hide ${label}` : `Show ${label}`}
+          className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {revealed ? (
+            <EyeOff className="h-4 w-4" />
+          ) : (
+            <Eye className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+      {hint ? (
+        <p className="text-[12px] leading-relaxed text-muted-foreground/75">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function EmployeeFields({
   employee,
   includeCodes = false,
   controlled,
   setControlled,
   positionChoices,
+  canEditPan = true,
 }: {
   employee: EmployeeForm;
   includeCodes?: boolean;
   controlled?: Row;
   setControlled?: (key: string, value: string) => void;
   positionChoices?: string[];
+  canEditPan?: boolean;
 }) {
   const lookups = useContext(EmployeeMasterLookupsContext);
   const value = (key: string) =>
@@ -427,6 +513,36 @@ function EmployeeFields({
           defaultValue={controlled ? undefined : employee.joiningDate}
         />
       </Field>
+      <MaskedInput
+        label="Aadhaar number"
+        name="aadhaarNumber"
+        inputMode="numeric"
+        maxLength={14}
+        placeholder="12-digit Aadhaar"
+        hint="Optional. Spaces and hyphens are removed on save."
+        value={value("aadhaarNumber")}
+        onChange={change("aadhaarNumber")}
+        defaultValue={
+          controlled ? undefined : (employee.aadhaarNumber ?? "")
+        }
+      />
+      <MaskedInput
+        label="PAN"
+        name={canEditPan ? "pan" : undefined}
+        maxLength={10}
+        placeholder={canEditPan ? "ABCDE1234F" : "Restricted for your role"}
+        disabled={!canEditPan}
+        hint={
+          canEditPan
+            ? "Optional. Saved in upper case."
+            : "Only admins and location managers can view or edit PAN."
+        }
+        value={canEditPan ? value("pan") : ""}
+        onChange={canEditPan ? change("pan") : undefined}
+        defaultValue={
+          controlled || !canEditPan ? undefined : (employee.pan ?? "")
+        }
+      />
     </>
   );
 }
@@ -830,6 +946,7 @@ function Editor({
   initial,
   onClose,
   canEditEmail,
+  canEditPan = true,
   lookups = emptyLookups,
   mode = "sections",
 }: {
@@ -837,6 +954,7 @@ function Editor({
   initial: EmployeeForm;
   onClose: () => void;
   canEditEmail: boolean;
+  canEditPan?: boolean;
   lookups?: EmployeeMasterLookups;
   mode?: "sections" | "wizard" | "continuation";
 }) {
@@ -989,6 +1107,14 @@ function Editor({
         drivingLicenseClassification: core.drivingLicenseClassification || null,
         drivingLicenseType: core.drivingLicenseType || null,
         drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null,
+        // Omit rather than null when the value was never loaded, so a redacted
+        // master response cannot wipe a stored identifier.
+        ...(core.aadhaarNumber !== undefined
+          ? { aadhaarNumber: core.aadhaarNumber || null }
+          : {}),
+        ...(canEditPan && core.pan !== undefined
+          ? { pan: core.pan || null }
+          : {}),
         ...(core.password ? { password: core.password } : {}),
       };
       if (canEditEmail) corePayload.email = core.email;
@@ -1164,6 +1290,7 @@ function Editor({
                       includeCodes
                       controlled={core}
                       setControlled={updateCore}
+                      canEditPan={canEditPan}
                       employee={{
                         ...initial,
                         firstName: stringValue(core.firstName),
@@ -1338,6 +1465,14 @@ function Editor({
                       value={profile.whatsappNumber}
                       onChange={(value) =>
                         updateGroup("profile", "whatsappNumber", value)
+                      }
+                    />
+                    <TextField
+                      label="Personal mobile"
+                      type="tel"
+                      value={profile.otherMobile}
+                      onChange={(value) =>
+                        updateGroup("profile", "otherMobile", value)
                       }
                     />
                     <TextField
@@ -1654,6 +1789,13 @@ function Editor({
                         }
                       />
                       <TextField
+                        label="Bank branch"
+                        value={row.bankBranch}
+                        onChange={(value) =>
+                          updateRow("bankAccounts", index, "bankBranch", value)
+                        }
+                      />
+                      <TextField
                         label="Account holder"
                         value={row.accountHolder}
                         onChange={(value) =>
@@ -1855,11 +1997,13 @@ export function EmployeeMasterQuickEdit({
   employee,
   canEditEmail,
   canEditMaster,
+  canEditPan = true,
   ...lookups
 }: {
   employee: EmployeeForm & { id: string };
   canEditEmail: boolean;
   canEditMaster: boolean;
+  canEditPan?: boolean;
 } & EmployeeMasterLookups) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1878,6 +2022,12 @@ export function EmployeeMasterQuickEdit({
         joiningDate: form.get("joiningDate") || null,
       };
       if (canEditEmail) payload.email = form.get("email");
+      // Absent inputs (a restricted PAN renders without a name) stay omitted so
+      // the server treats them as "no change" instead of clearing them.
+      const aadhaarNumber = form.get("aadhaarNumber");
+      if (aadhaarNumber !== null) payload.aadhaarNumber = aadhaarNumber;
+      const pan = form.get("pan");
+      if (pan !== null) payload.pan = pan;
       const response = await fetch(`/api/employees/${employee.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1909,6 +2059,7 @@ export function EmployeeMasterQuickEdit({
             id={employee.id}
             initial={employee}
             canEditEmail={canEditEmail}
+            canEditPan={canEditPan}
             lookups={lookups}
             mode="wizard"
             onClose={() => setOpen(false)}
@@ -1923,7 +2074,7 @@ export function EmployeeMasterQuickEdit({
       </Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Edit employee">
         <form onSubmit={quickSave} className="grid gap-4 sm:grid-cols-2">
-          <EmployeeFields employee={employee} />
+          <EmployeeFields employee={employee} canEditPan={canEditPan} />
           <div className="col-span-full flex justify-end gap-2">
             <Button
               type="button"
@@ -1946,10 +2097,12 @@ export function EmployeeMasterCreate({
   branches,
   positions,
   requireBranch,
+  canEditPan = true,
 }: {
   branches: Array<{ id: string; name: string }>;
   positions: string[];
   requireBranch: boolean;
+  canEditPan?: boolean;
 }) {
   return (
     <EmployeeMasterLookupsContext.Provider
@@ -1958,6 +2111,7 @@ export function EmployeeMasterCreate({
       <EmployeeMasterCreateContent
         branches={branches}
         requireBranch={requireBranch}
+        canEditPan={canEditPan}
       />
     </EmployeeMasterLookupsContext.Provider>
   );
@@ -1966,9 +2120,11 @@ export function EmployeeMasterCreate({
 function EmployeeMasterCreateContent({
   branches,
   requireBranch,
+  canEditPan = true,
 }: {
   branches: Array<{ id: string; name: string }>;
   requireBranch: boolean;
+  canEditPan?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<EmployeeForm | null>(null);
@@ -2059,6 +2215,8 @@ function EmployeeMasterCreateContent({
           joiningDate: form.get("joiningDate") || null,
           branchId: form.get("branchId") || null,
           password: form.get("password"),
+          aadhaarNumber: form.get("aadhaarNumber"),
+          pan: form.get("pan"),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2173,6 +2331,7 @@ function EmployeeMasterCreateContent({
               joiningDate: "",
             }}
             includeCodes
+            canEditPan={canEditPan}
           />
           <Field
             label="Initial password"
@@ -2363,6 +2522,7 @@ function EmployeeMasterCreateContent({
           id={String(created.id)}
           initial={created}
           canEditEmail
+          canEditPan={canEditPan}
           mode="continuation"
           onClose={finishLater}
         />
