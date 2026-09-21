@@ -130,3 +130,16 @@ export function isDateKey(value: string): boolean {
   const parsed = fromDateKey(value);
   return !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === value;
 }
+
+/**
+ * Parses an optional date-only form value. ISO timestamps are accepted so
+ * existing API values can be safely round-tripped through date inputs.
+ */
+export function optionalDateInput(value: unknown): Date | null | "invalid" {
+  if (value == null || String(value).trim() === "") return null;
+  const raw = String(value).trim();
+  const key = raw.slice(0, 10);
+  if (!isDateKey(key)) return "invalid";
+  if (raw !== key && Number.isNaN(new Date(raw).getTime())) return "invalid";
+  return new Date(`${key}T00:00:00.000Z`);
+}

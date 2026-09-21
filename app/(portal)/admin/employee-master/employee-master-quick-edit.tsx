@@ -125,7 +125,11 @@ const sections = [
 ] as const;
 
 function dateValue(value: unknown) {
-  return typeof value === "string" ? value.slice(0, 10) : "";
+  const key = typeof value === "string" ? value.trim().slice(0, 10) : "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) && !Number.isNaN(new Date(`${key}T00:00:00.000Z`).getTime())
+    && new Date(`${key}T00:00:00.000Z`).toISOString().slice(0, 10) === key
+    ? key
+    : "";
 }
 function stringValue(value: unknown) {
   return value == null ? "" : String(value);
@@ -172,6 +176,7 @@ function normalizeDates(master: Master): Master {
   return {
     ...master,
     joiningDate: dateValue(master.joiningDate),
+    drivingLicenseExpiresAt: dateValue(master.drivingLicenseExpiresAt),
     profile: master.profile
       ? dateFields(master.profile, [
           "dateOfBirthCertificate",
@@ -693,7 +698,7 @@ function LicenseFields({
         ]}
       />
       <TextField
-        label="Licence expiry"
+        label="Licence expiry (optional)"
         type="date"
         value={core.drivingLicenseExpiresAt}
         onChange={(value) => updateCore("drivingLicenseExpiresAt", value)}

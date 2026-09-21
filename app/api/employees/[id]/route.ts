@@ -8,6 +8,7 @@ import { profilePictureValue } from "@/lib/profile-picture";
 import { employeeHistory } from "@/lib/employee-history";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 import { optionalEmployeeEmail, optionalEmployeePosition, shouldProvisionEmployeeLogin } from "@/lib/employee-input";
+import { optionalDateInput } from "@/lib/dates";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -52,13 +53,6 @@ function joiningDateRangeError(d: Date): string | null {
     return "Joining date cannot be more than 90 days in the future.";
   }
   return null;
-}
-
-function dateInput(value: unknown): Date | null | "invalid" {
-  if (value == null || String(value).trim() === "") return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return "invalid";
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value ? "invalid" : date;
 }
 
 function salaryStructureError(v: unknown): string | null {
@@ -122,7 +116,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const nextDrivingLicenseNumber = body.drivingLicenseNumber === undefined ? undefined : (body.drivingLicenseNumber == null || String(body.drivingLicenseNumber).trim() === "" ? null : String(body.drivingLicenseNumber).trim().toUpperCase());
   const nextDrivingLicenseType = body.drivingLicenseType === undefined ? undefined : (body.drivingLicenseType == null || String(body.drivingLicenseType).trim() === "" ? null : String(body.drivingLicenseType).trim().toLowerCase());
   const nextDrivingLicenseClassification = body.drivingLicenseClassification === undefined ? undefined : (body.drivingLicenseClassification == null || String(body.drivingLicenseClassification).trim() === "" ? null : String(body.drivingLicenseClassification).trim().toLowerCase());
-  const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : dateInput(body.drivingLicenseExpiresAt);
+  const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : optionalDateInput(body.drivingLicenseExpiresAt);
   if (nextAadhaarNumber && !/^\d{12}$/.test(nextAadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
   if (nextDrivingLicenseNumber && (nextDrivingLicenseNumber.length < 8 || nextDrivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
   if (nextDrivingLicenseType && !LICENSE_TYPES.has(nextDrivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });

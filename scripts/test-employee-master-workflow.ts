@@ -4,6 +4,7 @@ import {
   optionalEmployeePosition,
   shouldProvisionEmployeeLogin,
 } from "../lib/employee-input";
+import { optionalDateInput } from "../lib/dates";
 
 // The Position select submits its label; the API must retain it independently
 // of whether it exists in the current scoped options list.
@@ -21,4 +22,13 @@ assert.equal(
   true,
 );
 
-console.log("employee master position/no-email workflow tests passed");
+// Selecting a licence classification without an expiry must submit a null
+// date, while existing ISO API values must round-trip safely through edits.
+assert.equal(optionalDateInput(""), null);
+assert.equal(optionalDateInput(null), null);
+assert.equal(optionalDateInput("Invalid Date"), "invalid");
+const storedExpiry = optionalDateInput("2030-12-31T00:00:00.000Z");
+assert.ok(storedExpiry instanceof Date);
+assert.equal(storedExpiry.toISOString(), "2030-12-31T00:00:00.000Z");
+
+console.log("employee master position/licence workflow tests passed");
