@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -122,6 +123,11 @@ const sections = [
   ["references", "References", UsersRound],
   ["banking", "Bank accounts", CreditCard],
   ["documents", "Documents", FileText],
+] as const;
+const continuationSteps = [
+  { key: "official", label: "Work details" },
+  { key: "personal", label: "Personal & contact" },
+  { key: "other", label: "Licence, bank & other" },
 ] as const;
 
 function dateValue(value: unknown) {
@@ -791,12 +797,14 @@ function Editor({
   onClose,
   canEditEmail,
   lookups = emptyLookups,
+  continuation = false,
 }: {
   id: string;
   initial: EmployeeForm;
   onClose: () => void;
   canEditEmail: boolean;
   lookups?: EmployeeMasterLookups;
+  continuation?: boolean;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -807,6 +815,8 @@ function Editor({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const load = () => {
     let cancelled = false;
@@ -844,6 +854,9 @@ function Editor({
     };
   };
   useEffect(() => load(), [id]);
+  useEffect(() => {
+    if (continuation && !loading && master) stepHeadingRef.current?.focus();
+  }, [active, continuation, loading, master]);
 
   const updateCore = (key: string, value: string) =>
     setCore((current) => ({ ...current, [key]: value }));
@@ -998,14 +1011,28 @@ function Editor({
 
   const profile = master?.profile ?? {};
   const employment = master?.employmentProfile ?? {};
+  const stepIndex = continuationSteps.findIndex((step) => step.key === active);
+  const currentStep = continuationSteps[stepIndex] ?? continuationSteps[0];
+  const goToNextStep = () => {
+    if (!formRef.current?.reportValidity()) return;
+    setActive(continuationSteps[stepIndex + 1].key);
+  };
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    if (continuation && stepIndex < continuationSteps.length - 1) {
+      event.preventDefault();
+      goToNextStep();
+      return;
+    }
+    void save(event);
+  };
   return (
     <EmployeeMasterLookupsContext.Provider value={loadedLookups}>
       <Modal
         open
         onClose={onClose}
         size="xl"
-        title="Employee master editor"
-        description="Update core information and structured HR records in one place."
+        title={continuation ? "Add master details" : "Employee master editor"}
+        description={continuation ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in one place."}
       >
         {loading ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
@@ -1018,31 +1045,52 @@ function Editor({
           </div>
         ) : (
           <form
-            onSubmit={save}
+            ref={formRef}
+            onSubmit={submit}
+            noValidate={continuation}
             className="grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]"
           >
-            <nav
-              aria-label="Employee master sections"
-              className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4"
-            >
-              {sections.map(([key, label, Icon]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setActive(key)}
-                  aria-current={active === key ? "step" : undefined}
-                  className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-white" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {label}
-                  <ChevronRight
-                    className="ml-auto hidden h-3.5 w-3.5 lg:block"
-                    aria-hidden="true"
-                  />
-                </button>
-              ))}
-            </nav>
+            {continuation ? (
+              <div className="space-y-3 border-b border-edge pb-4 lg:border-b-0 lg:border-r lg:pr-4">
+                <p className="text-sm font-semibold">Step {stepIndex + 1} of {continuationSteps.length}</p>
+                <ol aria-label="Master detail progress" className="flex gap-2 lg:block lg:space-y-2">
+                  {continuationSteps.map((step, index) => (
+                    <li key={step.key} aria-current={active === step.key ? "step" : undefined} className={`min-w-0 rounded-lg px-3 py-2 text-xs font-medium ${active === step.key ? "bg-primary text-white" : index < stepIndex ? "bg-tint text-foreground" : "text-muted-foreground"}`}>
+                      <span className="mr-1.5">{index + 1}.</span>{step.label}
+                    </li>
+                  ))}
+                </ol>
+                <div className="h-1.5 overflow-hidden rounded-full bg-tint" aria-hidden="true">
+                  <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${((stepIndex + 1) / continuationSteps.length) * 100}%` }} />
+                </div>
+              </div>
+            ) : (
+              <nav
+                aria-label="Employee master sections"
+                className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4"
+              >
+                {sections.map(([key, label, Icon]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActive(key)}
+                    aria-current={active === key ? "step" : undefined}
+                    className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-white" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                    {label}
+                    <ChevronRight className="ml-auto hidden h-3.5 w-3.5 lg:block" aria-hidden="true" />
+                  </button>
+                ))}
+              </nav>
+            )}
             <div className="min-w-0 space-y-5">
+              {continuation && (
+                <div>
+                  <h3 ref={stepHeadingRef} tabIndex={-1} className="text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{currentStep.label}</h3>
+                  <p className="text-sm text-muted-foreground">Required fields on this step must be completed before continuing. All other details are optional.</p>
+                </div>
+              )}
               {active === "official" && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <EmployeePhotoField core={core} updateCore={updateCore} />
@@ -1293,7 +1341,7 @@ function Editor({
                   />
                 </section>
               )}
-              {active === "dependents" && (
+              {(active === "dependents" || (continuation && active === "other")) && (
                 <Collection
                   title="Dependents"
                   rows={rows("dependents")}
@@ -1347,7 +1395,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {active === "education" && (
+              {(active === "education" || (continuation && active === "other")) && (
                 <Collection
                   title="Education"
                   rows={rows("education")}
@@ -1393,7 +1441,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {active === "experience" && (
+              {(active === "experience" || (continuation && active === "other")) && (
                 <Collection
                   title="Work experience"
                   rows={rows("workExperience")}
@@ -1464,7 +1512,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {active === "references" && (
+              {(active === "references" || (continuation && active === "other")) && (
                 <Collection
                   title="References"
                   rows={rows("references")}
@@ -1508,7 +1556,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {active === "banking" && (
+              {(active === "banking" || (continuation && active === "other")) && (
                 <Collection
                   title="Bank accounts"
                   rows={rows("bankAccounts")}
@@ -1588,7 +1636,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {active === "documents" && (
+              {(active === "documents" || (continuation && active === "other")) && (
                 <Collection
                   title="Documents"
                   rows={rows("documents")}
@@ -1647,18 +1695,38 @@ function Editor({
                     updateCore={updateCore}
                     employeeId={id}
                   />
-                  <LicenseFields core={core} updateCore={updateCore} />
                   <EmploymentStatusField core={core} updateCore={updateCore} />
                 </div>
               )}
-              <div className="flex justify-end gap-2 border-t border-edge pt-5">
-                <Button type="button" variant="ghost" onClick={onClose}>
-                  Cancel
-                </Button>
-                <Button type="submit" loading={saving}>
-                  Save employee master
-                </Button>
-              </div>
+              {(active === "official" || (continuation && active === "other")) && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <LicenseFields core={core} updateCore={updateCore} />
+                </div>
+              )}
+              {continuation ? (
+                <div className="flex flex-wrap justify-between gap-2 border-t border-edge pt-5">
+                  <div>
+                    {stepIndex > 0 && (
+                      <Button type="button" variant="outline" onClick={() => setActive(continuationSteps[stepIndex - 1].key)}>
+                        Previous
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="ghost" onClick={onClose}>Skip for now</Button>
+                    {stepIndex < continuationSteps.length - 1 ? (
+                      <Button type="button" onClick={goToNextStep}>Next</Button>
+                    ) : (
+                      <Button type="submit" loading={saving}>Save master details</Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-2 border-t border-edge pt-5">
+                  <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                  <Button type="submit" loading={saving}>Save employee master</Button>
+                </div>
+              )}
             </div>
           </form>
         )}
@@ -2238,6 +2306,7 @@ function EmployeeMasterCreateContent({
           id={String(created.id)}
           initial={created}
           canEditEmail
+          continuation
           onClose={finishLater}
         />
       )}
