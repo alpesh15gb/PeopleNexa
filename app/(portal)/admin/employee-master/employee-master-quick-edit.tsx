@@ -26,7 +26,11 @@ import { Field, Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
-import { shouldShowSpouseDetails, updateMaritalStatus } from "@/lib/employee-spouse";
+import {
+  shouldShowSpouseDetails,
+  updateMaritalStatus,
+  updateSpouseDetails,
+} from "@/lib/employee-spouse";
 import {
   adjacentEmployeeMasterWizardStep,
   employeeMasterWizardSteps,
@@ -535,6 +539,34 @@ function TextField({
   );
 }
 
+function SpouseFields({
+  profile,
+  onChange,
+}: {
+  profile: Row;
+  onChange: (field: "spouseName" | "spouseContactNumber", value: string) => void;
+}) {
+  return (
+    <>
+      <Field label="Spouse name">
+        <Input
+          value={stringValue(profile.spouseName)}
+          onChange={(event) => onChange("spouseName", event.target.value)}
+        />
+      </Field>
+      <Field label="Spouse contact number">
+        <Input
+          type="tel"
+          value={stringValue(profile.spouseContactNumber)}
+          onChange={(event) =>
+            onChange("spouseContactNumber", event.target.value)
+          }
+        />
+      </Field>
+    </>
+  );
+}
+
 function AddressFields({
   title,
   value,
@@ -873,6 +905,8 @@ function Editor({
             ...current,
             [group]: group === "profile" && key === "maritalStatus"
               ? updateMaritalStatus(current.profile ?? {}, String(value))
+              : group === "profile" && (key === "spouseName" || key === "spouseContactNumber")
+                ? updateSpouseDetails(current.profile ?? {}, key, String(value))
               : { ...(current[group] ?? {}), [key]: value },
           }
         : current,
@@ -1269,19 +1303,13 @@ function Editor({
                       }
                     />
                     {shouldShowSpouseDetails(profile.maritalStatus) && (
-                      <>
-                        <TextField
-                          label="Spouse name"
-                          value={profile.spouseName}
-                          onChange={(value) => updateGroup("profile", "spouseName", value)}
-                        />
-                        <TextField
-                          label="Spouse contact number"
-                          type="tel"
-                          value={profile.spouseContactNumber}
-                          onChange={(value) => updateGroup("profile", "spouseContactNumber", value)}
-                        />
-                      </>
+                      <SpouseFields
+                        key="spouse-details"
+                        profile={profile}
+                        onChange={(field, value) =>
+                          updateGroup("profile", field, value)
+                        }
+                      />
                     )}
                     <TextField
                       label="Date of birth"

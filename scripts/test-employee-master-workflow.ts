@@ -5,7 +5,11 @@ import {
   shouldProvisionEmployeeLogin,
 } from "../lib/employee-input";
 import { optionalDateInput } from "../lib/dates";
-import { shouldShowSpouseDetails, updateMaritalStatus } from "../lib/employee-spouse";
+import {
+  shouldShowSpouseDetails,
+  updateMaritalStatus,
+  updateSpouseDetails,
+} from "../lib/employee-spouse";
 
 // The Position select submits its label; the API must retain it independently
 // of whether it exists in the current scoped options list.
@@ -39,5 +43,21 @@ const unmarriedProfile = updateMaritalStatus(spouseProfile, "Single");
 assert.equal(shouldShowSpouseDetails(unmarriedProfile.maritalStatus), false);
 assert.equal(unmarriedProfile.spouseName, "Alex");
 assert.equal(unmarriedProfile.spouseContactNumber, "+919876543210");
+
+// Controlled spouse edits preserve both values through marital-status toggles.
+const editedSpouseProfile = updateSpouseDetails(
+  updateSpouseDetails(spouseProfile, "spouseName", "Alex Morgan"),
+  "spouseContactNumber",
+  "+919876543211",
+);
+assert.equal(editedSpouseProfile.spouseName, "Alex Morgan");
+assert.equal(editedSpouseProfile.spouseContactNumber, "+919876543211");
+assert.deepEqual(
+  updateMaritalStatus(
+    updateMaritalStatus(editedSpouseProfile, "Single"),
+    "Married",
+  ),
+  { ...editedSpouseProfile, maritalStatus: "Married" },
+);
 
 console.log("employee master position/licence workflow tests passed");

@@ -23,5 +23,17 @@ const editorSource = readFileSync(
 const directEditor = editorSource.slice(editorSource.indexOf("export function EmployeeMasterQuickEdit"));
 assert.match(directEditor, /<Editor[\s\S]*?mode="wizard"/);
 assert.match(editorSource, /mode="continuation"/);
+assert.match(
+  editorSource,
+  /<SpouseFields\s+key="spouse-details"[\s\S]*?profile=\{profile\}/,
+);
+assert.match(
+  editorSource,
+  /value=\{stringValue\(profile\.spouseName\)\}[\s\S]*?onChange=\{\(event\) => onChange\("spouseName", event\.target\.value\)\}/,
+);
+assert.match(
+  editorSource,
+  /value=\{stringValue\(profile\.spouseContactNumber\)\}[\s\S]*?onChange=\{\(event\) =>[\s\S]*?onChange\("spouseContactNumber", event\.target\.value\)/,
+);
 
 console.log("employee master direct-editor wizard navigation tests passed");
