@@ -15,3 +15,8 @@ export function adjacentEmployeeMasterWizardStep(
   const index = employeeMasterWizardSteps.findIndex((step) => step.key === current);
   return employeeMasterWizardSteps[index + (direction === "next" ? 1 : -1)]?.key;
 }
+
+export function employeeMasterWizardNextAction(current: EmployeeMasterWizardStep) {
+  const next = adjacentEmployeeMasterWizardStep(current, "next");
+  return next ? { type: "next" as const, step: next } : { type: "save" as const };
+}

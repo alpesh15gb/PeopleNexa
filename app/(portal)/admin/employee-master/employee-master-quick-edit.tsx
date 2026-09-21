@@ -33,6 +33,7 @@ import {
 } from "@/lib/employee-spouse";
 import {
   adjacentEmployeeMasterWizardStep,
+  employeeMasterWizardNextAction,
   employeeMasterWizardSteps,
   type EmployeeMasterWizardStep,
 } from "@/lib/employee-master-wizard";
@@ -1054,13 +1055,13 @@ function Editor({
   const employment = master?.employmentProfile ?? {};
   const stepIndex = employeeMasterWizardSteps.findIndex((step) => step.key === active);
   const currentStep = employeeMasterWizardSteps[stepIndex] ?? employeeMasterWizardSteps[0];
+  const nextAction = employeeMasterWizardNextAction(currentStep.key);
   const goToNextStep = () => {
     if (!formRef.current?.reportValidity()) return;
-    const next = adjacentEmployeeMasterWizardStep(currentStep.key, "next");
-    if (next) setActive(next);
+    if (nextAction.type === "next") setActive(nextAction.step);
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
-    if (wizard && stepIndex < employeeMasterWizardSteps.length - 1) {
+    if (wizard && nextAction.type === "next") {
       event.preventDefault();
       goToNextStep();
       return;
@@ -1765,7 +1766,7 @@ function Editor({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="ghost" onClick={onClose}>{canSkip ? "Skip for now" : "Cancel"}</Button>
-                    {stepIndex < employeeMasterWizardSteps.length - 1 ? (
+                    {nextAction.type === "next" ? (
                       <Button type="button" onClick={goToNextStep}>Next</Button>
                     ) : (
                       <Button type="submit" loading={saving}>{canSkip ? "Save master details" : "Save employee master"}</Button>
