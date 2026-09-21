@@ -21,8 +21,10 @@ export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 5
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
   const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
   drawBackground(doc, front);
-  if (branding?.hasConfiguredValues) await drawBranding(doc, branding);
-  if (template?.frontContentPanel !== "preserve") drawFrontContentPanel(doc);
+  // Uploaded artwork owns its header, footer and motif, so app branding is
+  // drawn only on the bundled fallback artwork.
+  if (!template && branding?.hasConfiguredValues) await drawBranding(doc, branding);
+  if (!template || template.frontContentPanel === "clean") drawFrontContentPanel(doc);
   const image = photo(employee.profilePicture);
   if (image) { try { const source = (doc as unknown as { openImage: (value: Buffer) => { width: number; height: number } }).openImage(image); const scale = Math.max(photoFrame.width / source.width, photoFrame.height / source.height); const imageWidth = source.width * scale; const imageHeight = source.height * scale; const imageX = photoFrame.x - (imageWidth - photoFrame.width) * (crop.x / 100); const imageY = photoFrame.y - (imageHeight - photoFrame.height) * (crop.y / 100); doc.save().roundedRect(photoFrame.x, photoFrame.y, photoFrame.width, photoFrame.height, photoFrame.radius).clip().image(image, imageX, imageY, { width: imageWidth, height: imageHeight }).restore(); } catch { /* The supplied template remains usable when a legacy photo is invalid. */ } }
   doc.roundedRect(photoFrame.x, photoFrame.y, photoFrame.width, photoFrame.height, photoFrame.radius).lineWidth(1.5).strokeColor("#ef7600").stroke();

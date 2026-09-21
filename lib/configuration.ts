@@ -46,7 +46,7 @@ export function idCardTemplate(payload: unknown): IdCardTemplate | null {
   const record = payload as Record<string, unknown>;
   const frontBackgroundUrl = typeof record.frontBackgroundUrl === "string" ? record.frontBackgroundUrl : "";
   const backBackgroundUrl = typeof record.backBackgroundUrl === "string" ? record.backBackgroundUrl : "";
-  const frontContentPanel = record.frontContentPanel === undefined ? "clean" : record.frontContentPanel;
+  const frontContentPanel = record.frontContentPanel === undefined ? "preserve" : record.frontContentPanel;
   // Lazy import avoidance keeps this shared resolver usable in client code.
   if (!isSafeImageUrl(frontBackgroundUrl) || !isSafeImageUrl(backBackgroundUrl) || !["clean", "preserve"].includes(String(frontContentPanel))) return null;
   return { frontBackgroundUrl, backBackgroundUrl, frontContentPanel: frontContentPanel as IdCardTemplate["frontContentPanel"] };
