@@ -16,6 +16,7 @@
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
     "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",
     "test:employee-master": "tsx scripts/test-employee-master-workflow.ts",
+    "test:employee-master-wizard": "tsx scripts/test-employee-master-wizard.ts",
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts"
   },
   "dependencies": {

@@ -27,6 +27,11 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
 import { shouldShowSpouseDetails, updateMaritalStatus } from "@/lib/employee-spouse";
+import {
+  adjacentEmployeeMasterWizardStep,
+  employeeMasterWizardSteps,
+  type EmployeeMasterWizardStep,
+} from "@/lib/employee-master-wizard";
 
 type EmployeeForm = {
   id?: string;
@@ -125,12 +130,6 @@ const sections = [
   ["banking", "Bank accounts", CreditCard],
   ["documents", "Documents", FileText],
 ] as const;
-const continuationSteps = [
-  { key: "official", label: "Work details" },
-  { key: "personal", label: "Personal & contact" },
-  { key: "other", label: "Licence, bank & other" },
-] as const;
-
 function dateValue(value: unknown) {
   const key = typeof value === "string" ? value.trim().slice(0, 10) : "";
   return /^\d{4}-\d{2}-\d{2}$/.test(key) && !Number.isNaN(new Date(`${key}T00:00:00.000Z`).getTime())
@@ -798,26 +797,28 @@ function Editor({
   onClose,
   canEditEmail,
   lookups = emptyLookups,
-  continuation = false,
+  mode = "sections",
 }: {
   id: string;
   initial: EmployeeForm;
   onClose: () => void;
   canEditEmail: boolean;
   lookups?: EmployeeMasterLookups;
-  continuation?: boolean;
+  mode?: "sections" | "wizard" | "continuation";
 }) {
   const toast = useToast();
   const router = useRouter();
   const [master, setMaster] = useState<Master | null>(null);
   const [core, setCore] = useState<Row>({ ...initial });
   const [loadedLookups, setLoadedLookups] = useState<EmployeeMasterLookups>(lookups);
-  const [active, setActive] = useState("official");
+  const [active, setActive] = useState<EmployeeMasterWizardStep | (typeof sections)[number][0]>("official");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  const wizard = mode !== "sections";
+  const canSkip = mode === "continuation";
 
   const load = () => {
     let cancelled = false;
@@ -856,8 +857,8 @@ function Editor({
   };
   useEffect(() => load(), [id]);
   useEffect(() => {
-    if (continuation && !loading && master) stepHeadingRef.current?.focus();
-  }, [active, continuation, loading, master]);
+    if (wizard && !loading && master) stepHeadingRef.current?.focus();
+  }, [active, loading, master, wizard]);
 
   const updateCore = (key: string, value: string) =>
     setCore((current) => ({ ...current, [key]: value }));
@@ -1017,14 +1018,15 @@ function Editor({
 
   const profile = master?.profile ?? {};
   const employment = master?.employmentProfile ?? {};
-  const stepIndex = continuationSteps.findIndex((step) => step.key === active);
-  const currentStep = continuationSteps[stepIndex] ?? continuationSteps[0];
+  const stepIndex = employeeMasterWizardSteps.findIndex((step) => step.key === active);
+  const currentStep = employeeMasterWizardSteps[stepIndex] ?? employeeMasterWizardSteps[0];
   const goToNextStep = () => {
     if (!formRef.current?.reportValidity()) return;
-    setActive(continuationSteps[stepIndex + 1].key);
+    const next = adjacentEmployeeMasterWizardStep(currentStep.key, "next");
+    if (next) setActive(next);
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
-    if (continuation && stepIndex < continuationSteps.length - 1) {
+    if (wizard && stepIndex < employeeMasterWizardSteps.length - 1) {
       event.preventDefault();
       goToNextStep();
       return;
@@ -1037,8 +1039,8 @@ function Editor({
         open
         onClose={onClose}
         size="xl"
-        title={continuation ? "Add master details" : "Employee master editor"}
-        description={continuation ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in one place."}
+        title={canSkip ? "Add master details" : "Employee master editor"}
+        description={canSkip ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in guided steps."}
       >
         {loading ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
@@ -1053,21 +1055,21 @@ function Editor({
           <form
             ref={formRef}
             onSubmit={submit}
-            noValidate={continuation}
+            noValidate={wizard}
             className="grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]"
           >
-            {continuation ? (
+            {wizard ? (
               <div className="space-y-3 border-b border-edge pb-4 lg:border-b-0 lg:border-r lg:pr-4">
-                <p className="text-sm font-semibold">Step {stepIndex + 1} of {continuationSteps.length}</p>
+                <p className="text-sm font-semibold">Step {stepIndex + 1} of {employeeMasterWizardSteps.length}</p>
                 <ol aria-label="Master detail progress" className="flex gap-2 lg:block lg:space-y-2">
-                  {continuationSteps.map((step, index) => (
+                  {employeeMasterWizardSteps.map((step, index) => (
                     <li key={step.key} aria-current={active === step.key ? "step" : undefined} className={`min-w-0 rounded-lg px-3 py-2 text-xs font-medium ${active === step.key ? "bg-primary text-white" : index < stepIndex ? "bg-tint text-foreground" : "text-muted-foreground"}`}>
                       <span className="mr-1.5">{index + 1}.</span>{step.label}
                     </li>
                   ))}
                 </ol>
                 <div className="h-1.5 overflow-hidden rounded-full bg-tint" aria-hidden="true">
-                  <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${((stepIndex + 1) / continuationSteps.length) * 100}%` }} />
+                  <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${((stepIndex + 1) / employeeMasterWizardSteps.length) * 100}%` }} />
                 </div>
               </div>
             ) : (
@@ -1091,7 +1093,7 @@ function Editor({
               </nav>
             )}
             <div className="min-w-0 space-y-5">
-              {continuation && (
+              {wizard && (
                 <div>
                   <h3 ref={stepHeadingRef} tabIndex={-1} className="text-base font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{currentStep.label}</h3>
                   <p className="text-sm text-muted-foreground">Required fields on this step must be completed before continuing. All other details are optional.</p>
@@ -1362,7 +1364,7 @@ function Editor({
                   />
                 </section>
               )}
-              {(active === "dependents" || (continuation && active === "other")) && (
+              {(active === "dependents" || (wizard && active === "background")) && (
                 <Collection
                   title="Dependents"
                   rows={rows("dependents")}
@@ -1416,7 +1418,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "education" || (continuation && active === "other")) && (
+              {(active === "education" || (wizard && active === "background")) && (
                 <Collection
                   title="Education"
                   rows={rows("education")}
@@ -1462,7 +1464,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "experience" || (continuation && active === "other")) && (
+              {(active === "experience" || (wizard && active === "background")) && (
                 <Collection
                   title="Work experience"
                   rows={rows("workExperience")}
@@ -1533,7 +1535,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "references" || (continuation && active === "other")) && (
+              {(active === "references" || (wizard && active === "background")) && (
                 <Collection
                   title="References"
                   rows={rows("references")}
@@ -1577,7 +1579,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "banking" || (continuation && active === "other")) && (
+              {(active === "banking" || (wizard && active === "records")) && (
                 <Collection
                   title="Bank accounts"
                   rows={rows("bankAccounts")}
@@ -1657,7 +1659,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "documents" || (continuation && active === "other")) && (
+              {(active === "documents" || (wizard && active === "records")) && (
                 <Collection
                   title="Documents"
                   rows={rows("documents")}
@@ -1719,26 +1721,26 @@ function Editor({
                   <EmploymentStatusField core={core} updateCore={updateCore} />
                 </div>
               )}
-              {(active === "official" || (continuation && active === "other")) && (
+              {((!wizard && active === "official") || (wizard && active === "records")) && (
                 <div className="grid gap-4 sm:grid-cols-2">
                   <LicenseFields core={core} updateCore={updateCore} />
                 </div>
               )}
-              {continuation ? (
+              {wizard ? (
                 <div className="flex flex-wrap justify-between gap-2 border-t border-edge pt-5">
                   <div>
                     {stepIndex > 0 && (
-                      <Button type="button" variant="outline" onClick={() => setActive(continuationSteps[stepIndex - 1].key)}>
+                      <Button type="button" variant="outline" onClick={() => setActive(adjacentEmployeeMasterWizardStep(currentStep.key, "previous")!)}>
                         Previous
                       </Button>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="ghost" onClick={onClose}>Skip for now</Button>
-                    {stepIndex < continuationSteps.length - 1 ? (
+                    <Button type="button" variant="ghost" onClick={onClose}>{canSkip ? "Skip for now" : "Cancel"}</Button>
+                    {stepIndex < employeeMasterWizardSteps.length - 1 ? (
                       <Button type="button" onClick={goToNextStep}>Next</Button>
                     ) : (
-                      <Button type="submit" loading={saving}>Save master details</Button>
+                      <Button type="submit" loading={saving}>{canSkip ? "Save master details" : "Save employee master"}</Button>
                     )}
                   </div>
                 </div>
@@ -1875,6 +1877,7 @@ export function EmployeeMasterQuickEdit({
             initial={employee}
             canEditEmail={canEditEmail}
             lookups={lookups}
+            mode="wizard"
             onClose={() => setOpen(false)}
           />
         )}
@@ -2327,7 +2330,7 @@ function EmployeeMasterCreateContent({
           id={String(created.id)}
           initial={created}
           canEditEmail
-          continuation
+          mode="continuation"
           onClose={finishLater}
         />
       )}
