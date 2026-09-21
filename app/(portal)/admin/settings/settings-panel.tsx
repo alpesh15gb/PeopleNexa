@@ -120,7 +120,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <Link2 className="h-4 w-4" />
           </span>
           <div>
-            <h3 className="font-display text-base font-semibold">eBioserver Web Service</h3>
+            <h3 className="font-display text-base font-semibold">eBioserver</h3>
             <p className="text-[12px] text-muted-foreground">
               ESSL middleware — each client connects their own server, punches flow into attendance.
             </p>
@@ -228,8 +228,8 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             Maps each eBio device group (for example MNP) to a PeopleNexa Location and each eBio worksite to its own Branch. This does not move employees, change punches, or reset live sync.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
-              <Link2 className="h-4 w-4" /> Sync worksite mapping
+              <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
+                <Link2 className="h-4 w-4" /> Sync topology
             </Button>
             {topologyResult && (
               <p className="text-[12.5px] text-muted-foreground">

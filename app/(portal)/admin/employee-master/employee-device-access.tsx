@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Fingerprint } from "lucide-react";
+import { Fingerprint, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 
-type Device = { id: string; name: string; serialNumber: string; allowed: boolean; commandStatus?: string; lastCommandAt?: string | null; lastError?: string | null };
+type Device = { id: string; name: string; serialNumber: string; locationCode: string | null; allowed: boolean; commandStatus?: string; lastCommandAt?: string | null; lastError?: string | null };
 type Result = { deviceId: string; name: string; allowed: boolean; status: "sent" | "failed"; error?: string };
 type ProvisionResult = { locationCode: string; status: "sent" | "failed"; lastError?: string | null; error?: string };
 
@@ -21,6 +21,8 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
   const [results, setResults] = useState<Result[]>([]);
   const [provisionResults, setProvisionResults] = useState<ProvisionResult[]>([]);
   const [inactive, setInactive] = useState(false);
+  const [canSyncTopology, setCanSyncTopology] = useState(false);
+  const [topologyInstruction, setTopologyInstruction] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -35,8 +37,10 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
            setDevices(data.devices ?? []);
            setSelected(data.deviceIds ?? []);
            setMode(data.mode === "restricted" ? "restricted" : "all");
-           setInactive(data.mode === "blocked");
-           setProvisionResults(data.provisionResults ?? []);
+            setInactive(data.mode === "blocked");
+            setProvisionResults(data.provisionResults ?? []);
+            setCanSyncTopology(Boolean(data.canSyncTopology));
+            setTopologyInstruction(data.topologyInstruction ?? "");
         }
       })
       .catch((error) => {
@@ -52,6 +56,9 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
   function toggle(deviceId: string) {
     setSelected((current) => current.includes(deviceId) ? current.filter((id) => id !== deviceId) : [...current, deviceId]);
   }
+
+  const provisionedDevices = mode === "all" ? devices : devices.filter((device) => selected.includes(device.id));
+  const unmappedDevices = provisionedDevices.filter((device) => !device.locationCode);
 
   async function save() {
     setSaving(true);
@@ -82,7 +89,9 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
   return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Fingerprint className="h-3.5 w-3.5" /> Device access</Button><Modal open={open} onClose={() => setOpen(false)} title="Biometric device access" description="Choose whether this employee may use every active device or only selected devices.">
     {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading active devices...</div> : <div className="space-y-4">
       {inactive ? <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">This employee is inactive and is blocked on all active eBio devices. Activate the employee to restore device access.</p> : <><div className="space-y-2 rounded-xl border border-edge p-3"><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> <span><strong>Allow all active devices</strong><span className="block text-xs text-muted-foreground">No device restriction is applied.</span></span></label><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "restricted"} onChange={() => setMode("restricted")} /> <span><strong>Restrict to selected devices</strong><span className="block text-xs text-muted-foreground">Employee is blocked on every unselected device.</span></span></label></div>
-      {mode === "restricted" && (devices.length ? <div className="max-h-[45vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">{devices.map((device) => <label key={device.id} className="flex cursor-pointer items-start gap-3 p-3 hover:bg-tint"><input type="checkbox" checked={selected.includes(device.id)} onChange={() => toggle(device.id)} className="mt-1 h-4 w-4 accent-primary" /><span className="min-w-0 flex-1"><span className="block text-sm font-medium">{device.name}</span><span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span>{device.commandStatus && <span className={`mt-1 block text-xs ${device.commandStatus === "failed" ? "text-destructive" : "text-muted-foreground"}`}>Last command: {device.commandStatus}{device.lastError ? ` - ${device.lastError}` : ""}</span>}</span></label>)}</div> : <p className="rounded-xl border border-dashed border-edge p-6 text-center text-sm text-muted-foreground">No active eBio devices are available for this employee.</p>)}</>}
+       {unmappedDevices.length > 0 && <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-200"><p className="font-medium">eBio location mapping is missing for {unmappedDevices.map((device) => device.name).join(", ")}.</p><p className="mt-1 text-amber-100/90">{topologyInstruction}</p>{canSyncTopology && <a href="/admin/settings" className="mt-2 inline-flex items-center gap-1 font-medium underline"><Link2 className="h-3.5 w-3.5" /> Open eBioserver topology sync</a>}</div>}
+       {mode === "all" && devices.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">Devices and eBio locations</p>{devices.map((device) => <p key={device.id} className={`mt-1 ${device.locationCode ? "text-muted-foreground" : "text-destructive"}`}>{device.name}: {device.locationCode ? `eBio location ${device.locationCode}` : "eBio location mapping missing"}</p>)}</div>}
+       {mode === "restricted" && (devices.length ? <div className="max-h-[45vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">{devices.map((device) => <label key={device.id} className="flex cursor-pointer items-start gap-3 p-3 hover:bg-tint"><input type="checkbox" checked={selected.includes(device.id)} onChange={() => toggle(device.id)} className="mt-1 h-4 w-4 accent-primary" /><span className="min-w-0 flex-1"><span className="block text-sm font-medium">{device.name}</span><span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span><span className={`mt-1 block text-xs ${device.locationCode ? "text-muted-foreground" : "text-destructive"}`}>{device.locationCode ? `eBio location: ${device.locationCode}` : "eBio location mapping missing"}</span>{device.commandStatus && <span className={`mt-1 block text-xs ${device.commandStatus === "failed" ? "text-destructive" : "text-muted-foreground"}`}>Last command: {device.commandStatus}{device.lastError ? ` - ${device.lastError}` : ""}</span>}</span></label>)}</div> : <p className="rounded-xl border border-dashed border-edge p-6 text-center text-sm text-muted-foreground">No active eBio devices are available for this employee.</p>)}</>}
       {provisionResults.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">eBio location provisioning</p>{provisionResults.map((result) => <p key={result.locationCode} className={`mt-1 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{result.locationCode}: {result.status}{result.error ?? result.lastError ? ` - ${result.error ?? result.lastError}` : ""}</p>)}</div>}
       {results.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">Command results</p>{results.map((result) => <p key={result.deviceId} className={`mt-1 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{result.name}: {result.status}{result.error ? ` - ${result.error}` : ""}</p>)}</div>}
        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Close</Button>{!inactive && <Button type="button" onClick={save} loading={saving} disabled={mode === "restricted" && !devices.length}>Save device access</Button>}</div>

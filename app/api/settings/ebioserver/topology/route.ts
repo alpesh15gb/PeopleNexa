@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getEbioserverConfig, syncEbioWorksites } from "@/lib/ebioserver";
+import { topologySyncInstruction } from "@/lib/ebio-location";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
 /** POST — map eBio locations/devices to PeopleNexa locations/worksite branches. */
 export async function POST() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || session.role !== "admin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (session.role !== "admin") {
+    return NextResponse.json({ error: topologySyncInstruction(session.role) }, { status: 403 });
+  }
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
   if (!tenant) return NextResponse.json({ error: "not found" }, { status: 404 });
   const profile = getEbioserverConfig(tenant);

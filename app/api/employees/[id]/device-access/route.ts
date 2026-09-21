@@ -3,17 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { appendAudit } from "@/lib/audit";
 import { getEbioserverConfig, getEbioserverPassword, setEbioUserDeviceAccess, updateEbioEmployee } from "@/lib/ebioserver";
-
-type EbioDeviceConfig = { ebioserver?: boolean; locationCode?: unknown };
-
-// Do not infer eBio's documented location code from a device name, worksite,
-// or PeopleNexa branch. Provisioning requires this explicit device mapping.
-function ebioLocationCode(config: unknown): string | null {
-  const value = (config as EbioDeviceConfig | null)?.locationCode;
-  if (typeof value !== "string") return null;
-  const code = value.trim();
-  return code && code.length <= 100 && !code.includes(",") ? code : null;
-}
+import { ebioLocationCode, topologySyncInstruction } from "@/lib/ebio-location";
 
 async function locationIdFor(session: { sub: string; tenantId: string; role: string }) {
   if (session.role !== "location_manager") return null;
@@ -51,6 +41,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     enabled: employee.deviceAccessEnabled,
     status: employee.status,
     accessAvailable,
+    canSyncTopology: session.role === "admin",
+    topologyInstruction: topologySyncInstruction(session.role),
     provisioning: "mapped_locations_only",
     provisioningNote: "Employee provisioning runs only for devices with an explicit eBio location code. Other devices retain the legacy Block/Unblock flow.",
     provisionResults,
@@ -90,7 +82,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const unmappedDevices = devices.filter((device) => (body.mode === "all" || selected.has(device.id)) && !ebioLocationCode(device.config));
   if (unmappedDevices.length) {
     return NextResponse.json({
-      error: `Cannot provision ${unmappedDevices.map((device) => device.name).join(", ")}: its eBio location code is missing. Run Settings > eBioserver > Sync topology, then retry.`,
+      error: `Cannot provision ${unmappedDevices.map((device) => device.name).join(", ")}: its eBio location code is missing. ${topologySyncInstruction(session.role)}`,
     }, { status: 409 });
   }
   const previous = await prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId, allowed: true }, select: { deviceId: true } });
