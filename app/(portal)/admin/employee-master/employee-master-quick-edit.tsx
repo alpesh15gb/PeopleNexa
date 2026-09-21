@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -1056,7 +1057,10 @@ function Editor({
   const stepIndex = employeeMasterWizardSteps.findIndex((step) => step.key === active);
   const currentStep = employeeMasterWizardSteps[stepIndex] ?? employeeMasterWizardSteps[0];
   const nextAction = employeeMasterWizardNextAction(currentStep.key);
-  const goToNextStep = () => {
+  const goToNextStep = (event?: MouseEvent<HTMLButtonElement>) => {
+    // A wizard advance must never bubble into form submission or a parent action.
+    event?.preventDefault();
+    event?.stopPropagation();
     if (!formRef.current?.reportValidity()) return;
     if (nextAction.type === "next") setActive(nextAction.step);
   };
@@ -1767,7 +1771,7 @@ function Editor({
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="ghost" onClick={onClose}>{canSkip ? "Skip for now" : "Cancel"}</Button>
                     {nextAction.type === "next" ? (
-                      <Button type="button" onClick={goToNextStep}>Next</Button>
+                      <Button type="button" onClick={(event) => goToNextStep(event)}>Next</Button>
                     ) : (
                       <Button type="submit" loading={saving}>{canSkip ? "Save master details" : "Save employee master"}</Button>
                     )}

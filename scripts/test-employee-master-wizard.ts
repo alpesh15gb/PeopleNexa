@@ -31,11 +31,28 @@ assert.match(directEditor, /<Editor[\s\S]*?mode="wizard"/);
 assert.match(editorSource, /mode="continuation"/);
 assert.match(
   editorSource,
-  /const nextAction = employeeMasterWizardNextAction\(currentStep\.key\);[\s\S]*?if \(wizard && nextAction\.type === "next"\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?goToNextStep\(\);[\s\S]*?return;[\s\S]*?\}\s*void save\(event\);/,
+  /const goToNextStep = \(event\?: MouseEvent<HTMLButtonElement>\) => \{[\s\S]*?event\?\.preventDefault\(\);[\s\S]*?event\?\.stopPropagation\(\);[\s\S]*?if \(!formRef\.current\?\.reportValidity\(\)\) return;[\s\S]*?if \(nextAction\.type === "next"\) setActive\(nextAction\.step\);[\s\S]*?\};/,
 );
 assert.match(
   editorSource,
-  /nextAction\.type === "next" \? \(\s*<Button type="button" onClick=\{goToNextStep\}>Next<\/Button>\s*\) : \(\s*<Button type="submit" loading=\{saving\}>/,
+  /const submit = \(event: FormEvent<HTMLFormElement>\) => \{[\s\S]*?if \(wizard && nextAction\.type === "next"\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?goToNextStep\(\);[\s\S]*?return;[\s\S]*?\}\s*void save\(event\);/,
+);
+assert.match(
+  editorSource,
+  /nextAction\.type === "next" \? \(\s*<Button type="button" onClick=\{\(event\) => goToNextStep\(event\)\}>Next<\/Button>\s*\) : \(\s*<Button type="submit" loading=\{saving\}>/,
+);
+
+// Page 3 is a Next action, not a save action: its click can only advance to
+// records. The shared Editor serves both direct edits and create continuation.
+const pageThreeNextHandler = editorSource.match(
+  /const goToNextStep = \(event\?: MouseEvent<HTMLButtonElement>\) => \{([\s\S]*?)\n  \};/,
+)?.[1] ?? "";
+assert.match(pageThreeNextHandler, /setActive\(nextAction\.step\)/);
+assert.doesNotMatch(pageThreeNextHandler, /fetch\(|save\(|onClose\(/);
+assert.match(directEditor, /mode="wizard"/);
+assert.match(editorSource, /mode="continuation"/);
+assert.match(editorSource, /Step \{stepIndex \+ 1\} of \{employeeMasterWizardSteps\.length\}/);
+assert.match(editorSource, /<Button type="submit" loading=\{saving\}>\{canSkip \? "Save master details" : "Save employee master"\}<\/Button>/,
 );
 assert.match(
   editorSource,
