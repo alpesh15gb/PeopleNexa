@@ -2129,6 +2129,12 @@ function EmployeeMasterCreateContent({
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<EmployeeForm | null>(null);
   const [editCreated, setEditCreated] = useState(false);
+  // Set once the flow moves past master data, so the "add details now?" prompt
+  // cannot reappear behind the device step.
+  const [deviceStepStarted, setDeviceStepStarted] = useState(false);
+  // Lets the admin abandon the device check without the in-flight request
+  // reopening the device modal behind the detail page.
+  const accessCancelledRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
   const [accessLoading, setAccessLoading] = useState(false);
@@ -2163,15 +2169,20 @@ function EmployeeMasterCreateContent({
     router.push(`/admin/employee-master?employee=${id}`);
     router.refresh();
   };
-  async function loadAccess(employee: EmployeeForm) {
+  // Returns true only when the device modal was actually opened, so the caller
+  // can finish the flow instead of leaving the admin with nothing on screen.
+  async function loadAccess(employee: EmployeeForm): Promise<boolean> {
+    accessCancelledRef.current = false;
     setAccessLoading(true);
     setAccessResults([]);
     setProvisionResults([]);
     try {
       const response = await fetch(
         `/api/employees/${employee.id}/device-access`,
+        { signal: AbortSignal.timeout(20_000) },
       );
       const data = await response.json().catch(() => ({}));
+      if (accessCancelledRef.current) return false;
       if (!response.ok)
         throw new Error(data.error ?? "Could not load biometric devices.");
       if (!data.accessAvailable || !data.devices?.length) {
@@ -2179,23 +2190,46 @@ function EmployeeMasterCreateContent({
           "success",
           "Employee created. Biometric setup is unavailable for this location, so no device policy was applied.",
         );
-        return;
+        return false;
       }
       setAccessDevices(data.devices);
       setProvisionResults(data.provisionResults ?? []);
       setAccessAvailable(true);
       setAccessOpen(true);
+      return true;
     } catch (error) {
+      if (accessCancelledRef.current) return false;
       toast(
         "error",
         error instanceof Error
           ? error.message
           : "Employee created, but biometric setup could not be loaded.",
       );
+      return false;
     } finally {
       setAccessLoading(false);
     }
   }
+  // Device setup is the last step of onboarding: it runs only after master data
+  // is saved or skipped, and the flow navigates away when there is nothing to
+  // configure so the admin is never left with a blank screen.
+  const startDeviceStep = () => {
+    setEditCreated(false);
+    setDeviceStepStarted(true);
+    const target = created;
+    if (!target?.deviceCode) {
+      finishLater();
+      return;
+    }
+    void loadAccess(target).then((opened) => {
+      if (!opened) finishLater();
+    });
+  };
+  const cancelAccessCheck = () => {
+    accessCancelledRef.current = true;
+    setAccessLoading(false);
+    finishLater();
+  };
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -2228,17 +2262,17 @@ function EmployeeMasterCreateContent({
       };
       setOpen(false);
       setCreated(employee);
+      setDeviceStepStarted(false);
       const loginMessage = data.loginCreated
         ? "Portal login created."
         : "No portal login was requested.";
-      if (employee.deviceCode) {
-        toast("success", `Employee created. ${loginMessage}`);
-        void loadAccess(employee);
-      } else
-        toast(
-          "success",
-          `Employee created. ${loginMessage} Add a Device Code before configuring biometric access.`,
-        );
+      // Master data comes next; the device step runs after it, not here.
+      toast(
+        "success",
+        employee.deviceCode
+          ? `Employee created. ${loginMessage}`
+          : `Employee created. ${loginMessage} Add a Device Code before configuring biometric access.`,
+      );
     } catch (error) {
       toast(
         "error",
@@ -2370,16 +2404,21 @@ function EmployeeMasterCreateContent({
         </form>
       </Modal>
       {accessLoading && (
-        <Modal open onClose={() => undefined} title="Checking biometric access">
+        <Modal open onClose={cancelAccessCheck} title="Checking biometric access">
           <div className="py-8 text-center text-sm text-muted-foreground">
             Checking active devices for this employee...
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" onClick={cancelAccessCheck}>
+              Cancel
+            </Button>
           </div>
         </Modal>
       )}
       {created && accessOpen && (
         <Modal
           open
-          onClose={() => setAccessOpen(false)}
+          onClose={finishLater}
           title="Configure biometric access"
           description="Choose an explicit policy. No access is the default; it does not grant all-device access."
         >
@@ -2479,7 +2518,7 @@ function EmployeeMasterCreateContent({
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => setAccessOpen(false)}
+                onClick={finishLater}
               >
                 Finish later
               </Button>
@@ -2500,16 +2539,16 @@ function EmployeeMasterCreateContent({
           </div>
         </Modal>
       )}
-      {created && !editCreated && !accessOpen && !accessLoading && (
+      {created && !editCreated && !accessOpen && !accessLoading && !deviceStepStarted && (
         <Modal
           open
-          onClose={finishLater}
+          onClose={startDeviceStep}
           title="Add employee details now?"
-          description="The core employee record is saved. You can add address, profile, employment, bank, and document records now or finish later."
+          description="The core employee record is saved. Add address, profile, employment, bank and document records now, or continue straight to biometric device setup."
         >
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={finishLater}>
-              Finish later
+            <Button type="button" variant="ghost" onClick={startDeviceStep}>
+              {created.deviceCode ? "Skip to device setup" : "Finish later"}
             </Button>
             <Button type="button" onClick={() => setEditCreated(true)}>
               Continue to Employee Master
@@ -2524,7 +2563,7 @@ function EmployeeMasterCreateContent({
           canEditEmail
           canEditPan={canEditPan}
           mode="continuation"
-          onClose={finishLater}
+          onClose={startDeviceStep}
         />
       )}
     </>
