@@ -983,6 +983,9 @@ function Editor({
       .then(([employee, nextLookups]) => {
         if (cancelled) return;
         const normalized = normalizeDates(employee);
+        // Belt and braces: a prefilled password field would be re-submitted on
+        // save and re-hashed, locking the employee out.
+        delete normalized.password;
         setMaster(normalized);
         setCore(normalized);
         setLoadedLookups(nextLookups);
