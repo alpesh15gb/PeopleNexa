@@ -276,10 +276,8 @@ export async function POST(req: NextRequest) {
     }
     let phone: string | null = null;
     if (body.phone != null && String(body.phone).trim() !== "") {
-      // Persist the normalized form so the column stays comparable, matching
-      // how Aadhaar / PAN / UAN / IFSC are already normalized before saving.
-      phone = String(body.phone).replace(/[\s-]/g, "").trim();
-      if (!PHONE_RE.test(phone)) {
+      phone = String(body.phone).trim();
+      if (!PHONE_RE.test(phone.replace(/[\s-]/g, ""))) {
         return NextResponse.json({ error: "Enter a valid phone number (10-15 digits)." }, { status: 400 });
       }
     }

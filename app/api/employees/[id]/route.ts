@@ -316,12 +316,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (body.phone === null || String(body.phone).trim() === "") {
       nextPhone = null;
     } else {
-      nextPhone = String(body.phone).replace(/[\s-]/g, "").trim();
-      // Validate only on a real change, compared against the normalized stored
-      // value, so a legacy short or formatted number never blocks an unrelated
-      // edit — it is simply re-saved in normalized form.
-      const currentPhone = (employee.phone ?? "").replace(/[\s-]/g, "").trim();
-      if (nextPhone !== currentPhone && !PHONE_RE.test(nextPhone)) {
+      nextPhone = String(body.phone).trim();
+      // Validate only on a real change, so a legacy short or formatted number
+      // never blocks an unrelated edit. The submitted value is stored as typed
+      // — existing rows are never rewritten by a save that didn't touch them.
+      const currentPhone = (employee.phone ?? "").trim();
+      if (nextPhone !== currentPhone && !PHONE_RE.test(nextPhone.replace(/[\s-]/g, ""))) {
         return NextResponse.json({ error: "Enter a valid phone number (10-15 digits)." }, { status: 400 });
       }
     }
