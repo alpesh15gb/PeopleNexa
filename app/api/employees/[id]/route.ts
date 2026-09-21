@@ -7,6 +7,7 @@ import { appendAudit } from "@/lib/audit";
 import { profilePictureValue } from "@/lib/profile-picture";
 import { employeeHistory } from "@/lib/employee-history";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
+import { optionalEmployeeEmail, optionalEmployeePosition, shouldProvisionEmployeeLogin } from "@/lib/employee-input";
 
 /**
  * Walk the manager chain starting at `newManagerId` to ensure assigning it
@@ -193,14 +194,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
 
-  const email = body.email !== undefined ? String(body.email).toLowerCase().trim() || null : employee.email;
+  const email = body.email !== undefined ? optionalEmployeeEmail(body.email) : employee.email;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   if (email && email !== employee.email) {
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email, NOT: { id } } });
     if (duplicate) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
   }
   const password = body.password !== undefined ? String(body.password).trim() : "";
-  if (email && password && password.length < 12) {
+  if (shouldProvisionEmployeeLogin(email, password) && password.length < 12) {
     return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
   }
   if (body.status !== undefined && body.status !== "active" && body.status !== "inactive") {
@@ -271,7 +272,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Last name must be at most 100 characters." }, { status: 400 });
     }
   }
-  if (body.position !== undefined && body.position !== null && body.position !== "" && String(body.position).length > 100) {
+  const nextPosition = body.position !== undefined ? optionalEmployeePosition(body.position) : employee.position;
+  if (nextPosition && nextPosition.length > 100) {
     return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
   }
   const nextEmployeeNumber = body.employeeNumber !== undefined ? String(body.employeeNumber).trim() : employee.employeeNumber;
@@ -416,9 +418,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        firstName: nextFirstName,
       lastName: nextLastName,
       email,
-       ...(email && password ? { password: await hashPassword(password) } : {}),
+      password: email ? (shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : employee.password) : null,
       phone: nextPhone,
-      position: body.position ?? employee.position,
+      position: nextPosition,
       role: nextRole,
       salary: body.salary != null && body.salary !== "" ? Number(body.salary) : body.salary === "" ? null : employee.salary,
       status: requestedStatus,

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
-import { randomBytes } from "crypto";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { hashPassword } from "@/lib/auth";
+import { optionalEmployeeEmail, optionalEmployeePosition } from "@/lib/employee-input";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ROWS = 2500;
@@ -63,15 +62,6 @@ const TEMPLATE_HEADERS = [
   "medical",
   "otherAllowance",
 ] as const;
-
-function genPassword(): string {
-  const chars =
-    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
-  const buf = randomBytes(12);
-  let out = "";
-  for (let i = 0; i < 12; i++) out += chars[buf[i] % chars.length];
-  return out;
-}
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -191,11 +181,9 @@ export async function POST(req: NextRequest) {
   let updated = 0;
   const failed: { email: string; error: string }[] = [];
   const seenInBatch = new Set<string>();
-  const importPassword = await hashPassword(genPassword());
-
   for (let i = 0; i < rows.length; i++) {
     const raw = rows[i] as BulkRow;
-    const email = String(raw?.email ?? "").toLowerCase().trim();
+    const email = optionalEmployeeEmail(raw?.email);
     try {
       const employeeNumberInput = raw?.employeeNumber ? String(raw.employeeNumber).trim() : "";
       const deviceCodeInput = raw?.deviceCode ? String(raw.deviceCode).trim() : "";
@@ -221,7 +209,8 @@ export async function POST(req: NextRequest) {
       const bulkLastName = bulkLastRaw.trim();
       if (bulkLastRaw !== "" && !bulkLastName) throw new Error("Last name cannot be empty.");
       if (bulkLastName.length > 100) throw new Error("Last name must be at most 100 characters.");
-      if (raw?.position != null && String(raw.position).length > 100) {
+      const position = optionalEmployeePosition(raw?.position);
+      if (position && position.length > 100) {
         throw new Error("Position must be at most 100 characters.");
       }
       if (email && !EMAIL_RE.test(email)) throw new Error("Enter a valid email address.");
@@ -322,7 +311,7 @@ export async function POST(req: NextRequest) {
             ...(bulkLastRaw !== "" && bulkLastName ? { lastName: bulkLastName } : {}),
             ...(email ? { email } : {}),
             ...(raw?.phone != null && String(raw.phone).trim() !== "" ? { phone: bulkPhone } : {}),
-            ...(raw?.position != null && String(raw.position).trim() !== "" ? { position: String(raw.position).trim() } : {}),
+            ...(position ? { position } : {}),
             ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
             ...(joiningDate ? { joiningDate } : {}),
             ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
@@ -335,8 +324,6 @@ export async function POST(req: NextRequest) {
         continue;
       }
       if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
-      const newEmail = email || `import-${Buffer.from(employeeNumber).toString("hex")}@device.local`;
-
       await prisma.employee.create({
         data: {
           tenantId: session.tenantId,
@@ -344,11 +331,11 @@ export async function POST(req: NextRequest) {
           deviceCode,
           firstName,
           lastName: bulkLastName,
-          email: newEmail,
+          email,
           phone: bulkPhone,
-          password: importPassword,
+          password: null,
           role: "employee",
-          position: raw?.position ? String(raw.position) : null,
+          position,
           salary,
           joiningDate,
           branchId: branchId || null,

@@ -50,6 +50,7 @@ export async function GET() {
     shifts,
     managers,
     positions: positions.flatMap((row) => row.position ? [row.position] : []),
+    subdepartments: [...new Set(subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : []))].sort((a, b) => a.localeCompare(b)),
     subdepartmentsByDepartment,
   });
 }

@@ -5,6 +5,7 @@ import { hashPassword } from "@/lib/auth";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { profilePictureValue } from "@/lib/profile-picture";
 import { employeeHistory } from "@/lib/employee-history";
+import { optionalEmployeeEmail, optionalEmployeePosition, shouldProvisionEmployeeLogin } from "@/lib/employee-input";
 
 const select = {
   id: true,
@@ -213,7 +214,8 @@ export async function POST(req: NextRequest) {
     if (drivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
-    const email = String(body.email ?? "").toLowerCase().trim();
+    const email = optionalEmployeeEmail(body.email);
+    const position = optionalEmployeePosition(body.position);
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
     const lastName = lastNameRaw.trim();
@@ -225,10 +227,10 @@ export async function POST(req: NextRequest) {
     if (firstName.length > 100 || lastName.length > 100) {
       return NextResponse.json({ error: "First name and last name must be at most 100 characters." }, { status: 400 });
     }
-    if (body.position !== undefined && body.position !== null && body.position !== "" && String(body.position).length > 100) {
+    if (position && position.length > 100) {
       return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
     }
-    if (email && password && password.length < 12) {
+    if (shouldProvisionEmployeeLogin(email, password) && password.length < 12) {
       return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -360,10 +362,10 @@ export async function POST(req: NextRequest) {
           lastName,
           email: email || null,
           phone,
-          password: email && password ? await hashPassword(password) : null,
+          password: shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : null,
           role: loginOnly ? "branch_manager" : "employee",
           loginOnly,
-          position: loginOnly ? null : (body.position ?? null),
+          position: loginOnly ? null : position,
           salary,
           joiningDate,
           branchId: body.branchId || null,
@@ -406,7 +408,7 @@ export async function POST(req: NextRequest) {
       lastName: employee.lastName,
       email: employee.email,
     });
-    return NextResponse.json({ employee, loginCreated: Boolean(email && password) }, { status: 201 });
+    return NextResponse.json({ employee, loginCreated: shouldProvisionEmployeeLogin(email, password) }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create employee." }, { status: 500 });
   }

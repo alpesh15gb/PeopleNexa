@@ -515,7 +515,7 @@ export function EmployeesTable({
         open={modal !== null}
         onClose={() => setModal(null)}
         title={editing ? `Edit ${editing.firstName}` : "Add employee"}
-        description={editing ? `Employee ID: ${editing.employeeNumber}` : "They'll get a default password to sign in."}
+        description={editing ? `Employee ID: ${editing.employeeNumber}` : "Portal access is optional; provide both credentials only when needed."}
       >
         <form key={editing ? editing.id : "create"} onSubmit={onSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -537,15 +537,15 @@ export function EmployeesTable({
             <Field label="Device Code" hint="eBio enrollment ID used for attendance matching">
               <Input name="deviceCode" defaultValue={editing?.deviceCode ?? ""} placeholder="e.g. 8767" />
             </Field>
-            <Field label="Email">
-              <Input name="email" type="email" required defaultValue={editing?.email ?? ""} />
+            <Field label="Email" hint="Optional. Provide a password too only to enable portal sign-in.">
+              <Input name="email" type="email" defaultValue={editing?.email ?? ""} />
             </Field>
             <Field label="Phone">
               <Input name="phone" defaultValue={editing?.phone ?? ""} />
             </Field>
             {!editing && (
-              <Field label="Password" hint="Employee uses this to sign in">
-                <Input name="password" type="password" required minLength={12} placeholder="Min 12 characters" />
+              <Field label="Password" hint="Optional. Requires an email to enable portal sign-in.">
+                <Input name="password" type="password" minLength={12} placeholder="Min 12 characters" />
               </Field>
             )}
             <Field label="Position">

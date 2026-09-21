@@ -14,7 +14,8 @@
     "test:leave-policy-period": "tsx scripts/test-leave-policy-period.ts",
     "test:payroll-policy": "tsx scripts/test-payroll-policy.ts",
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
-    "test:id-card-layout": "tsx scripts/test-id-card-layout.ts"
+    "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",
+    "test:employee-master": "tsx scripts/test-employee-master-workflow.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

@@ -237,21 +237,24 @@ function CustomSelectField({
   onChange,
   options,
   emptyMessage,
+  controlled = false,
 }: {
   label: string;
   value: unknown;
   onChange?: (value: string) => void;
   options: string[];
   emptyMessage?: string;
+  controlled?: boolean;
 }) {
   const text = stringValue(value);
   const [uncontrolledValue, setUncontrolledValue] = useState(text);
-  const [custom, setCustom] = useState(
+  const [customSelected, setCustomSelected] = useState(
     () => options.length === 0 || (Boolean(text) && !options.includes(text)),
   );
-  const current = onChange ? text : uncontrolledValue;
+  const current = controlled ? text : uncontrolledValue;
+  const custom = customSelected || (Boolean(current) && !options.includes(current));
   const update = (next: string) => {
-    if (onChange) onChange(next);
+    if (controlled) onChange?.(next);
     else setUncontrolledValue(next);
   };
   return (
@@ -262,7 +265,7 @@ function CustomSelectField({
           value={custom ? "__custom__" : current}
           onChange={(event) => {
             const next = event.target.value;
-            setCustom(next === "__custom__");
+            setCustomSelected(next === "__custom__");
             update(next === "__custom__" ? "" : next);
           }}
           className={inputClass}
@@ -382,10 +385,11 @@ function EmployeeFields({
       {positionOptions ? (
         <CustomSelectField
           label="Position"
-          value={controlled?.position}
+          value={controlled ? controlled.position : employee.position}
           onChange={(next) => setControlled?.("position", next)}
           options={positionOptions}
           emptyMessage="No saved positions are available in your permitted scope. Enter a custom position."
+          controlled={Boolean(controlled)}
         />
       ) : (
         <Field label="Position">
@@ -505,6 +509,7 @@ function TextField({
         value={value}
         onChange={onChange}
         options={lookups.subdepartments}
+        controlled
       />
     );
   return (
@@ -1119,6 +1124,7 @@ function Editor({
                       onChange={(value) => updateGroup("employmentProfile", "subDepartment", value)}
                       options={loadedLookups.subdepartmentsByDepartment[stringValue(core.departmentId)] ?? []}
                       emptyMessage={core.departmentId ? "No subdepartments exist for this department. Enter a custom value if needed." : "Select a department to view its subdepartments. Enter a custom value if needed."}
+                      controlled
                     />
                     <TextField
                       label="Grade"
@@ -1936,7 +1942,7 @@ function EmployeeMasterCreateContent({
       setCreated(employee);
       const loginMessage = data.loginCreated
         ? "Portal login created."
-        : "No portal login was created. Add both an email and password later to enable sign-in.";
+        : "No portal login was requested.";
       if (employee.deviceCode) {
         toast("success", `Employee created. ${loginMessage}`);
         void loadAccess(employee);
