@@ -25,6 +25,18 @@ assert.match(directEditor, /<Editor[\s\S]*?mode="wizard"/);
 assert.match(editorSource, /mode="continuation"/);
 assert.match(
   editorSource,
+  /if \(wizard && !loading && master\) stepHeadingRef\.current\?\.focus\(\);\s*\}, \[active, loading, wizard\]\);/,
+);
+assert.doesNotMatch(
+  editorSource,
+  /stepHeadingRef\.current\?\.focus\(\);\s*\}, \[active, loading, master, wizard\]\);/,
+);
+assert.match(
+  editorSource,
+  /<AddressFields\s+title="Current address"[\s\S]*?value=\{profile\.currentAddress\}[\s\S]*?<AddressFields\s+title="Permanent address"[\s\S]*?value=\{profile\.permanentAddress\}/,
+);
+assert.match(
+  editorSource,
   /<SpouseFields\s+key="spouse-details"[\s\S]*?profile=\{profile\}/,
 );
 assert.match(

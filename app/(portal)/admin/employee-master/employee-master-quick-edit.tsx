@@ -890,7 +890,7 @@ function Editor({
   useEffect(() => load(), [id]);
   useEffect(() => {
     if (wizard && !loading && master) stepHeadingRef.current?.focus();
-  }, [active, loading, master, wizard]);
+  }, [active, loading, wizard]);
 
   const updateCore = (key: string, value: string) =>
     setCore((current) => ({ ...current, [key]: value }));
