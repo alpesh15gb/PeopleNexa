@@ -91,7 +91,7 @@ created with `db push`, take a backup and verify it matches the current schema
 before marking the baseline as applied once:
 
 ```bash
-docker compose run --rm app npx prisma migrate resolve --applied 20260826000000_postgresql_baseline
+docker compose run --rm --no-deps --entrypoint "" app npx prisma migrate resolve --applied 20260826000000_postgresql_baseline
 ```
 
 Only use `migrate resolve` after schema verification; it records migration
