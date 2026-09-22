@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { optionalEmployeeEmail, optionalEmployeePosition } from "@/lib/employee-input";
+import { ensureDesignations, normalizeDesignationName } from "@/lib/designation";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ROWS = 2500;
@@ -209,7 +210,7 @@ export async function POST(req: NextRequest) {
       const bulkLastName = bulkLastRaw.trim();
       if (bulkLastRaw !== "" && !bulkLastName) throw new Error("Last name cannot be empty.");
       if (bulkLastName.length > 100) throw new Error("Last name must be at most 100 characters.");
-      const position = optionalEmployeePosition(raw?.position);
+      const position = normalizeDesignationName(optionalEmployeePosition(raw?.position));
       if (position && position.length > 100) {
         throw new Error("Position must be at most 100 characters.");
       }
@@ -298,62 +299,65 @@ export async function POST(req: NextRequest) {
       const deviceCode = deviceCodeInput || null;
       if (deviceCode && deviceCode.length > 100) throw new Error("Device Code must be at most 100 characters.");
 
-      if (existingForRow) {
-        const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
-          ? existingForRow.salaryStructure as Record<string, unknown>
-          : {};
-        await prisma.employee.update({
-          where: { id: existingForRow.id },
+      await prisma.$transaction(async (tx) => {
+        await ensureDesignations(tx, session.tenantId, position ? [position] : []);
+        if (existingForRow) {
+          const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
+            ? existingForRow.salaryStructure as Record<string, unknown>
+            : {};
+          await tx.employee.update({
+            where: { id: existingForRow.id },
+            data: {
+              employeeNumber: employeeNumberInput || existingForRow.employeeNumber,
+              deviceCode: deviceCodeInput || existingForRow.deviceCode,
+              ...(firstName ? { firstName } : {}),
+              ...(bulkLastRaw !== "" && bulkLastName ? { lastName: bulkLastName } : {}),
+              ...(email ? { email } : {}),
+              ...(raw?.phone != null && String(raw.phone).trim() !== "" ? { phone: bulkPhone } : {}),
+              ...(position ? { position } : {}),
+              ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
+              ...(joiningDate ? { joiningDate } : {}),
+              ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
+              ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(raw?.status ? { status } : {}),
+              ...(bankName ? { bankName } : {}), ...(bulkPan ? { pan: bulkPan } : {}), ...(bulkUan ? { uan: bulkUan } : {}), ...(bulkIfsc ? { ifscCode: bulkIfsc } : {}), ...(bulkAccount ? { accountNumber: bulkAccount } : {}),
+              ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
+            },
+          });
+          updated++;
+          return;
+        }
+        if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
+        await tx.employee.create({
           data: {
-            employeeNumber: employeeNumberInput || existingForRow.employeeNumber,
-            deviceCode: deviceCodeInput || existingForRow.deviceCode,
-            ...(firstName ? { firstName } : {}),
-            ...(bulkLastRaw !== "" && bulkLastName ? { lastName: bulkLastName } : {}),
-            ...(email ? { email } : {}),
-            ...(raw?.phone != null && String(raw.phone).trim() !== "" ? { phone: bulkPhone } : {}),
-            ...(position ? { position } : {}),
-            ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
-            ...(joiningDate ? { joiningDate } : {}),
-            ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
-            ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(raw?.status ? { status } : {}),
-            ...(bankName ? { bankName } : {}), ...(bulkPan ? { pan: bulkPan } : {}), ...(bulkUan ? { uan: bulkUan } : {}), ...(bulkIfsc ? { ifscCode: bulkIfsc } : {}), ...(bulkAccount ? { accountNumber: bulkAccount } : {}),
-            ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
+            tenantId: session.tenantId,
+            employeeNumber,
+            deviceCode,
+            firstName,
+            lastName: bulkLastName,
+            email,
+            phone: bulkPhone,
+            password: null,
+            role: "employee",
+            position,
+            salary,
+            joiningDate,
+            branchId: branchId || null,
+            departmentId: departmentId || null,
+            shiftId: shiftId || null,
+            payMode,
+            workBasisRate,
+            managerId: managerId || null,
+            status,
+            bankName,
+            pan: bulkPan,
+            uan: bulkUan,
+            ifscCode: bulkIfsc,
+            accountNumber: bulkAccount,
+            salaryStructure: Object.keys(salaryStructure).length ? (salaryStructure as Prisma.InputJsonValue) : extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== "" ? (extra.salaryStructure as Prisma.InputJsonValue) : undefined,
           },
         });
-        updated++;
-        continue;
-      }
-      if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
-      await prisma.employee.create({
-        data: {
-          tenantId: session.tenantId,
-          employeeNumber,
-          deviceCode,
-          firstName,
-          lastName: bulkLastName,
-          email,
-          phone: bulkPhone,
-          password: null,
-          role: "employee",
-          position,
-          salary,
-          joiningDate,
-          branchId: branchId || null,
-          departmentId: departmentId || null,
-          shiftId: shiftId || null,
-          payMode,
-          workBasisRate,
-          managerId: managerId || null,
-          status,
-          bankName,
-          pan: bulkPan,
-          uan: bulkUan,
-          ifscCode: bulkIfsc,
-          accountNumber: bulkAccount,
-          salaryStructure: Object.keys(salaryStructure).length ? (salaryStructure as Prisma.InputJsonValue) : extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== "" ? (extra.salaryStructure as Prisma.InputJsonValue) : undefined,
-        },
+        created++;
       });
-      created++;
     } catch (err: unknown) {
       if (
         typeof err === "object" &&

@@ -4,6 +4,7 @@ import { readFile } from "fs/promises";
 import type { Prisma } from "../generated/prisma/client";
 import { prisma } from "../lib/prisma";
 import { hashPassword } from "../lib/auth";
+import { ensureDesignations, normalizeDesignationName } from "../lib/designation";
 
 const DEFAULT_FILE = "MASTER-Employee-ALL.csv";
 const PLACEHOLDER_RE = /^(?:select(?:\s+.*)?|n\/?a|na|null|nil|--|-|0+)$/i;
@@ -177,7 +178,7 @@ async function main() {
           password: "",
           role: "employee",
           status: text(row.OFF_status)?.toLowerCase() === "active" ? "active" : "inactive",
-          position: text(row["RPT_Designation"]),
+          position: normalizeDesignationName(text(row["RPT_Designation"])),
           salary: optionalNumber(row.OFF_gross, "OFF_gross", rowNumber),
           joiningDate: parseDate(text(row["RPT_Joining Date"]) ? row["RPT_Joining Date"] : row.OFF_joiningDate, "joining date", rowNumber),
           bankName: text(row["BANK_Bank Name"]) ?? text(row["BANK_Name As Per Bank Records"]),
@@ -204,16 +205,16 @@ async function main() {
   if (existing.length + createCount > tenant.seats) throw new Error(`Import needs ${createCount} new seats; tenant has ${tenant.seats} seats.`);
 
   const noLoginPassword = await hashPassword(randomBytes(32).toString("base64url"));
-  await prisma.$transaction(
-    planned.map(({ existingId, data }) => {
+  await prisma.$transaction(async (tx) => {
+    await ensureDesignations(tx, tenant.id, planned.map(({ data }) => data.position));
+    await Promise.all(planned.map(({ existingId, data }) => {
       if (existingId) {
         const { password: _password, tenantId: _tenantId, ...update } = data;
-        return prisma.employee.update({ where: { id: existingId }, data: update });
+        return tx.employee.update({ where: { id: existingId }, data: update });
       }
-      return prisma.employee.create({ data: { ...data, password: noLoginPassword } });
-    }),
-    { timeout: 120_000 }
-  );
+      return tx.employee.create({ data: { ...data, password: noLoginPassword } });
+    }));
+  }, { timeout: 120_000 });
   console.log(JSON.stringify({ imported: planned.length, created: createCount, updated: updateCount }, null, 2));
 }
 
