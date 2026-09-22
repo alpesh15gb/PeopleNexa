@@ -17,13 +17,13 @@ interface BalanceItem {
   id: string;
   name: string;
   code: string;
-  maxDays: number;
+  maxDays: number | null;
   color: string;
   opening: number;
   credited: number;
   used: number;
   pending: number;
-  remaining: number;
+  remaining: number | null;
   policyNote: string;
 }
 
@@ -51,7 +51,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
   const selectedBalance = balance.find((item) => item.id === selectedTypeId);
   const requestedDays = halfDay ? 0.5 : fromDate && toDate && toDate >= fromDate ? Math.round((new Date(`${toDate}T12:00:00`).getTime() - new Date(`${fromDate}T12:00:00`).getTime()) / 86400000) + 1 : 0;
   const dateError = Boolean(fromDate && toDate && toDate < fromDate) || Boolean(halfDay && fromDate && toDate && fromDate !== toDate);
-  const balanceError = Boolean(selectedBalance && requestedDays > selectedBalance.remaining);
+  const balanceError = Boolean(selectedBalance && selectedBalance.remaining !== null && requestedDays > selectedBalance.remaining);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -111,7 +111,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
                   </p>
                   <p className="mt-2 font-display text-3xl font-bold tracking-tight">
                     {b.remaining}
-                    <span className="ml-1 text-sm font-medium text-muted-foreground">{t(lang, "leaves.daysLeft", { max: b.maxDays })}</span>
+                    <span className="ml-1 text-sm font-medium text-muted-foreground">{b.remaining === null ? "unlimited" : t(lang, "leaves.daysLeft", { max: b.maxDays ?? 0 })}</span>
                   </p>
                 </div>
               </div>
@@ -173,7 +173,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
             <Select name="leaveTypeId" required value={selectedTypeId} onChange={(event) => setSelectedTypeId(event.target.value)}>
               {balance.map((b) => (
                 <option key={b.id} value={b.id} disabled={b.remaining === 0}>
-                  {b.name} ({t(lang, "leaves.left", { n: b.remaining })})
+                  {b.name} ({b.remaining === null ? "unlimited" : t(lang, "leaves.left", { n: b.remaining })})
                 </option>
               ))}
             </Select>
@@ -191,7 +191,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
             Half day (single date only, when the active policy permits it)
           </label>
           {(dateError || balanceError) && <p role="alert" className="text-[12px] text-rose-300">{dateError ? "Choose one valid date for a half day, with the end date on or after the start date." : `This request needs ${requestedDays} day(s), but only ${selectedBalance?.remaining ?? 0} are currently available.`}</p>}
-          {selectedBalance && requestedDays > 0 && !dateError && !balanceError && <p className="rounded-lg border border-edge bg-tint px-3 py-2 text-[12px] text-muted-foreground">Balance check: {requestedDays} day(s) requested. {Math.max(selectedBalance.remaining - requestedDays, 0)} day(s) would remain if submitted. Final eligibility is checked against the active policy when you submit.</p>}
+          {selectedBalance && requestedDays > 0 && !dateError && !balanceError && <p className="rounded-lg border border-edge bg-tint px-3 py-2 text-[12px] text-muted-foreground">Balance check: {requestedDays} day(s) requested. {selectedBalance.remaining === null ? "No annual maximum applies." : `${Math.max(selectedBalance.remaining - requestedDays, 0)} day(s) would remain if submitted.`} Final eligibility is checked against the active policy when you submit.</p>}
           <Field label={t(lang, "leaves.reason")}>
             <Textarea name="reason" placeholder={t(lang, "leaves.reasonPlaceholder")} />
           </Field>

@@ -1,0 +1,2 @@
+ALTER TABLE "LeaveType" ALTER COLUMN "maxDays" DROP NOT NULL;
+ALTER TABLE "LeavePolicyBalance" ALTER COLUMN "entitlement" DROP NOT NULL;

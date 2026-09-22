@@ -101,7 +101,7 @@ async function openLeavePeriod(session: { tenantId: string; sub: string; role: s
       const data = employees.flatMap((employee) => draft.leaveTypes.flatMap((rules) => {
         const leaveType = typeByCode.get(rules.code);
         if (!leaveType) return [];
-        const legacyRemaining = Math.max(leaveType.maxDays - (used.get(`${employee.id}:${leaveType.id}`) ?? 0), 0);
+        const legacyRemaining = leaveType.maxDays === null ? 0 : Math.max(leaveType.maxDays - (used.get(`${employee.id}:${leaveType.id}`) ?? 0), 0);
         const carryForward = carryForwardCandidate(legacyRemaining, rules.carryForward, rules.carryForwardLimit);
         const accrual = rules.workedDayAccrual ? monthlyWorkedDayAccrual(rules.workedDayAccrual, workedDaysForMonth(attendance.filter((row) => row.employeeId === employee.id), accrualMonth), employee.joiningDate, accrualMonth) : null;
         return [{ tenantId: session.tenantId, policyPeriodId: created.id, employeeId: employee.id, leaveTypeId: leaveType.id, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, carryForward, policySnapshot: { configurationId: configuration.id, version: configuration.version, scope: configuration.locationId ? "location" : "tenant", rules, ...(accrual ? { accrual: { ...accrual, availableOn: accrual.availableOn.toISOString(), month: accrualMonth } } : {}) }, allocatedBy: session.sub }];
@@ -168,9 +168,9 @@ async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payloa
       const leaveType = typeByCode.get(rules.code);
       if (!leaveType) return [];
       const used = requests.filter((request) => request.employeeId === employee.id && request.leaveTypeId === leaveType.id).reduce((sum, request) => sum + request.days, 0);
-      const legacyBalance = Math.max(leaveType.maxDays - used, 0);
+      const legacyBalance = leaveType.maxDays === null ? null : Math.max(leaveType.maxDays - used, 0);
       const accrual = rules.workedDayAccrual ? monthlyWorkedDayAccrual(rules.workedDayAccrual, workedDaysForMonth(attendance.filter((row) => row.employeeId === employee.id), accrualMonth), employee.joiningDate, accrualMonth) : null;
-      return [{ employeeId: employee.id, employee: `${employee.firstName} ${employee.lastName}`, leaveType: rules.code, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, legacyBalance, carryForwardCandidate: carryForwardCandidate(legacyBalance, rules.carryForward, rules.carryForwardLimit), workedDays: accrual?.workedDays ?? null, accrued: accrual?.accrued ?? null, availableOn: accrual?.availableOn.toISOString() ?? null, deferral: accrual?.deferred ?? false }];
+      return [{ employeeId: employee.id, employee: `${employee.firstName} ${employee.lastName}`, leaveType: rules.code, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, legacyBalance, carryForwardCandidate: carryForwardCandidate(legacyBalance ?? 0, rules.carryForward, rules.carryForwardLimit), workedDays: accrual?.workedDays ?? null, accrued: accrual?.accrued ?? null, availableOn: accrual?.availableOn.toISOString() ?? null, deferral: accrual?.deferred ?? false }];
     }));
     return NextResponse.json({ kind, affectedEmployees: affectedEmployees.length, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (LeaveType)", effectiveFrom, leaveTypes: leaveDiff, eligibleEmployees });
   }

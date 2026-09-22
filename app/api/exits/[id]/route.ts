@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const usedByType = new Map<string, number>();
     for (const r of leaveRequests) usedByType.set(r.leaveTypeId, (usedByType.get(r.leaveTypeId) ?? 0) + r.days);
     const encashableDays = leaveTypes.reduce(
-      (sum, t) => sum + Math.max(t.maxDays - (usedByType.get(t.id) ?? 0), 0),
+      (sum, t) => sum + (t.maxDays === null ? 0 : Math.max(t.maxDays - (usedByType.get(t.id) ?? 0), 0)),
       0
     );
 

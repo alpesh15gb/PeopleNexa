@@ -37,6 +37,7 @@ export default async function AdminLeavesPage() {
       where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : locationId ? { branch: { locationId } } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: { employeeNumber: "asc" },
+      take: 100,
     }),
     session.role === "admin" ? prisma.leaveBalanceImportBatch.findMany({ where: { tenantId: session.tenantId }, include: { leaveType: { select: { name: true, code: true } }, _count: { select: { entries: true } } }, orderBy: { importedAt: "desc" }, take: 10 }) : Promise.resolve([]),
   ]);

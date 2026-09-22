@@ -183,8 +183,8 @@ export async function POST(req: NextRequest) {
             }
             if (halfDay) days = 0.5;
             const usedDays = allocated ? usedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriod.id).reduce((sum, row) => sum + row.days, 0) : usedRows.reduce((sum, row) => sum + row.days, 0);
-            const entitlement = allocated ? allocated.entitlement + allocated.carryForward : leaveType.maxDays;
-            if (usedDays + days > entitlement) {
+            const entitlement = allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : leaveType.maxDays;
+            if (entitlement !== null && usedDays + days > entitlement) {
               const err = new Error(
                 `Insufficient balance — ${entitlement - usedDays} day(s) remaining.`
               ) as Error & { code?: string };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { resolveLeavePolicy } from "../lib/leave-policy";
 
-const rules = (annualEntitlement: number) => ({ leaveTypes: [{ name: "Casual Leave", code: "CL", annualEntitlement, paid: true, allowsHalfDay: true, requiresApproval: false, carryForward: false, carryForwardLimit: null }] });
+const rules = (annualEntitlement: number | null) => ({ leaveTypes: [{ name: "Casual Leave", code: "CL", annualEntitlement, paid: true, allowsHalfDay: true, requiresApproval: false, carryForward: false, carryForwardLimit: null }] });
 const record = (overrides: Partial<{ id: string; locationId: string | null; version: number; active: boolean; effectiveFrom: Date; effectiveTo: Date | null; payload: unknown }> = {}) => ({ id: "tenant-v1", locationId: null, version: 1, active: true, effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), effectiveTo: null, payload: rules(12), ...overrides });
 
 const at = new Date("2026-06-15T00:00:00.000Z");
@@ -18,4 +18,6 @@ const resolved = resolveLeavePolicy([
 assert.deepEqual(resolved, { configurationId: "location-v2", version: 2, scope: "location", rules: { name: "Casual Leave", code: "CL", annualEntitlement: 8, paid: true, allowsHalfDay: true, requiresApproval: false, carryForward: false, carryForwardLimit: null } }, "location policy overrides tenant policy");
 
 assert.equal(resolveLeavePolicy([record()], "loc-1", at, "SL"), null, "an unmatched policy type retains legacy LeaveType behavior");
+const unlimited = resolveLeavePolicy([record({ payload: rules(null) })], "loc-1", at, "CL");
+assert.equal(unlimited?.rules.annualEntitlement, null, "a blank policy entitlement means unlimited");
 console.log("leave policy resolution tests passed");

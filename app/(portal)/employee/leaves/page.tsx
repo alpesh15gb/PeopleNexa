@@ -40,17 +40,17 @@ export default async function EmployeeLeavesPage() {
     const policyRequests = allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId) : requests.filter((request) => request.leaveTypeId === t.id && (!imported || request.fromDate >= imported.periodEnd));
     const used = policyRequests.filter((request) => request.status === "approved").reduce((sum, request) => sum + request.days, 0);
     const pending = policyRequests.filter((request) => request.status === "pending").reduce((sum, request) => sum + request.days, 0);
-    const entitlement = allocated ? allocated.entitlement + allocated.carryForward : imported ? imported.available : t.maxDays;
+    const entitlement = allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : imported ? imported.available : t.maxDays;
     return { id: t.id,
     name: t.name,
     code: t.code,
     maxDays: entitlement,
     color: t.color,
     opening: imported?.openingBalance ?? 0,
-    credited: allocated ? allocated.entitlement + allocated.carryForward : imported?.credited ?? 0,
+    credited: allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported?.credited ?? 0,
     used,
     pending,
-    remaining: Math.max(entitlement - used - pending, 0),
+    remaining: entitlement === null ? null : Math.max(entitlement - used - pending, 0),
     policyNote: allocated ? "Current policy-period allocation" : imported ? `Imported snapshot through ${imported.periodEnd.toISOString().slice(0, 7)}` : "Leave type allowance",
     policyPeriodId: allocated?.policyPeriodId ?? null,
   }; });

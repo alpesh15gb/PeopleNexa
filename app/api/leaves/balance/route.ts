@@ -32,9 +32,9 @@ export async function GET() {
     const usedDays = imported ? requests.filter((request) => request.leaveTypeId === t.id && request.fromDate >= imported.periodEnd).reduce((sum, request) => sum + request.days, 0) : used.get(t.id) ?? 0;
     return {
       ...t,
-      maxDays: allocated ? allocated.entitlement + allocated.carryForward : imported ? imported.available : t.maxDays,
+      maxDays: allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : imported ? imported.available : t.maxDays,
       used: allocated ? policyUsed : usedDays,
-      remaining: allocated ? periodBalance(allocated.entitlement, allocated.carryForward, policyUsed) : imported ? Math.max(imported.available - usedDays, 0) : Math.max(t.maxDays - usedDays, 0),
+      remaining: allocated ? periodBalance(allocated.entitlement, allocated.carryForward, policyUsed) : imported ? Math.max(imported.available - usedDays, 0) : t.maxDays === null ? null : Math.max(t.maxDays - usedDays, 0),
       policyPeriodId: allocated?.policyPeriodId ?? null,
       importedBalance: imported ? { batchId: imported.batchId, throughMonth: imported.periodEnd.toISOString().slice(0, 7), opening: imported.openingBalance, credited: imported.credited, availed: imported.availed, available: imported.available } : null,
     };

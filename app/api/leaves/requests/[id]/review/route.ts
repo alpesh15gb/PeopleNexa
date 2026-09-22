@@ -133,8 +133,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const periodId = request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" ? (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId : null;
       const allocation = typeof periodId === "string" ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, policyPeriodId: periodId } }) : null;
       const total = allocation ? approvedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === periodId).reduce((sum, row) => sum + row.days, 0) : approvedRows.reduce((sum, row) => sum + row.days, 0);
-      const entitlement = allocation ? allocation.entitlement + allocation.carryForward : leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
-      if (leaveType && entitlement !== undefined && total > entitlement) {
+      const entitlement = allocation ? (allocation.entitlement === null ? null : allocation.entitlement + allocation.carryForward) : leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
+      if (leaveType && entitlement !== undefined && entitlement !== null && total > entitlement) {
         const err = new Error(
           `Approving this would exceed the ${leaveType.name} balance — ${entitlement} day(s) allowed, ${total} day(s) would be approved.`
         ) as Error & { code?: string };

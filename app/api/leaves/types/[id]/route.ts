@@ -16,7 +16,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     where: { id },
     data: {
       name: body.name ?? type.name,
-      maxDays: body.maxDays != null ? Number(body.maxDays) : type.maxDays,
+      maxDays: body.maxDays === undefined ? type.maxDays : body.maxDays === null || body.maxDays === "" ? null : Number(body.maxDays),
       isCarryForward: body.isCarryForward != null ? Boolean(body.isCarryForward) : type.isCarryForward,
       requiresApproval: body.requiresApproval != null ? Boolean(body.requiresApproval) : type.requiresApproval,
       color: body.color ?? type.color,

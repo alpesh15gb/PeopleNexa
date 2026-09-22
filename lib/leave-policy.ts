@@ -17,7 +17,7 @@ export type LeavePolicySnapshot = {
   rules: {
     name: string;
     code: string;
-    annualEntitlement: number;
+    annualEntitlement: number | null;
     paid: boolean;
     allowsHalfDay: boolean;
     requiresApproval: boolean;
@@ -50,10 +50,11 @@ export function resolveLeavePolicy(records: LeavePolicyRecord[], locationId: str
   };
 }
 
-export function leaveRequestEntitlement(snapshot: unknown): number | null {
+export function leaveRequestEntitlement(snapshot: unknown): number | null | undefined {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   const rules = (snapshot as Record<string, unknown>).rules;
   if (!rules || typeof rules !== "object" || Array.isArray(rules)) return null;
   const entitlement = (rules as Record<string, unknown>).annualEntitlement;
-  return typeof entitlement === "number" && Number.isInteger(entitlement) && entitlement >= 0 && entitlement <= 366 ? entitlement : null;
+  if (entitlement === null) return null;
+  return typeof entitlement === "number" && Number.isInteger(entitlement) && entitlement >= 0 && entitlement <= 366 ? entitlement : undefined;
 }

@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    if (!body.name || !body.code || !body.maxDays) {
-      return NextResponse.json({ error: "Name, code and max days are required." }, { status: 400 });
+    if (!body.name || !body.code) {
+      return NextResponse.json({ error: "Name and code are required." }, { status: 400 });
     }
     const code = String(body.code).toUpperCase();
     const exists = await prisma.leaveType.findFirst({ where: { tenantId: session.tenantId, code } });
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
         tenantId: session.tenantId,
         name: body.name,
         code,
-        maxDays: Number(body.maxDays),
+        maxDays: body.maxDays === null || body.maxDays === "" || body.maxDays === undefined ? null : Number(body.maxDays),
         isCarryForward: Boolean(body.isCarryForward),
         requiresApproval: body.requiresApproval !== false,
         color: body.color || "#3b82f6",

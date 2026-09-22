@@ -3,6 +3,6 @@ export function carryForwardCandidate(legacyRemaining: number, enabled: boolean,
   return Math.max(0, Math.min(legacyRemaining, limit));
 }
 
-export function periodBalance(entitlement: number, carryForward: number, used: number) {
-  return Math.max(entitlement + carryForward - used, 0);
+export function periodBalance(entitlement: number | null, carryForward: number, used: number) {
+  return entitlement === null ? null : Math.max(entitlement + carryForward - used, 0);
 }
