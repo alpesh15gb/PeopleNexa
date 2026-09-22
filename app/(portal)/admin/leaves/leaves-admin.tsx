@@ -482,7 +482,8 @@ export function LeavesAdmin({
 
 type BalanceResponse = {
   types: Array<{ id: string; name: string; code: string }>;
-  balances: Array<{ employee: { id: string; firstName: string; lastName: string; employeeNumber: string; location: string | null }; balances: Array<{ leaveType: { id: string; name: string; code: string; color: string }; opening: number; credited: number; used: number; pending: number; available: number | null; source: string; nextEligibility: string | null; history: Array<{ id: string; days: number; status: string; fromDate: string; toDate: string }> }> }>;
+  balances: Array<{ employee: { id: string; firstName: string; lastName: string; employeeNumber: string; location: string | null }; balances: Array<{ leaveType: { id: string; name: string; code: string; color: string }; opening: number; credited: number; used: number; pending: number; available: number | null; source: "policy_period" | "imported_snapshot" | "leave_type_allowance" | "unlimited_leave_type"; importedSnapshot: { throughMonth: string; opening: number; credited: number; availed: number; available: number } | null; fixedEarnedLeaveWarning: boolean; nextEligibility: string | null; history: Array<{ id: string; days: number; status: string; fromDate: string; toDate: string }> }> }>;
+  summary: { importedSnapshots: number; policyPeriods: number; leaveTypeAllowances: number; fixedEarnedLeaveWarnings: number };
   page: number;
   pages: number;
   total: number;
@@ -492,36 +493,41 @@ function EmployeeBalances() {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [leaveTypeId, setLeaveTypeId] = useState("");
+  const [source, setSource] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<BalanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  useEffect(() => { setPage(1); }, [deferredQuery, leaveTypeId]);
+  useEffect(() => { setPage(1); }, [deferredQuery, leaveTypeId, source]);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     const params = new URLSearchParams({ page: String(page) });
     if (deferredQuery.trim()) params.set("q", deferredQuery.trim());
     if (leaveTypeId) params.set("leaveTypeId", leaveTypeId);
+    if (source) params.set("source", source);
     void fetch(`/api/leaves/balances?${params}`).then(async (response) => {
       if (!response.ok) throw new Error();
       return response.json() as Promise<BalanceResponse>;
     }).then((result) => { if (!cancelled) setData(result); }).catch(() => { if (!cancelled) setData(null); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [deferredQuery, leaveTypeId, page]);
+  }, [deferredQuery, leaveTypeId, source, page]);
 
   return <div className="space-y-4 p-5">
     <div className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-tint p-3">
       <Field label="Find employee" className="min-w-56 flex-1"><div className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Name or employee number" /></div></Field>
-      <Field label="Leave type" className="min-w-44"><Select value={leaveTypeId} onChange={(event) => setLeaveTypeId(event.target.value)}><option value="">All leave types</option>{data?.types.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.code})</option>)}</Select></Field>
-    </div>
+       <Field label="Leave type" className="min-w-44"><Select value={leaveTypeId} onChange={(event) => setLeaveTypeId(event.target.value)}><option value="">All leave types</option>{data?.types.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.code})</option>)}</Select></Field>
+       <Field label="Balance source" className="min-w-48"><Select value={source} onChange={(event) => setSource(event.target.value)}><option value="">All sources</option><option value="imported">Imported snapshot only</option></Select></Field>
+     </div>
+     <div className="rounded-xl border border-edge bg-tint px-3 py-2 text-[12px] text-muted-foreground">Imported snapshots apply only to source employees that matched an active PeopleNexa employee code during import. They never create or map missing employees. {data && <span className="ml-2 font-medium text-foreground">This page: {data.summary.importedSnapshots} imported, {data.summary.policyPeriods} policy-period, {data.summary.leaveTypeAllowances} leave-type allowance.</span>}</div>
+     {data?.summary.fixedEarnedLeaveWarnings ? <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">{data.summary.fixedEarnedLeaveWarnings} Earned Leave row(s) resolve to an active fixed entitlement, not attendance accrual. This is a configuration warning only; balances are unchanged. <a href="/admin/configuration" className="font-semibold underline">Review leave policy configuration</a>.</div> : null}
     <div className="overflow-x-auto rounded-xl border border-edge">
       <Table><THead><TR><TH>Employee</TH><TH>Leave type</TH><TH>Opening / imported</TH><TH>Credited</TH><TH>Used</TH><TH>Pending</TH><TH>Available</TH><TH>Source / eligibility</TH></TR></THead><TBody>
         {loading ? <tr><td colSpan={8} className="py-10 text-center text-[13px] text-muted-foreground">Loading balances...</td></tr> : data?.balances.length ? data.balances.flatMap((row) => row.balances.map((balance) => <>
           <TR key={`${row.employee.id}:${balance.leaveType.id}`}>
             <TD><button className="text-left text-[13px] font-medium hover:text-indigo-300" onClick={() => setExpanded(expanded === `${row.employee.id}:${balance.leaveType.id}` ? null : `${row.employee.id}:${balance.leaveType.id}`)}>{row.employee.firstName} {row.employee.lastName}<span className="block text-[11px] font-normal text-muted-foreground">{row.employee.employeeNumber}{row.employee.location ? ` · ${row.employee.location}` : ""}</span></button></TD>
-            <TD><span className="flex items-center gap-2 text-[13px]"><span className="h-2.5 w-2.5 rounded-full" style={{ background: balance.leaveType.color }} />{balance.leaveType.name}</span></TD><TD>{balance.opening}</TD><TD>{balance.credited}</TD><TD>{balance.used}</TD><TD>{balance.pending}</TD><TD className="font-semibold">{balance.available === null ? "Unlimited" : balance.available}</TD><TD className="max-w-56 text-[12px] text-muted-foreground">{balance.source}{balance.nextEligibility ? ` · eligible ${String(balance.nextEligibility).slice(0, 10)}` : ""}</TD>
+            <TD><span className="flex items-center gap-2 text-[13px]"><span className="h-2.5 w-2.5 rounded-full" style={{ background: balance.leaveType.color }} />{balance.leaveType.name}</span></TD><TD>{balance.importedSnapshot ? `${balance.importedSnapshot.opening} · imported ${balance.importedSnapshot.throughMonth}` : balance.opening}</TD><TD>{balance.credited}</TD><TD>{balance.used}</TD><TD>{balance.pending}</TD><TD className="font-semibold">{balance.available === null ? "Unlimited" : balance.available}</TD><TD className="max-w-56 text-[12px] text-muted-foreground">{balance.source === "policy_period" ? "Policy-period allocation" : balance.source === "imported_snapshot" ? `Imported snapshot through ${balance.importedSnapshot?.throughMonth}` : balance.source === "unlimited_leave_type" ? "Unlimited leave type" : "Leave type allowance"}{balance.importedSnapshot && balance.source === "policy_period" ? ` · imported baseline through ${balance.importedSnapshot.throughMonth}` : ""}{balance.nextEligibility ? ` · eligible ${String(balance.nextEligibility).slice(0, 10)}` : ""}</TD>
           </TR>
           {expanded === `${row.employee.id}:${balance.leaveType.id}` && <tr key={`${row.employee.id}:${balance.leaveType.id}:history`}><td colSpan={8} className="bg-tint px-5 py-3"><p className="mb-2 text-[12px] font-semibold">Recent leave history</p>{balance.history.length ? <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-muted-foreground">{balance.history.map((item) => <span key={item.id}>{String(item.fromDate).slice(0, 10)} to {String(item.toDate).slice(0, 10)} · {item.days}d · {item.status}</span>)}</div> : <p className="text-[12px] text-muted-foreground">No leave history for this balance source.</p>}</td></tr>}
         </>)) : <tr><td colSpan={8} className="py-10 text-center text-[13px] text-muted-foreground">No employees match this search. Try a name, employee number, or another leave type.</td></tr>}

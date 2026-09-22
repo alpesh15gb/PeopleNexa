@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { calculateLeaveBalance, leaveBalanceScope } from "@/lib/leave-balance";
+import { calculateLeaveBalance, isEarnedLeave, leaveBalanceScope, leaveBalanceSource } from "@/lib/leave-balance";
+import { leavePolicyDraft, resolveConfiguration } from "@/lib/configuration";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
 
   const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
   const leaveTypeId = request.nextUrl.searchParams.get("leaveTypeId") || null;
+  const sourceFilter = request.nextUrl.searchParams.get("source") === "imported" ? "imported" : null;
   const requestedPage = Number(request.nextUrl.searchParams.get("page") ?? "1");
   const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
   const where = {
@@ -29,6 +31,7 @@ export async function GET(request: NextRequest) {
       { lastName: { contains: query, mode: "insensitive" as const } },
       { employeeNumber: { contains: query, mode: "insensitive" as const } },
     ] } : {}),
+    ...(sourceFilter ? { leaveBalanceImportEntries: { some: { tenantId: session.tenantId, ...(leaveTypeId ? { leaveTypeId } : {}), periodEnd: { lte: new Date() } } } } : {}),
   };
   const [total, employees, types] = await Promise.all([
     prisma.employee.count({ where }),
@@ -37,10 +40,11 @@ export async function GET(request: NextRequest) {
   ]);
   const employeeIds = employees.map((employee) => employee.id);
   const now = new Date();
-  const [requests, allocations, imports] = await Promise.all([
+  const [requests, allocations, imports, policyRecords] = await Promise.all([
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, ...(leaveTypeId ? { leaveTypeId } : {}) }, select: { id: true, employeeId: true, leaveTypeId: true, days: true, status: true, fromDate: true, toDate: true, appliedAt: true, leavePolicySnapshot: true }, orderBy: { appliedAt: "desc" } }),
     prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, ...(leaveTypeId ? { leaveTypeId } : {}), policyPeriod: { effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] } }, include: { policyPeriod: { select: { id: true, locationId: true } } } }),
     prisma.leaveBalanceImportEntry.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, ...(leaveTypeId ? { leaveTypeId } : {}), periodEnd: { lte: now } }, orderBy: { periodEnd: "desc" } }),
+    prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "leave_policy", active: true }, select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }),
   ]);
 
   const balances = employees.map((employee) => ({
@@ -55,8 +59,25 @@ export async function GET(request: NextRequest) {
       const opening = imported?.openingBalance ?? 0;
       const credited = allocation ? (allocation.entitlement ?? 0) + allocation.carryForward : imported?.credited ?? 0;
       const available = calculateLeaveBalance({ cap, opening: imported ? imported.available : opening, credited: imported ? 0 : credited, used, pending }).available;
-      return { leaveType: type, opening, credited, used, pending, available, source: allocation ? "policy period" : imported ? `imported through ${imported.periodEnd.toISOString().slice(0, 7)}` : cap === null ? "unlimited leave type" : "leave type allowance", nextEligibility: allocation?.policySnapshot && typeof allocation.policySnapshot === "object" && (allocation.policySnapshot as Record<string, unknown>).accrual && typeof ((allocation.policySnapshot as Record<string, unknown>).accrual as Record<string, unknown>).availableOn === "string" ? ((allocation.policySnapshot as Record<string, unknown>).accrual as Record<string, unknown>).availableOn : null, history: relevant.slice(0, 5) };
-    }),
-  }));
-  return NextResponse.json({ types, balances, page, pageSize: PAGE_SIZE, total, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)) });
+      const source = leaveBalanceSource(Boolean(allocation), Boolean(imported), cap);
+      const policy = resolveConfiguration(policyRecords.filter((record) => leavePolicyDraft(record.payload)), employee.branch?.locationId ?? null, now);
+      const rule = leavePolicyDraft(policy?.payload)?.leaveTypes.find((item) => item.code === type.code);
+      const fixedEarnedLeaveWarning = Boolean(rule && isEarnedLeave(type.code, type.name) && rule.annualEntitlement !== null && !rule.workedDayAccrual);
+      return {
+        leaveType: type, opening, credited, used, pending, available, source,
+        importedSnapshot: imported ? { throughMonth: imported.periodEnd.toISOString().slice(0, 7), opening: imported.openingBalance, credited: imported.credited, availed: imported.availed, available: imported.available } : null,
+        fixedEarnedLeaveWarning,
+        nextEligibility: allocation?.policySnapshot && typeof allocation.policySnapshot === "object" && (allocation.policySnapshot as Record<string, unknown>).accrual && typeof ((allocation.policySnapshot as Record<string, unknown>).accrual as Record<string, unknown>).availableOn === "string" ? ((allocation.policySnapshot as Record<string, unknown>).accrual as Record<string, unknown>).availableOn : null,
+        history: relevant.slice(0, 5),
+      };
+    }).filter((balance) => !sourceFilter || Boolean(balance.importedSnapshot)),
+  })).filter((row) => row.balances.length > 0);
+  const flatBalances = balances.flatMap((row) => row.balances);
+  const summary = {
+    importedSnapshots: flatBalances.filter((balance) => balance.importedSnapshot).length,
+    policyPeriods: flatBalances.filter((balance) => balance.source === "policy_period").length,
+    leaveTypeAllowances: flatBalances.filter((balance) => balance.source === "leave_type_allowance").length,
+    fixedEarnedLeaveWarnings: flatBalances.filter((balance) => balance.fixedEarnedLeaveWarning).length,
+  };
+  return NextResponse.json({ types, balances, summary, page, pageSize: PAGE_SIZE, total, pages: Math.max(1, Math.ceil(total / PAGE_SIZE)) });
 }
