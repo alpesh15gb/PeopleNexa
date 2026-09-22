@@ -141,11 +141,14 @@ export async function GET(req: NextRequest) {
     ],
   };
 
-  const [total, tenant, branch] = await Promise.all([
+  const [total, tenant, branch, location] = await Promise.all([
     prisma.employee.count({ where: employeeWhere }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     branchId
       ? prisma.branch.findFirst({ where: { id: branchId, tenantId: session.tenantId }, select: { name: true } })
+      : Promise.resolve(null),
+    scopedLocationId
+      ? prisma.location.findFirst({ where: { id: scopedLocationId, tenantId: session.tenantId }, select: { name: true } })
       : Promise.resolve(null),
   ]);
 
@@ -199,7 +202,7 @@ export async function GET(req: NextRequest) {
         fromDate: { lt: rangeEnd },
         toDate: { gte: rangeStart },
       },
-      select: { employeeId: true, fromDate: true, toDate: true },
+      select: { employeeId: true, fromDate: true, toDate: true, leaveType: { select: { name: true, code: true } } },
     }),
     prisma.holiday.findMany({
       where: {
@@ -232,7 +235,12 @@ export async function GET(req: NextRequest) {
 
   // Approved-leave lookup at IST day granularity.
   const leaveKeys = new Set<string>(); // `${employeeId}|${dayKey}`
+  const leaveLabels = new Map<string, string[]>();
   for (const l of leaves) {
+    const label = l.leaveType.code || l.leaveType.name;
+    const labels = leaveLabels.get(l.employeeId) ?? [];
+    if (!labels.includes(label)) labels.push(label);
+    leaveLabels.set(l.employeeId, labels);
     const lStart = istStartOfDay(l.fromDate);
     const lEnd = istStartOfDay(l.toDate);
     for (const day of dayKeys) {
@@ -251,7 +259,7 @@ export async function GET(req: NextRequest) {
   }
 
   const tenantInfo = { name: tenant?.name ?? "Company" };
-  const branchInfo = branch ? { name: branch.name } : null;
+  const branchInfo = branch ? { name: branch.name } : location ? { name: location.name } : null;
   const departmentInfo = department ? { name: department.name } : null;
 
   if (kind === "daily") {
@@ -298,6 +306,7 @@ export async function GET(req: NextRequest) {
       records,
       punchesByDay,
       leaves: leaveKeys,
+      leaveLabels,
       holidays: holidayKeys,
     });
     if (format === "xlsx") return statusMatrixXlsx(output, monthKey);
@@ -445,44 +454,57 @@ function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string) {
 
 function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
   return xlsxResponse(`status-matrix-${monthKey}.xlsx`, (wb) => {
-    const ws = wb.addWorksheet("Status Matrix");
+    const ws = wb.addWorksheet("Monthly Attendance Matrix");
     const dayCount = output.blocks[0]?.days.length ?? 0;
-    const cols = dayCount + 1;
-    ws.getColumn(1).width = 10;
-    for (let d = 1; d <= dayCount; d++) ws.getColumn(d + 1).width = 7;
+    const fixedColumns = [7, 15, 28, 18, 12];
+    const totalLabels = ["Present", "Absent", "Leave", "Holiday", "Week Off", "PON"];
+    const cols = fixedColumns.length + dayCount + totalLabels.length;
+    fixedColumns.forEach((width, index) => { ws.getColumn(index + 1).width = width; });
+    for (let d = 1; d <= dayCount; d++) ws.getColumn(fixedColumns.length + d).width = 8;
+    totalLabels.forEach((_, index) => { ws.getColumn(fixedColumns.length + dayCount + index + 1).width = 10; });
     const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
-    ws.mergeCells(titleRow.number, 1, titleRow.number, Math.max(cols, 1));
+    ws.mergeCells(titleRow.number, 1, titleRow.number, cols);
     styleTitleRow(titleRow);
-    borderAll(ws, titleRow.number, Math.max(cols, 1));
+    titleRow.height = 24;
+    borderAll(ws, titleRow.number, cols);
     if (output.department) {
       const depRow = ws.addRow([`Department | ${output.department}`]);
-      ws.mergeCells(depRow.number, 1, depRow.number, Math.max(cols, 1));
+      ws.mergeCells(depRow.number, 1, depRow.number, cols);
       depRow.font = { bold: true };
-      borderAll(ws, depRow.number, Math.max(cols, 1));
+      borderAll(ws, depRow.number, cols);
     }
-    let isFirst = true;
+    const headerRow = ws.addRow(["Sl No", "Employee Id", "Employee Name", "Applied Leave", "", ...(output.blocks[0]?.days.map((d) => `${d.day}\n${d.dow}`) ?? []), ...totalLabels]);
+    styleHeaderRow(headerRow);
+    headerRow.height = 30;
+    headerRow.eachCell((cell, col) => {
+      const day = output.blocks[0]?.days[col - fixedColumns.length - 1];
+      if (day?.isSunday) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE2E2" } };
+    });
+    borderAll(ws, headerRow.number, cols);
     for (const block of output.blocks) {
-      if (!isFirst) ws.addRow([]);
-      isFirst = false;
-      const empRow = ws.addRow([`Emp. Code ${block.code} Emp. Name ${block.name}`]);
-      ws.mergeCells(empRow.number, 1, empRow.number, Math.max(cols, 1));
-      empRow.font = { bold: true };
-      borderAll(ws, empRow.number, Math.max(cols, 1));
-      const headRow = ws.addRow(["", ...block.days.map((d) => `${d.day} ${d.dow}`)]);
-      styleHeaderRow(headRow);
-      const statusRow = ws.addRow(["Status", ...block.days.map((d) => d.status)]);
-      const inRow = ws.addRow(["InTime", ...block.days.map((d) => d.inTime)]);
-      const outRow = ws.addRow(["OutTime", ...block.days.map((d) => d.outTime)]);
-      const totalRow = ws.addRow(["Total", ...block.days.map((d) => d.total)]);
-      for (let n = headRow.number; n <= totalRow.number; n++) borderAll(ws, n, Math.max(cols, 1));
-      // P green / A red fills on the status row.
-      statusRow.eachCell((cell, col) => {
-        if (col === 1) return;
-        const v = String(cell.value ?? "");
-        if (v === "P" || v === "½P") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
-        else if (v === "A") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
-      });
+      const startRow = ws.rowCount + 1;
+      const checkIn = ws.addRow([block.serial, block.code, block.name, block.appliedLeave, "CHECK IN", ...block.days.map((d) => d.inTime), "", "", "", "", "", ""]);
+      const checkOut = ws.addRow(["", "", "", "", "CHECK OUT", ...block.days.map((d) => d.outTime), "", "", "", "", "", ""]);
+      const attendance = ws.addRow(["", "", "", "", "ATT", ...block.days.map((d) => d.status), block.totals.present, block.totals.absent, block.totals.leave, block.totals.holiday, block.totals.weekOff, block.totals.pon]);
+      ws.mergeCells(startRow, 1, startRow + 2, 1);
+      ws.mergeCells(startRow, 2, startRow + 2, 2);
+      ws.mergeCells(startRow, 3, startRow + 2, 3);
+      ws.mergeCells(startRow, 4, startRow + 2, 4);
+      for (let n = startRow; n <= startRow + 2; n++) {
+        borderAll(ws, n, cols);
+        ws.getRow(n).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      }
+      for (let c = fixedColumns.length + 1; c <= fixedColumns.length + dayCount; c++) {
+        const day = block.days[c - fixedColumns.length - 1];
+        const cell = attendance.getCell(c);
+        if (day.status === "P" || day.status === "½P" || day.status === "PON") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } };
+        else if (day.status === "A") cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
+        else if (day.isSunday) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE2E2" } };
+      }
     }
+    ws.views = [{ state: "frozen", xSplit: 4, ySplit: output.department ? 3 : 2 }];
+    ws.pageSetup = { orientation: "landscape", paperSize: 5, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true };
+    ws.pageSetup.printTitlesRow = `${headerRow.number}:${headerRow.number}`;
   });
 }
 

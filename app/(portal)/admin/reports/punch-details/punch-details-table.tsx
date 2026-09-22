@@ -23,6 +23,7 @@ interface AttendanceRow {
     position: string | null;
     branch: { name: string } | null;
     department: { name: string } | null;
+    employmentProfile: { subDepartment: string | null } | null;
     shift: { name: string } | null;
   };
   deviceIn: { name: string; serialNumber: string } | null;
@@ -154,44 +155,43 @@ export function PunchDetailsTable({
             <THead>
               <TR>
                 <TH>Sl No</TH>
-                <TH className="hidden md:table-cell">Employee Id</TH>
+                <TH>Employee ID</TH>
                 <TH className="sticky left-0 z-20 bg-card">Employee Name</TH>
                 <TH>Designation</TH>
-                <TH>Division</TH>
+                <TH>Division Name</TH><TH>Department Name</TH><TH>Sub-Department Name</TH>
                 <TH>Date</TH>
-                <TH>Device IN</TH>
+                <TH>In Device</TH><TH>In Device Serial Number</TH>
                 <TH>In Time</TH>
-                <TH>Device OUT</TH>
-                <TH>Out Time</TH>
-                <TH>Attendance</TH>
+                <TH>Out Time</TH><TH>Attendance</TH>
+                <TH>Out Device</TH><TH>Out Device Serial Number</TH>
                 <TH>Working Hours</TH>
-                <TH>Shift</TH>
-                <TH>Status</TH>
               </TR>
             </THead>
             <TBody>
               {loading && (
-                <TR><TD colSpan={14} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
+                <TR><TD colSpan={15} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
               )}
               {!loading && (data?.rows.length ?? 0) === 0 && (
-                <TR><TD colSpan={14} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
+                <TR><TD colSpan={15} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
               )}
               {(data?.rows ?? []).map((row, i) => {
                 return <TR key={row.id}>
                   <TD>{startRow + i}</TD>
-                  <TD className="hidden font-mono md:table-cell">{row.employee.employeeNumber}</TD>
+                  <TD className="font-mono">{row.employee.employeeNumber}</TD>
                   <TD className="sticky left-0 z-10 bg-card"><p>{row.employee.firstName} {row.employee.lastName}</p><p className="font-mono text-[11px] text-muted-foreground md:hidden">{row.employee.employeeNumber} · {row.employee.position ?? "No designation"}</p></TD>
                   <TD>{row.employee.position ?? "—"}</TD>
                   <TD>{row.employee.branch?.name ?? "—"}</TD>
+                  <TD>{row.employee.department?.name ?? "—"}</TD>
+                  <TD>{row.employee.employmentProfile?.subDepartment ?? "—"}</TD>
                   <TD className="font-mono">{date(row.date)}</TD>
                   <TD><span className="block max-w-44 truncate" title={row.deviceIn?.serialNumber ?? ""}>{row.deviceIn?.name ?? "—"}</span></TD>
+                  <TD className="font-mono">{row.deviceIn?.serialNumber ?? "—"}</TD>
                   <TD className="font-mono">{time(row.punchInTime)}</TD>
-                  <TD><span className="block max-w-44 truncate" title={row.deviceOut?.serialNumber ?? ""}>{row.deviceOut?.name ?? "—"}</span></TD>
                   <TD className="font-mono">{time(row.punchOutTime)}</TD>
                   <TD className="capitalize">{row.status.replace(/_/g, " ")}</TD>
+                  <TD><span className="block max-w-44 truncate" title={row.deviceOut?.serialNumber ?? ""}>{row.deviceOut?.name ?? "—"}</span></TD>
+                  <TD className="font-mono">{row.deviceOut?.serialNumber ?? "—"}</TD>
                   <TD className="font-mono">{workingHours(row.workingMinutes)}</TD>
-                  <TD>{row.employee.shift?.name ?? "—"}</TD>
-                  <TD className="text-emerald-400">ACTIVE</TD>
                 </TR>;
               })}
             </TBody>

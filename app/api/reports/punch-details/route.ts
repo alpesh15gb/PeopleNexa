@@ -159,29 +159,27 @@ export async function GET(req: NextRequest) {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Punch Details");
     ws.columns = [
-      { header: "S.No.", key: "serial", width: 8 },
-      { header: "Employee Code", key: "code", width: 16 },
-      { header: "Device Code", key: "deviceCode", width: 14 },
+      { header: "Sl No", key: "serial", width: 8 },
+      { header: "Employee ID", key: "code", width: 16 },
       { header: "Employee Name", key: "name", width: 26 },
       { header: "Designation", key: "designation", width: 24 },
-      { header: "Branch / Division", key: "branch", width: 26 },
-      { header: "Department", key: "department", width: 20 },
-      { header: "Subdepartment", key: "subdepartment", width: 20 },
+      { header: "Division Name", key: "branch", width: 26 },
+      { header: "Department Name", key: "department", width: 20 },
+      { header: "Sub-Department Name", key: "subdepartment", width: 20 },
       { header: "Date", key: "date", width: 14 },
-      { header: "Device IN", key: "deviceIn", width: 26 },
-      { header: "In Time (IST)", key: "inTime", width: 14 },
-      { header: "Device OUT", key: "deviceOut", width: 26 },
-      { header: "Out Time (IST)", key: "outTime", width: 14 },
+      { header: "In Device", key: "deviceIn", width: 26 },
+      { header: "In Device Serial Number", key: "deviceInSerial", width: 24 },
+      { header: "In Time", key: "inTime", width: 14 },
+      { header: "Out Time", key: "outTime", width: 14 },
       { header: "Attendance", key: "attendance", width: 14 },
+      { header: "Out Device", key: "deviceOut", width: 26 },
+      { header: "Out Device Serial Number", key: "deviceOutSerial", width: 24 },
       { header: "Working Hours", key: "workingHours", width: 16 },
-      { header: "Shift", key: "shift", width: 16 },
-      { header: "Status", key: "status", width: 12 },
     ];
     for (const [index, row] of rows.entries()) {
       ws.addRow({
         serial: index + 1,
         code: row.employee.employeeNumber,
-        deviceCode: row.employee.deviceCode ?? "",
         name: `${row.employee.firstName} ${row.employee.lastName}`.trim(),
         designation: row.employee.position ?? "",
         branch: row.employee.branch?.name ?? "",
@@ -189,13 +187,13 @@ export async function GET(req: NextRequest) {
         subdepartment: row.employee.employmentProfile?.subDepartment ?? "",
         date: formatDateIST(row.date),
         deviceIn: row.deviceIn?.name ?? "",
+        deviceInSerial: row.deviceIn?.serialNumber ?? "",
         inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
-        deviceOut: row.deviceOut?.name ?? "",
         outTime: row.punchOutTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchOutTime) : "",
         attendance: row.status,
+        deviceOut: row.deviceOut?.name ?? "",
+        deviceOutSerial: row.deviceOut?.serialNumber ?? "",
         workingHours: row.workingMinutes == null ? "" : `${Math.floor(row.workingMinutes / 60)}h ${row.workingMinutes % 60}m`,
-        shift: row.employee.shift?.name ?? "",
-        status: "ACTIVE",
       });
     }
     ws.getRow(1).font = { bold: true };

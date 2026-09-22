@@ -89,7 +89,7 @@ export default async function AdminReportsPage({
                 <Download className="h-4 w-4" aria-hidden="true" /> Download master data
               </a>
             )}
-            <Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Punch Details</Link>
+            <Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Punch Details / Logs</Link>
           </div>
         }
       />

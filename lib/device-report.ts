@@ -540,6 +540,7 @@ function firstLastInstants(snapshot: unknown, fallback: SnapshotPunch[] | undefi
 export interface DeviceStatusMatrixDay {
   day: number;
   dow: string;
+  isSunday: boolean;
   status: string; // P | ½P | A | WO | H | L
   inTime: string;
   outTime: string;
@@ -547,8 +548,11 @@ export interface DeviceStatusMatrixDay {
 }
 
 export interface DeviceStatusMatrixBlock {
+  serial: number;
   code: string;
   name: string;
+  appliedLeave: string;
+  totals: { present: number; absent: number; leave: number; holiday: number; weekOff: number; pon: number };
   days: DeviceStatusMatrixDay[];
 }
 
@@ -572,42 +576,68 @@ export function buildStatusMatrix(args: {
   punchesByDay: Map<string, SnapshotPunch[]>;
   /** `${employeeId}|${dayKey}` keys for approved-leave days. */
   leaves: Set<string>;
+  /** Approved leave labels keyed by employee id, for the matrix leave column. */
+  leaveLabels?: Map<string, string[]>;
   /** IST day keys that are tenant holidays. */
   holidays: Set<string>;
 }): DeviceStatusMatrixOutput {
-  const { tenant, branch, department, month, employees, records, punchesByDay, leaves, holidays } = args;
+  const { tenant, branch, department, month, employees, records, punchesByDay, leaves, holidays, leaveLabels } = args;
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
-  const blocks: DeviceStatusMatrixBlock[] = employees.map((emp) => ({
-    code: emp.employeeNumber,
-    name: fullName(emp),
-    days: days.map((dayKey, idx) => {
+  const blocks: DeviceStatusMatrixBlock[] = employees.map((emp, employeeIndex) => {
+    const totals = { present: 0, absent: 0, leave: 0, holiday: 0, weekOff: 0, pon: 0 };
+    const matrixDays = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const present = !!record && PRESENT_STATUSES.has(record.status);
+      const isSunday = new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
       let status: string;
-      if (holidays.has(dayKey)) status = "H";
-       else if (leaves.has(`${emp.id}|${dayKey}`)) status = "L";
-      else if (record && PRESENT_STATUSES.has(record.status)) status = record.status === "half_day" ? "½P" : "P";
-      else status = "A";
-      const present = status === "P" || status === "½P";
+      if (present && (holidays.has(dayKey) || isSunday)) {
+        status = "PON";
+        totals.pon++;
+      } else if (holidays.has(dayKey)) {
+        status = "H";
+        totals.holiday++;
+      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+        status = "L";
+        totals.leave++;
+      } else if (isSunday) {
+        status = "WO";
+        totals.weekOff++;
+      } else if (present) {
+        status = record.status === "half_day" ? "½P" : "P";
+        totals.present++;
+      } else {
+        status = "A";
+        totals.absent++;
+      }
       return {
         day: idx + 1,
         dow: dowLetter(dayKey),
+        isSunday,
         status,
         inTime: present ? cells.inTime : "",
         outTime: present ? cells.outTime : "",
         total: present ? cells.duration : "",
       };
-    }),
-  }));
+    });
+    return {
+      serial: employeeIndex + 1,
+      code: emp.employeeNumber,
+      name: fullName(emp),
+      appliedLeave: (leaveLabels?.get(emp.id) ?? []).join(", "),
+      totals,
+      days: matrixDays,
+    };
+  });
   return {
     kind: "status-matrix",
     month,
     monthLabel: formatMonthLabel(month),
     header: {
       left: `${tenant.name} - ${branch?.name ?? "All Branches"}`,
-      center: "Monthly Status Report",
-      right: formatRangeLabel(month),
+      center: "Monthly Attendance Matrix",
+      right: `${formatRangeLabel(month)} | ${days.length} Days`,
     },
     department: department?.name ?? null,
     blocks,

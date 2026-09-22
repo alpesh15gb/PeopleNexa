@@ -9,8 +9,8 @@ import { RotateCcw } from "lucide-react";
 
 const TYPES = [
   { key: "device-daily", label: "Daily Attendance" },
-  { key: "device-monthly", label: "Monthly Attendance" },
-  { key: "device-status-matrix", label: "Status Matrix" },
+  { key: "device-monthly", label: "Monthly Attendance Details" },
+  { key: "device-status-matrix", label: "Monthly Attendance Matrix" },
   { key: "device-work-summary", label: "Work Summary" },
   { key: "device-performance", label: "Performance" },
   { key: "inactive-employees", label: "Inactive Employees" },
