@@ -7,10 +7,11 @@ import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { ID_CARD_ARTBOARD, ID_CARD_FONT, ID_CARD_LAYOUT, ID_CARD_SIZE, idCardDetails } from "@/lib/id-card-content";
 import { safeLogoUrl } from "@/lib/branding-url";
+import { idCardDownloadUrl } from "@/lib/id-card-generation";
 import type { CompanyBranding } from "@/lib/company-branding";
 import type { IdCardTemplate } from "@/lib/configuration";
 
-type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; idCardIssuedAt: string | null; idCardValidUntil: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
+type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
 
 export function IdCardGenerator() {
   const [deviceCode, setDeviceCode] = useState("");
@@ -20,6 +21,7 @@ export function IdCardGenerator() {
   const [loading, setLoading] = useState(false);
   const [photoX, setPhotoX] = useState(50);
   const [photoY, setPhotoY] = useState(50);
+  const [validTill, setValidTill] = useState("");
   const toast = useToast();
 
   async function lookup(event: FormEvent) {
@@ -29,7 +31,7 @@ export function IdCardGenerator() {
       const response = await fetch(`/api/id-cards?deviceCode=${encodeURIComponent(deviceCode.trim())}`);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Could not find employee.");
-      setEmployee(data.employee); setBranding(data.branding); setTemplate(data.template); setPhotoX(50); setPhotoY(50);
+      setEmployee(data.employee); setBranding(data.branding); setTemplate(data.template); setPhotoX(50); setPhotoY(50); setValidTill("");
     } catch (error) {
       setEmployee(null); setBranding(null); setTemplate(null);
       toast("error", error instanceof Error ? error.message : "Could not find employee.");
@@ -39,18 +41,19 @@ export function IdCardGenerator() {
   return <div className="space-y-6">
     <form onSubmit={lookup} className="flex max-w-xl gap-3"><Field label="Device ID"><Input value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} placeholder="Enter biometric Device ID" required /></Field><Button className="mt-6" type="submit" loading={loading}><Search className="h-4 w-4" /> Find employee</Button></form>
     {employee && <>
-      <div className="grid gap-6 lg:grid-cols-2"><IdCardPreviewSide title="Front" employee={employee} branding={branding} template={template} photoPosition={{ x: photoX, y: photoY }} front /><IdCardPreviewSide title="Back" employee={employee} branding={branding} template={template} /></div>
+      <section className="flex max-w-xl flex-wrap items-end gap-3 rounded-xl border border-edge bg-tint p-4"><Field label="Valid up to"><Input type="date" value={validTill} onChange={(event) => setValidTill(event.target.value)} /></Field><p className="pb-2 text-xs text-muted-foreground">Optional. Applies only to this PDF.</p></section>
+      <div className="grid gap-6 lg:grid-cols-2"><IdCardPreviewSide title="Front" employee={employee} branding={branding} template={template} photoPosition={{ x: photoX, y: photoY }} validTill={validTill || null} front /><IdCardPreviewSide title="Back" employee={employee} branding={branding} template={template} /></div>
       {employee.profilePicture && <section className="max-w-[306px] space-y-3 rounded-xl border border-edge bg-tint p-4"><div><h2 className="text-sm font-semibold">Photo framing</h2><p className="mt-1 text-xs text-muted-foreground">Adjust the photo position for this card. The PDF uses the same framing.</p></div><Field label="Horizontal position"><Input type="range" min="0" max="100" value={photoX} onChange={(event) => setPhotoX(Number(event.target.value))} /></Field><Field label="Vertical position"><Input type="range" min="0" max="100" value={photoY} onChange={(event) => setPhotoY(Number(event.target.value))} /></Field></section>}
-      <a href={`/api/id-cards?deviceCode=${encodeURIComponent(deviceCode.trim())}&format=pdf&photoX=${photoX}&photoY=${photoY}`}><Button><Download className="h-4 w-4" /> Download front and back PDF</Button></a>
+      <a href={idCardDownloadUrl(deviceCode, photoX, photoY, validTill)}><Button><Download className="h-4 w-4" /> Download front and back PDF</Button></a>
     </>}
   </div>;
 }
 
-export function IdCardPreviewSide({ title, employee, branding, template, front = false, photoPosition = { x: 50, y: 50 } }: { title: string; employee: Employee; branding: CompanyBranding | null; template: IdCardTemplate | null; front?: boolean; photoPosition?: { x: number; y: number } }) {
+export function IdCardPreviewSide({ title, employee, branding, template, front = false, photoPosition = { x: 50, y: 50 }, validTill }: { title: string; employee: Employee; branding: CompanyBranding | null; template: IdCardTemplate | null; front?: boolean; photoPosition?: { x: number; y: number }; validTill?: string | null }) {
   const logo = safeLogoUrl(branding?.logoUrl);
   const contact = [branding?.address, branding?.contact].filter(Boolean).join(" | ");
   const background = front ? template?.frontBackgroundUrl ?? "/id-cards/1.png" : template?.backBackgroundUrl ?? "/id-cards/2.png";
-  const fields = idCardDetails(employee);
+  const fields = idCardDetails(employee, { issuedAt: new Date(), validTill });
   const at = (box: { x: number; y: number; width: number; height: number }) => ({ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.width * 100}%`, height: `${box.height * 100}%` });
   const dynamicFont: CSSProperties = { fontFamily: `var(--font-id-card), ${ID_CARD_FONT.family}, Arial, sans-serif` };
   const cqw = (points: number) => `${(points / ID_CARD_SIZE.widthPt) * 100}cqw`;

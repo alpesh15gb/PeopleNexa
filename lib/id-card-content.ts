@@ -10,6 +10,11 @@ export type IdCardEmployeeContent = {
   profile: { bloodGroup: string | null } | null;
 };
 
+export type IdCardGenerationDetails = {
+  issuedAt?: Date;
+  validTill?: string | null;
+};
+
 const MM_TO_POINTS = 72 / 25.4;
 
 // CR80 is 85.60 x 53.98 mm. Portrait cards use the short side as their width.
@@ -53,18 +58,24 @@ export function idCardFieldsHeight() {
 
 const ellipsis = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
 
-export function idCardDetails(employee: IdCardEmployeeContent) {
-  const joiningDate = employee.joiningDate
-    ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(employee.joiningDate))
-    : "-";
-  const format = (value: Date | string | null | undefined) => value ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "-";
+export function formatIdCardDate(value: Date | string | null | undefined) {
+  if (!value) return "-";
+  // Picker values are calendar dates, so preserve the selected day independently of server timezone.
+  const dateOnly = typeof value === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`;
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(value));
+}
+
+export function idCardDetails(employee: IdCardEmployeeContent, generation: IdCardGenerationDetails = {}) {
+  const issuedAt = generation.issuedAt ?? employee.idCardIssuedAt;
+  const validTill = generation.validTill ?? employee.idCardValidUntil;
   return [
     ["Emp. ID", ellipsis(employee.employeeNumber, 24)],
     ["Emp. Name", ellipsis(`${employee.firstName} ${employee.lastName}`.trim(), 28)],
     ["Designation", ellipsis(employee.position ?? "-", 28)],
-    ["DOJ", joiningDate],
-    ["Issue Date", format(employee.idCardIssuedAt)],
-    ["Validity", format(employee.idCardValidUntil)],
+    ["DOJ", formatIdCardDate(employee.joiningDate)],
+    ["Issued Date", formatIdCardDate(issuedAt)],
+    ["Valid Till", formatIdCardDate(validTill)],
     ["Blood Group", ellipsis(employee.profile?.bloodGroup ?? "-", 16)],
     ["Contact", ellipsis(employee.phone ?? "-", 20)],
   ] as const;

@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ID_CARD_FONT, ID_CARD_LAYOUT, ID_CARD_SIZE, idCardDetails } from "@/lib/id-card-content";
+import { ID_CARD_FONT, ID_CARD_LAYOUT, ID_CARD_SIZE, idCardDetails, type IdCardGenerationDetails } from "@/lib/id-card-content";
 import { loadBrandLogo, safeLogoUrl, type CompanyBranding } from "@/lib/company-branding";
 import type { IdCardTemplate } from "@/lib/configuration";
 
@@ -16,7 +16,7 @@ const fontPath = (weight: "400Regular" | "600SemiBold") => path.join(process.cwd
 
 function photo(value: string | null) { if (!value?.startsWith("data:image/")) return null; const encoded = value.split(",", 2)[1]; return encoded ? Buffer.from(encoded, "base64") : null; }
 
-export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 50 }, branding?: CompanyBranding, template?: IdCardTemplate | null): Promise<Buffer> {
+export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 50 }, branding?: CompanyBranding, template?: IdCardTemplate | null, generation: IdCardGenerationDetails = {}): Promise<Buffer> {
   const [front, back] = await Promise.all([cardBackground(template?.frontBackgroundUrl, "1.png"), cardBackground(template?.backBackgroundUrl, "2.png")]);
   const doc = new PDFDocument({ size: [width, height], margin: 0 });
   doc.registerFont(ID_CARD_FONT.regular, fontPath("400Regular"));
@@ -28,7 +28,7 @@ export async function renderIdCardPdf(employee: IdCardData, crop = { x: 50, y: 5
   if (!template && branding?.hasConfiguredValues) await drawBranding(doc, branding);
   if (!template || template.frontContentPanel === "clean") drawFrontContentPanel(doc);
   drawPhoto(doc, employee.profilePicture, crop);
-  drawFields(doc, idCardDetails(employee));
+  drawFields(doc, idCardDetails(employee, generation));
   doc.addPage({ size: [width, height], margin: 0 });
   drawBackground(doc, back);
   doc.end();

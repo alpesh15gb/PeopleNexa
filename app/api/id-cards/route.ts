@@ -5,6 +5,7 @@ import { renderIdCardPdf } from "@/lib/id-card-pdf";
 import { photoPosition } from "@/lib/id-card-content";
 import { resolveCompanyBranding } from "@/lib/company-branding";
 import { idCardTemplate, resolveConfiguration } from "@/lib/configuration";
+import { validTillFromRequest } from "@/lib/id-card-generation";
 
 export async function GET(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -15,9 +16,11 @@ export async function GET(request: NextRequest) {
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const deviceCode = request.nextUrl.searchParams.get("deviceCode")?.trim();
   if (!deviceCode) return NextResponse.json({ error: "Device ID is required." }, { status: 400 });
+  const validTill = validTillFromRequest(request.nextUrl.searchParams.get("validTill"));
+  if (validTill === undefined) return NextResponse.json({ error: "Valid up to must be a valid date." }, { status: 400 });
   const [tenant, employee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
-    prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, idCardIssuedAt: true, idCardValidUntil: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
+    prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
   ]);
   if (!employee) return NextResponse.json({ error: "No employee matches this Device ID." }, { status: 404 });
   const branding = resolveCompanyBranding(tenant, employee.branch?.location ?? employee.location);
@@ -26,6 +29,7 @@ export async function GET(request: NextRequest) {
   const templateRecord = resolveConfiguration(records, employeeLocationId);
   const template = idCardTemplate(templateRecord?.payload);
   if (request.nextUrl.searchParams.get("format") !== "pdf") return NextResponse.json({ employee, branding, template });
-  const pdf = await renderIdCardPdf(employee, { x: photoPosition(request.nextUrl.searchParams.get("photoX")), y: photoPosition(request.nextUrl.searchParams.get("photoY")) }, branding, template);
+  // The issued date is captured only in this generated PDF; employee master data remains unchanged.
+  const pdf = await renderIdCardPdf(employee, { x: photoPosition(request.nextUrl.searchParams.get("photoX")), y: photoPosition(request.nextUrl.searchParams.get("photoY")) }, branding, template, { issuedAt: new Date(), validTill });
   return new NextResponse(new Uint8Array(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="id-card-${employee.deviceCode ?? employee.employeeNumber}.pdf"` } });
 }
