@@ -547,6 +547,9 @@ export interface DeviceStatusMatrixDay {
   total: string;
 }
 
+export const PON_LEGEND = "PON = Present on non-working day (Sunday or company holiday)";
+export const PON_TOTAL_LABEL = "PON (Present on non-working day)";
+
 export interface DeviceStatusMatrixBlock {
   serial: number;
   code: string;

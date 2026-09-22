@@ -10,6 +10,8 @@ import {
   buildPerformance,
   buildStatusMatrix,
   buildWorkSummary,
+  PON_LEGEND,
+  PON_TOTAL_LABEL,
   type DeviceDailyOutput,
   type DeviceMonthlyOutput,
   type DevicePerformanceOutput,
@@ -457,7 +459,7 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
     const ws = wb.addWorksheet("Monthly Attendance Matrix");
     const dayCount = output.blocks[0]?.days.length ?? 0;
     const fixedColumns = [7, 15, 28, 18, 12];
-    const totalLabels = ["Present", "Absent", "Leave", "Holiday", "Week Off", "PON"];
+    const totalLabels = ["Present", "Absent", "Leave", "Holiday", "Week Off", PON_TOTAL_LABEL];
     const cols = fixedColumns.length + dayCount + totalLabels.length;
     fixedColumns.forEach((width, index) => { ws.getColumn(index + 1).width = width; });
     for (let d = 1; d <= dayCount; d++) ws.getColumn(fixedColumns.length + d).width = 8;
@@ -473,6 +475,10 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
       depRow.font = { bold: true };
       borderAll(ws, depRow.number, cols);
     }
+    const legendRow = ws.addRow([PON_LEGEND]);
+    ws.mergeCells(legendRow.number, 1, legendRow.number, cols);
+    legendRow.font = { italic: true, size: 10 };
+    borderAll(ws, legendRow.number, cols);
     const headerRow = ws.addRow(["Sl No", "Employee Id", "Employee Name", "Applied Leave", "", ...(output.blocks[0]?.days.map((d) => `${d.day}\n${d.dow}`) ?? []), ...totalLabels]);
     styleHeaderRow(headerRow);
     headerRow.height = 30;
@@ -502,7 +508,7 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
         else if (day.isSunday) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE2E2" } };
       }
     }
-    ws.views = [{ state: "frozen", xSplit: 4, ySplit: output.department ? 3 : 2 }];
+    ws.views = [{ state: "frozen", xSplit: 4, ySplit: output.department ? 4 : 3 }];
     ws.pageSetup = { orientation: "landscape", paperSize: 5, fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true };
     ws.pageSetup.printTitlesRow = `${headerRow.number}:${headerRow.number}`;
   });

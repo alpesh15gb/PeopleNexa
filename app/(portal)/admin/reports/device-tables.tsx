@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
 import { Download, Printer } from "lucide-react";
-import type { DeviceDailyOutput, DeviceMonthlyOutput, DevicePerformanceOutput, DeviceStatusMatrixOutput, DeviceWorkSummaryOutput } from "@/lib/device-report";
+import { PON_LEGEND, PON_TOTAL_LABEL, type DeviceDailyOutput, type DeviceMonthlyOutput, type DevicePerformanceOutput, type DeviceStatusMatrixOutput, type DeviceWorkSummaryOutput } from "@/lib/device-report";
 
 export type DeviceKind = "daily" | "monthly" | "status-matrix" | "work-summary" | "performance";
 
@@ -374,6 +374,7 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
         {output.department && (
           <p className="bg-white text-[13px] font-semibold text-black">Department | {output.department}</p>
         )}
+        <p className="text-xs text-slate-700 print:text-black">{PON_LEGEND}</p>
         {visible.map((block) => (
           <div key={block.code}>
             <div className="overflow-x-auto">
@@ -386,7 +387,7 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
                         {d.day} {d.dow}
                       </th>
                     ))}
-                    <th className={TH}>Present</th><th className={TH}>Absent</th><th className={TH}>Leave</th><th className={TH}>Holiday</th><th className={TH}>Week Off</th><th className={TH}>PON</th>
+                    <th className={TH}>Present</th><th className={TH}>Absent</th><th className={TH}>Leave</th><th className={TH}>Holiday</th><th className={TH}>Week Off</th><th className={TH} title={PON_LEGEND}>{PON_TOTAL_LABEL}</th>
                   </tr>
                 </thead>
                 <tbody>
