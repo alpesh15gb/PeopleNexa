@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { IdCardPreviewSide } from "@/app/(portal)/admin/id-cards/id-card-generator";
 import { idCardTemplate } from "@/lib/configuration";
 import { ID_CARD_ARTBOARD, ID_CARD_LAYOUT, ID_CARD_SIZE, idCardDetails, idCardFieldsHeight } from "@/lib/id-card-content";
 
@@ -21,4 +24,11 @@ assert.ok(ID_CARD_LAYOUT.photo.y >= ID_CARD_LAYOUT.frontContentPanel.y && ID_CAR
 assert.ok(ID_CARD_LAYOUT.fields.y >= ID_CARD_LAYOUT.frontContentPanel.y && ID_CARD_LAYOUT.fields.y + ID_CARD_LAYOUT.fields.height <= ID_CARD_LAYOUT.frontContentPanel.y + ID_CARD_LAYOUT.frontContentPanel.height);
 assert.equal(idCardTemplate({ frontBackgroundUrl: "https://cdn.example.com/front.png", backBackgroundUrl: "https://cdn.example.com/back.png" })?.frontContentPanel, "preserve", "legacy templates preserve their supplied artwork");
 assert.equal(idCardTemplate({ frontBackgroundUrl: "https://cdn.example.com/front.png", backBackgroundUrl: "https://cdn.example.com/back.png", frontContentPanel: "preserve" })?.frontContentPanel, "preserve");
+const preview = renderToStaticMarkup(createElement(IdCardPreviewSide, { title: "Front", employee: { id: "employee-1", employeeNumber: "EMP-001", deviceCode: "DEVICE-001", firstName: "Ada", lastName: "Lovelace", position: "Engineer", joiningDate: "2020-01-02", idCardIssuedAt: null, idCardValidUntil: null, phone: "1234567890", profilePicture: null, profile: { bloodGroup: "O+" } }, branding: null, template: null, front: true }));
+assert.match(preview, /data-testid="id-card-preview-canvas"[^>]*aspect-ratio:0\.630607/, "preview canvas uses the exact CR80 aspect ratio");
+assert.match(preview, /data-testid="id-card-preview-canvas"[^>]*overflow:hidden/, "preview canvas clips only content that exceeds its CR80 bounds");
+assert.match(preview, /data-testid="id-card-artwork"[^>]*object-fit:contain/, "preview artwork is uniformly contained instead of cropped");
+assert.equal((preview.match(/data-testid="id-card-details"/g) ?? []).length, 1, "preview has one dynamic text layer");
+assert.equal((preview.match(/data-testid="id-card-detail-row"/g) ?? []).length, fields.length, "preview renders each dynamic employee row once");
+assert.match(preview, /data-testid="id-card-content-panel"[^>]*top:22%[^>]*height:63%/, "preview safe panel uses the shared normalized PDF bounds");
 console.log("ID-card layout geometry tests passed");
