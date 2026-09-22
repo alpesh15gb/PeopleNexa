@@ -38,4 +38,3 @@ CREATE TABLE "LeaveBalanceImportEntry" (
 );
 CREATE UNIQUE INDEX "LeaveBalanceImportEntry_batchId_employeeId_key" ON "LeaveBalanceImportEntry"("batchId", "employeeId");
 CREATE UNIQUE INDEX "LeaveBalanceImportEntry_tenantId_employeeId_leaveTypeId_periodEnd_key" ON "LeaveBalanceImportEntry"("tenantId", "employeeId", "leaveTypeId", "periodEnd");
-CREATE INDEX "LeaveBalanceImportEntry_tenantId_employeeId_leaveTypeId_periodEnd_idx" ON "LeaveBalanceImportEntry"("tenantId", "employeeId", "leaveTypeId", "periodEnd");

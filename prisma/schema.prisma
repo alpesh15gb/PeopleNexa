@@ -937,7 +937,6 @@ model LeaveBalanceImportEntry {
 
   @@unique([batchId, employeeId])
   @@unique([tenantId, employeeId, leaveTypeId, periodEnd])
-  @@index([tenantId, employeeId, leaveTypeId, periodEnd])
 }
 
 // ─── Holidays ──────────────────────────────────────────────────────────────
