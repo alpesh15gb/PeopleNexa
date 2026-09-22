@@ -1,0 +1,2 @@
+schema_profile,employee_code,employee_name,designation,joining_date,opening_balance,through_month,worked_days,credited,availed,available,source_row
+peoplenexa-leave-balance-flat-v1,EMP-001,Example Employee,Example Role,2024-01-15,5,2026-08,31,2,1,6,6

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
-import { parseKeystoneLeaveLedgerSheet } from "../lib/leave-balance-import";
+import { parseKeystoneLeaveLedgerSheet, parseLeaveBalanceFlatCsv } from "../lib/leave-balance-import";
 
 const workbook = new ExcelJS.Workbook();
 const sheet = workbook.addWorksheet("Sheet1");
@@ -15,11 +15,19 @@ const parsed = parseKeystoneLeaveLedgerSheet(sheet, "2026-02");
 assert.equal(parsed.errors.length, 0);
 assert.equal(parsed.rows.length, 1);
 assert.deepEqual(parsed.rows[0].errors, []);
-assert.equal(parsed.rows[0].openingBalance, 5);
+assert.equal(parsed.rows[0].openingBalance, 6);
 assert.equal(parsed.rows[0].workedDays, 24);
 assert.equal(parsed.rows[0].credited, 1);
 assert.equal(parsed.rows[0].availed, 2);
 assert.equal(parsed.rows[0].available, 5);
 sheet.getCell("N6").value = 4;
 assert.match(parseKeystoneLeaveLedgerSheet(sheet, "2026-02").rows[0].errors.join(" "), /does not reconcile/);
+const csv = [
+  "schema_profile,employee_code,employee_name,designation,joining_date,opening_balance,through_month,worked_days,credited,availed,available,source_row",
+  "peoplenexa-leave-balance-flat-v1,EMP-001,Fixture Employee,Supervisor,2024-01-01,6,2026-02,24,1,2,5,6",
+].join("\n");
+const flat = parseLeaveBalanceFlatCsv(csv, "2026-02");
+assert.equal(flat.errors.length, 0);
+assert.deepEqual(flat.rows[0].errors, []);
+assert.match(parseLeaveBalanceFlatCsv(csv.replace(",5,6", ",4,6"), "2026-02").rows[0].errors.join(" "), /must reconcile/);
 console.log("leave import parser tests passed");

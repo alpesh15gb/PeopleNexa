@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { appendAudit } from "@/lib/audit";
-import { KEYSTONE_MANIPUR_2026_LEAVE_LEDGER, parseKeystoneLeaveLedger } from "@/lib/leave-balance-import";
+import { parseKeystoneLeaveLedger, parseLeaveBalanceFlatCsv } from "@/lib/leave-balance-import";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -30,13 +30,13 @@ export async function POST(request: NextRequest) {
   const leaveTypeId = String(form?.get("leaveTypeId") ?? "");
   const throughMonth = String(form?.get("throughMonth") ?? "");
   const confirm = form?.get("confirm") === "true";
-  if (!(file instanceof File) || !/\.xlsx$/i.test(file.name)) return NextResponse.json({ error: "Choose the .xlsx leave ledger." }, { status: 400 });
+  if (!(file instanceof File) || !/\.(xlsx|csv)$/i.test(file.name)) return NextResponse.json({ error: "Choose a .xlsx ledger or canonical .csv export." }, { status: 400 });
   const leaveType = await prisma.leaveType.findFirst({ where: { id: leaveTypeId, tenantId: session.tenantId }, select: { id: true, name: true, code: true } });
   if (!leaveType) return NextResponse.json({ error: "Choose a leave type in this tenant." }, { status: 400 });
 
   const bytes = await file.arrayBuffer();
   let ledger;
-  try { ledger = await parseKeystoneLeaveLedger(bytes, throughMonth); }
+  try { ledger = /\.csv$/i.test(file.name) ? parseLeaveBalanceFlatCsv(await file.text(), throughMonth) : await parseKeystoneLeaveLedger(bytes, throughMonth); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not read this workbook." }, { status: 400 }); }
   const sourceHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
   const employeeNumbers = [...new Set(ledger.rows.map((row) => row.employeeNumber.toLocaleLowerCase()))];
@@ -77,17 +77,17 @@ export async function POST(request: NextRequest) {
     available: previewRows.reduce((sum, row) => sum + row.available, 0),
   };
   const blocking = ledger.errors.length > 0 || previewRows.some((row) => row.status !== "ready" || row.errors.length > 0);
-  if (!confirm) return NextResponse.json({ profile: KEYSTONE_MANIPUR_2026_LEAVE_LEDGER, sourceHash, periodEnd: ledger.periodEnd, idempotentBatchId: idempotentBatch?.id ?? null, blocking, workbookErrors: ledger.errors, summary, rows: previewRows.slice(0, 100), truncatedRows: Math.max(0, previewRows.length - 100) });
+  if (!confirm) return NextResponse.json({ profile: ledger.schemaProfile, sourceHash, periodEnd: ledger.periodEnd, idempotentBatchId: idempotentBatch?.id ?? null, blocking, workbookErrors: ledger.errors, summary, rows: previewRows.slice(0, 100), truncatedRows: Math.max(0, previewRows.length - 100) });
   if (idempotentBatch) return NextResponse.json({ batchId: idempotentBatch.id, idempotent: true });
   if (blocking) return NextResponse.json({ error: "The preview contains unmatched employees, conflicts, or validation errors. Nothing was imported." }, { status: 409 });
 
   try {
     const batch = await prisma.$transaction(async (tx) => {
-      const created = await tx.leaveBalanceImportBatch.create({ data: { tenantId: session.tenantId, leaveTypeId, schemaProfile: KEYSTONE_MANIPUR_2026_LEAVE_LEDGER, sourceFileName: file.name, sourceHash, throughMonth, periodEnd: ledger.periodEnd, importedBy: session.sub } });
+      const created = await tx.leaveBalanceImportBatch.create({ data: { tenantId: session.tenantId, leaveTypeId, schemaProfile: ledger.schemaProfile, sourceFileName: file.name, sourceHash, throughMonth, periodEnd: ledger.periodEnd, importedBy: session.sub } });
       await tx.leaveBalanceImportEntry.createMany({ data: previewRows.map((row) => ({ batchId: created.id, tenantId: session.tenantId, employeeId: row.employee!.id, leaveTypeId, employeeNumber: row.employee!.employeeNumber, sourceRow: row.sourceRow, openingBalance: row.openingBalance, workedDays: row.workedDays, credited: row.credited, availed: row.availed, available: row.available, periodEnd: ledger.periodEnd })) });
       return created;
     }, { isolationLevel: "Serializable" });
-    await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "leave_balance_import.create", entity: "LeaveBalanceImportBatch", entityId: batch.id, summary: `Imported ${summary.ready} ${leaveType.code} balance snapshots through ${throughMonth}`, after: { schemaProfile: KEYSTONE_MANIPUR_2026_LEAVE_LEDGER, sourceHash, throughMonth, leaveTypeId, rows: summary.ready, totals: summary } });
+    await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "leave_balance_import.create", entity: "LeaveBalanceImportBatch", entityId: batch.id, summary: `Imported ${summary.ready} ${leaveType.code} balance snapshots through ${throughMonth}`, after: { schemaProfile: ledger.schemaProfile, sourceHash, throughMonth, leaveTypeId, rows: summary.ready, totals: summary } });
     return NextResponse.json({ batchId: batch.id, idempotent: false }, { status: 201 });
   } catch (error) {
     if ((error as { code?: string }).code === "P2002" || (error as { code?: string }).code === "P2034") return NextResponse.json({ error: "The same cutoff was imported concurrently or now conflicts. Refresh the preview; nothing was overwritten." }, { status: 409 });

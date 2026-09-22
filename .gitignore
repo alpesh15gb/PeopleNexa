@@ -44,3 +44,6 @@ public/models/face/
 
 # Local HR source data; contains employee PII and financial identifiers.
 /MASTER-Employee-ALL.csv
+
+# Generated client leave-ledger exports and rejection reports contain PII.
+/imports/
