@@ -10,15 +10,46 @@ export type IdCardEmployeeContent = {
   profile: { bloodGroup: string | null } | null;
 };
 
-export const ID_CARD_ARTBOARD = { width: 591, height: 1004 } as const;
+const MM_TO_POINTS = 72 / 25.4;
+
+// CR80 is 85.60 x 53.98 mm. Portrait cards use the short side as their width.
+export const ID_CARD_ARTBOARD = { width: 53.98, height: 85.6 } as const;
+export const ID_CARD_SIZE = {
+  widthMm: ID_CARD_ARTBOARD.width,
+  heightMm: ID_CARD_ARTBOARD.height,
+  widthPt: ID_CARD_ARTBOARD.width * MM_TO_POINTS,
+  heightPt: ID_CARD_ARTBOARD.height * MM_TO_POINTS,
+} as const;
+
 export const ID_CARD_LAYOUT = {
+  background: { fit: "cover", position: "center" },
   header: { x: 0, y: 0, width: 1, height: 0.22 },
-  photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295 },
-  fields: { x: 0.06, y: 0.535, width: 0.88, height: 0.276, rowHeight: 0.041, gap: 0.006 },
+  photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295, borderWidth: 1, radius: 4 },
+  fields: {
+    x: 0.06, y: 0.535, width: 0.88, height: 0.307,
+    labelWidth: 0.34, rowHeight: 0.034, gap: 0.005,
+    fontSize: 5.5, lineHeight: 1.1, overflow: "ellipsis",
+  },
   footer: { x: 0, y: 0.85, width: 1, height: 0.15 },
+  branding: {
+    logo: { x: 0.06, y: 0.03, width: 0.22, height: 0.14 },
+    companyName: { x: 0.32, y: 0.084, width: 0.62, height: 0.035, fontSize: 8, lineHeight: 1.1 },
+    contact: { x: 0.05, y: 0.895, width: 0.9, height: 0.07, fontSize: 5.5, lineHeight: 1.2, maxLines: 2 },
+  },
   // This bounded area is owned by dynamic photo and employee content, not template artwork.
   frontContentPanel: { x: 0, y: 0.22, width: 1, height: 0.63 },
 } as const;
+
+export const ID_CARD_FONT = {
+  family: "Inter",
+  regular: "Inter-Regular",
+  semibold: "Inter-SemiBold",
+} as const;
+
+export function idCardFieldsHeight() {
+  const fieldCount = idCardDetails({ employeeNumber: "", firstName: "", lastName: "", position: null, joiningDate: null, phone: null, profile: null }).length;
+  return fieldCount * ID_CARD_LAYOUT.fields.rowHeight + (fieldCount - 1) * ID_CARD_LAYOUT.fields.gap;
+}
 
 const ellipsis = (value: string, limit: number) => value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
 
@@ -37,11 +68,6 @@ export function idCardDetails(employee: IdCardEmployeeContent) {
     ["Blood Group", ellipsis(employee.profile?.bloodGroup ?? "-", 16)],
     ["Contact", ellipsis(employee.phone ?? "-", 20)],
   ] as const;
-}
-
-export function idCardFieldsHeight() {
-  const fieldCount = idCardDetails({ employeeNumber: "", firstName: "", lastName: "", position: null, joiningDate: null, phone: null, profile: null }).length;
-  return fieldCount * ID_CARD_LAYOUT.fields.rowHeight + (fieldCount - 1) * ID_CARD_LAYOUT.fields.gap;
 }
 
 export function photoPosition(value: string | null) {

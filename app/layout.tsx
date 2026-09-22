@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { getLang } from "@/lib/i18n-server";
 import { PWARegister } from "@/components/pwa-register";
 import "./globals.css";
@@ -10,6 +11,17 @@ const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
   display: "swap",
+});
+
+// Kept local so ID-card previews never depend on a browser font fetch and PDFKit
+// embeds the matching TTF files from the same package.
+const inter = localFont({
+  variable: "--font-id-card",
+  display: "swap",
+  src: [
+    { path: "../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf", weight: "400", style: "normal" },
+    { path: "../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf", weight: "600", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {
@@ -39,7 +51,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Screen readers need the correct lang for hi/gu/mr/ta pronunciation.
   const lang = await getLang().catch(() => "en" as const);
   return (
-    <html lang={lang} suppressHydrationWarning className={`${jakarta.variable} h-full antialiased`}>
+    <html lang={lang} suppressHydrationWarning className={`${jakarta.variable} ${inter.variable} h-full antialiased`}>
       <body className="min-h-full">
         <PWARegister />
         {children}

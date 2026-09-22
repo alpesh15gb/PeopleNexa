@@ -16,12 +16,14 @@
     "test:payroll-policy": "tsx scripts/test-payroll-policy.ts",
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
     "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",
+    "test:id-card-pdf": "tsx scripts/test-id-card-pdf.ts",
     "test:employee-master": "tsx scripts/test-employee-master-workflow.ts",
     "test:employee-master-wizard": "tsx scripts/test-employee-master-wizard.ts",
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts",
     "test:device-access": "tsx scripts/test-device-access-policy.ts"
   },
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
     "@mediapipe/tasks-vision": "^1.0.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",

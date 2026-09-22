@@ -13,7 +13,7 @@ assert.equal(mediaAllowedForScope(locationAsset, "tenant-a", "location-a"), true
 assert.equal(mediaAllowedForScope(locationAsset, "tenant-a", "location-b"), false, "a location cannot attach another location's media");
 assert.equal(mediaAllowedForScope(locationAsset, "tenant-b", "location-a"), false, "a tenant cannot attach another tenant's media");
 assert.equal(safeLogoUrl("/api/media/tenant-a/tenant/not-a-uuid.png"), null, "malformed first-party media is rejected");
-assert.deepEqual(idCardTemplate({ frontBackgroundUrl: tenantAsset, backBackgroundUrl: tenantAsset }), { frontBackgroundUrl: tenantAsset, backBackgroundUrl: tenantAsset, frontContentPanel: "clean" }, "uploaded first-party backgrounds are accepted");
+assert.deepEqual(idCardTemplate({ frontBackgroundUrl: tenantAsset, backBackgroundUrl: tenantAsset }), { frontBackgroundUrl: tenantAsset, backBackgroundUrl: tenantAsset, frontContentPanel: "preserve" }, "uploaded first-party backgrounds are accepted");
 assert.equal(idCardTemplate({ frontBackgroundUrl: tenantAsset }), null, "both ID-card backgrounds are required");
 assert.ok(idCardTemplate({ frontBackgroundUrl: "https://cdn.example.com/front.jpg", backBackgroundUrl: "data:image/png;base64,AAAA" }), "legacy HTTPS and data backgrounds remain accepted");
 console.log("tenant media URL scope tests passed");
