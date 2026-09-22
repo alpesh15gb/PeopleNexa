@@ -28,6 +28,43 @@ export type ParsedLeaveLedger = {
   errors: string[];
 };
 
+export type LeaveLedgerEmployee = {
+  id: string;
+  employeeNumber: string;
+  deviceCode: string | null;
+};
+
+export type LeaveLedgerEmployeeMatch<T extends LeaveLedgerEmployee = LeaveLedgerEmployee> =
+  | { kind: "matched"; employee: T; matchedBy: "employeeNumber" | "id" | "deviceCode" }
+  | { kind: "unmatched" }
+  | { kind: "ambiguous"; employees: LeaveLedgerEmployee[] };
+
+// Ledger exports have historically varied in casing and accidental spacing.
+// Employee codes do not use whitespace as a meaningful identifier character.
+export function normalizeLeaveLedgerEmployeeCode(value: string) {
+  return value.replace(/\s+/g, "").toLowerCase();
+}
+
+export function matchLeaveLedgerEmployee<T extends LeaveLedgerEmployee>(code: string, employees: T[]): LeaveLedgerEmployeeMatch<T> {
+  const normalizedCode = normalizeLeaveLedgerEmployeeCode(code);
+  const matchingEmployees = new Map<string, T>();
+  let matchedBy: "employeeNumber" | "id" | "deviceCode" | null = null;
+
+  for (const field of ["employeeNumber", "id", "deviceCode"] as const) {
+    const matches = employees.filter((employee) => {
+      const value = employee[field];
+      return typeof value === "string" && normalizeLeaveLedgerEmployeeCode(value) === normalizedCode;
+    });
+    for (const employee of matches) matchingEmployees.set(employee.id, employee);
+    if (!matchedBy && matches.length) matchedBy = field;
+  }
+
+  const matches = [...matchingEmployees.values()];
+  if (matches.length === 0) return { kind: "unmatched" };
+  if (matches.length > 1) return { kind: "ambiguous", employees: matches };
+  return { kind: "matched", employee: matches[0], matchedBy: matchedBy! };
+}
+
 function scalar(value: ExcelJS.CellValue | undefined): unknown {
   if (value && typeof value === "object" && "result" in value) return value.result;
   return value;
@@ -85,7 +122,7 @@ export function parseKeystoneLeaveLedgerSheet(sheet: ExcelJS.Worksheet, throughM
     const employeeNumber = text(sheet.getCell(row, 2).value);
     if (!employeeNumber) continue;
     const rowErrors: string[] = [];
-    const key = employeeNumber.toLocaleLowerCase();
+    const key = normalizeLeaveLedgerEmployeeCode(employeeNumber);
     if (codes.has(key)) rowErrors.push("Duplicate employee code in workbook.");
     codes.add(key);
     const sourceOpeningBalance = numberValue(sheet.getCell(row, 6).value);
@@ -163,7 +200,7 @@ export function parseLeaveBalanceFlatCsv(source: string, selectedThroughMonth: s
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(throughMonth)) rowErrors.push("through_month must be YYYY-MM.");
     if (throughMonth !== selectedThroughMonth) rowErrors.push("through_month must match the selected cutoff month.");
     if (!/^\d+$/.test(sourceRowText) || Number(sourceRowText) < 1) rowErrors.push("source_row must be a positive integer.");
-    const key = employeeNumber.toLocaleLowerCase();
+    const key = normalizeLeaveLedgerEmployeeCode(employeeNumber);
     if (codes.has(key)) rowErrors.push("Duplicate employee_code in CSV.");
     codes.add(key);
     const openingBalance = csvNumber(opening, "opening_balance", rowErrors);

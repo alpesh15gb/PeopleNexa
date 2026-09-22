@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
-import { parseKeystoneLeaveLedgerSheet, parseLeaveBalanceFlatCsv } from "../lib/leave-balance-import";
+import { matchLeaveLedgerEmployee, normalizeLeaveLedgerEmployeeCode, parseKeystoneLeaveLedgerSheet, parseLeaveBalanceFlatCsv } from "../lib/leave-balance-import";
 
 const workbook = new ExcelJS.Workbook();
 const sheet = workbook.addWorksheet("Sheet1");
@@ -30,4 +30,21 @@ const flat = parseLeaveBalanceFlatCsv(csv, "2026-02");
 assert.equal(flat.errors.length, 0);
 assert.deepEqual(flat.rows[0].errors, []);
 assert.match(parseLeaveBalanceFlatCsv(csv.replace(",5,6", ",4,6"), "2026-02").rows[0].errors.join(" "), /must reconcile/);
+
+const activeEmployees = [
+  { id: "employee-portal-login", employeeNumber: "EMP-001", deviceCode: null },
+  { id: "employee-device-code", employeeNumber: "EMP-002", deviceCode: "MN/004" },
+  { id: "employee-canonical-code", employeeNumber: " mn-005 ", deviceCode: "BIO-005" },
+];
+assert.equal(matchLeaveLedgerEmployee(" emp-001 ", activeEmployees).kind, "matched", "staff with portal login remains eligible");
+const deviceMatch = matchLeaveLedgerEmployee(" MN / 004 ", activeEmployees);
+assert.equal(deviceMatch.kind, "matched");
+if (deviceMatch.kind === "matched") assert.equal(deviceMatch.employee.id, "employee-device-code");
+const canonicalMatch = matchLeaveLedgerEmployee("MN-005", activeEmployees);
+assert.equal(canonicalMatch.kind, "matched");
+if (canonicalMatch.kind === "matched") assert.equal(canonicalMatch.matchedBy, "employeeNumber");
+assert.equal(matchLeaveLedgerEmployee("missing", activeEmployees).kind, "unmatched");
+assert.equal(matchLeaveLedgerEmployee("MN/004", activeEmployees.filter((employee) => employee.id !== "employee-device-code")).kind, "unmatched", "inactive employees are excluded before matching");
+assert.equal(matchLeaveLedgerEmployee("DUP-001", [...activeEmployees, { id: "employee-duplicate", employeeNumber: "DUP-001", deviceCode: null }, { id: "employee-device-duplicate", employeeNumber: "EMP-003", deviceCode: "dup-001" }]).kind, "ambiguous");
+assert.equal(normalizeLeaveLedgerEmployeeCode(" MN / 004 "), "mn/004");
 console.log("leave import parser tests passed");

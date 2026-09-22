@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { appendAudit } from "@/lib/audit";
-import { parseKeystoneLeaveLedger, parseLeaveBalanceFlatCsv } from "@/lib/leave-balance-import";
+import { matchLeaveLedgerEmployee, parseKeystoneLeaveLedger, parseLeaveBalanceFlatCsv } from "@/lib/leave-balance-import";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -39,13 +39,14 @@ export async function POST(request: NextRequest) {
   try { ledger = /\.csv$/i.test(file.name) ? parseLeaveBalanceFlatCsv(await file.text(), throughMonth) : await parseKeystoneLeaveLedger(bytes, throughMonth); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not read this workbook." }, { status: 400 }); }
   const sourceHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
-  const employeeNumbers = [...new Set(ledger.rows.map((row) => row.employeeNumber.toLocaleLowerCase()))];
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, employeeNumber: { in: employeeNumbers }, status: "active", loginOnly: false },
-    select: { id: true, employeeNumber: true, firstName: true, lastName: true, branch: { select: { locationId: true } } },
+    // Portal credentials are not an employment status. Keep login-only accounts
+    // excluded, but match every active staff employee in this tenant.
+    where: { tenantId: session.tenantId, status: "active", loginOnly: false },
+    select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, branch: { select: { locationId: true } } },
   });
-  const employeeByNumber = new Map(employees.map((employee) => [employee.employeeNumber.toLocaleLowerCase(), employee]));
-  const matchedIds = employees.map((employee) => employee.id);
+  const matchedEmployees = ledger.rows.map((row) => matchLeaveLedgerEmployee(row.employeeNumber, employees));
+  const matchedIds = matchedEmployees.flatMap((match) => match.kind === "matched" ? [match.employee.id] : []);
   const [existingEntries, policyBalances, idempotentBatch] = await Promise.all([
     prisma.leaveBalanceImportEntry.findMany({ where: { tenantId: session.tenantId, leaveTypeId, employeeId: { in: matchedIds }, periodEnd: ledger.periodEnd }, select: { employeeId: true, openingBalance: true, workedDays: true, credited: true, availed: true, available: true, batchId: true } }),
     prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, leaveTypeId, employeeId: { in: matchedIds }, policyPeriod: { effectiveFrom: { lte: ledger.periodEnd }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: ledger.periodEnd } }] } }, select: { employeeId: true } }),
@@ -53,17 +54,20 @@ export async function POST(request: NextRequest) {
   ]);
   const entryByEmployee = new Map(existingEntries.map((entry) => [entry.employeeId, entry]));
   const allocatedEmployees = new Set(policyBalances.map((entry) => entry.employeeId));
-  const previewRows = ledger.rows.map((row) => {
-    const employee = employeeByNumber.get(row.employeeNumber.toLocaleLowerCase());
+  const previewRows = ledger.rows.map((row, index) => {
+    const match = matchedEmployees[index];
     const validation = [...row.errors];
     let status: "ready" | "unmatched" | "conflict" | "policy_conflict" = "ready";
-    if (!employee) { status = "unmatched"; validation.push("Employee code was not found among active, non-login employees in this tenant."); }
-    else if (allocatedEmployees.has(employee.id)) { status = "policy_conflict"; validation.push("A policy-period allocation already covers this leave type and cutoff. It will not be changed by this import."); }
+    if (match.kind === "unmatched") { status = "unmatched"; validation.push("Employee code was not found among active employees in this tenant. Portal access does not affect matching."); }
+    else if (match.kind === "ambiguous") { status = "unmatched"; validation.push(`Employee code is ambiguous among active employees in this tenant (${match.employees.map((candidate) => candidate.employeeNumber).join(", ")}). Correct the ledger code before importing.`); }
     else {
-      const existing = entryByEmployee.get(employee.id);
-      if (existing && !sameValues(existing, row)) { status = "conflict"; validation.push("A different immutable snapshot already exists for this employee, leave type, and cutoff."); }
+      if (allocatedEmployees.has(match.employee.id)) { status = "policy_conflict"; validation.push("A policy-period allocation already covers this leave type and cutoff. It will not be changed by this import."); }
+      else {
+        const existing = entryByEmployee.get(match.employee.id);
+        if (existing && !sameValues(existing, row)) { status = "conflict"; validation.push("A different immutable snapshot already exists for this employee, leave type, and cutoff."); }
+      }
     }
-    return { ...row, employee: employee ? { id: employee.id, employeeNumber: employee.employeeNumber, name: `${employee.firstName} ${employee.lastName}`, locationId: employee.branch?.locationId ?? null } : null, status, errors: validation };
+    return { ...row, employee: match.kind === "matched" ? { id: match.employee.id, employeeNumber: match.employee.employeeNumber, name: `${match.employee.firstName} ${match.employee.lastName}`, locationId: match.employee.branch?.locationId ?? null } : null, status, errors: validation };
   });
   const summary = {
     total: previewRows.length,
