@@ -49,6 +49,10 @@ interface ImportBatch {
   importedAt: Date;
   leaveType: { name: string; code: string };
   _count: { entries: number };
+  attemptedCount: number;
+  acceptedCount: number;
+  excludedCount: number;
+  importDecision: string;
 }
 
 export function LeavesAdmin({
@@ -81,16 +85,30 @@ export function LeavesAdmin({
   const [importMonth, setImportMonth] = useState("2026-08");
   const [importPreview, setImportPreview] = useState<any>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [reviewedExceptions, setReviewedExceptions] = useState(false);
+  const [exceptionsAcknowledged, setExceptionsAcknowledged] = useState(false);
 
   async function previewImport(confirm = false) {
     if (!importFile || !importTypeId) { toast("error", "Choose the workbook and mapped leave type."); return; }
     setImportBusy(true);
     try {
-      const form = new FormData(); form.set("file", importFile); form.set("leaveTypeId", importTypeId); form.set("throughMonth", importMonth); if (confirm) form.set("confirm", "true");
+      const form = new FormData(); form.set("file", importFile); form.set("leaveTypeId", importTypeId); form.set("throughMonth", importMonth); if (confirm) { form.set("confirm", "true"); if (reviewedExceptions) { form.set("reviewedExceptions", "true"); form.set("acknowledgedExceptionCount", String(importPreview?.summary.excluded ?? 0)); } }
       const response = await fetch("/api/leaves/imports", { method: "POST", body: form }); const data = await response.json();
       if (!response.ok) { toast("error", data.error ?? "Could not import the workbook."); return; }
       if (confirm) { toast("success", data.idempotent ? "This workbook was already imported; no changes made." : "Immutable balance snapshots imported."); setImportOpen(false); setImportPreview(null); setImportFile(null); router.refresh(); return; }
       setImportPreview(data);
+    } finally { setImportBusy(false); }
+  }
+
+  async function downloadExceptionReport() {
+    if (!importFile || !importTypeId) return;
+    setImportBusy(true);
+    try {
+      const form = new FormData(); form.set("file", importFile); form.set("leaveTypeId", importTypeId); form.set("throughMonth", importMonth); form.set("report", "true");
+      const response = await fetch("/api/leaves/imports", { method: "POST", body: form });
+      if (!response.ok) { const data = await response.json(); toast("error", data.error ?? "Could not create exception report."); return; }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a"); link.href = url; link.download = `leave-balance-exceptions-${importMonth}.csv`; link.click(); URL.revokeObjectURL(url);
     } finally { setImportBusy(false); }
   }
 
@@ -299,17 +317,17 @@ export function LeavesAdmin({
             <div><p className="text-[13px] font-semibold">Initial balance reconciliation</p><p className="mt-1 text-[12px] text-muted-foreground">Accepts the Key Stone Manipur 2026 ledger or the canonical flat CSV. It creates immutable balance snapshots, never leave requests or policy allocations.</p></div>
             <Button size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3.5 w-3.5" /> Import workbook</Button>
           </div>
-          {importBatches.length === 0 ? <p className="py-6 text-center text-[13px] text-muted-foreground">No balance imports yet.</p> : <Table><THead><TR><TH>Cutoff</TH><TH>Leave type</TH><TH>Rows</TH><TH>Imported</TH><TH /></TR></THead><TBody>{importBatches.map((batch) => <TR key={batch.id}><TD>{batch.throughMonth}</TD><TD>{batch.leaveType.name} ({batch.leaveType.code})</TD><TD>{batch._count.entries}</TD><TD>{formatDate(batch.importedAt)}</TD><TD><a className="text-[12px] font-medium text-indigo-300 hover:underline" href={`/api/leaves/imports/${batch.id}/export`}>Export check</a></TD></TR>)}</TBody></Table>}
+          {importBatches.length === 0 ? <p className="py-6 text-center text-[13px] text-muted-foreground">No balance imports yet.</p> : <Table><THead><TR><TH>Cutoff</TH><TH>Leave type</TH><TH>Accepted / attempted</TH><TH>Decision</TH><TH>Imported</TH><TH /></TR></THead><TBody>{importBatches.map((batch) => <TR key={batch.id}><TD>{batch.throughMonth}</TD><TD>{batch.leaveType.name} ({batch.leaveType.code})</TD><TD>{batch.acceptedCount || batch._count.entries} / {batch.attemptedCount || batch._count.entries}{batch.excludedCount ? ` (${batch.excludedCount} excluded)` : ""}</TD><TD>{batch.importDecision === "reviewed_exceptions" ? "Reviewed exceptions" : "Strict"}</TD><TD>{formatDate(batch.importedAt)}</TD><TD><a className="text-[12px] font-medium text-indigo-300 hover:underline" href={`/api/leaves/imports/${batch.id}/export`}>Export check</a></TD></TR>)}</TBody></Table>}
         </div>
       )}
 
       <Modal open={importOpen} onClose={() => { if (!importBusy) { setImportOpen(false); setImportPreview(null); } }} title="Import leave balance ledger" size="lg">
         <div className="space-y-4">
           <p className="text-[12px] leading-5 text-muted-foreground">Select the leave type and cutoff. Employee codes match active staff by employee number or device code, regardless of portal access. XLSX uses the selected ledger month. Canonical CSV requires every through_month value to match it. The cutoff is an IST boundary.</p>
-          <Field label="Ledger (.xlsx) or canonical export (.csv)"><Input type="file" accept=".xlsx,.csv" onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setImportPreview(null); }} /></Field>
-          <div className="grid gap-4 sm:grid-cols-2"><Field label="Map all rows to leave type"><Select value={importTypeId} onChange={(event) => { setImportTypeId(event.target.value); setImportPreview(null); }}><option value="">Select leave type</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.code})</option>)}</Select></Field><Field label="Ledger through month"><Select value={importMonth} onChange={(event) => { setImportMonth(event.target.value); setImportPreview(null); }}>{["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, index) => <option key={label} value={`2026-${String(index + 1).padStart(2, "0")}`}>{label} 2026</option>)}</Select></Field></div>
-          {importPreview && <div className="space-y-3 rounded-xl border border-edge p-3 text-[12px]"><p className="font-semibold">Dry run: {importPreview.summary.ready}/{importPreview.summary.total} rows ready. Opening {importPreview.summary.openingBalance}, credited {importPreview.summary.credited}, availed {importPreview.summary.availed}, available {importPreview.summary.available}.</p>{importPreview.idempotentBatchId && <p className="text-amber-300">This exact workbook was already imported. Confirmation is idempotent.</p>}{importPreview.blocking ? <p className="text-rose-300">Write blocked: resolve unmatched employees, existing snapshots, policy allocations, or row validation errors. Nothing has been changed.</p> : <p className="text-emerald-300">All rows reconcile and are eligible for an immutable snapshot import.</p>}<div className="max-h-40 overflow-auto border-t border-edge pt-2">{importPreview.rows.filter((row: any) => row.errors.length).slice(0, 20).map((row: any) => <p key={row.sourceRow} className="py-0.5 text-rose-300">Row {row.sourceRow} ({row.employeeNumber}): {row.errors.join(" ")}</p>)}{importPreview.truncatedRows > 0 && <p className="text-muted-foreground">Preview limited to the first 100 rows; all rows were validated server-side.</p>}</div></div>}
-          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>{!importPreview ? <Button loading={importBusy} onClick={() => previewImport()}>Dry run</Button> : <Button loading={importBusy} disabled={importPreview.blocking} onClick={() => previewImport(true)}>Confirm immutable import</Button>}</div>
+          <Field label="Ledger (.xlsx) or canonical export (.csv)"><Input type="file" accept=".xlsx,.csv" onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setImportPreview(null); setReviewedExceptions(false); setExceptionsAcknowledged(false); }} /></Field>
+          <div className="grid gap-4 sm:grid-cols-2"><Field label="Map all rows to leave type"><Select value={importTypeId} onChange={(event) => { setImportTypeId(event.target.value); setImportPreview(null); setReviewedExceptions(false); setExceptionsAcknowledged(false); }}><option value="">Select leave type</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.code})</option>)}</Select></Field><Field label="Ledger through month"><Select value={importMonth} onChange={(event) => { setImportMonth(event.target.value); setImportPreview(null); setReviewedExceptions(false); setExceptionsAcknowledged(false); }}>{["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, index) => <option key={label} value={`2026-${String(index + 1).padStart(2, "0")}`}>{label} 2026</option>)}</Select></Field></div>
+          {importPreview && <div className="space-y-3 rounded-xl border border-edge p-3 text-[12px]"><p className="font-semibold">Dry run: {importPreview.summary.ready}/{importPreview.summary.total} rows ready; {importPreview.summary.excluded} excluded. Opening {importPreview.summary.openingBalance}, credited {importPreview.summary.credited}, availed {importPreview.summary.availed}, available {importPreview.summary.available}.</p><p className="text-muted-foreground">Exceptions: {importPreview.summary.missing} missing, {importPreview.summary.inactive} inactive, {importPreview.summary.ambiguous} ambiguous, {importPreview.summary.reconciliationConflicts} snapshot conflicts, {importPreview.summary.policyConflicts} policy conflicts, {importPreview.summary.invalid} invalid.</p>{importPreview.idempotentBatchId && <p className="text-amber-300">This exact workbook was already imported. Confirmation is idempotent.</p>}{importPreview.blocking ? <div role="alert" className="space-y-2 text-rose-300"><p>Strict import is blocked. Nothing has been changed.</p><Button size="sm" variant="outline" loading={importBusy} onClick={downloadExceptionReport}>Download all {importPreview.summary.excluded} exceptions CSV</Button></div> : <p className="text-emerald-300">All rows reconcile and are eligible for an immutable snapshot import.</p>}{importPreview.blocking && importPreview.workbookErrors.length === 0 && importPreview.summary.ready > 0 && <label className="flex min-h-11 items-start gap-2 border-t border-edge pt-3 text-muted-foreground"><input type="checkbox" checked={reviewedExceptions} onChange={(event) => { setReviewedExceptions(event.target.checked); setExceptionsAcknowledged(false); }} className="mt-0.5 h-4 w-4 accent-indigo-500" /> <span>Import only the {importPreview.summary.ready} ready, active employees and exclude exceptions.</span></label>}{reviewedExceptions && <label className="flex min-h-11 items-start gap-2 text-amber-200"><input type="checkbox" checked={exceptionsAcknowledged} onChange={(event) => setExceptionsAcknowledged(event.target.checked)} className="mt-0.5 h-4 w-4 accent-indigo-500" /> <span>I reviewed and downloaded the report. I acknowledge exactly {importPreview.summary.excluded} rows will be excluded and no employee records will be created or reactivated.</span></label>}<div className="max-h-40 overflow-auto border-t border-edge pt-2">{importPreview.rows.filter((row: any) => row.errors.length).slice(0, 20).map((row: any) => <p key={row.sourceRow} className="py-0.5 text-rose-300">Row {row.sourceRow} ({row.employeeNumber}): {row.errors.join(" ")}</p>)}{importPreview.truncatedRows > 0 && <p className="text-muted-foreground">Preview limited to 100 rows. Download the CSV for every exception.</p>}</div></div>}
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>{!importPreview ? <Button loading={importBusy} onClick={() => previewImport()}>Dry run</Button> : <Button loading={importBusy} disabled={(importPreview.blocking && (!reviewedExceptions || !exceptionsAcknowledged))} onClick={() => previewImport(true)}>{reviewedExceptions ? `Confirm import ${importPreview.summary.ready} ready rows` : "Confirm strict import"}</Button>}</div>
         </div>
       </Modal>
 

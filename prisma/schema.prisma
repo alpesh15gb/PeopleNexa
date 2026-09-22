@@ -908,6 +908,10 @@ model LeaveBalanceImportBatch {
   throughMonth   String // YYYY-MM, the selected ledger month
   periodEnd      DateTime
   importedBy     String
+  attemptedCount Int      @default(0)
+  acceptedCount  Int      @default(0)
+  excludedCount  Int      @default(0)
+  importDecision String   @default("strict") // strict | reviewed_exceptions
   importedAt     DateTime @default(now())
   entries        LeaveBalanceImportEntry[]
 

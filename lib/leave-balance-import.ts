@@ -45,6 +45,22 @@ export function normalizeLeaveLedgerEmployeeCode(value: string) {
   return value.replace(/\s+/g, "").toLowerCase();
 }
 
+export function canConfirmLeaveBalanceImport(input: {
+  blocking: boolean;
+  structuralErrors: number;
+  readyCount: number;
+  excludedCount: number;
+  reviewedExceptions: boolean;
+  acknowledgedExceptionCount: number;
+}) {
+  if (!input.blocking) return { allowed: true, decision: "strict" as const };
+  const allowed = input.reviewedExceptions
+    && input.structuralErrors === 0
+    && input.readyCount > 0
+    && input.acknowledgedExceptionCount === input.excludedCount;
+  return { allowed, decision: "reviewed_exceptions" as const };
+}
+
 export function matchLeaveLedgerEmployee<T extends LeaveLedgerEmployee>(code: string, employees: T[]): LeaveLedgerEmployeeMatch<T> {
   const normalizedCode = normalizeLeaveLedgerEmployeeCode(code);
   const matchingEmployees = new Map<string, T>();

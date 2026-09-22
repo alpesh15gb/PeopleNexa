@@ -1,0 +1,5 @@
+ALTER TABLE "LeaveBalanceImportBatch"
+  ADD COLUMN "attemptedCount" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "acceptedCount" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "excludedCount" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "importDecision" TEXT NOT NULL DEFAULT 'strict';

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
-import { matchLeaveLedgerEmployee, normalizeLeaveLedgerEmployeeCode, parseKeystoneLeaveLedgerSheet, parseLeaveBalanceFlatCsv } from "../lib/leave-balance-import";
+import { canConfirmLeaveBalanceImport, matchLeaveLedgerEmployee, normalizeLeaveLedgerEmployeeCode, parseKeystoneLeaveLedgerSheet, parseLeaveBalanceFlatCsv } from "../lib/leave-balance-import";
 
 const workbook = new ExcelJS.Workbook();
 const sheet = workbook.addWorksheet("Sheet1");
@@ -47,4 +47,9 @@ assert.equal(matchLeaveLedgerEmployee("missing", activeEmployees).kind, "unmatch
 assert.equal(matchLeaveLedgerEmployee("MN/004", activeEmployees.filter((employee) => employee.id !== "employee-device-code")).kind, "unmatched", "inactive employees are excluded before matching");
 assert.equal(matchLeaveLedgerEmployee("DUP-001", [...activeEmployees, { id: "employee-duplicate", employeeNumber: "DUP-001", deviceCode: null }, { id: "employee-device-duplicate", employeeNumber: "EMP-003", deviceCode: "dup-001" }]).kind, "ambiguous");
 assert.equal(normalizeLeaveLedgerEmployeeCode(" MN / 004 "), "mn/004");
+assert.equal(canConfirmLeaveBalanceImport({ blocking: true, structuralErrors: 0, readyCount: 1511, excludedCount: 93, reviewedExceptions: false, acknowledgedExceptionCount: 0 }).allowed, false, "strict import blocks every exception");
+assert.equal(canConfirmLeaveBalanceImport({ blocking: true, structuralErrors: 0, readyCount: 1511, excludedCount: 93, reviewedExceptions: true, acknowledgedExceptionCount: 92 }).allowed, false, "partial import requires the exact exception acknowledgement");
+const reviewed = canConfirmLeaveBalanceImport({ blocking: true, structuralErrors: 0, readyCount: 1511, excludedCount: 93, reviewedExceptions: true, acknowledgedExceptionCount: 93 });
+assert.deepEqual(reviewed, { allowed: true, decision: "reviewed_exceptions" }, "explicit reviewed-exceptions import accepts only ready rows");
+assert.equal(canConfirmLeaveBalanceImport({ blocking: true, structuralErrors: 1, readyCount: 1511, excludedCount: 93, reviewedExceptions: true, acknowledgedExceptionCount: 93 }).allowed, false, "partial import never bypasses structural workbook errors");
 console.log("leave import parser tests passed");
