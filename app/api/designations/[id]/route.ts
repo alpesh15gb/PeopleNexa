@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
+import { canManageDesignations } from "@/lib/designation-access";
 import { requireActiveSession } from "@/lib/session";
 
 export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || !["admin", "location_manager"].includes(session.role)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Authentication is required." }, { status: 401 });
+  if (!canManageDesignations(session.role)) return NextResponse.json({ error: "You do not have permission to manage designations." }, { status: 403 });
   const { id } = await context.params; const current = await prisma.designation.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!current) return NextResponse.json({ error: "not found" }, { status: 404 });
   const body = await request.json().catch(() => ({})); const name = body.name === undefined ? current.name : String(body.name).trim();

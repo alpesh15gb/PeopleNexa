@@ -20,7 +20,8 @@
     "test:employee-master": "tsx scripts/test-employee-master-workflow.ts",
     "test:employee-master-wizard": "tsx scripts/test-employee-master-wizard.ts",
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts",
-    "test:device-access": "tsx scripts/test-device-access-policy.ts"
+    "test:device-access": "tsx scripts/test-device-access-policy.ts",
+    "test:designation-access": "tsx scripts/test-designation-access.ts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

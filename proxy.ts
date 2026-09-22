@@ -102,6 +102,7 @@ async function proxy(request: NextRequest) {
 
   const isAdminRoute = pathname.startsWith("/admin");
   const isEmployeeRoute = pathname.startsWith("/employee");
+  const isDesignationRoute = pathname === "/admin/designations" || pathname.startsWith("/admin/designations/");
 
   // A valid JWT signature is not enough on its own: the employee must still
   // exist and be active. Tokens that survive a DB reset (or reference a
@@ -161,7 +162,7 @@ async function proxy(request: NextRequest) {
     );
   }
   // Supervisor is admin-lite for their scope: attendance + regularization + punch-details only.
-  if (role === "supervisor" && isAdminRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization") && !pathname.startsWith("/admin/reports/punch-details")) {
+  if (role === "supervisor" && isAdminRoute && !isDesignationRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization") && !pathname.startsWith("/admin/reports/punch-details")) {
     return NextResponse.redirect(new URL("/admin/attendance", request.url));
   }
   // Branch manager is scoped to their branch: dashboard + attendance +
@@ -174,16 +175,17 @@ async function proxy(request: NextRequest) {
        pathname.startsWith("/admin/employees") ||
        pathname.startsWith("/admin/employee-master") ||
       pathname.startsWith("/admin/leaves") ||
-      pathname.startsWith("/admin/reports/punch-details");
+       pathname.startsWith("/admin/reports/punch-details") ||
+       isDesignationRoute;
     if (!allowed) {
       return NextResponse.redirect(new URL("/admin/attendance", request.url));
     }
   }
   if (role === "location_manager" && isAdminRoute) {
-    const allowed = pathname === "/admin" || ["attendance", "regularization", "employees", "employee-master", "id-cards", "departments", "branches", "devices", "leaves", "reports", "payroll", "loans", "expenses", "cashbook", "assets", "documents", "helpdesk", "onboarding", "performance", "policies", "shifts", "rosters", "holidays", "journeys", "exits"].some((segment) => pathname.startsWith(`/admin/${segment}`));
+    const allowed = pathname === "/admin" || ["attendance", "regularization", "employees", "employee-master", "id-cards", "departments", "designations", "branches", "devices", "leaves", "reports", "payroll", "loans", "expenses", "cashbook", "assets", "documents", "helpdesk", "onboarding", "performance", "policies", "shifts", "rosters", "holidays", "journeys", "exits"].some((segment) => pathname.startsWith(`/admin/${segment}`));
     if (!allowed) return NextResponse.redirect(new URL("/admin", request.url));
   }
-  if (isAdminRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {
+  if (isAdminRoute && !isDesignationRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
 

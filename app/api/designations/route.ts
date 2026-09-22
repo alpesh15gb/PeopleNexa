@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
+import { canManageDesignations } from "@/lib/designation-access";
 import { requireActiveSession } from "@/lib/session";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || !["admin", "location_manager", "branch_manager"].includes(session.role)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Authentication is required." }, { status: 401 });
+  if (!canManageDesignations(session.role)) return NextResponse.json({ error: "You do not have permission to view designations." }, { status: 403 });
   return NextResponse.json({ designations: await prisma.designation.findMany({ where: { tenantId: session.tenantId }, orderBy: [{ active: "desc" }, { name: "asc" }] }) });
 }
 
 export async function POST(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || !["admin", "location_manager"].includes(session.role)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Authentication is required." }, { status: 401 });
+  if (!canManageDesignations(session.role)) return NextResponse.json({ error: "You do not have permission to manage designations." }, { status: 403 });
   const name = String((await request.json().catch(() => ({}))).name ?? "").trim();
   if (!name || name.length > 100) return NextResponse.json({ error: "Designation name must be 1-100 characters." }, { status: 400 });
   try {
