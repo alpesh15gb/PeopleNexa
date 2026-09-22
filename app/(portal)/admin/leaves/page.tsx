@@ -23,7 +23,7 @@ export default async function AdminLeavesPage() {
   const branchId = isBranchManager ? ownBranchId : null;
   const locationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
 
-  const [requests, types, employees] = await Promise.all([
+  const [requests, types, employees, importBatches] = await Promise.all([
     prisma.leaveRequest.findMany({
       where: { tenantId: session.tenantId, ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}) },
       include: {
@@ -38,6 +38,7 @@ export default async function AdminLeavesPage() {
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: { employeeNumber: "asc" },
     }),
+    session.role === "admin" ? prisma.leaveBalanceImportBatch.findMany({ where: { tenantId: session.tenantId }, include: { leaveType: { select: { name: true, code: true } }, _count: { select: { entries: true } } }, orderBy: { importedAt: "desc" }, take: 10 }) : Promise.resolve([]),
   ]);
 
   return (
@@ -59,7 +60,7 @@ export default async function AdminLeavesPage() {
       />
       <Card>
         <CardContent className="p-0">
-          <LeavesAdmin requests={requests} types={types} employees={employees} canManageTypes={session.role === "admin"} />
+          <LeavesAdmin requests={requests} types={types} employees={employees} canManageTypes={session.role === "admin"} importBatches={importBatches} />
         </CardContent>
       </Card>
     </div>

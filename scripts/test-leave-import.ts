@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
+import { parseKeystoneLeaveLedgerSheet } from "../lib/leave-balance-import";
+
+const workbook = new ExcelJS.Workbook();
+const sheet = workbook.addWorksheet("Sheet1");
+sheet.getCell("A3").value = "Employee Leave Details For 2026";
+["Sl No", "Employee Code", "Name Of Employee", "Designation", "Date Of Joining", "Leave Balance as on 31.12.2025"].forEach((value, index) => sheet.getCell(5, index + 1).value = value);
+sheet.getCell("G5").value = "Working Days"; sheet.getCell("H5").value = "Leaves Credited"; sheet.getCell("I5").value = "Leaves Availed"; sheet.getCell("J5").value = "Leave Balance";
+sheet.getCell("K5").value = "Working Days"; sheet.getCell("L5").value = "Leaves Credited"; sheet.getCell("M5").value = "Leaves Availed"; sheet.getCell("N5").value = "Leave Balance";
+sheet.getCell("A6").value = 1; sheet.getCell("B6").value = "EMP-001"; sheet.getCell("C6").value = "Fixture Employee"; sheet.getCell("D6").value = "Supervisor"; sheet.getCell("E6").value = new Date("2024-01-01"); sheet.getCell("F6").value = 5;
+sheet.getCell("G6").value = 25; sheet.getCell("H6").value = 2; sheet.getCell("I6").value = 1; sheet.getCell("J6").value = 6;
+sheet.getCell("K6").value = 24; sheet.getCell("L6").value = 1; sheet.getCell("M6").value = 2; sheet.getCell("N6").value = 5;
+const parsed = parseKeystoneLeaveLedgerSheet(sheet, "2026-02");
+assert.equal(parsed.errors.length, 0);
+assert.equal(parsed.rows.length, 1);
+assert.deepEqual(parsed.rows[0].errors, []);
+assert.equal(parsed.rows[0].openingBalance, 5);
+assert.equal(parsed.rows[0].workedDays, 24);
+assert.equal(parsed.rows[0].credited, 1);
+assert.equal(parsed.rows[0].availed, 2);
+assert.equal(parsed.rows[0].available, 5);
+sheet.getCell("N6").value = 4;
+assert.match(parseKeystoneLeaveLedgerSheet(sheet, "2026-02").rows[0].errors.join(" "), /does not reconcile/);
+console.log("leave import parser tests passed");

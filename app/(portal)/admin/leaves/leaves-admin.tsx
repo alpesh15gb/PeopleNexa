@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, CalendarDays, PenLine } from "lucide-react";
+import { Check, X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, CalendarDays, PenLine, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -43,20 +43,30 @@ interface Employee {
   employeeNumber: string;
 }
 
+interface ImportBatch {
+  id: string;
+  throughMonth: string;
+  importedAt: Date;
+  leaveType: { name: string; code: string };
+  _count: { entries: number };
+}
+
 export function LeavesAdmin({
   requests,
   types,
   employees,
   canManageTypes,
+  importBatches,
 }: {
   requests: Request[];
   types: Type[];
   employees: Employee[];
   canManageTypes: boolean;
+  importBatches: ImportBatch[];
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [tab, setTab] = useState<"requests" | "types" | "calendar">("requests");
+  const [tab, setTab] = useState<"requests" | "types" | "calendar" | "reconciliation">("requests");
   const [busy, setBusy] = useState<string | null>(null);
   const [typeModal, setTypeModal] = useState<Type | "new" | null>(null);
   const [saving, setSaving] = useState(false);
@@ -65,6 +75,24 @@ export function LeavesAdmin({
   const [employeeQuery, setEmployeeQuery] = useState("");
   const deferredEmployeeQuery = useDeferredValue(employeeQuery);
   const [month, setMonth] = useState(() => new Date());
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importTypeId, setImportTypeId] = useState("");
+  const [importMonth, setImportMonth] = useState("2026-08");
+  const [importPreview, setImportPreview] = useState<any>(null);
+  const [importBusy, setImportBusy] = useState(false);
+
+  async function previewImport(confirm = false) {
+    if (!importFile || !importTypeId) { toast("error", "Choose the workbook and mapped leave type."); return; }
+    setImportBusy(true);
+    try {
+      const form = new FormData(); form.set("file", importFile); form.set("leaveTypeId", importTypeId); form.set("throughMonth", importMonth); if (confirm) form.set("confirm", "true");
+      const response = await fetch("/api/leaves/imports", { method: "POST", body: form }); const data = await response.json();
+      if (!response.ok) { toast("error", data.error ?? "Could not import the workbook."); return; }
+      if (confirm) { toast("success", data.idempotent ? "This workbook was already imported; no changes made." : "Immutable balance snapshots imported."); setImportOpen(false); setImportPreview(null); setImportFile(null); router.refresh(); return; }
+      setImportPreview(data);
+    } finally { setImportBusy(false); }
+  }
 
   async function review(id: string, status: string) {
     setBusy(id);
@@ -142,7 +170,7 @@ export function LeavesAdmin({
           {([
             ["requests", `Requests${pending ? ` (${pending})` : ""}`],
             ["calendar", "Team calendar"],
-            ...(canManageTypes ? [["types", "Leave types"]] as const : []),
+            ...(canManageTypes ? [["types", "Leave types"], ["reconciliation", "Balance import"]] as const : []),
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -239,7 +267,7 @@ export function LeavesAdmin({
         </Table>
       ) : tab === "calendar" ? (
         <TeamCalendar month={month} setMonth={setMonth} requests={requests} />
-      ) : (
+      ) : tab === "types" ? (
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {types.map((t) => (
             <div key={t.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
@@ -265,7 +293,25 @@ export function LeavesAdmin({
             </div>
           ))}
         </div>
+      ) : (
+        <div className="space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-edge bg-tint p-4">
+            <div><p className="text-[13px] font-semibold">Initial balance reconciliation</p><p className="mt-1 text-[12px] text-muted-foreground">Recognizes the Key Stone Manipur 2026 ledger. It creates immutable balance snapshots, never leave requests or policy allocations.</p></div>
+            <Button size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3.5 w-3.5" /> Import workbook</Button>
+          </div>
+          {importBatches.length === 0 ? <p className="py-6 text-center text-[13px] text-muted-foreground">No balance imports yet.</p> : <Table><THead><TR><TH>Cutoff</TH><TH>Leave type</TH><TH>Rows</TH><TH>Imported</TH><TH /></TR></THead><TBody>{importBatches.map((batch) => <TR key={batch.id}><TD>{batch.throughMonth}</TD><TD>{batch.leaveType.name} ({batch.leaveType.code})</TD><TD>{batch._count.entries}</TD><TD>{formatDate(batch.importedAt)}</TD><TD><a className="text-[12px] font-medium text-indigo-300 hover:underline" href={`/api/leaves/imports/${batch.id}/export`}>Export check</a></TD></TR>)}</TBody></Table>}
+        </div>
       )}
+
+      <Modal open={importOpen} onClose={() => { if (!importBusy) { setImportOpen(false); setImportPreview(null); } }} title="Import leave balance ledger" size="lg">
+        <div className="space-y-4">
+          <p className="text-[12px] leading-5 text-muted-foreground">Profile: Key Stone Manipur 2026 leave ledger. Select the leave type represented by the workbook and the last completed monthly column. Dates are displayed as DD/MM/YYYY; the import cutoff is an IST boundary.</p>
+          <Field label="Workbook (.xlsx)"><Input type="file" accept=".xlsx" onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setImportPreview(null); }} /></Field>
+          <div className="grid gap-4 sm:grid-cols-2"><Field label="Map all rows to leave type"><Select value={importTypeId} onChange={(event) => { setImportTypeId(event.target.value); setImportPreview(null); }}><option value="">Select leave type</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name} ({type.code})</option>)}</Select></Field><Field label="Ledger through month"><Select value={importMonth} onChange={(event) => { setImportMonth(event.target.value); setImportPreview(null); }}>{["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((label, index) => <option key={label} value={`2026-${String(index + 1).padStart(2, "0")}`}>{label} 2026</option>)}</Select></Field></div>
+          {importPreview && <div className="space-y-3 rounded-xl border border-edge p-3 text-[12px]"><p className="font-semibold">Dry run: {importPreview.summary.ready}/{importPreview.summary.total} rows ready. Opening {importPreview.summary.openingBalance}, credited {importPreview.summary.credited}, availed {importPreview.summary.availed}, available {importPreview.summary.available}.</p>{importPreview.idempotentBatchId && <p className="text-amber-300">This exact workbook was already imported. Confirmation is idempotent.</p>}{importPreview.blocking ? <p className="text-rose-300">Write blocked: resolve unmatched employees, existing snapshots, policy allocations, or row validation errors. Nothing has been changed.</p> : <p className="text-emerald-300">All rows reconcile and are eligible for an immutable snapshot import.</p>}<div className="max-h-40 overflow-auto border-t border-edge pt-2">{importPreview.rows.filter((row: any) => row.errors.length).slice(0, 20).map((row: any) => <p key={row.sourceRow} className="py-0.5 text-rose-300">Row {row.sourceRow} ({row.employeeNumber}): {row.errors.join(" ")}</p>)}{importPreview.truncatedRows > 0 && <p className="text-muted-foreground">Preview limited to the first 100 rows; all rows were validated server-side.</p>}</div></div>}
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setImportOpen(false)}>Cancel</Button>{!importPreview ? <Button loading={importBusy} onClick={() => previewImport()}>Dry run</Button> : <Button loading={importBusy} disabled={importPreview.blocking} onClick={() => previewImport(true)}>Confirm immutable import</Button>}</div>
+        </div>
+      </Modal>
 
       <Modal
         open={onBehalfOpen} onClose={() => setOnBehalfOpen(false)} title="Log leave for an employee" size="sm">

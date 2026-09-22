@@ -24,7 +24,8 @@
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts",
     "test:device-access": "tsx scripts/test-device-access-policy.ts",
     "test:designation-access": "tsx scripts/test-designation-access.ts",
-    "test:designation-import": "tsx scripts/test-designation-import.ts"
+    "test:designation-import": "tsx scripts/test-designation-import.ts",
+    "test:leave-import": "tsx scripts/test-leave-import.ts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

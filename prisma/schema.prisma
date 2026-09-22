@@ -39,6 +39,8 @@ model Tenant {
   shifts             Shift[]
   employees          Employee[]
   leaveTypes         LeaveType[]
+  leaveBalanceImportBatches LeaveBalanceImportBatch[]
+  leaveBalanceImportEntries LeaveBalanceImportEntry[]
   holidays           Holiday[]
   attendance         Attendance[]
   assets             Asset[]
@@ -500,6 +502,7 @@ model Employee {
   punches           Punch[]
   leaveRequests     LeaveRequest[]
   leavePolicyBalances LeavePolicyBalance[]
+  leaveBalanceImportEntries LeaveBalanceImportEntry[]
   notifications     Notification[]
   payslips          Payslip[]
   loans             EmployeeLoan[]
@@ -821,6 +824,8 @@ model LeaveType {
 
   requests LeaveRequest[]
   policyBalances LeavePolicyBalance[]
+  leaveBalanceImportBatches LeaveBalanceImportBatch[]
+  leaveBalanceImportEntries LeaveBalanceImportEntry[]
 
   @@unique([tenantId, code])
 }
@@ -887,6 +892,52 @@ model LeavePolicyBalance {
 
   @@unique([policyPeriodId, employeeId, leaveTypeId])
   @@index([tenantId, employeeId])
+}
+
+// Immutable imported reconciliation snapshots. These intentionally do not
+// create leave requests or alter policy-period allocations.
+model LeaveBalanceImportBatch {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leaveTypeId    String
+  leaveType      LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  schemaProfile  String
+  sourceFileName String
+  sourceHash     String
+  throughMonth   String // YYYY-MM, the selected ledger month
+  periodEnd      DateTime
+  importedBy     String
+  importedAt     DateTime @default(now())
+  entries        LeaveBalanceImportEntry[]
+
+  @@unique([tenantId, sourceHash, leaveTypeId, throughMonth])
+  @@index([tenantId, leaveTypeId, periodEnd])
+}
+
+model LeaveBalanceImportEntry {
+  id             String                  @id @default(cuid())
+  batchId        String
+  batch          LeaveBalanceImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  tenantId       String
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee                @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveTypeId    String
+  leaveType      LeaveType               @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  employeeNumber String
+  sourceRow      Int
+  openingBalance Float
+  workedDays     Float
+  credited       Float
+  availed        Float
+  available      Float
+  periodEnd      DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([batchId, employeeId])
+  @@unique([tenantId, employeeId, leaveTypeId, periodEnd])
+  @@index([tenantId, employeeId, leaveTypeId, periodEnd])
 }
 
 // ─── Holidays ──────────────────────────────────────────────────────────────
