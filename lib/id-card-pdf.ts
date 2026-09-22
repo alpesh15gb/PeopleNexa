@@ -42,7 +42,7 @@ async function cardBackground(source: string | undefined, fallback: string) {
 
 function drawBackground(doc: PDFKit.PDFDocument, image: Buffer) {
   const source = (doc as unknown as { openImage: (value: Buffer) => { width: number; height: number } }).openImage(image);
-  const scale = Math.max(width / source.width, height / source.height);
+  const scale = Math.min(width / source.width, height / source.height);
   const imageWidth = source.width * scale;
   const imageHeight = source.height * scale;
   doc.image(image, (width - imageWidth) / 2, (height - imageHeight) / 2, { width: imageWidth, height: imageHeight });

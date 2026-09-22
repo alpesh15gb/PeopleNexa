@@ -17,7 +17,7 @@ assert.ok(ID_CARD_LAYOUT.photo.y + ID_CARD_LAYOUT.photo.height < ID_CARD_LAYOUT.
 assert.ok(Math.abs(ID_CARD_LAYOUT.fields.height - fieldsHeight) < Number.EPSILON);
 assert.ok(ID_CARD_LAYOUT.fields.y + ID_CARD_LAYOUT.fields.height <= ID_CARD_LAYOUT.footer.y);
 assert.equal(ID_CARD_LAYOUT.fields.overflow, "ellipsis");
-assert.equal(ID_CARD_LAYOUT.background.fit, "cover");
+assert.equal(ID_CARD_LAYOUT.background.fit, "contain");
 assert.ok(ID_CARD_LAYOUT.frontContentPanel.y >= ID_CARD_LAYOUT.header.y + ID_CARD_LAYOUT.header.height);
 assert.ok(ID_CARD_LAYOUT.frontContentPanel.y + ID_CARD_LAYOUT.frontContentPanel.height <= ID_CARD_LAYOUT.footer.y + Number.EPSILON);
 assert.ok(ID_CARD_LAYOUT.photo.y >= ID_CARD_LAYOUT.frontContentPanel.y && ID_CARD_LAYOUT.photo.y + ID_CARD_LAYOUT.photo.height <= ID_CARD_LAYOUT.frontContentPanel.y + ID_CARD_LAYOUT.frontContentPanel.height);

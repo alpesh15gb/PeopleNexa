@@ -27,7 +27,8 @@ export const ID_CARD_SIZE = {
 } as const;
 
 export const ID_CARD_LAYOUT = {
-  background: { fit: "cover", position: "center" },
+  // Artwork must remain inside the CR80 page; templates may not share its aspect ratio.
+  background: { fit: "contain", position: "center" },
   header: { x: 0, y: 0, width: 1, height: 0.22 },
   photo: { x: 0.28, y: 0.23, width: 0.37, height: 0.295, borderWidth: 1, radius: 4 },
   fields: {
