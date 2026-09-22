@@ -10,7 +10,7 @@ import { safeLogoUrl } from "@/lib/branding-url";
 import type { CompanyBranding } from "@/lib/company-branding";
 import type { IdCardTemplate } from "@/lib/configuration";
 
-type Employee = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
+type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; idCardIssuedAt: string | null; idCardValidUntil: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
 
 export function IdCardGenerator() {
   const [deviceCode, setDeviceCode] = useState("");

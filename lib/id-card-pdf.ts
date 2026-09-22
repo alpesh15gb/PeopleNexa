@@ -5,7 +5,7 @@ import { ID_CARD_ARTBOARD, ID_CARD_LAYOUT, idCardDetails } from "@/lib/id-card-c
 import { loadBrandLogo, safeLogoUrl, type CompanyBranding } from "@/lib/company-branding";
 import type { IdCardTemplate } from "@/lib/configuration";
 
-export type IdCardData = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
+export type IdCardData = { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; idCardIssuedAt?: Date | null; idCardValidUntil?: Date | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
 
 const brown = "#985016";
 const width = 153;

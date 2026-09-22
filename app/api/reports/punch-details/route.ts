@@ -21,6 +21,7 @@ type AttendanceRow = {
     position: string | null;
     branch: { name: string } | null;
     department: { name: string } | null;
+    employmentProfile: { subDepartment: string | null } | null;
     shift: { name: string } | null;
   };
 };
@@ -147,6 +148,7 @@ export async function GET(req: NextRequest) {
             position: true,
             branch: { select: { name: true } },
             department: { select: { name: true } },
+            employmentProfile: { select: { subDepartment: true } },
             shift: { select: { name: true } },
           },
         },
@@ -157,12 +159,14 @@ export async function GET(req: NextRequest) {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Punch Details");
     ws.columns = [
+      { header: "S.No.", key: "serial", width: 8 },
       { header: "Employee Code", key: "code", width: 16 },
       { header: "Device Code", key: "deviceCode", width: 14 },
       { header: "Employee Name", key: "name", width: 26 },
       { header: "Designation", key: "designation", width: 24 },
       { header: "Branch / Division", key: "branch", width: 26 },
       { header: "Department", key: "department", width: 20 },
+      { header: "Subdepartment", key: "subdepartment", width: 20 },
       { header: "Date", key: "date", width: 14 },
       { header: "Device IN", key: "deviceIn", width: 26 },
       { header: "In Time (IST)", key: "inTime", width: 14 },
@@ -173,14 +177,16 @@ export async function GET(req: NextRequest) {
       { header: "Shift", key: "shift", width: 16 },
       { header: "Status", key: "status", width: 12 },
     ];
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       ws.addRow({
+        serial: index + 1,
         code: row.employee.employeeNumber,
         deviceCode: row.employee.deviceCode ?? "",
         name: `${row.employee.firstName} ${row.employee.lastName}`.trim(),
         designation: row.employee.position ?? "",
         branch: row.employee.branch?.name ?? "",
         department: row.employee.department?.name ?? "",
+        subdepartment: row.employee.employmentProfile?.subDepartment ?? "",
         date: formatDateIST(row.date),
         deviceIn: row.deviceIn?.name ?? "",
         inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
@@ -222,6 +228,7 @@ export async function GET(req: NextRequest) {
             position: true,
           branch: { select: { name: true } },
           department: { select: { name: true } },
+          employmentProfile: { select: { subDepartment: true } },
           shift: { select: { name: true } },
         },
         },

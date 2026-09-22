@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   if (!deviceCode) return NextResponse.json({ error: "Device ID is required." }, { status: 400 });
   const [tenant, employee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
-    prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
+    prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, idCardIssuedAt: true, idCardValidUntil: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
   ]);
   if (!employee) return NextResponse.json({ error: "No employee matches this Device ID." }, { status: 404 });
   const branding = resolveCompanyBranding(tenant, employee.branch?.location ?? employee.location);

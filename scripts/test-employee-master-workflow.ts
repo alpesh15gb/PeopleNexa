@@ -35,6 +35,7 @@ assert.equal(optionalDateInput("Invalid Date"), "invalid");
 const storedExpiry = optionalDateInput("2030-12-31T00:00:00.000Z");
 assert.ok(storedExpiry instanceof Date);
 assert.equal(storedExpiry.toISOString(), "2030-12-31T00:00:00.000Z");
+assert.equal(optionalDateInput(""), null); // Optional licence issue/card validity dates remain optional.
 
 // Changing the status hides, rather than clears, saved spouse details.
 const spouseProfile = { maritalStatus: "Married", spouseName: "Alex", spouseContactNumber: "+919876543210" };

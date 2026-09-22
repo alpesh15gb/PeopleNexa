@@ -35,6 +35,7 @@ model Tenant {
   branches           Branch[]
   locations          Location[]
   departments        Department[]
+  designations       Designation[]
   shifts             Shift[]
   employees          Employee[]
   leaveTypes         LeaveType[]
@@ -376,6 +377,19 @@ model Department {
   @@unique([tenantId, name])
 }
 
+model Designation {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, active])
+}
+
 model Shift {
   id           String   @id @default(cuid())
   tenantId     String
@@ -444,7 +458,10 @@ model Employee {
   // whose existing license type cannot be classified safely.
   drivingLicenseClassification String?
   drivingLicenseType      String?
+  drivingLicenseIssuedAt DateTime?
   drivingLicenseExpiresAt DateTime?
+  idCardIssuedAt         DateTime?
+  idCardValidUntil       DateTime?
 
   // Complete normalized source row from a controlled legacy HR import.
   // Retains fields not yet represented by dedicated PeopleNexa models.
@@ -570,6 +587,7 @@ model EmployeeProfile {
   employeeId                 String   @unique
   employee                   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   middleName                 String?
+  fullName                   String?
   nameAsOnAadhaar            String?
   nickName                   String?
   gender                     String?

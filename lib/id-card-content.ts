@@ -4,6 +4,8 @@ export type IdCardEmployeeContent = {
   lastName: string;
   position: string | null;
   joiningDate: Date | string | null;
+  idCardIssuedAt?: Date | string | null;
+  idCardValidUntil?: Date | string | null;
   phone: string | null;
   profile: { bloodGroup: string | null } | null;
 };
@@ -24,11 +26,14 @@ export function idCardDetails(employee: IdCardEmployeeContent) {
   const joiningDate = employee.joiningDate
     ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(employee.joiningDate))
     : "-";
+  const format = (value: Date | string | null | undefined) => value ? new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "-";
   return [
     ["Emp. ID", ellipsis(employee.employeeNumber, 24)],
     ["Emp. Name", ellipsis(`${employee.firstName} ${employee.lastName}`.trim(), 28)],
     ["Designation", ellipsis(employee.position ?? "-", 28)],
     ["DOJ", joiningDate],
+    ["Issue Date", format(employee.idCardIssuedAt)],
+    ["Validity", format(employee.idCardValidUntil)],
     ["Blood Group", ellipsis(employee.profile?.bloodGroup ?? "-", 16)],
     ["Contact", ellipsis(employee.phone ?? "-", 20)],
   ] as const;

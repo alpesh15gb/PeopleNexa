@@ -132,7 +132,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     return rows;
   };
   const parseProfile = (raw: Record<string, unknown>) => {
-    const values = optionalTextFields(raw, ["middleName", "nameAsOnAadhaar", "nickName", "gender", "celebrateDatePreference", "maritalStatus", "bloodGroup", "whatsappNumber", "otherMobile", "personalEmail", "placeOfBirth", "nationality", "citizenship", "fatherName", "motherName", "emergencyContactName", "emergencyContactNumber", "emergencyContactRelation"]);
+    const values = optionalTextFields(raw, ["middleName", "fullName", "nameAsOnAadhaar", "nickName", "gender", "celebrateDatePreference", "maritalStatus", "bloodGroup", "whatsappNumber", "otherMobile", "personalEmail", "placeOfBirth", "nationality", "citizenship", "fatherName", "motherName", "emergencyContactName", "emergencyContactNumber", "emergencyContactRelation"]);
     if (fail(values)) return values;
     if (Object.hasOwn(raw, "spouseName")) {
       const spouseName = text(raw.spouseName, "spouseName");

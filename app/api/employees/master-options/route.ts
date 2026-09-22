@@ -27,12 +27,12 @@ export async function GET() {
       ? { branchId: branchId! }
       : {};
   const branchScope = session.role === "location_manager" ? { locationId: locationId! } : session.role === "branch_manager" ? { id: branchId! } : {};
-  const [branches, departments, shifts, managers, positions, subdepartments] = await Promise.all([
+  const [branches, departments, shifts, managers, designations, subdepartments] = await Promise.all([
     prisma.branch.findMany({ where: { tenantId: session.tenantId, ...branchScope }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, status: "active", ...employeeScope }, select: { id: true, firstName: true, lastName: true, employeeNumber: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
-    prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, position: { not: null }, ...employeeScope }, distinct: ["position"], select: { position: true }, orderBy: { position: "asc" } }),
+    prisma.designation.findMany({ where: { tenantId: session.tenantId, active: true }, select: { name: true }, orderBy: { name: "asc" } }),
     prisma.employeeEmploymentProfile.findMany({ where: { subDepartment: { not: null }, employee: { tenantId: session.tenantId, loginOnly: false, departmentId: { not: null }, ...employeeScope } }, select: { subDepartment: true, employee: { select: { departmentId: true } } } }),
   ]);
   const subdepartmentsByDepartment = subdepartments.reduce<Record<string, string[]>>((result, row) => {
@@ -49,7 +49,7 @@ export async function GET() {
     departments,
     shifts,
     managers,
-    positions: positions.flatMap((row) => row.position ? [row.position] : []),
+    positions: designations.map((row) => row.name),
     subdepartments: [...new Set(subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : []))].sort((a, b) => a.localeCompare(b)),
     subdepartmentsByDepartment,
   });

@@ -33,6 +33,7 @@ const select = {
   drivingLicenseNumber: true,
   drivingLicenseClassification: true,
   drivingLicenseType: true,
+  drivingLicenseIssuedAt: true,
   drivingLicenseExpiresAt: true,
   profilePicture: true,
   managerId: true,
@@ -62,6 +63,7 @@ const safeSelect = {
   drivingLicenseNumber: true,
   drivingLicenseClassification: true,
   drivingLicenseType: true,
+  drivingLicenseIssuedAt: true,
   drivingLicenseExpiresAt: true,
   bankName: true,
   accountNumber: true,
@@ -191,15 +193,18 @@ export async function POST(req: NextRequest) {
     const drivingLicenseType = body.drivingLicenseType != null && String(body.drivingLicenseType).trim() !== "" ? String(body.drivingLicenseType).trim().toLowerCase() : null;
     const drivingLicenseClassification = body.drivingLicenseClassification != null && String(body.drivingLicenseClassification).trim() !== "" ? String(body.drivingLicenseClassification).trim().toLowerCase() : null;
     const drivingLicenseExpiresAt = optionalDateInput(body.drivingLicenseExpiresAt);
+    const drivingLicenseIssuedAt = optionalDateInput(body.drivingLicenseIssuedAt);
     if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
     if (drivingLicenseNumber && (drivingLicenseNumber.length < 8 || drivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
     if (drivingLicenseType && !LICENSE_TYPES.has(drivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });
     if (drivingLicenseClassification && !LICENSE_CLASSIFICATIONS.has(drivingLicenseClassification)) return NextResponse.json({ error: "Driving licence classification must be transport, non-transport, or no licence." }, { status: 400 });
     if (drivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
+    if (drivingLicenseIssuedAt === "invalid") return NextResponse.json({ error: "Driving License Issue Date must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
     const email = optionalEmployeeEmail(body.email);
     const position = optionalEmployeePosition(body.position);
+    if (position && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: position, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation from Designation Master." }, { status: 400 });
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
     const lastName = lastNameRaw.trim();
@@ -367,8 +372,9 @@ export async function POST(req: NextRequest) {
            aadhaarNumber: loginOnly ? null : aadhaarNumber,
               drivingLicenseNumber: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseNumber,
               drivingLicenseClassification: loginOnly ? null : drivingLicenseClassification,
-              drivingLicenseType: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseType,
-              drivingLicenseExpiresAt: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseExpiresAt,
+               drivingLicenseType: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseType,
+               drivingLicenseIssuedAt: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseIssuedAt,
+               drivingLicenseExpiresAt: loginOnly || drivingLicenseClassification === "no_license" ? null : drivingLicenseExpiresAt,
             profilePicture: photo.value,
             education: loginOnly ? undefined : { create: history.education },
             workExperience: loginOnly ? undefined : { create: history.experience },

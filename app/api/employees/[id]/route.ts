@@ -117,11 +117,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const nextDrivingLicenseType = body.drivingLicenseType === undefined ? undefined : (body.drivingLicenseType == null || String(body.drivingLicenseType).trim() === "" ? null : String(body.drivingLicenseType).trim().toLowerCase());
   const nextDrivingLicenseClassification = body.drivingLicenseClassification === undefined ? undefined : (body.drivingLicenseClassification == null || String(body.drivingLicenseClassification).trim() === "" ? null : String(body.drivingLicenseClassification).trim().toLowerCase());
   const nextDrivingLicenseExpiresAt = body.drivingLicenseExpiresAt === undefined ? undefined : optionalDateInput(body.drivingLicenseExpiresAt);
+  const nextDrivingLicenseIssuedAt = body.drivingLicenseIssuedAt === undefined ? undefined : optionalDateInput(body.drivingLicenseIssuedAt);
+  const nextIdCardIssuedAt = body.idCardIssuedAt === undefined ? undefined : optionalDateInput(body.idCardIssuedAt);
+  const nextIdCardValidUntil = body.idCardValidUntil === undefined ? undefined : optionalDateInput(body.idCardValidUntil);
   if (nextAadhaarNumber && !/^\d{12}$/.test(nextAadhaarNumber)) return NextResponse.json({ error: "Aadhaar Number must be 12 digits." }, { status: 400 });
   if (nextDrivingLicenseNumber && (nextDrivingLicenseNumber.length < 8 || nextDrivingLicenseNumber.length > 30)) return NextResponse.json({ error: "Driving License Number must be 8–30 characters." }, { status: 400 });
   if (nextDrivingLicenseType && !LICENSE_TYPES.has(nextDrivingLicenseType)) return NextResponse.json({ error: "Driving License Type must be learner, permanent, commercial, or international." }, { status: 400 });
   if (nextDrivingLicenseClassification && !LICENSE_CLASSIFICATIONS.has(nextDrivingLicenseClassification)) return NextResponse.json({ error: "Driving licence classification must be transport, non-transport, or no licence." }, { status: 400 });
   if (nextDrivingLicenseExpiresAt === "invalid") return NextResponse.json({ error: "Driving License Expiry must be a valid date." }, { status: 400 });
+  if (nextDrivingLicenseIssuedAt === "invalid") return NextResponse.json({ error: "Driving License Issue Date must be a valid date." }, { status: 400 });
+  if (nextIdCardIssuedAt === "invalid" || nextIdCardValidUntil === "invalid") return NextResponse.json({ error: "ID card issue date and validity must be valid dates." }, { status: 400 });
   const photo = body.profilePicture === undefined ? null : profilePictureValue(body.profilePicture);
   if (photo?.error) return NextResponse.json({ error: photo.error }, { status: 400 });
   const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId } });
@@ -267,6 +272,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
   const nextPosition = body.position !== undefined ? optionalEmployeePosition(body.position) : employee.position;
+  if (body.position !== undefined && nextPosition && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: nextPosition, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation from Designation Master." }, { status: 400 });
   if (nextPosition && nextPosition.length > 100) {
     return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
   }
@@ -439,8 +445,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        aadhaarNumber: nextAadhaarNumber === undefined ? employee.aadhaarNumber : nextAadhaarNumber,
        drivingLicenseNumber: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseNumber === undefined ? employee.drivingLicenseNumber : nextDrivingLicenseNumber,
        drivingLicenseClassification: nextDrivingLicenseClassification === undefined ? employee.drivingLicenseClassification : nextDrivingLicenseClassification,
-       drivingLicenseType: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseType === undefined ? employee.drivingLicenseType : nextDrivingLicenseType,
-       drivingLicenseExpiresAt: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
+        drivingLicenseType: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseType === undefined ? employee.drivingLicenseType : nextDrivingLicenseType,
+        drivingLicenseIssuedAt: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseIssuedAt === undefined ? employee.drivingLicenseIssuedAt : nextDrivingLicenseIssuedAt,
+        drivingLicenseExpiresAt: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
+        idCardIssuedAt: nextIdCardIssuedAt === undefined ? employee.idCardIssuedAt : nextIdCardIssuedAt,
+        idCardValidUntil: nextIdCardValidUntil === undefined ? employee.idCardValidUntil : nextIdCardValidUntil,
        legacyImportData: nextLegacyImportData === null ? Prisma.DbNull : nextLegacyImportData,
        ...(history ? {
          education: { deleteMany: {}, create: history.education },

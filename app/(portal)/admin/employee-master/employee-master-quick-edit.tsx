@@ -60,6 +60,7 @@ type EmployeeForm = {
   drivingLicenseNumber?: string | null;
   drivingLicenseClassification?: string | null;
   drivingLicenseType?: string | null;
+  drivingLicenseIssuedAt?: string;
   drivingLicenseExpiresAt?: string;
 };
 type Row = Record<string, unknown>;
@@ -194,6 +195,7 @@ function normalizeDates(master: Master): Master {
     ...master,
     joiningDate: dateValue(master.joiningDate),
     drivingLicenseExpiresAt: dateValue(master.drivingLicenseExpiresAt),
+    drivingLicenseIssuedAt: dateValue(master.drivingLicenseIssuedAt),
     profile: master.profile
       ? dateFields(master.profile, [
           "dateOfBirthCertificate",
@@ -816,6 +818,7 @@ function LicenseFields({
             updateCore("drivingLicenseNumber", "");
             updateCore("drivingLicenseType", "");
             updateCore("drivingLicenseExpiresAt", "");
+            updateCore("drivingLicenseIssuedAt", "");
           }
         }}
         placeholder="Not recorded (optional)"
@@ -842,6 +845,12 @@ function LicenseFields({
           { value: "commercial", label: "Commercial" },
           { value: "international", label: "International" },
         ]}
+      />
+      <TextField
+        label="Licence issue date (optional)"
+        type="date"
+        value={core.drivingLicenseIssuedAt}
+        onChange={(value) => updateCore("drivingLicenseIssuedAt", value)}
       />
       <TextField
         label="Licence expiry (optional)"
@@ -1099,6 +1108,7 @@ function Editor({
         drivingLicenseNumber: core.drivingLicenseNumber || null,
         drivingLicenseClassification: core.drivingLicenseClassification || null,
         drivingLicenseType: core.drivingLicenseType || null,
+        drivingLicenseIssuedAt: core.drivingLicenseIssuedAt || null,
         drivingLicenseExpiresAt: core.drivingLicenseExpiresAt || null,
         // Omit rather than null when the value was never loaded, so a redacted
         // master response cannot wipe a stored identifier.
@@ -1410,10 +1420,10 @@ function Editor({
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <TextField
-                      label="Middle name"
-                      value={profile.middleName}
+                      label="Full name"
+                      value={profile.fullName}
                       onChange={(value) =>
-                        updateGroup("profile", "middleName", value)
+                        updateGroup("profile", "fullName", value)
                       }
                     />
                     <TextField
@@ -1513,6 +1523,11 @@ function Editor({
                       onChange={(value) =>
                         updateGroup("profile", "emergencyContactNumber", value)
                       }
+                    />
+                    <TextField
+                      label="Emergency contact relationship"
+                      value={profile.emergencyContactRelation}
+                      onChange={(value) => updateGroup("profile", "emergencyContactRelation", value)}
                     />
                   </div>
                 </section>
