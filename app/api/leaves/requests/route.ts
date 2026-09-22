@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fromDateKey, toDateKey, daysBetween } from "@/lib/dates";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { resolveLeavePolicy } from "@/lib/leave-policy";
+import { canApplyLeaveOnBehalf, leaveSubmissionAttribution } from "@/lib/leave-on-behalf";
+import { appendAudit } from "@/lib/audit";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -77,28 +79,20 @@ export async function POST(req: NextRequest) {
 
     // Admins may log leave on behalf of an employee; employees apply for themselves.
     let employeeId = session.sub;
-    let onBehalf = false;
-    if (body.employeeId && (session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager")) {
+    if (body.employeeId && String(body.employeeId) !== session.sub) {
       const target = await prisma.employee.findFirst({
         where: { id: String(body.employeeId), tenantId: session.tenantId },
         select: { id: true, branchId: true, branch: { select: { locationId: true } } },
       });
       if (!target) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
-      if (session.role === "branch_manager") {
-        const manager = await prisma.employee.findFirst({
-          where: { id: session.sub, tenantId: session.tenantId },
-          select: { branchId: true },
-        });
-        if (!manager?.branchId || target.branchId !== manager.branchId) {
-          return NextResponse.json({ error: "Employee not found in your branch." }, { status: 400 });
-        }
-      }
-      if (session.role === "location_manager") {
-        const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
-        if (!manager?.locationId || target.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "Employee not found in your location." }, { status: 400 });
+      const actor = await prisma.employee.findFirst({
+        where: { id: session.sub, tenantId: session.tenantId },
+        select: { branchId: true, locationId: true },
+      });
+      if (!actor || !canApplyLeaveOnBehalf(session.role, actor, { branchId: target.branchId, locationId: target.branch?.locationId ?? null })) {
+        return NextResponse.json({ error: "You are not authorized to apply leave for this employee." }, { status: 403 });
       }
       employeeId = target.id;
-      onBehalf = true;
     }
 
     const from = fromDateKey(fromDate);
@@ -123,6 +117,7 @@ export async function POST(req: NextRequest) {
     if (applicant.loginOnly) {
       return NextResponse.json({ error: "Manager logins cannot request leave." }, { status: 403 });
     }
+    const attribution = leaveSubmissionAttribution(session.sub, employeeId);
 
     // Overlap + balance checks and the create run inside one serializable
     // transaction so concurrent submits for the same days cannot both pass.
@@ -207,6 +202,8 @@ export async function POST(req: NextRequest) {
                 days,
                 reason: reason || null,
                 status: (policy?.rules.requiresApproval ?? leaveType.requiresApproval) ? "pending" : "approved",
+                createdBy: attribution.createdBy,
+                source: attribution.source,
                 leavePolicySnapshot: policy && allocated ? { ...policy, policyPeriodId: allocated.policyPeriod.id, ...(accrual ? { accrual } : {}) } as Prisma.InputJsonValue : undefined,
               },
               include: { leaveType: true, employee: { select: { firstName: true, lastName: true } } },
@@ -232,8 +229,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Leave request conflicted with another submission. Please try again." }, { status: 409 });
     }
 
+    await appendAudit({
+      tenantId: session.tenantId,
+      actorId: session.sub,
+      actorRole: session.role,
+      action: attribution.onBehalf ? "leave.create_on_behalf" : "leave.create",
+      entity: "LeaveRequest",
+      entityId: request.id,
+      summary: `${attribution.onBehalf ? "recorded for employee" : "submitted"} ${request.days}d ${request.leaveType.name}`,
+      after: { employeeId, createdBy: attribution.createdBy, source: attribution.source, status: request.status },
+    });
+
     // Notify admins about the new request (or the employee when auto-approved).
-    if (onBehalf) {
+    if (attribution.onBehalf) {
       await notifyEmployee(
         session.tenantId,
         employeeId,
@@ -241,6 +249,14 @@ export async function POST(req: NextRequest) {
         "Leave logged for you",
         `${request.leaveType.name} (${toDateKey(request.fromDate)} → ${toDateKey(request.toDate)}) was logged on your behalf by an admin.`
       );
+      if (request.status === "pending") {
+        await notifyAdmins(
+          session.tenantId,
+          "info",
+          "Leave request recorded for employee",
+          `${request.employee.firstName} ${request.employee.lastName}'s ${days} day(s) of ${request.leaveType.name} needs approval.`
+        );
+      }
     } else if (request.status === "pending") {
       await notifyAdmins(
         session.tenantId,

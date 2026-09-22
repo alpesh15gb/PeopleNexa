@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, CalendarDays, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
@@ -21,6 +21,7 @@ interface Request {
   fromDate: Date;
   toDate: Date;
   appliedAt: Date;
+  source: string;
   leaveType: { name: string; color: string };
   employee: { firstName: string; lastName: string; employeeNumber: string };
 }
@@ -46,10 +47,12 @@ export function LeavesAdmin({
   requests,
   types,
   employees,
+  canManageTypes,
 }: {
   requests: Request[];
   types: Type[];
   employees: Employee[];
+  canManageTypes: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -59,6 +62,8 @@ export function LeavesAdmin({
   const [saving, setSaving] = useState(false);
   const [onBehalfOpen, setOnBehalfOpen] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
+  const [employeeQuery, setEmployeeQuery] = useState("");
+  const deferredEmployeeQuery = useDeferredValue(employeeQuery);
   const [month, setMonth] = useState(() => new Date());
 
   async function review(id: string, status: string) {
@@ -125,6 +130,10 @@ export function LeavesAdmin({
   }
 
   const pending = requests.filter((r) => r.status === "pending").length;
+  const employeeMatches = employees.filter((employee) => {
+    const query = deferredEmployeeQuery.trim().toLowerCase();
+    return !query || `${employee.firstName} ${employee.lastName} ${employee.employeeNumber}`.toLowerCase().includes(query);
+  });
 
   return (
     <>
@@ -133,7 +142,7 @@ export function LeavesAdmin({
           {([
             ["requests", `Requests${pending ? ` (${pending})` : ""}`],
             ["calendar", "Team calendar"],
-            ["types", "Leave types"],
+            ...(canManageTypes ? [["types", "Leave types"]] as const : []),
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -219,6 +228,9 @@ export function LeavesAdmin({
                         {r.status === "approved" ? "Approved" : "Rejected"}
                       </span>
                     )}
+                    {r.source === "admin_on_behalf" && (
+                      <p className="mt-1 text-[10.5px] text-muted-foreground">Recorded on behalf</p>
+                    )}
                   </TD>
                 </TR>
               ))
@@ -272,6 +284,7 @@ export function LeavesAdmin({
                   fromDate: form.get("fromDate"),
                   toDate: form.get("toDate"),
                   reason: form.get("reason"),
+                  halfDay: form.get("halfDay") === "on",
                 }),
               });
               const data = await res.json();
@@ -281,6 +294,7 @@ export function LeavesAdmin({
               }
               toast("success", "Leave logged — employee notified");
               setOnBehalfOpen(false);
+              setEmployeeQuery("");
               router.refresh();
             } finally {
               setLogSaving(false);
@@ -288,15 +302,26 @@ export function LeavesAdmin({
           }}
           className="space-y-4"
         >
+          <Field label="Find employee">
+            <Input
+              value={employeeQuery}
+              onChange={(event) => setEmployeeQuery(event.target.value)}
+              placeholder="Search name or employee number"
+              autoComplete="off"
+            />
+          </Field>
           <Field label="Employee">
             <Select name="employeeId" required>
               <option value="">Select employee</option>
-              {employees.map((e) => (
+              {employeeMatches.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.firstName} {e.lastName} ({e.employeeNumber})
                 </option>
               ))}
             </Select>
+            {employeeQuery && employeeMatches.length === 0 && (
+              <p className="mt-1.5 text-[12px] text-muted-foreground">No matching employee in your permitted scope. Try a name or employee number.</p>
+            )}
           </Field>
           <Field label="Leave type">
             <Select name="leaveTypeId" required>
@@ -316,9 +341,14 @@ export function LeavesAdmin({
               <Input name="toDate" type="date" required />
             </Field>
           </div>
+          <label className="flex min-h-11 items-center gap-2 text-[13px] text-muted-foreground">
+            <input type="checkbox" name="halfDay" className="h-4 w-4 accent-indigo-500" />
+            Half day (single date only, when allowed by the applicable leave policy)
+          </label>
           <Field label="Reason">
-            <Input name="reason" placeholder="e.g. Leave sanctioned by manager" />
+            <Textarea name="reason" placeholder="Why is this leave being recorded?" />
           </Field>
+          <p className="text-[12px] leading-5 text-muted-foreground">This creates a request for the selected employee. It follows their active location policy and normal approval workflow; only leave types explicitly configured without approval are auto-approved.</p>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={() => setOnBehalfOpen(false)}>Cancel</Button>
             <Button type="submit" loading={logSaving}>Log leave</Button>

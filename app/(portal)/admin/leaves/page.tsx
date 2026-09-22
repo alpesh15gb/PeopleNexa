@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
+import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { LeavesAdmin } from "./leaves-admin";
 
@@ -7,6 +8,9 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminLeavesPage() {
   const session = await requireSession();
+  if (!['admin', 'branch_manager', 'location_manager'].includes(session.role)) {
+    redirect('/employee/leaves');
+  }
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
@@ -46,12 +50,16 @@ export default async function AdminLeavesPage() {
             <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
               Branch: {ownBranchName}
             </span>
+          ) : isLocationManager ? (
+            <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
+              Location-scoped
+            </span>
           ) : undefined
         }
       />
       <Card>
         <CardContent className="p-0">
-          <LeavesAdmin requests={requests} types={types} employees={employees} />
+          <LeavesAdmin requests={requests} types={types} employees={employees} canManageTypes={session.role === "admin"} />
         </CardContent>
       </Card>
     </div>

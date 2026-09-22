@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee } from "@/lib/notifications";
 import { formatDate } from "@/lib/dates";
@@ -24,6 +24,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id, tenantId: session.tenantId },
   });
   if (!request) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (request.employeeId === session.sub || request.createdBy === session.sub) {
+    return NextResponse.json({ error: "You cannot review a leave request you submitted or that belongs to you." }, { status: 403 });
+  }
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },

@@ -841,6 +841,10 @@ model LeaveRequest {
   reviewedBy  String?
   reviewedAt  DateTime?
   appliedAt   DateTime  @default(now())
+  // The account that submitted the request. It can differ from employeeId when
+  // an authorized manager records leave for an employee.
+  createdBy   String?
+  source      String    @default("self_service") // self_service | admin_on_behalf
   // Null for requests created before policy activation. New policy-governed
   // requests retain the selected version and applicable rules permanently.
   leavePolicySnapshot Json?

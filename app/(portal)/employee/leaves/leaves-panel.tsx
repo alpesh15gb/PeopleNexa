@@ -31,6 +31,7 @@ interface Req {
   fromDate: Date;
   toDate: Date;
   appliedAt: Date;
+  source: string;
   leaveType: { name: string; color: string };
 }
 
@@ -127,6 +128,7 @@ export function LeavesPanel({ balance, requests, lang = "en" }: { balance: Balan
                     <p className="text-[11.5px] text-muted-foreground">
                       {formatDate(r.fromDate)} → {formatDate(r.toDate)}
                       {r.reason ? ` · ${r.reason}` : ""}
+                      {r.source === "admin_on_behalf" ? " · Recorded on your behalf" : ""}
                     </p>
                   </div>
                   <StatusPill status={r.status} lang={lang} />
