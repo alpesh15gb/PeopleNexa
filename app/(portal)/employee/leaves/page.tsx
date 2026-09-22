@@ -22,7 +22,10 @@ export default async function EmployeeLeavesPage() {
     }),
     prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branch: { select: { locationId: true } } } }),
   ]);
-  const policyBalances = await prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, policyPeriod: { effectiveFrom: { lte: new Date() }, AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }, { OR: [{ locationId: employee?.branch?.locationId ?? "" }, { locationId: null }] }] } }, include: { policyPeriod: { select: { locationId: true } } } });
+  const [policyBalances, importedBalances] = await Promise.all([
+    prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, policyPeriod: { effectiveFrom: { lte: new Date() }, AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }, { OR: [{ locationId: employee?.branch?.locationId ?? "" }, { locationId: null }] }] } }, include: { policyPeriod: { select: { locationId: true } } } }),
+    prisma.leaveBalanceImportEntry.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, periodEnd: { lte: new Date() } }, orderBy: { periodEnd: "desc" } }),
+  ]);
 
   const usedByType = new Map<string, number>();
   for (const r of requests) {
@@ -33,13 +36,22 @@ export default async function EmployeeLeavesPage() {
 
   const balance = types.map((t) => {
     const allocated = policyBalances.filter((item) => item.leaveTypeId === t.id).sort((a, b) => Number(b.policyPeriod.locationId === employee?.branch?.locationId) - Number(a.policyPeriod.locationId === employee?.branch?.locationId))[0];
+    const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
+    const policyRequests = allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId) : requests.filter((request) => request.leaveTypeId === t.id && (!imported || request.fromDate >= imported.periodEnd));
+    const used = policyRequests.filter((request) => request.status === "approved").reduce((sum, request) => sum + request.days, 0);
+    const pending = policyRequests.filter((request) => request.status === "pending").reduce((sum, request) => sum + request.days, 0);
+    const entitlement = allocated ? allocated.entitlement + allocated.carryForward : imported ? imported.available : t.maxDays;
     return { id: t.id,
     name: t.name,
     code: t.code,
-    maxDays: allocated ? allocated.entitlement + allocated.carryForward : t.maxDays,
+    maxDays: entitlement,
     color: t.color,
-    used: allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId && (request.status === "approved" || request.status === "pending")).reduce((sum, request) => sum + request.days, 0) : usedByType.get(t.id) ?? 0,
-    remaining: allocated ? periodBalance(allocated.entitlement, allocated.carryForward, requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId && (request.status === "approved" || request.status === "pending")).reduce((sum, request) => sum + request.days, 0)) : Math.max(t.maxDays - (usedByType.get(t.id) ?? 0), 0),
+    opening: imported?.openingBalance ?? 0,
+    credited: allocated ? allocated.entitlement + allocated.carryForward : imported?.credited ?? 0,
+    used,
+    pending,
+    remaining: Math.max(entitlement - used - pending, 0),
+    policyNote: allocated ? "Current policy-period allocation" : imported ? `Imported snapshot through ${imported.periodEnd.toISOString().slice(0, 7)}` : "Leave type allowance",
     policyPeriodId: allocated?.policyPeriodId ?? null,
   }; });
 

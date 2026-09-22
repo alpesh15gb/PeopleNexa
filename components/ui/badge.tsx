@@ -43,6 +43,7 @@ const statusTones: Record<string, Tone> = {
   pending: "warning",
   approved: "success",
   rejected: "danger",
+  cancelled: "neutral",
   active: "success",
   inactive: "neutral",
   paid: "success",

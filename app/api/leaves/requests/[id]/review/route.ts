@@ -7,6 +7,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
+import { canReviewLeaveRequest } from "@/lib/leave-lifecycle";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id, tenantId: session.tenantId },
   });
   if (!request) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (request.employeeId === session.sub || request.createdBy === session.sub) {
+  if (!canReviewLeaveRequest(request, session.sub)) {
     return NextResponse.json({ error: "You cannot review a leave request you submitted or that belongs to you." }, { status: 403 });
   }
   if (session.role === "branch_manager") {

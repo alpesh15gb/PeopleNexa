@@ -1,7 +1,7 @@
 "use client";
 
 import { useDeferredValue, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, X, Plus, Pencil, Trash2, ChevronLeft, ChevronRight, CalendarDays, PenLine, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/badge";
@@ -69,6 +69,7 @@ export function LeavesAdmin({
   importBatches: ImportBatch[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const [tab, setTab] = useState<"requests" | "types" | "calendar" | "reconciliation">("requests");
   const [busy, setBusy] = useState<string | null>(null);
@@ -176,6 +177,13 @@ export function LeavesAdmin({
   }
 
   const pending = requests.filter((r) => r.status === "pending").length;
+  const statusFilter = searchParams.get("status") ?? "all";
+  const filteredRequests = statusFilter === "all" ? requests : requests.filter((request) => request.status === statusFilter);
+  function setStatusFilter(value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === "all") params.delete("status"); else params.set("status", value);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }
   const employeeMatches = employees.filter((employee) => {
     const query = deferredEmployeeQuery.trim().toLowerCase();
     return !query || `${employee.firstName} ${employee.lastName} ${employee.employeeNumber}`.toLowerCase().includes(query);
@@ -203,9 +211,15 @@ export function LeavesAdmin({
           ))}
         </div>
         {tab === "requests" && (
-          <Button size="sm" variant="outline" onClick={() => setOnBehalfOpen(true)}>
-            <PenLine className="h-3.5 w-3.5" /> Log for employee
-          </Button>
+          <div className="flex items-center gap-2">
+            <label className="sr-only" htmlFor="leave-status-filter">Filter requests by status</label>
+            <Select id="leave-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-9 min-w-28 text-[12px]">
+              <option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="cancelled">Withdrawn</option>
+            </Select>
+            <Button size="sm" variant="outline" onClick={() => setOnBehalfOpen(true)}>
+              <PenLine className="h-3.5 w-3.5" /> Log for employee
+            </Button>
+          </div>
         )}
         {tab === "types" && (
           <Button size="sm" onClick={() => setTypeModal("new")}>
@@ -228,14 +242,14 @@ export function LeavesAdmin({
             </TR>
           </THead>
           <TBody>
-            {requests.length === 0 ? (
+            {filteredRequests.length === 0 ? (
               <tr>
                 <td colSpan={7} className="py-12 text-center text-[13px] text-muted-foreground">
                   No leave requests yet.
                 </td>
               </tr>
             ) : (
-              requests.map((r) => (
+              filteredRequests.map((r) => (
                 <TR key={r.id}>
                   <TD>
                     <p className="text-[13.5px] font-medium">
@@ -271,7 +285,7 @@ export function LeavesAdmin({
                       </div>
                     ) : (
                       <span className="text-[12px] text-muted-foreground">
-                        {r.status === "approved" ? "Approved" : "Rejected"}
+                        {r.status === "approved" ? "Approved" : r.status === "cancelled" ? "Withdrawn" : "Rejected"}
                       </span>
                     )}
                     {r.source === "admin_on_behalf" && (
