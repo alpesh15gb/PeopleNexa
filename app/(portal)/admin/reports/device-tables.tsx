@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
 import { Download, Printer } from "lucide-react";
-import { PON_LEGEND, PON_TOTAL_LABEL, type DeviceDailyOutput, type DeviceMonthlyOutput, type DevicePerformanceOutput, type DeviceStatusMatrixOutput, type DeviceWorkSummaryOutput } from "@/lib/device-report";
+import { type DeviceDailyOutput, type DeviceMonthlyOutput, type DevicePerformanceOutput, type DeviceStatusMatrixOutput, type DeviceWorkSummaryOutput } from "@/lib/device-report";
 
 export type DeviceKind = "daily" | "monthly" | "status-matrix" | "work-summary" | "performance";
 
@@ -345,9 +345,10 @@ function MonthlyTables({ baseUrl }: { baseUrl: string }) {
 }
 
 function statusCellClass(status: string): string {
-  if (status === "P" || status === "½P") return `${TD} text-center font-bold text-green-600`;
-  if (status === "A") return `${TD} text-center font-bold text-red-600`;
-  return `${TD} text-center font-bold`;
+  if (status === "P" || status === "½P") return `${TD} bg-green-50 text-center font-bold text-green-700`;
+  if (status === "A") return `${TD} bg-red-50 text-center font-bold text-red-700`;
+  if (status === "L") return `${TD} bg-blue-50 text-center font-bold text-blue-700`;
+  return `${TD} text-center font-bold text-neutral-700`;
 }
 
 function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
@@ -374,7 +375,6 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
         {output.department && (
           <p className="bg-white text-[13px] font-semibold text-black">Department | {output.department}</p>
         )}
-        <p className="text-xs text-slate-700 print:text-black">{PON_LEGEND}</p>
         {visible.map((block) => (
           <div key={block.code}>
             <div className="overflow-x-auto">
@@ -383,34 +383,34 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
                   <tr>
                     <th className={TH}>Sl No</th><th className={TH}>Employee Id</th><th className={TH}>Employee Name</th><th className={TH}>Applied Leave</th><th className={TH}></th>
                     {block.days.map((d) => (
-                      <th key={d.day} className={`${TH} text-center ${d.isSunday ? "bg-rose-100" : ""}`}>
+                      <th key={d.day} className={`${TH} text-center`}>
                         {d.day} {d.dow}
                       </th>
                     ))}
-                    <th className={TH}>Present</th><th className={TH}>Absent</th><th className={TH}>Leave</th><th className={TH}>Holiday</th><th className={TH}>Week Off</th><th className={TH} title={PON_LEGEND}>{PON_TOTAL_LABEL}</th>
+                    <th className={TH}>Present</th><th className={TH}>Absent</th><th className={TH}>Leave</th><th className={TH}>Holiday</th><th className={TH}>Week Off</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
                     <td className={TD} rowSpan={3}>{block.serial}</td><td className={TD} rowSpan={3}>{block.code}</td><td className={TD} rowSpan={3}>{block.name}</td><td className={TD} rowSpan={3}>{block.appliedLeave}</td><td className={`${TD} font-bold whitespace-nowrap`}>CHECK IN</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono ${d.isSunday ? "bg-rose-50" : ""}`}>{d.inTime}</td>
+                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.inTime}</td>
                     ))}
-                    <td className={TD} colSpan={6}></td>
+                    <td className={TD} colSpan={5}></td>
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold whitespace-nowrap`}>CHECK OUT</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono ${d.isSunday ? "bg-rose-50" : ""}`}>{d.outTime}</td>
+                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.outTime}</td>
                     ))}
-                    <td className={TD} colSpan={6}></td>
+                    <td className={TD} colSpan={5}></td>
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold`}>ATT</td>
                     {block.days.map((d) => (
                       <td key={d.day} className={statusCellClass(d.status)}>{d.status}</td>
                     ))}
-                    <td className={`${TD} text-center font-bold`}>{block.totals.present}</td><td className={`${TD} text-center font-bold`}>{block.totals.absent}</td><td className={`${TD} text-center font-bold`}>{block.totals.leave}</td><td className={`${TD} text-center font-bold`}>{block.totals.holiday}</td><td className={`${TD} text-center font-bold`}>{block.totals.weekOff}</td><td className={`${TD} text-center font-bold`}>{block.totals.pon}</td>
+                    <td className={`${TD} text-center font-bold`}>{block.totals.present}</td><td className={`${TD} text-center font-bold`}>{block.totals.absent}</td><td className={`${TD} text-center font-bold`}>{block.totals.leave}</td><td className={`${TD} text-center font-bold`}>{block.totals.holiday}</td><td className={`${TD} text-center font-bold`}>{block.totals.weekOff}</td>
                   </tr>
                 </tbody>
               </table>

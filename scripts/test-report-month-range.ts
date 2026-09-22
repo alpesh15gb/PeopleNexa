@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseIST } from "../lib/ist";
 import { istDateKey } from "../lib/ist";
-import { buildStatusMatrix, PON_LEGEND } from "../lib/device-report";
+import { buildStatusMatrix } from "../lib/device-report";
 
 const month = "2026-02";
 const start = parseIST(`${month}-01 00:00:00`)!;
@@ -31,12 +31,12 @@ assert.equal(block.days[0].status, "WO", "Sunday is a week off without a punch")
 assert.equal(block.days[1].status, "P");
 assert.equal(block.days[2].status, "L");
 assert.equal(block.days[3].status, "H");
-assert.deepEqual(block.totals, { present: 1, absent: 21, leave: 1, holiday: 1, weekOff: 4, pon: 0 });
+assert.deepEqual(block.totals, { present: 1, absent: 21, leave: 1, holiday: 1, weekOff: 4 });
 assert.equal(block.days[1].inTime, "09:00");
 assert.equal(block.days[1].outTime, "18:00");
 assert.equal(block.days[0].inTime, "", "no punch stays blank");
 
-const ponMatrix = buildStatusMatrix({
+const nonWorkingDayPresentMatrix = buildStatusMatrix({
   tenant: { name: "Fixture Company" },
   branch: null,
   department: null,
@@ -50,16 +50,24 @@ const ponMatrix = buildStatusMatrix({
   leaves: new Set(),
   holidays: new Set(["2026-02-04"]),
 });
-assert.equal(ponMatrix.blocks[0].days[0].status, "PON", "present Sunday is PON");
-assert.equal(ponMatrix.blocks[0].days[3].status, "PON", "present company holiday is PON");
-assert.equal(ponMatrix.blocks[0].totals.pon, 2);
-assert.equal(PON_LEGEND, "PON = Present on non-working day (Sunday or company holiday)");
+assert.equal(nonWorkingDayPresentMatrix.blocks[0].days[0].status, "P", "present Sunday displays as P");
+assert.equal(nonWorkingDayPresentMatrix.blocks[0].days[0].inTime, "09:00", "Sunday check-in is retained");
+assert.equal(nonWorkingDayPresentMatrix.blocks[0].days[0].outTime, "18:00", "Sunday check-out is retained");
+assert.equal(nonWorkingDayPresentMatrix.blocks[0].days[3].status, "P", "present company holiday displays as P");
+assert.equal(nonWorkingDayPresentMatrix.blocks[0].totals.present, 2, "non-working-day presence counts as Present");
+assert.equal("pon" in nonWorkingDayPresentMatrix.blocks[0].totals, false, "matrix has no PON total");
 
 const punchRoute = readFileSync(new URL("../app/api/reports/punch-details/route.ts", import.meta.url), "utf8");
 assert.match(punchRoute, /In Device Serial Number/, "punch XLSX includes the device serial column");
 assert.match(punchRoute, /date: \{ gte: start, lt: end \}/, "punch query uses the inclusive end-day range");
 const matrixTable = readFileSync(new URL("../app/(portal)/admin/reports/device-tables.tsx", import.meta.url), "utf8");
 const deviceReportRoute = readFileSync(new URL("../app/api/reports/device/route.ts", import.meta.url), "utf8");
-assert.match(matrixTable, /PON_LEGEND/, "matrix browser and print view include the PON legend");
-assert.match(deviceReportRoute, /PON_LEGEND/, "matrix XLSX export includes the PON legend");
+assert.doesNotMatch(matrixTable, /PON/, "matrix browser and print view have no PON legend or total");
+assert.doesNotMatch(deviceReportRoute, /PON/, "matrix XLSX export has no PON legend or total");
+assert.doesNotMatch(matrixTable, /bg-rose/, "matrix browser and print view have neutral Sunday headers and punch cells");
+assert.doesNotMatch(deviceReportRoute, /FFFFE2E2/, "matrix XLSX has neutral Sunday headers and cells");
+assert.match(matrixTable, /bg-green-50.*text-green-700/, "browser ATT present values have accessible green styling");
+assert.match(matrixTable, /bg-red-50.*text-red-700/, "browser ATT absent values have accessible red styling");
+assert.match(deviceReportRoute, /day\.status === "P" \|\| day\.status === "½P"/, "XLSX ATT present values are green");
+assert.match(deviceReportRoute, /day\.status === "A"/, "XLSX ATT absent values are red");
 console.log("monthly report date range tests passed");

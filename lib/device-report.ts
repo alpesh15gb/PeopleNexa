@@ -547,15 +547,12 @@ export interface DeviceStatusMatrixDay {
   total: string;
 }
 
-export const PON_LEGEND = "PON = Present on non-working day (Sunday or company holiday)";
-export const PON_TOTAL_LABEL = "PON (Present on non-working day)";
-
 export interface DeviceStatusMatrixBlock {
   serial: number;
   code: string;
   name: string;
   appliedLeave: string;
-  totals: { present: number; absent: number; leave: number; holiday: number; weekOff: number; pon: number };
+  totals: { present: number; absent: number; leave: number; holiday: number; weekOff: number };
   days: DeviceStatusMatrixDay[];
 }
 
@@ -588,16 +585,16 @@ export function buildStatusMatrix(args: {
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
   const blocks: DeviceStatusMatrixBlock[] = employees.map((emp, employeeIndex) => {
-    const totals = { present: 0, absent: 0, leave: 0, holiday: 0, weekOff: 0, pon: 0 };
+    const totals = { present: 0, absent: 0, leave: 0, holiday: 0, weekOff: 0 };
     const matrixDays = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       const present = !!record && PRESENT_STATUSES.has(record.status);
       const isSunday = new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
       let status: string;
-      if (present && (holidays.has(dayKey) || isSunday)) {
-        status = "PON";
-        totals.pon++;
+      if (present) {
+        status = record.status === "half_day" ? "½P" : "P";
+        totals.present++;
       } else if (holidays.has(dayKey)) {
         status = "H";
         totals.holiday++;
@@ -607,9 +604,6 @@ export function buildStatusMatrix(args: {
       } else if (isSunday) {
         status = "WO";
         totals.weekOff++;
-      } else if (present) {
-        status = record.status === "half_day" ? "½P" : "P";
-        totals.present++;
       } else {
         status = "A";
         totals.absent++;
