@@ -31,6 +31,7 @@ interface Type {
   name: string;
   code: string;
   maxDays: number | null;
+  unlimitedEntitlement: boolean;
   color: string;
   isCarryForward: boolean;
   requiresApproval: boolean;
@@ -141,7 +142,8 @@ export function LeavesAdmin({
     const payload = {
       name: form.get("name"),
       code: form.get("code"),
-        maxDays: form.get("unlimited") === "on" ? null : form.get("maxDays"),
+        maxDays: form.get("maxDays"),
+        unlimitedEntitlement: form.get("unlimitedEntitlement") === "on",
       isCarryForward: form.get("isCarryForward") === "on",
       requiresApproval: form.get("requiresApproval") === "on" || form.get("requiresApproval") === null,
       color: form.get("color"),
@@ -314,7 +316,7 @@ export function LeavesAdmin({
                 </span>
               </div>
               <p className="mt-2 text-[12.5px] text-muted-foreground">
-                {t.maxDays === null ? "unlimited" : `${t.maxDays} days`} · {t.isCarryForward ? "carry forward" : "no carry forward"} ·{" "}
+                {t.unlimitedEntitlement ? "unlimited entitlement" : t.maxDays === null || t.maxDays === 0 ? "no annual maximum" : `${t.maxDays} days`} · {t.isCarryForward ? "carry forward" : "no carry forward"} ·{" "}
                 {t.requiresApproval ? "approval required" : "auto-approved"}
               </p>
               <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
@@ -409,7 +411,7 @@ export function LeavesAdmin({
               <option value="">Select type</option>
               {types.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.maxDays === null ? "unlimited" : `${t.maxDays} days`})
+                  {t.name} ({t.unlimitedEntitlement ? "unlimited entitlement" : t.maxDays === null || t.maxDays === 0 ? "no annual maximum" : `${t.maxDays} days`})
                 </option>
               ))}
             </Select>
@@ -452,15 +454,15 @@ export function LeavesAdmin({
               <Input name="code" required defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.code : ""} placeholder="e.g. CL" />
             </Field>
             <Field label="Annual maximum (optional)">
-              <Input name="maxDays" type="number" min={0} defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.maxDays ?? "" : ""} placeholder="Unlimited when blank" />
+              <Input name="maxDays" type="number" min={0} defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.maxDays ?? "" : ""} placeholder="Blank or 0 = no annual maximum" />
             </Field>
             <Field label="Color">
               <Input name="color" type="color" defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.color : "#3b82f6"} className="h-10 p-1" />
             </Field>
           </div>
           <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <input type="checkbox" name="unlimited" defaultChecked={typeModal === "new" || (typeModal !== null && typeof typeModal === "object" && typeModal.maxDays === null)} className="h-4 w-4 accent-indigo-500" />
-            No annual maximum (unlimited)
+            <input type="checkbox" name="unlimitedEntitlement" defaultChecked={typeModal !== null && typeof typeModal === "object" && typeModal.unlimitedEntitlement} className="h-4 w-4 accent-indigo-500" />
+            Unlimited available balance (use only for leave types with an explicit unlimited entitlement)
           </label>
           <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <input type="checkbox" name="isCarryForward" defaultChecked={typeModal !== null && typeof typeModal === "object" ? typeModal.isCarryForward : false} className="h-4 w-4 accent-indigo-500" />

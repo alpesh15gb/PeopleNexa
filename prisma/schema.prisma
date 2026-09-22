@@ -814,9 +814,10 @@ model LeaveType {
   tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name             String
   code             String
-  // Null means this leave type has no annual maximum. Existing numeric values
-  // are retained as explicit legacy caps.
+  // Null means this leave type has no annual maximum. It does not grant an
+  // unlimited balance; that requires the explicit flag below.
   maxDays          Int?
+  unlimitedEntitlement Boolean @default(false)
   isCarryForward   Boolean  @default(false)
   requiresApproval Boolean  @default(true)
   color            String   @default("#3b82f6")
@@ -886,7 +887,8 @@ model LeavePolicyBalance {
   employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   leaveTypeId    String
   leaveType      LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
-  // Null represents an unlimited policy-period allocation.
+  // Null is only an unlimited policy-period allocation when its policy
+  // snapshot explicitly enables unlimitedEntitlement.
   entitlement    Float?
   carryForward   Float   @default(0)
   policySnapshot Json

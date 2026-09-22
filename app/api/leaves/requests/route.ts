@@ -6,6 +6,7 @@ import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { resolveLeavePolicy } from "@/lib/leave-policy";
 import { canApplyLeaveOnBehalf, leaveSubmissionAttribution } from "@/lib/leave-on-behalf";
 import { appendAudit } from "@/lib/audit";
+import { calculateLeaveBalance, canClaimLeave, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
                 leaveTypeId,
                 status: { in: ["approved", "pending"] },
               },
-                select: { days: true, leavePolicySnapshot: true },
+                select: { days: true, fromDate: true, leavePolicySnapshot: true },
               });
             // Policy selection is part of the same transaction as the request
             // creation so this exact active/effective version is snapshotted.
@@ -160,6 +161,7 @@ export async function POST(req: NextRequest) {
             });
             const resolvedPolicy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? null, from, leaveType.code);
             const allocated = resolvedPolicy ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId, leaveTypeId, policyPeriod: { configurationId: resolvedPolicy.configurationId, effectiveFrom: { lte: from }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: from } }] } }, include: { policyPeriod: { select: { id: true } } } }) : null;
+            const imported = allocated ? null : await tx.leaveBalanceImportEntry.findFirst({ where: { tenantId: session.tenantId, employeeId, leaveTypeId, periodEnd: { lte: from } }, orderBy: { periodEnd: "desc" } });
             // Activated policies retain legacy behavior until this employee has
             // an explicit policy-period allocation.
             const policy = allocated ? resolvedPolicy : null;
@@ -182,11 +184,13 @@ export async function POST(req: NextRequest) {
               throw err;
             }
             if (halfDay) days = 0.5;
-            const usedDays = allocated ? usedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriod.id).reduce((sum, row) => sum + row.days, 0) : usedRows.reduce((sum, row) => sum + row.days, 0);
-            const entitlement = allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : leaveType.maxDays;
-            if (entitlement !== null && usedDays + days > entitlement) {
+            const usedDays = allocated ? usedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriod.id).reduce((sum, row) => sum + row.days, 0) : usedRows.filter((row) => !imported || row.fromDate >= imported.periodEnd).reduce((sum, row) => sum + row.days, 0);
+            const cap = allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported ? 0 : leaveType.maxDays;
+            const unlimitedEntitlement = allocated ? policyHasUnlimitedEntitlement(allocated.policySnapshot) : !imported && leaveType.unlimitedEntitlement;
+            const available = calculateLeaveBalance({ cap, opening: imported ? imported.available : 0, credited: 0, used: usedDays, pending: 0, unlimitedEntitlement }).available;
+            if (!canClaimLeave(available, days)) {
               const err = new Error(
-                `Insufficient balance — ${entitlement - usedDays} day(s) remaining.`
+                `Insufficient balance — ${available} day(s) remaining.`
               ) as Error & { code?: string };
               err.code = "BALANCE";
               throw err;

@@ -18,6 +18,7 @@ export type LeavePolicySnapshot = {
     name: string;
     code: string;
     annualEntitlement: number | null;
+    unlimitedEntitlement: boolean;
     paid: boolean;
     allowsHalfDay: boolean;
     requiresApproval: boolean;
@@ -41,6 +42,7 @@ export function resolveLeavePolicy(records: LeavePolicyRecord[], locationId: str
       name: rules.name,
       code: rules.code,
       annualEntitlement: rules.annualEntitlement,
+      unlimitedEntitlement: rules.unlimitedEntitlement,
       paid: rules.paid,
       allowsHalfDay: rules.allowsHalfDay,
       requiresApproval: rules.requiresApproval,

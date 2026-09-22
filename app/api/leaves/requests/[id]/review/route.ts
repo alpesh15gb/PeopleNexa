@@ -7,6 +7,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
+import { calculateLeaveBalance, canClaimLeave, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 import { canReviewLeaveRequest } from "@/lib/leave-lifecycle";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -126,17 +127,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             leaveTypeId: request.leaveTypeId,
             status: "approved",
           },
-            select: { days: true, leavePolicySnapshot: true },
+            select: { days: true, fromDate: true, leavePolicySnapshot: true },
         }),
         tx.leaveType.findUnique({ where: { id: request.leaveTypeId } }),
       ]);
       const periodId = request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" ? (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId : null;
       const allocation = typeof periodId === "string" ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, policyPeriodId: periodId } }) : null;
-      const total = allocation ? approvedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === periodId).reduce((sum, row) => sum + row.days, 0) : approvedRows.reduce((sum, row) => sum + row.days, 0);
-      const entitlement = allocation ? (allocation.entitlement === null ? null : allocation.entitlement + allocation.carryForward) : leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
-      if (leaveType && entitlement !== undefined && entitlement !== null && total > entitlement) {
+      const imported = allocation ? null : await tx.leaveBalanceImportEntry.findFirst({ where: { tenantId: session.tenantId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, periodEnd: { lte: request.fromDate } }, orderBy: { periodEnd: "desc" } });
+      const total = allocation ? approvedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === periodId).reduce((sum, row) => sum + row.days, 0) : approvedRows.filter((row) => !imported || row.fromDate >= imported.periodEnd).reduce((sum, row) => sum + row.days, 0);
+      const cap = allocation ? (allocation.entitlement ?? 0) + allocation.carryForward : imported ? 0 : leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
+      const unlimitedEntitlement = allocation ? policyHasUnlimitedEntitlement(allocation.policySnapshot) : !imported && Boolean((request.leavePolicySnapshot as Record<string, unknown> | null)?.rules && policyHasUnlimitedEntitlement(request.leavePolicySnapshot) || leaveType?.unlimitedEntitlement);
+      const allowed = calculateLeaveBalance({ cap: cap ?? null, opening: imported ? imported.available : 0, credited: 0, used: 0, pending: 0, unlimitedEntitlement }).available;
+      if (leaveType && !canClaimLeave(allowed, total)) {
         const err = new Error(
-          `Approving this would exceed the ${leaveType.name} balance — ${entitlement} day(s) allowed, ${total} day(s) would be approved.`
+          `Approving this would exceed the ${leaveType.name} balance — ${allowed} day(s) allowed, ${total} day(s) would be approved.`
         ) as Error & { code?: string };
         err.code = "OVER_BALANCE";
         throw err;

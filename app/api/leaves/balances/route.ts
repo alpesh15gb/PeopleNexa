@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { calculateLeaveBalance, isEarnedLeave, leaveBalanceScope, leaveBalanceSource } from "@/lib/leave-balance";
+import { calculateLeaveBalance, isEarnedLeave, leaveBalanceScope, leaveBalanceSource, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 import { leavePolicyDraft, resolveConfiguration } from "@/lib/configuration";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   const [total, employees, types] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({ where, select: { id: true, firstName: true, lastName: true, employeeNumber: true, branch: { select: { name: true, locationId: true } } }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
-    prisma.leaveType.findMany({ where: { tenantId: session.tenantId, ...(leaveTypeId ? { id: leaveTypeId } : {}) }, select: { id: true, name: true, code: true, color: true, maxDays: true }, orderBy: { code: "asc" } }),
+    prisma.leaveType.findMany({ where: { tenantId: session.tenantId, ...(leaveTypeId ? { id: leaveTypeId } : {}) }, select: { id: true, name: true, code: true, color: true, maxDays: true, unlimitedEntitlement: true }, orderBy: { code: "asc" } }),
   ]);
   const employeeIds = employees.map((employee) => employee.id);
   const now = new Date();
@@ -55,11 +55,12 @@ export async function GET(request: NextRequest) {
       const relevant = requests.filter((item) => item.employeeId === employee.id && item.leaveTypeId === type.id && (allocation ? item.leavePolicySnapshot && typeof item.leavePolicySnapshot === "object" && (item.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocation.policyPeriodId : !imported || item.fromDate >= imported.periodEnd));
       const used = relevant.filter((item) => item.status === "approved").reduce((sum, item) => sum + item.days, 0);
       const pending = relevant.filter((item) => item.status === "pending").reduce((sum, item) => sum + item.days, 0);
-      const cap = allocation ? allocation.entitlement === null ? null : allocation.entitlement + allocation.carryForward : imported ? 0 : type.maxDays;
-      const opening = imported?.openingBalance ?? 0;
-      const credited = allocation ? (allocation.entitlement ?? 0) + allocation.carryForward : imported?.credited ?? 0;
-      const available = calculateLeaveBalance({ cap, opening: imported ? imported.available : opening, credited: imported ? 0 : credited, used, pending }).available;
-      const source = leaveBalanceSource(Boolean(allocation), Boolean(imported), cap);
+      const cap = allocation ? (allocation.entitlement ?? 0) + allocation.carryForward : imported ? 0 : type.maxDays;
+      const opening = imported ? imported.available : 0;
+      const credited = imported ? 0 : 0;
+      const unlimitedEntitlement = allocation ? policyHasUnlimitedEntitlement(allocation.policySnapshot) : !imported && type.unlimitedEntitlement;
+      const available = calculateLeaveBalance({ cap, opening, credited, used, pending, unlimitedEntitlement }).available;
+      const source = leaveBalanceSource(Boolean(allocation), Boolean(imported), unlimitedEntitlement);
       const policy = resolveConfiguration(policyRecords.filter((record) => leavePolicyDraft(record.payload)), employee.branch?.locationId ?? null, now);
       const rule = leavePolicyDraft(policy?.payload)?.leaveTypes.find((item) => item.code === type.code);
       const fixedEarnedLeaveWarning = Boolean(rule && isEarnedLeave(type.code, type.name) && rule.annualEntitlement !== null && !rule.workedDayAccrual);

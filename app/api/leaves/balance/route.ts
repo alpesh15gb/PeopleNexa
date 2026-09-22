@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { periodBalance } from "@/lib/leave-policy-period";
+import { calculateLeaveBalance, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -30,11 +30,14 @@ export async function GET() {
     const policyUsed = allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId).reduce((sum, request) => sum + request.days, 0) : 0;
     const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
     const usedDays = imported ? requests.filter((request) => request.leaveTypeId === t.id && request.fromDate >= imported.periodEnd).reduce((sum, request) => sum + request.days, 0) : used.get(t.id) ?? 0;
+    const cap = allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported ? 0 : t.maxDays;
+    const unlimitedEntitlement = allocated ? policyHasUnlimitedEntitlement(allocated.policySnapshot) : !imported && t.unlimitedEntitlement;
+    const remaining = calculateLeaveBalance({ cap, opening: imported ? imported.available : 0, credited: 0, used: allocated ? policyUsed : usedDays, pending: 0, unlimitedEntitlement }).available;
     return {
       ...t,
-      maxDays: allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : imported ? imported.available : t.maxDays,
+      maxDays: allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported ? imported.available : t.maxDays,
       used: allocated ? policyUsed : usedDays,
-      remaining: allocated ? periodBalance(allocated.entitlement, allocated.carryForward, policyUsed) : imported ? Math.max(imported.available - usedDays, 0) : t.maxDays === null ? null : Math.max(t.maxDays - usedDays, 0),
+      remaining,
       policyPeriodId: allocated?.policyPeriodId ?? null,
       importedBalance: imported ? { batchId: imported.batchId, throughMonth: imported.periodEnd.toISOString().slice(0, 7), opening: imported.openingBalance, credited: imported.credited, availed: imported.availed, available: imported.available } : null,
     };

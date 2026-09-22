@@ -168,7 +168,7 @@ async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payloa
       const leaveType = typeByCode.get(rules.code);
       if (!leaveType) return [];
       const used = requests.filter((request) => request.employeeId === employee.id && request.leaveTypeId === leaveType.id).reduce((sum, request) => sum + request.days, 0);
-      const legacyBalance = leaveType.maxDays === null ? null : Math.max(leaveType.maxDays - used, 0);
+      const legacyBalance = leaveType.maxDays === null ? 0 : Math.max(leaveType.maxDays - used, 0);
       const accrual = rules.workedDayAccrual ? monthlyWorkedDayAccrual(rules.workedDayAccrual, workedDaysForMonth(attendance.filter((row) => row.employeeId === employee.id), accrualMonth), employee.joiningDate, accrualMonth) : null;
       return [{ employeeId: employee.id, employee: `${employee.firstName} ${employee.lastName}`, leaveType: rules.code, entitlement: accrual ? accrual.accrued : rules.annualEntitlement, legacyBalance, carryForwardCandidate: carryForwardCandidate(legacyBalance ?? 0, rules.carryForward, rules.carryForwardLimit), workedDays: accrual?.workedDays ?? null, accrued: accrual?.accrued ?? null, availableOn: accrual?.availableOn.toISOString() ?? null, deferral: accrual?.deferred ?? false }];
     }));

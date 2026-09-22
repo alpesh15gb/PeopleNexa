@@ -5,7 +5,7 @@ import { getLang } from "@/lib/i18n-server";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
 import { LeavesPanel } from "./leaves-panel";
-import { periodBalance } from "@/lib/leave-policy-period";
+import { calculateLeaveBalance, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,9 @@ export default async function EmployeeLeavesPage() {
     const policyRequests = allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId) : requests.filter((request) => request.leaveTypeId === t.id && (!imported || request.fromDate >= imported.periodEnd));
     const used = policyRequests.filter((request) => request.status === "approved").reduce((sum, request) => sum + request.days, 0);
     const pending = policyRequests.filter((request) => request.status === "pending").reduce((sum, request) => sum + request.days, 0);
-    const entitlement = allocated ? (allocated.entitlement === null ? null : allocated.entitlement + allocated.carryForward) : imported ? imported.available : t.maxDays;
+    const entitlement = allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported ? imported.available : t.maxDays;
+    const unlimitedEntitlement = allocated ? policyHasUnlimitedEntitlement(allocated.policySnapshot) : !imported && t.unlimitedEntitlement;
+    const remaining = calculateLeaveBalance({ cap: allocated ? entitlement : imported ? 0 : t.maxDays, opening: imported ? imported.available : 0, credited: 0, used, pending, unlimitedEntitlement }).available;
     return { id: t.id,
     name: t.name,
     code: t.code,
@@ -50,8 +52,8 @@ export default async function EmployeeLeavesPage() {
     credited: allocated ? (allocated.entitlement ?? 0) + allocated.carryForward : imported?.credited ?? 0,
     used,
     pending,
-    remaining: entitlement === null ? null : Math.max(entitlement - used - pending, 0),
-    policyNote: allocated ? "Current policy-period allocation" : imported ? `Imported snapshot through ${imported.periodEnd.toISOString().slice(0, 7)}` : "Leave type allowance",
+    remaining,
+    policyNote: allocated ? "Current policy-period allocation" : imported ? `Imported snapshot through ${imported.periodEnd.toISOString().slice(0, 7)}` : t.maxDays === null || t.maxDays === 0 ? "No annual maximum; balance accrues or is imported" : "Leave type allowance",
     policyPeriodId: allocated?.policyPeriodId ?? null,
   }; });
 
