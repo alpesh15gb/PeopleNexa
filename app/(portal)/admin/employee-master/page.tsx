@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader }
 import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
 import { EmployeeDeviceAccess } from "./employee-device-access";
 import { EmployeeTransfer } from "./employee-transfer";
+import { EmployeeStatusAction } from "./employee-status-action";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
 
 export const dynamic = "force-dynamic";
@@ -158,11 +159,14 @@ export default async function EmployeeMasterPage({
             </form>
             <div className="max-h-[60vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">
               {employees.map((item) => (
-                <Link key={item.id} href={`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(page), employee: item.id })}`} className={`block px-3 py-3 transition-colors hover:bg-tint ${item.id === employee?.id ? "bg-primary/[0.08]" : ""}`}>
-                  <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
-                  <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber} · {item.deviceCode ?? "No device ID"}</p>
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
-                </Link>
+                <div key={item.id} className={`flex items-center gap-1 px-3 py-3 transition-colors hover:bg-tint ${item.id === employee?.id ? "bg-primary/[0.08]" : ""}`}>
+                  <Link href={`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(page), employee: item.id })}`} className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
+                    <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber} · {item.deviceCode ?? "No device ID"}</p>
+                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
+                  </Link>
+                  {(isAdmin || isLocationManager) && <EmployeeStatusAction compact employeeId={item.id} employeeName={`${item.firstName} ${item.lastName}`} status={item.status} />}
+                </div>
               ))}
               {!employees.length && <p className="p-5 text-center text-sm text-muted-foreground">No employees found.</p>}
             </div>
@@ -181,7 +185,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={branches} departments={departments} shifts={shifts} managers={managers} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: branches.find((branch) => branch.id === scheduledTransfer.destinationBranchId)?.name ?? "selected branch" } : null} />}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
+                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} /><EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={branches} departments={departments} shifts={shifts} managers={managers} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: branches.find((branch) => branch.id === scheduledTransfer.destinationBranchId)?.name ?? "selected branch" } : null} /></>}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
                 </div>
               </CardContent>
             </Card>

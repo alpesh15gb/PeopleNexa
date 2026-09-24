@@ -493,18 +493,20 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     before: pickAuditFields(employee),
     after: pickAuditFields(updated),
   });
-  if (updated.status !== employee.status) {
-    const results = await enforceEbioEmployeeAccess(session.tenantId, updated.id, updated.status === "active");
+  if (updated.status !== employee.status && updated.status === "inactive") {
+    // Reactivation restores employment only. Existing device policy remains
+    // explicit so status changes never broaden biometric access.
+    const results = await enforceEbioEmployeeAccess(session.tenantId, updated.id, false);
     const failed = results.filter((result) => result.status === "failed");
     await appendAudit({
       tenantId: session.tenantId,
       actorId: session.sub,
       actorRole: session.role,
-      action: updated.status === "active" ? "employee.device_access.restore" : "employee.device_access.block",
+      action: "employee.device_access.block",
       entity: "Employee",
       entityId: updated.id,
-      summary: `${updated.firstName} ${updated.lastName}: ${updated.status === "active" ? "restore" : "block"} sent to ${results.length} active eBio device(s)${failed.length ? `; ${failed.length} failed` : ""}`,
-      after: { allowed: updated.status === "active", results },
+      summary: `${updated.firstName} ${updated.lastName}: block sent to ${results.length} active eBio device(s)${failed.length ? `; ${failed.length} failed` : ""}`,
+      after: { allowed: false, results },
     });
   }
   return NextResponse.json({ employee: updated });

@@ -20,6 +20,7 @@
     "test:id-card-pdf": "tsx scripts/test-id-card-pdf.ts",
     "test:id-card-generation": "tsx scripts/test-id-card-generation.ts",
     "test:employee-master": "tsx scripts/test-employee-master-workflow.ts",
+    "test:employee-status": "tsx scripts/test-employee-status.ts",
     "test:employee-master-wizard": "tsx scripts/test-employee-master-wizard.ts",
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts",
     "test:device-access": "tsx scripts/test-device-access-policy.ts",

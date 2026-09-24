@@ -1129,24 +1129,6 @@ function Editor({
       const coreData = await coreResponse.json().catch(() => ({}));
       if (!coreResponse.ok)
         throw new Error(coreData.error ?? "Could not update official details.");
-      if (core.status !== master.status && core.deviceCode) {
-        const deviceResponse = await fetch(
-          `/api/employees/${id}/device-access`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: core.status === "inactive" ? "restricted" : "all",
-              deviceIds: [],
-            }),
-          },
-        );
-        if (!deviceResponse.ok && deviceResponse.status !== 207)
-          toast(
-            "error",
-            "Employee status was saved, but device access could not be updated.",
-          );
-      }
       const masterResponse = await fetch(`/api/employees/${id}/master`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
