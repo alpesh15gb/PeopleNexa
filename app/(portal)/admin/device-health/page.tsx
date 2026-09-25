@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { DeviceHealthGrid } from "./device-health-grid";
 import { istStartOfDay } from "@/lib/ist";
+import { deviceHealthState } from "@/lib/device-health";
 
 export const dynamic = "force-dynamic";
 
@@ -46,10 +47,9 @@ export default async function AdminDeviceHealthPage() {
   const logMap = new Map(logCounts.map((l) => [l.deviceId, l._count._all]));
   const errorMap = new Map(errorCounts.map((e) => [e.deviceId, e._count._all]));
 
-  const healthy = devices.filter(
-    (d) => d.status !== "inactive" && d.lastSeenAt && d.lastSeenAt.getTime() > Date.now() - 24 * 3600 * 1000
-  ).length;
-  const offline = devices.filter((d) => d.status === "offline" || (d.status === "active" && (!d.lastSeenAt || d.lastSeenAt.getTime() <= Date.now() - 24 * 3600 * 1000))).length;
+  const now = Date.now();
+  const healthy = devices.filter((d) => ["online", "idle"].includes(deviceHealthState(d.status, d.lastSeenAt, now))).length;
+  const offline = devices.filter((d) => ["offline", "stale"].includes(deviceHealthState(d.status, d.lastSeenAt, now))).length;
   const todayPunches = [...punchMap.values()].reduce((s, n) => s + n, 0);
 
   return (

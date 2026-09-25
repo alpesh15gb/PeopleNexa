@@ -23,6 +23,7 @@
     "test:employee-status": "tsx scripts/test-employee-status.ts",
     "test:employee-master-wizard": "tsx scripts/test-employee-master-wizard.ts",
     "test:ebio-topology": "tsx scripts/test-ebio-topology-access.ts",
+    "test:device-health": "tsx scripts/test-device-health.ts",
     "test:device-access": "tsx scripts/test-device-access-policy.ts",
     "test:designation-access": "tsx scripts/test-designation-access.ts",
     "test:designation-import": "tsx scripts/test-designation-import.ts",

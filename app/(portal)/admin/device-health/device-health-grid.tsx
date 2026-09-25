@@ -2,6 +2,7 @@
 
 import { Fingerprint, Wifi, WifiOff, AlertTriangle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { deviceHealthState } from "@/lib/device-health";
 
 interface Device {
   id: string;
@@ -27,11 +28,11 @@ export function DeviceHealthGrid({
   errorMap: Record<string, number>;
 }) {
   function statusOf(d: Device): { label: string; cls: string; icon: React.ReactNode } {
-    const seen = d.lastSeenAt ? Date.now() - d.lastSeenAt.getTime() : Infinity;
-    if (d.status === "inactive") return { label: "Disabled", cls: "text-muted-foreground", icon: <WifiOff className="h-3.5 w-3.5" /> };
-    if (d.status === "offline" || seen > 24 * 3600 * 1000)
-      return { label: d.status === "offline" ? "Offline" : "Stale (>24h)", cls: "text-rose-300", icon: <WifiOff className="h-3.5 w-3.5" /> };
-    if (seen > 2 * 3600 * 1000) return { label: "Idle", cls: "text-amber-300", icon: <Clock className="h-3.5 w-3.5" /> };
+    const state = deviceHealthState(d.status, d.lastSeenAt);
+    if (state === "disabled") return { label: "Disabled", cls: "text-muted-foreground", icon: <WifiOff className="h-3.5 w-3.5" /> };
+    if (state === "offline" || state === "stale")
+      return { label: state === "offline" ? "Offline" : "Stale (>24h)", cls: "text-rose-300", icon: <WifiOff className="h-3.5 w-3.5" /> };
+    if (state === "idle") return { label: "Idle", cls: "text-amber-300", icon: <Clock className="h-3.5 w-3.5" /> };
     return { label: "Online", cls: "text-emerald-300", icon: <Wifi className="h-3.5 w-3.5" /> };
   }
 

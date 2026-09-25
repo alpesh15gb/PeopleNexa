@@ -6,6 +6,7 @@ import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
 import { istDateKey, istStartOfDay, parseIST } from "./ist";
 import { hashPassword } from "./auth";
+import { ebioHeartbeatPatch } from "./device-health";
 import crypto from "node:crypto";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
 import type { Tenant } from "@/generated/prisma/client";
@@ -558,6 +559,12 @@ async function touchDevices(ids: Set<string>): Promise<void> {
   if (ids.size === 0) return;
   try {
     await prisma.device.updateMany({ where: { id: { in: [...ids] } }, data: { lastSeenAt: new Date() } });
+    // Only connection states may be reactivated; preserve disabled or future
+    // administrative statuses even when a device continues sending logs.
+    await prisma.device.updateMany({
+      where: { id: { in: [...ids] }, status: { in: ["active", "offline"] } },
+      data: { status: "active" },
+    });
   } catch (err) {
     console.warn("[eBioserver] touchDevices failed:", err instanceof Error ? err.message : err);
   }
@@ -644,8 +651,16 @@ export async function pullTenant(
           ...authArgs(profile),
           DeviceSerialNumber: device.serialNumber,
         });
-        const lastSeenAt = parseDevicePing(resultString(pingResult));
-        if (lastSeenAt) await prisma.device.update({ where: { id: device.id }, data: { lastSeenAt } });
+        const heartbeat = ebioHeartbeatPatch(parseDevicePing(resultString(pingResult)));
+        if (heartbeat) {
+          await prisma.device.update({ where: { id: device.id }, data: { lastSeenAt: heartbeat.lastSeenAt } });
+          if (heartbeat.status) {
+            await prisma.device.updateMany({
+              where: { id: device.id, status: { in: ["active", "offline"] } },
+              data: { status: heartbeat.status },
+            });
+          }
+        }
       } catch {
         // A ping error must not block attendance ingestion for other machines.
       }

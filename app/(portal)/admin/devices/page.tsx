@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/card";
 import { DevicesPanel } from "./devices-panel";
 import { DevicesTabs } from "./devices-tabs";
 import { RealtimePanel, type RealtimeRow } from "./realtime-panel";
+import { deviceHealthState } from "@/lib/device-health";
 
 export const dynamic = "force-dynamic";
 
@@ -111,7 +112,7 @@ export default async function AdminDevicesPage() {
                     <p className="font-mono text-[11px] text-muted-foreground">{d.serialNumber}</p>
                   </div>
                   <p className="shrink-0 text-[12px] text-muted-foreground">
-                    {d.status === "active" && d.lastSeenAt && now - d.lastSeenAt.getTime() < 5 * 60 * 1000
+                    {deviceHealthState(d.status, d.lastSeenAt, now) === "online"
                       ? "Online"
                       : "Offline"}{" "}
                     · {d.logCount} logs
