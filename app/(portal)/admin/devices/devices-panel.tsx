@@ -177,7 +177,7 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
            <label className="text-[12px] text-muted-foreground">
              <span className="sr-only">Filter devices by status</span>
              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground">
-               <option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option>
+               <option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="disabled">Admin disabled</option>
              </select>
            </label>
           {!readOnly && <Button onClick={() => setAddOpen(true)}>
@@ -232,7 +232,7 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
                   </TD>
                   <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                   <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
-                     {d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}
+                     {d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; offline"}
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">

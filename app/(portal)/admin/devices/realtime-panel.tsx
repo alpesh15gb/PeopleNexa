@@ -255,7 +255,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
           <label className="text-[12px] text-muted-foreground">
             <span className="sr-only">Filter Realtime devices by status</span>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground">
-              <option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option>
+              <option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="disabled">Admin disabled</option>
             </select>
           </label>
           <Button onClick={() => { setNewKey(null); setAddOpen(true); }}>
@@ -316,7 +316,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                     <TD className="hidden text-[13px] text-muted-foreground md:table-cell">{d.linkedCount}</TD>
                     <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                     <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
-                      {d.lastSeenAt ? `${formatDateTime(new Date(d.lastSeenAt))} IST` : "No source report recorded"}
+                      {d.lastSeenAt ? `${formatDateTime(new Date(d.lastSeenAt))} IST` : "No source report recorded; offline"}
                     </TD>
                     <TD>
                       <div className="flex items-center justify-end gap-1">

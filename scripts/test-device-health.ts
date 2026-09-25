@@ -16,14 +16,16 @@ assert.deepEqual(ebioHeartbeatPatch(stale, now), { lastSeenAt: stale });
 // SOAP failures/unparseable responses produce no heartbeat patch or reactivation.
 assert.equal(ebioHeartbeatPatch(null, now), null);
 assert.equal(deviceHealthState("inactive", recent, now), "disabled");
+assert.equal(deviceHealthState("inactive", null, now), "disabled");
 assert.equal(deviceHealthState("maintenance", recent, now), "disabled");
-assert.equal(deviceHealthState("active", null, now), "pending");
+assert.equal(deviceHealthState("active", null, now), "offline");
 assert.equal(deviceHealthState("offline", null, now), "offline");
 
 // Realtime availability is only based on its documented poll/webhook window.
 assert.equal(realtimeDeviceHealthState("active", new Date(now - REALTIME_ONLINE_WINDOW_MS + 1), now), "online");
 assert.equal(realtimeDeviceHealthState("active", new Date(now - REALTIME_ONLINE_WINDOW_MS), now), "offline");
-assert.equal(realtimeDeviceHealthState("active", null, now), "pending");
+assert.equal(realtimeDeviceHealthState("active", null, now), "offline");
 assert.equal(realtimeDeviceHealthState("inactive", recent, now), "disabled");
+assert.equal(realtimeDeviceHealthState("inactive", null, now), "disabled");
 
 console.log("device health tests passed");

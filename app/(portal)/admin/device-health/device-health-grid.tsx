@@ -59,7 +59,7 @@ export function DeviceHealthGrid({
     <div className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <DeviceStatusLegend />
-        <label className="text-[12px] text-muted-foreground"><span className="sr-only">Filter devices by status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground"><option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option></select></label>
+        <label className="text-[12px] text-muted-foreground"><span className="sr-only">Filter devices by status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground"><option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="disabled">Admin disabled</option></select></label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {visibleDevices.map((d) => {
@@ -96,7 +96,7 @@ export function DeviceHealthGrid({
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 capitalize">{d.type}</span>
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.protocol}</span>
               {d.ipAddress && <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.ipAddress}</span>}
-              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}>
+              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; device is offline"}>
                 <Clock className="h-3 w-3" aria-hidden="true" /> {lastSeen(d)}{d.lastSeenAt && " IST"}
               </span>
             </div>

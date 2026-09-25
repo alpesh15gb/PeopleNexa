@@ -1,13 +1,12 @@
-import { CircleHelp, Clock, MonitorOff, Wifi, WifiOff } from "lucide-react";
+import { Clock, MonitorOff, Wifi, WifiOff } from "lucide-react";
 import { type DeviceHealthState } from "@/lib/device-health";
 import { cn } from "@/lib/utils";
 
 const statusDetails: Record<DeviceHealthState, { label: string; description: string; className: string; Icon: typeof Wifi }> = {
   online: { label: "Online", description: "A recent source heartbeat was received.", className: "border-emerald-500/40 bg-emerald-500/15 text-emerald-100", Icon: Wifi },
-  offline: { label: "Offline", description: "The source has not reported within its online window.", className: "border-rose-500/40 bg-rose-500/15 text-rose-100", Icon: WifiOff },
+  offline: { label: "Offline", description: "No source heartbeat has been received, or it is outside its online window.", className: "border-rose-500/40 bg-rose-500/15 text-rose-100", Icon: WifiOff },
   stale: { label: "Stale", description: "Last heartbeat is over 24 hours old.", className: "border-rose-500/40 bg-rose-500/15 text-rose-100", Icon: WifiOff },
   idle: { label: "Idle", description: "Last heartbeat is 2 to 24 hours old.", className: "border-amber-500/40 bg-amber-500/15 text-amber-100", Icon: Clock },
-  pending: { label: "Pending", description: "Registered, but no heartbeat has been received yet.", className: "border-sky-500/40 bg-sky-500/15 text-sky-100", Icon: CircleHelp },
   disabled: { label: "Admin disabled", description: "Disabled by an administrator; connection state is not evaluated.", className: "border-slate-500/40 bg-slate-500/15 text-slate-100", Icon: MonitorOff },
 };
 
@@ -37,7 +36,7 @@ export function DeviceStatusLegend({ realtime = false }: { realtime?: boolean })
       <span><b className="text-emerald-100">Online</b> {realtime ? "source report within 5 min" : "heartbeat within 2h"}</span>
       {!realtime && <span><b className="text-amber-100">Idle</b> 2-24h</span>}
       {!realtime && <span><b className="text-rose-100">Stale</b> over 24h</span>}
-      <span><b className="text-sky-100">Pending</b> no heartbeat</span>
+      <span><b className="text-rose-100">Offline</b> no heartbeat or outside online window</span>
       <span><b className="text-slate-100">Admin disabled</b> not evaluated</span>
     </p>
   );

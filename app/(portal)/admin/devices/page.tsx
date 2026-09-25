@@ -114,7 +114,7 @@ export default async function AdminDevicesPage() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <DeviceStatusBadge state={deviceHealthState(d.status, d.lastSeenAt, now)} />
-                    <span className="text-[12px] text-muted-foreground" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}>{d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat"} · {d.logCount} logs</span>
+                    <span className="text-[12px] text-muted-foreground" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; device is offline"}>{d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat; offline"} · {d.logCount} logs</span>
                   </div>
                 </div>
               ))}
