@@ -5,6 +5,8 @@ import { DevicesPanel } from "./devices-panel";
 import { DevicesTabs } from "./devices-tabs";
 import { RealtimePanel, type RealtimeRow } from "./realtime-panel";
 import { deviceHealthState } from "@/lib/device-health";
+import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
+import { formatDateTime } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -78,12 +80,10 @@ export default async function AdminDevicesPage() {
   }));
 
   const now = Date.now();
-  const online = (lastSeenAt: Date | null, status: string) =>
-    status === "active" && lastSeenAt && now - lastSeenAt.getTime() < 5 * 60 * 1000;
   const counts = {
     total: rows.length,
-    online: rows.filter((d) => online(d.lastSeenAt, d.status)).length,
-    offline: rows.filter((d) => !online(d.lastSeenAt, d.status)).length,
+    online: rows.filter((d) => deviceHealthState(d.status, d.lastSeenAt, now) === "online").length,
+    offline: rows.filter((d) => ["offline", "stale"].includes(deviceHealthState(d.status, d.lastSeenAt, now))).length,
   };
 
   return (
@@ -105,18 +105,17 @@ export default async function AdminDevicesPage() {
             </p>
           ) : (
             <div className="card-surface overflow-hidden rounded-2xl">
-              {ebioRows.map((d) => (
+              <div className="border-b border-edge px-5 py-3"><DeviceStatusLegend /></div>
+              {ebioRows.sort((a, b) => deviceHealthState(a.status, a.lastSeenAt, now).localeCompare(deviceHealthState(b.status, b.lastSeenAt, now)) || a.name.localeCompare(b.name)).map((d) => (
                 <div key={d.id} className="flex items-center justify-between gap-4 border-b border-edge px-5 py-3.5 last:border-0">
                   <div className="min-w-0">
                     <p className="truncate text-[13.5px] font-semibold">{d.name}</p>
                     <p className="font-mono text-[11px] text-muted-foreground">{d.serialNumber}</p>
                   </div>
-                  <p className="shrink-0 text-[12px] text-muted-foreground">
-                    {deviceHealthState(d.status, d.lastSeenAt, now) === "online"
-                      ? "Online"
-                      : "Offline"}{" "}
-                    · {d.logCount} logs
-                  </p>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <DeviceStatusBadge state={deviceHealthState(d.status, d.lastSeenAt, now)} />
+                    <span className="text-[12px] text-muted-foreground" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}>{d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat"} · {d.logCount} logs</span>
+                  </div>
                 </div>
               ))}
             </div>

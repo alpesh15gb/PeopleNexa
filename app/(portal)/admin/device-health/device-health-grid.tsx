@@ -1,8 +1,11 @@
 "use client";
 
-import { Fingerprint, Wifi, WifiOff, AlertTriangle, Clock } from "lucide-react";
+import { useState } from "react";
+import { Fingerprint, AlertTriangle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { deviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { DeviceStatusBadge, DeviceStatusLegend, deviceStatusDetail } from "@/components/devices/device-status";
+import { formatDateTime } from "@/lib/dates";
 
 interface Device {
   id: string;
@@ -27,18 +30,15 @@ export function DeviceHealthGrid({
   logMap: Record<string, number>;
   errorMap: Record<string, number>;
 }) {
-  function statusOf(d: Device): { label: string; cls: string; icon: React.ReactNode } {
-    const state = deviceHealthState(d.status, d.lastSeenAt);
-    if (state === "disabled") return { label: "Disabled", cls: "text-muted-foreground", icon: <WifiOff className="h-3.5 w-3.5" /> };
-    if (state === "offline" || state === "stale")
-      return { label: state === "offline" ? "Offline" : "Stale (>24h)", cls: "text-rose-300", icon: <WifiOff className="h-3.5 w-3.5" /> };
-    if (state === "idle") return { label: "Idle", cls: "text-amber-300", icon: <Clock className="h-3.5 w-3.5" /> };
-    return { label: "Online", cls: "text-emerald-300", icon: <Wifi className="h-3.5 w-3.5" /> };
-  }
+  const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
+  const now = Date.now();
+  const stateOf = (d: Device) => deviceHealthState(d.status, d.lastSeenAt, now);
+  const visibleDevices = devices.filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
+    .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
 
   function lastSeen(d: Device): string {
     if (!d.lastSeenAt) return "Never";
-    const mins = Math.round((Date.now() - d.lastSeenAt.getTime()) / 60000);
+    const mins = Math.max(0, Math.round((now - d.lastSeenAt.getTime()) / 60000));
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.round(mins / 60);
@@ -56,23 +56,27 @@ export function DeviceHealthGrid({
   }
 
   return (
-    <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-      {devices.map((d) => {
-        const st = statusOf(d);
+    <div className="p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <DeviceStatusLegend />
+        <label className="text-[12px] text-muted-foreground"><span className="sr-only">Filter devices by status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground"><option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option></select></label>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {visibleDevices.map((d) => {
+        const state = stateOf(d);
+        const detail = deviceStatusDetail(state);
         const errors = errorMap[d.id] ?? 0;
         return (
           <div key={d.id} className="card-surface rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", st.cls === "text-rose-300" ? "bg-rose-500/10" : "bg-tint-strong")}>
-                {st.icon}
+              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", state === "offline" || state === "stale" ? "bg-rose-500/10 text-rose-100" : "bg-tint-strong text-muted-foreground")}>
+                <detail.Icon className="h-4 w-4" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] font-semibold">{d.name}</p>
                 <p className="truncate font-mono text-[11px] text-muted-foreground">{d.serialNumber}</p>
               </div>
-              <span className={cn("rounded-md px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide", `bg-tint-strong ${st.cls}`)}>
-                {st.label}
-              </span>
+              <DeviceStatusBadge state={state} />
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-lg bg-tint px-2 py-2">
@@ -92,8 +96,8 @@ export function DeviceHealthGrid({
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 capitalize">{d.type}</span>
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.protocol}</span>
               {d.ipAddress && <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.ipAddress}</span>}
-              <span className="ml-auto flex items-center gap-1">
-                <Clock className="h-3 w-3" /> {lastSeen(d)}
+              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}>
+                <Clock className="h-3 w-3" aria-hidden="true" /> {lastSeen(d)}{d.lastSeenAt && " IST"}
               </span>
             </div>
             {errors > 0 && (
@@ -104,6 +108,8 @@ export function DeviceHealthGrid({
           </div>
         );
       })}
+      {visibleDevices.length === 0 && <p className="col-span-full py-10 text-center text-[13px] text-muted-foreground">No devices match this status.</p>}
+      </div>
     </div>
   );
 }

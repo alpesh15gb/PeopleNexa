@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { createPunchForEvent } from "./punch-idempotency";
 import { attendanceDayForPunch, reconcileEmployeeDay } from "./reconcile";
 import type { RealtimeDevice } from "@/generated/prisma/client";
+import { REALTIME_ONLINE_WINDOW_MS } from "./device-health";
 
 // ── Realtime ingest (own track) ─────────────────────────────────────────────
 // Same pipeline shape as lib/iclock.ts handleDevicePunch, but writing to the
@@ -10,7 +11,7 @@ import type { RealtimeDevice } from "@/generated/prisma/client";
 // derived by the shared reconciler, so all three sources (ESSL / eBioserver /
 // Realtime) show up uniformly. Nothing here touches Device / DeviceLog.
 
-export const REALTIME_ONLINE_WINDOW_MS = 5 * 60 * 1000;
+export { REALTIME_ONLINE_WINDOW_MS } from "./device-health";
 
 export const REALTIME_PROTOCOLS = ["wss", "fkweb"] as const;
 

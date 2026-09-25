@@ -56,18 +56,18 @@ export default async function AdminDeviceHealthPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Device Health"
-        description="Live status of every biometric / punch device connected to your account"
+        description="Heartbeat health for ESSL and eBioserver devices. Last seen times are shown in IST."
       />
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="p-5">
             <p className="font-display text-2xl font-bold text-emerald-300">{healthy}</p>
-            <p className="text-[12px] text-muted-foreground">Healthy (seen in 24h)</p>
+            <p className="text-[12px] text-muted-foreground">Online or idle (seen in 24h)</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-amber-300">{offline}</p>
+            <p className="font-display text-2xl font-bold text-rose-200">{offline}</p>
             <p className="text-[12px] text-muted-foreground">Offline / stale</p>
           </CardContent>
         </Card>

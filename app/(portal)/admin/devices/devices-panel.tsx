@@ -8,10 +8,7 @@ import {
   RotateCcw,
   ScrollText,
   Trash2,
-  Wifi,
-  WifiOff,
   Clock,
-  Monitor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,6 +18,8 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
+import { deviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
 
 export interface DeviceRow {
   id: string;
@@ -55,9 +54,13 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<DeviceRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
 
   const now = Date.now();
-  const isOnline = (d: DeviceRow) => d.status === "active" && d.lastSeenAt && now - d.lastSeenAt.getTime() < 5 * 60 * 1000;
+  const stateOf = (d: DeviceRow) => deviceHealthState(d.status, d.lastSeenAt, now);
+  const visibleDevices = devices
+    .filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
+    .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
 
   async function addDevice(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -158,18 +161,25 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stat("Total devices", counts.total, "text-foreground")}
-        {stat("Online", counts.online, "text-emerald-400")}
-        {stat("Offline", counts.offline, "text-amber-400")}
+        {stat("Online", devices.filter((d) => stateOf(d) === "online").length, "text-emerald-300")}
+        {stat("Needs attention", devices.filter((d) => ["offline", "stale"].includes(stateOf(d))).length, "text-rose-200")}
       </div>
 
       <div className="card-surface overflow-hidden rounded-2xl">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-4">
-          <div>
+           <div>
             <p className="text-[13.5px] font-semibold">Registered devices</p>
             <p className="text-[12px] text-muted-foreground">
               Devices push punches to <span className="font-mono text-[11px]">/iclock/cdata?SN=…</span>
             </p>
-          </div>
+            <DeviceStatusLegend />
+           </div>
+           <label className="text-[12px] text-muted-foreground">
+             <span className="sr-only">Filter devices by status</span>
+             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground">
+               <option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option>
+             </select>
+           </label>
           {!readOnly && <Button onClick={() => setAddOpen(true)}>
             <Plus aria-hidden="true" className="h-4 w-4" /> Add device
           </Button>}
@@ -189,19 +199,19 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
             </TR>
           </THead>
           <TBody>
-            {devices.length === 0 && (
+            {visibleDevices.length === 0 && (
               <TR>
                 <TD colSpan={7} className="py-12 text-center">
                   <Fingerprint className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-                  <p className="text-[13.5px] font-medium">No devices yet</p>
+                    <p className="text-[13.5px] font-medium">{devices.length === 0 ? "No devices yet" : "No devices match this status"}</p>
                   <p className="mt-1 text-[12.5px] text-muted-foreground">
                     Add an ESSL device with its serial number to start receiving punches.
                   </p>
                 </TD>
               </TR>
             )}
-            {devices.map((d) => {
-              const online = isOnline(d);
+            {visibleDevices.map((d) => {
+               const state = stateOf(d);
               return (
                 <TR key={d.id}>
                   <TD>
@@ -218,29 +228,11 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
                   <TD className="hidden capitalize text-[13px] md:table-cell">{d.type}</TD>
                   <TD className="hidden font-mono text-[12px] text-muted-foreground md:table-cell">{d.ipAddress || "—"}</TD>
                   <TD>
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                        d.status === "inactive"
-                          ? "bg-muted text-muted-foreground"
-                          : online
-                            ? "bg-emerald-500/10 text-emerald-400"
-                            : "bg-amber-500/10 text-amber-400"
-                      )}
-                    >
-                      {d.status === "inactive" ? (
-                        <Monitor className="h-3 w-3" />
-                      ) : online ? (
-                        <Wifi className="h-3 w-3" />
-                      ) : (
-                        <WifiOff className="h-3 w-3" />
-                      )}
-                      {d.status === "inactive" ? "Inactive" : online ? "Online" : "Offline"}
-                    </span>
+                    <DeviceStatusBadge state={state} />
                   </TD>
                   <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                   <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
-                    {d.lastSeenAt ? formatDateTime(d.lastSeenAt) : "Never"}
+                     {d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded"}
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">

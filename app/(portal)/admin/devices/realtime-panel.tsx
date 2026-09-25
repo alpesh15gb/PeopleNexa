@@ -8,10 +8,7 @@ import {
   RotateCcw,
   ScrollText,
   Trash2,
-  Wifi,
-  WifiOff,
   Clock,
-  Monitor,
   KeyRound,
   Link2,
 } from "lucide-react";
@@ -23,6 +20,8 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
+import { realtimeDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
 
 export interface RealtimeRow {
   id: string;
@@ -62,11 +61,14 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
   const [linkSel, setLinkSel] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<RealtimeRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
 
   const now = Date.now();
-  const isOnline = (d: RealtimeRow) =>
-    d.status === "active" && d.lastSeenAt && now - new Date(d.lastSeenAt).getTime() < 5 * 60 * 1000;
-  const onlineCount = devices.filter(isOnline).length;
+  const stateOf = (d: RealtimeRow) => realtimeDeviceHealthState(d.status, d.lastSeenAt ? new Date(d.lastSeenAt) : null, now);
+  const onlineCount = devices.filter((d) => stateOf(d) === "online").length;
+  const visibleDevices = devices
+    .filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
+    .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
 
   async function addDevice(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -235,7 +237,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stat("Realtime devices", devices.length, "text-foreground")}
         {stat("Online", onlineCount, "text-emerald-400")}
-        {stat("Offline", devices.length - onlineCount, "text-amber-400")}
+        {stat("Needs attention", devices.filter((d) => stateOf(d) === "offline").length, "text-rose-200")}
       </div>
 
       <div className="card-surface overflow-hidden rounded-2xl">
@@ -248,7 +250,14 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
               with <span className="font-mono text-[11px]">X-API-Key</span> · poll{" "}
               <span className="font-mono text-[11px]">/api/realtime/poll</span>
             </p>
+            <DeviceStatusLegend realtime />
           </div>
+          <label className="text-[12px] text-muted-foreground">
+            <span className="sr-only">Filter Realtime devices by status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground">
+              <option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="pending">Pending</option><option value="disabled">Admin disabled</option>
+            </select>
+          </label>
           <Button onClick={() => { setNewKey(null); setAddOpen(true); }}>
             <Plus aria-hidden="true" className="h-4 w-4" /> Add device
           </Button>
@@ -268,19 +277,19 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
               </TR>
             </THead>
             <TBody>
-              {devices.length === 0 && (
+              {visibleDevices.length === 0 && (
                 <TR>
                   <TD colSpan={7} className="py-12 text-center">
                     <Fingerprint className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-                    <p className="text-[13.5px] font-medium">No Realtime devices yet</p>
+                    <p className="text-[13.5px] font-medium">{devices.length === 0 ? "No Realtime devices yet" : "No devices match this status"}</p>
                     <p className="mt-1 text-[12.5px] text-muted-foreground">
                       Add a Pro1100B / F500-class unit with its serial — an API key is issued for the machine.
                     </p>
                   </TD>
                 </TR>
               )}
-              {devices.map((d) => {
-                const online = isOnline(d);
+              {visibleDevices.map((d) => {
+                 const state = stateOf(d);
                 return (
                   <TR key={d.id}>
                     <TD>
@@ -302,24 +311,12 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                     </TD>
                     <TD className="hidden font-mono text-[12px] text-muted-foreground md:table-cell">{d.protocol}</TD>
                     <TD>
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                          d.status === "inactive"
-                            ? "bg-muted text-muted-foreground"
-                            : online
-                              ? "bg-emerald-500/10 text-emerald-400"
-                              : "bg-amber-500/10 text-amber-400"
-                        )}
-                      >
-                        {d.status === "inactive" ? <Monitor className="h-3 w-3" /> : online ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                        {d.status === "inactive" ? "Inactive" : online ? "Online" : "Offline"}
-                      </span>
+                      <DeviceStatusBadge state={state} />
                     </TD>
                     <TD className="hidden text-[13px] text-muted-foreground md:table-cell">{d.linkedCount}</TD>
                     <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                     <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
-                      {d.lastSeenAt ? formatDateTime(new Date(d.lastSeenAt)) : "Never"}
+                      {d.lastSeenAt ? `${formatDateTime(new Date(d.lastSeenAt))} IST` : "No source report recorded"}
                     </TD>
                     <TD>
                       <div className="flex items-center justify-end gap-1">
