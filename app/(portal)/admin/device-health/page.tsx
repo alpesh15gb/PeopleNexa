@@ -67,7 +67,7 @@ export default async function AdminDeviceHealthPage() {
         </Card>
         <Card>
           <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-rose-200">{offline}</p>
+            <p className="font-display text-2xl font-bold text-rose-300">{offline}</p>
             <p className="text-[12px] text-muted-foreground">Offline / stale</p>
           </CardContent>
         </Card>

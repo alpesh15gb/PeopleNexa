@@ -237,7 +237,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stat("Realtime devices", devices.length, "text-foreground")}
         {stat("Online", onlineCount, "text-emerald-400")}
-        {stat("Needs attention", devices.filter((d) => stateOf(d) === "offline").length, "text-rose-200")}
+        {stat("Needs attention", devices.filter((d) => stateOf(d) === "offline").length, "text-rose-300")}
       </div>
 
       <div className="card-surface overflow-hidden rounded-2xl">

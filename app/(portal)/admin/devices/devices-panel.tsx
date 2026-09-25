@@ -162,7 +162,7 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {stat("Total devices", counts.total, "text-foreground")}
         {stat("Online", devices.filter((d) => stateOf(d) === "online").length, "text-emerald-300")}
-        {stat("Needs attention", devices.filter((d) => ["offline", "stale"].includes(stateOf(d))).length, "text-rose-200")}
+        {stat("Needs attention", devices.filter((d) => ["offline", "stale"].includes(stateOf(d))).length, "text-rose-300")}
       </div>
 
       <div className="card-surface overflow-hidden rounded-2xl">

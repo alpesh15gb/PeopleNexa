@@ -69,7 +69,7 @@ export function DeviceHealthGrid({
         return (
           <div key={d.id} className="card-surface rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", state === "offline" || state === "stale" ? "bg-rose-500/10 text-rose-100" : "bg-tint-strong text-muted-foreground")}>
+              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", state === "offline" || state === "stale" ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300" : "bg-tint-strong text-muted-foreground")}>
                 <detail.Icon className="h-4 w-4" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
