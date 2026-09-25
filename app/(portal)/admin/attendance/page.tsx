@@ -1,4 +1,5 @@
-import { PartyPopper } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { dayRangeIST, todayKey, isDateKey, formatTime, formatDate } from "@/lib/dates";
@@ -9,6 +10,7 @@ import { DatePicker } from "./date-picker";
 import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 import { tallyDailyAttendance } from "@/lib/attendance-tally";
+import { attendanceDrilldownStatus, attendanceEmployeeScope, attendanceStatusFilter } from "@/lib/attendance-drilldown";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZES = [50, 100, 200, 500] as const;
@@ -16,14 +18,15 @@ const PAGE_SIZES = [50, 100, 200, 500] as const;
 export default async function AdminAttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string; size?: string }>;
+  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string; size?: string; status?: string }>;
 }) {
   const session = await requireSession();
-  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam, size: sizeParam } = await searchParams;
+  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam, size: sizeParam, status: statusParam } = await searchParams;
   // UI routes fall back to today for a malformed URL instead of rendering a
   // normalized-but-wrong day. APIs reject malformed dates with HTTP 400.
   const dateKey = dateParam && isDateKey(dateParam) ? dateParam : todayKey();
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
+  const attendanceStatus = attendanceDrilldownStatus(statusParam);
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
@@ -47,10 +50,13 @@ export default async function AdminAttendancePage({
   const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
   const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
 
-  const employeeScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...(ownLocationId ? { branch: { locationId: ownLocationId } } : {}), ...(branchId ? { branchId } : {}) };
+  const employeeScope = attendanceEmployeeScope({ tenantId: session.tenantId, locationId: ownLocationId, branchId });
+  // An employee/day is unique; filtering employees by their exact day record keeps
+  // this drilldown distinct and aligned with the dashboard tally buckets.
+  const statusScope = attendanceStatus ? attendanceStatusFilter(attendanceStatus, dayStart, dayEnd) : {};
   const employeeWhere = query
-    ? { ...employeeScope, AND: query.split(/\s+/).filter(Boolean).map((term) => ({ OR: [{ firstName: { contains: term, mode: "insensitive" as const } }, { lastName: { contains: term, mode: "insensitive" as const } }, { employeeNumber: { contains: term, mode: "insensitive" as const } }] })) }
-    : employeeScope;
+    ? { ...employeeScope, ...statusScope, AND: query.split(/\s+/).filter(Boolean).map((term) => ({ OR: [{ firstName: { contains: term, mode: "insensitive" as const } }, { lastName: { contains: term, mode: "insensitive" as const } }, { employeeNumber: { contains: term, mode: "insensitive" as const } }] })) }
+    : { ...employeeScope, ...statusScope };
   const totalEmployees = await prisma.employee.count({ where: employeeWhere });
   const totalPages = Math.max(1, Math.ceil(totalEmployees / pageSize));
   const page = Math.min(requestedPage, totalPages);
@@ -64,6 +70,7 @@ export default async function AdminAttendancePage({
         firstName: true,
         lastName: true,
         department: { select: { name: true } },
+        branch: { select: { name: true } },
         shift: { select: { name: true, startTime: true } },
       },
        orderBy: { employeeNumber: "asc" },
@@ -98,6 +105,7 @@ export default async function AdminAttendancePage({
       employeeNumber: emp.employeeNumber,
       name: `${emp.firstName} ${emp.lastName}`.trim(),
       department: emp.department?.name ?? "Unassigned",
+      branch: emp.branch?.name ?? "Unassigned",
       shift: emp.shift?.name ?? "—",
       record: record
         ? {
@@ -116,6 +124,7 @@ export default async function AdminAttendancePage({
   });
 
   const counts = tallyDailyAttendance(tallyEmployees.map((employee) => employee.id), tallyRecords, tallyLeaves.map((leave) => leave.employeeId));
+  const dashboardHref = branchId ? `/admin?branch=${encodeURIComponent(branchId)}` : "/admin";
 
   const statCards = [
     { label: "Present", value: counts.present, cls: "text-emerald-300" },
@@ -146,7 +155,7 @@ export default async function AdminAttendancePage({
       )}
       <PageHeader
         title="Attendance"
-        description={`Daily attendance for ${formatDate(dayStart)}${branchId ? ` · ${isBranchManager ? ownBranchName : (branches.find((b) => b.id === branchId)?.name ?? "")}` : ""}`}
+        description={`${attendanceStatus ? `${attendanceStatus === "present" ? "Present" : "Late"} employees · ` : "Daily attendance for "}${formatDate(dayStart)}${branchId ? ` · ${isBranchManager ? ownBranchName : (branches.find((b) => b.id === branchId)?.name ?? "")}` : ""}`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {isBranchManager ? (
@@ -160,6 +169,7 @@ export default async function AdminAttendancePage({
           </div>
         }
       />
+      {attendanceStatus && <Link href={dashboardHref} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to dashboard</Link>}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
         {statCards.map((s) => (
@@ -178,7 +188,7 @@ export default async function AdminAttendancePage({
               description={branchId ? "Try another branch or date." : "Add employees to start tracking attendance."}
             />
           ) : (
-            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} />
+            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} status={attendanceStatus ?? ""} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} />
           )}
         </CardContent>
       </Card>

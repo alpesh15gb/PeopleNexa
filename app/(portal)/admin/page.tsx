@@ -188,6 +188,11 @@ export default async function AdminDashboardPage({
     params.set("attendancePage", String(page));
     return `/admin?${params.toString()}`;
   };
+  const attendanceDrilldownHref = (status: "present" | "late") => {
+    const params = new URLSearchParams({ date: istDateKey(today), status });
+    if (branchId) params.set("branch", branchId);
+    return `/admin/attendance?${params.toString()}`;
+  };
   const currentMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate >= currentMonthStart);
   const previousMonthJoiners = newJoiners.filter((employee) => employee.joiningDate && employee.joiningDate < currentMonthStart);
   const todayMonthDay = istDateKey(today).slice(5);
@@ -280,8 +285,8 @@ export default async function AdminDashboardPage({
       <Suspense fallback={<StatsSkeleton />}>
        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
          <div className={widgetClass("total_employees")} style={widgetStyle("total_employees")}><StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} /></div>
-         <div className={widgetClass("present")} style={widgetStyle("present")}><StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={statCardClass} /></div>
-         <div className={widgetClass("late")} style={widgetStyle("late")}><StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={statCardClass} /></div>
+          <div className={widgetClass("present")} style={widgetStyle("present")}><Link href={attendanceDrilldownHref("present")} aria-label={`View ${counts.present} present employees`} className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><StatCard label="Present" value={counts.present} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={`${statCardClass} group-hover:border-emerald-400/40 group-hover:shadow-[0_14px_32px_-24px_rgba(16,185,129,0.55)]`} /></Link></div>
+          <div className={widgetClass("late")} style={widgetStyle("late")}><Link href={attendanceDrilldownHref("late")} aria-label={`View ${counts.late} late employees`} className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={`${statCardClass} group-hover:border-amber-400/40 group-hover:shadow-[0_14px_32px_-24px_rgba(245,158,11,0.55)]`} /></Link></div>
          <div className={widgetClass("permission")} style={widgetStyle("permission")}><StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} /></div>
          <div className={widgetClass("absent")} style={widgetStyle("absent")}><StatCard label="Absent" value={counts.absent + counts.noRecord} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} /></div>
          <div className={widgetClass("pending_leaves")} style={widgetStyle("pending_leaves")}><StatCard

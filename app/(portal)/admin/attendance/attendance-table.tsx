@@ -26,6 +26,7 @@ interface Row {
   employeeNumber: string;
   name: string;
   department: string;
+  branch: string;
   shift: string;
   record: {
     id: string;
@@ -51,7 +52,7 @@ const fmtISTFull = (iso: string) => {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 };
 
-export function AttendanceTable({ rows, date, branchId, query, page, pageSize, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; page: number; pageSize: number; totalEmployees: number; totalPages: number }) {
+export function AttendanceTable({ rows, date, branchId, query, status: statusFilter, page, pageSize, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; status: string; page: number; pageSize: number; totalEmployees: number; totalPages: number }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
@@ -134,6 +135,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
   const pageUrl = (nextPage: number) => {
     const params = new URLSearchParams({ date, page: String(nextPage), size: String(pageSize) });
     if (branchId) params.set("branch", branchId);
+    if (statusFilter) params.set("status", statusFilter);
     if (query) params.set("q", query);
     return `/admin/attendance?${params.toString()}`;
   };
@@ -144,6 +146,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
         <form action="/admin/attendance" className="flex max-w-xl gap-2">
           <input type="hidden" name="date" value={date} />
           {branchId && <input type="hidden" name="branch" value={branchId} />}
+          {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
           <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input name="q" defaultValue={query} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
@@ -160,6 +163,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
           <TR>
             <TH className="sticky left-0 z-20 bg-card">Employee</TH>
             <TH className="hidden md:table-cell">Department</TH>
+            <TH className="hidden lg:table-cell">Branch</TH>
             <TH className="hidden lg:table-cell">Shift</TH>
             <TH>In</TH>
             <TH>Out</TH>
@@ -180,12 +184,15 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
                     <div className="min-w-0">
                       <p className="text-[13.5px] font-medium">{row.name}</p>
                       <p className="text-[11.5px] text-muted-foreground">{row.employeeNumber}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{row.department} · {row.shift}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{row.branch} · {row.department}</p>
                     </div>
                   </div>
                 </TD>
                 <TD className="hidden md:table-cell">
                   <span className="text-[13px] text-muted-foreground">{row.department}</span>
+                </TD>
+                <TD className="hidden lg:table-cell">
+                  <span className="text-[13px] text-muted-foreground">{row.branch}</span>
                 </TD>
                 <TD className="hidden lg:table-cell">
                   <span className="text-[13px] text-muted-foreground">{row.shift}</span>
@@ -244,7 +251,7 @@ export function AttendanceTable({ rows, date, branchId, query, page, pageSize, t
           })}
           {rows.length === 0 && (
             <TR>
-              <TD colSpan={7} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
+              <TD colSpan={8} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
             </TR>
           )}
         </TBody>

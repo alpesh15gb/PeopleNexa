@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:payroll": "tsx scripts/test-payroll-lop.ts",
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
+    "test:attendance-drilldown": "tsx scripts/test-attendance-drilldown.ts",
     "test:report-month-range": "tsx scripts/test-report-month-range.ts",
     "test:leave-policy": "tsx scripts/test-leave-policy.ts",
     "test:leave-policy-period": "tsx scripts/test-leave-policy-period.ts",
