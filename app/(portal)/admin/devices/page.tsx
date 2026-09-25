@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/ui/card";
 import { DevicesPanel } from "./devices-panel";
 import { DevicesTabs } from "./devices-tabs";
 import { RealtimePanel, type RealtimeRow } from "./realtime-panel";
-import { deviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, deviceStatusMetadata } from "@/lib/device-health";
 import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
 import { formatDateTime } from "@/lib/dates";
 
@@ -106,18 +106,21 @@ export default async function AdminDevicesPage() {
           ) : (
             <div className="card-surface overflow-hidden rounded-2xl">
               <div className="border-b border-edge px-5 py-3"><DeviceStatusLegend /></div>
-              {ebioRows.sort((a, b) => deviceHealthState(a.status, a.lastSeenAt, now).localeCompare(deviceHealthState(b.status, b.lastSeenAt, now)) || a.name.localeCompare(b.name)).map((d) => (
+              {ebioRows.sort((a, b) => deviceHealthState(a.status, a.lastSeenAt, now).localeCompare(deviceHealthState(b.status, b.lastSeenAt, now)) || a.name.localeCompare(b.name)).map((d) => {
+                const state = deviceHealthState(d.status, d.lastSeenAt, now);
+                return (
                 <div key={d.id} className="flex items-center justify-between gap-4 border-b border-edge px-5 py-3.5 last:border-0">
                   <div className="min-w-0">
                     <p className="truncate text-[13.5px] font-semibold">{d.name}</p>
                     <p className="font-mono text-[11px] text-muted-foreground">{d.serialNumber}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <DeviceStatusBadge state={deviceHealthState(d.status, d.lastSeenAt, now)} />
-                    <span className="text-[12px] text-muted-foreground" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; device is offline"}>{d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat; offline"} · {d.logCount} logs</span>
+                    <DeviceStatusBadge state={state} />
+                    <span className="text-[12px] text-muted-foreground" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : deviceStatusMetadata(state)}>{d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST · ${d.logCount} logs` : deviceStatusMetadata(state, d.logCount)}</span>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )
         }

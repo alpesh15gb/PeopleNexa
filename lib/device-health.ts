@@ -4,6 +4,20 @@ export const REALTIME_ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
 export type DeviceHealthState = "disabled" | "offline" | "stale" | "idle" | "online";
 
+const deviceHealthLabels: Record<DeviceHealthState, string> = {
+  online: "Online",
+  idle: "Idle",
+  stale: "Stale",
+  offline: "Offline",
+  disabled: "Admin disabled",
+};
+
+/** Status text for device metadata; log counts are omitted when unavailable. */
+export function deviceStatusMetadata(state: DeviceHealthState, logCount?: number | null): string {
+  const label = deviceHealthLabels[state];
+  return logCount == null ? label : `${label} · ${logCount} logs`;
+}
+
 export function isRecentDeviceHeartbeat(lastSeenAt: Date, now = Date.now()): boolean {
   const seenAt = lastSeenAt.getTime();
   return seenAt <= now && now - seenAt < DEVICE_STALE_MS;

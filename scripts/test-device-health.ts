@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { DEVICE_IDLE_MS, DEVICE_STALE_MS, REALTIME_ONLINE_WINDOW_MS, deviceHealthState, ebioHeartbeatPatch, realtimeDeviceHealthState } from "../lib/device-health";
+import { DEVICE_IDLE_MS, DEVICE_STALE_MS, REALTIME_ONLINE_WINDOW_MS, deviceHealthState, deviceStatusMetadata, ebioHeartbeatPatch, realtimeDeviceHealthState } from "../lib/device-health";
 
 const now = Date.parse("2026-09-25T12:00:00.000Z");
 const recent = new Date(now - 5 * 60 * 1000);
@@ -20,6 +20,8 @@ assert.equal(deviceHealthState("inactive", null, now), "disabled");
 assert.equal(deviceHealthState("maintenance", recent, now), "disabled");
 assert.equal(deviceHealthState("active", null, now), "offline");
 assert.equal(deviceHealthState("offline", null, now), "offline");
+assert.equal(deviceStatusMetadata("offline", 0), "Offline · 0 logs");
+assert.equal(deviceStatusMetadata("offline"), "Offline");
 
 // Realtime availability is only based on its documented poll/webhook window.
 assert.equal(realtimeDeviceHealthState("active", new Date(now - REALTIME_ONLINE_WINDOW_MS + 1), now), "online");

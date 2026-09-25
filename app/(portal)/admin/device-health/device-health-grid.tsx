@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Fingerprint, AlertTriangle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { deviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, deviceStatusMetadata, type DeviceHealthState } from "@/lib/device-health";
 import { DeviceStatusBadge, DeviceStatusLegend, deviceStatusDetail } from "@/components/devices/device-status";
 import { formatDateTime } from "@/lib/dates";
 
@@ -96,7 +96,7 @@ export function DeviceHealthGrid({
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 capitalize">{d.type}</span>
               <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.protocol}</span>
               {d.ipAddress && <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.ipAddress}</span>}
-              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; device is offline"}>
+              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : deviceStatusMetadata(state)}>
                 <Clock className="h-3 w-3" aria-hidden="true" /> {lastSeen(d)}{d.lastSeenAt && " IST"}
               </span>
             </div>

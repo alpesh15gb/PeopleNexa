@@ -18,7 +18,7 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
-import { deviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, deviceStatusMetadata, type DeviceHealthState } from "@/lib/device-health";
 import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
 
 export interface DeviceRow {
@@ -232,7 +232,7 @@ export function DevicesPanel({ rows, counts, readOnly = false, branches = [], re
                   </TD>
                   <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                   <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
-                     {d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : "No heartbeat recorded; offline"}
+                      {d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : deviceStatusMetadata(state)}
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">
