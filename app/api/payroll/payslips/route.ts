@@ -31,9 +31,26 @@ export async function GET(req: NextRequest) {
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
   const pdfs = await Promise.all(slips.map(async (slip) => {
     const branding = resolveCompanyBranding(tenant, slip.employee.branch?.location ?? slip.employee.location);
+    const snapshot = slip.status === "finalized" || slip.status === "paid"
+      ? (slip.inputSnapshot as { employee?: { employeeNumber?: string; firstName?: string; lastName?: string; position?: string | null; joiningDate?: string | Date | null; departmentName?: string | null; pan?: string | null; uan?: string | null }; bank?: { bankName?: string | null; accountNumber?: string | null; ifscCode?: string | null } } | null)
+      : null;
+    const employee = snapshot?.employee ? {
+      ...slip.employee,
+      employeeNumber: snapshot.employee.employeeNumber ?? slip.employee.employeeNumber,
+      firstName: snapshot.employee.firstName ?? slip.employee.firstName,
+      lastName: snapshot.employee.lastName ?? slip.employee.lastName,
+      position: snapshot.employee.position ?? slip.employee.position,
+      joiningDate: snapshot.employee.joiningDate ? new Date(snapshot.employee.joiningDate) : slip.employee.joiningDate,
+      department: snapshot.employee.departmentName ? { name: snapshot.employee.departmentName } : slip.employee.department,
+      bankName: snapshot.bank?.bankName ?? slip.employee.bankName,
+      accountNumber: snapshot.bank?.accountNumber ?? slip.employee.accountNumber,
+      ifscCode: snapshot.bank?.ifscCode ?? slip.employee.ifscCode,
+      pan: snapshot.employee.pan ?? slip.employee.pan,
+      uan: snapshot.employee.uan ?? slip.employee.uan,
+    } : slip.employee;
     return {
       name: `${safeName(slip.employee.employeeNumber)}-${safeName(`${slip.employee.firstName}-${slip.employee.lastName}`)}-${month}.pdf`,
-       data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, month, employee: slip.employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
+        data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, month, employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
     };
   }));
   if (pdfs.length === 1) return new NextResponse(new Uint8Array(pdfs[0].data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdfs[0].name}"` } });

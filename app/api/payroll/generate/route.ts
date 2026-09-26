@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.employee.findMany({
       where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
-      select: { id: true, employeeNumber: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, branch: { select: { locationId: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
+      select: { id: true, employeeNumber: true, firstName: true, lastName: true, position: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { locationId: true, name: true } }, department: { select: { name: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
   ]);
 
@@ -61,6 +61,11 @@ export async function POST(req: NextRequest) {
        employeeNumber: e.employeeNumber,
        firstName: e.firstName,
        lastName: e.lastName,
+       position: e.position,
+       branchName: e.branch?.name,
+       departmentName: e.department?.name,
+       pan: e.pan,
+       uan: e.uan,
        bankName: e.bankName,
        accountNumber: e.accountNumber,
        ifscCode: e.ifscCode,

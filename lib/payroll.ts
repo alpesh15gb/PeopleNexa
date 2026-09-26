@@ -684,6 +684,11 @@ export async function generatePayslipForEmployee(
     branchId?: string | null;
     locationId?: string | null;
     departmentId?: string | null;
+    position?: string | null;
+    branchName?: string | null;
+    departmentName?: string | null;
+    pan?: string | null;
+    uan?: string | null;
     pfAllowed?: boolean | null;
     esicAllowed?: boolean | null;
     tdsAllowed?: boolean | null;
@@ -788,7 +793,7 @@ export async function generatePayslipForEmployee(
           payrollPolicyRules: policySnapshot?.appliedRules as unknown as Prisma.InputJsonValue | undefined,
           inputSnapshot: {
             version: 1,
-            employee: { id: employee.id, employeeNumber: employee.employeeNumber, name: `${employee.firstName ?? ""} ${employee.lastName ?? ""}`.trim(), branchId: employee.branchId, locationId: employee.locationId, departmentId: employee.departmentId, payMode: employee.payMode ?? "monthly", salary: employee.salary },
+            employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName, position: employee.position ?? null, joiningDate: employee.joiningDate ?? null, branchId: employee.branchId, branchName: employee.branchName ?? null, locationId: employee.locationId, departmentId: employee.departmentId, departmentName: employee.departmentName ?? null, pan: employee.pan ?? null, uan: employee.uan ?? null, payMode: employee.payMode ?? "monthly", salary: employee.salary },
             statutory: { pfAllowed: employee.pfAllowed ?? null, esicAllowed: employee.esicAllowed ?? null, tdsAllowed: employee.tdsAllowed ?? null },
             // This private snapshot is never returned to employee/admin list UI;
             // it preserves the payment instruction selected at run generation.
