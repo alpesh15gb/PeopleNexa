@@ -401,6 +401,9 @@ export function PayrollPanel({
           {canManageSettings && <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
             <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Settings
           </Button>}
+          {canManageSettings && <Button size="sm" variant="ghost" onClick={() => router.push("/admin/payroll/configuration")}>
+            <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Rule hub
+          </Button>}
           <Select value={bank} onChange={(e) => setBank(e.target.value)} aria-label="Bank format" className="w-full sm:w-auto lg:w-52">
             {BANKS.map((b) => (
               <option key={b.key} value={b.key}>{b.label}</option>

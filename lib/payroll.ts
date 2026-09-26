@@ -642,10 +642,13 @@ export function computePayroll(
 }
 
 function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, monthlyBase: number) {
-  if (!rules?.length) return null;
+  // Employer benefits, reimbursements, variable and one-time catalog entries
+  // are deliberately not inferred into payroll amounts by this engine.
+  const operationalRules = rules?.filter((rule): rule is PayrollComponentRule & { kind: "earning" | "deduction"; formula: "fixed" | "percent_of_ctc" | "percent_of_component" | "salary_band_fixed" } => rule.active !== false && (rule.kind === "earning" || rule.kind === "deduction") && !["variable", "one_time"].includes(rule.formula)) ?? [];
+  if (!operationalRules.length) return null;
   const values = new Map<string, number>();
   const rows: PayrollResult["salaryBreakdown"] = [];
-  for (const rule of rules) {
+  for (const rule of operationalRules) {
     // Component rules are evaluated against the monthly payroll base. Their
     // historical "CTC" labels are not treated as annual CTC implicitly.
     const eligible = (rule.minCtc === null || monthlyBase >= rule.minCtc) && (rule.maxCtc === null || monthlyBase <= rule.maxCtc);
@@ -659,9 +662,9 @@ function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, mo
     amount = round2(amount); values.set(rule.code, amount);
     rows.push({ label: rule.label, amount, kind: rule.kind, includeInGross: rule.includeInGross, visibleOnPayslip: rule.visibleOnPayslip });
   }
-  const wageBase = rules.find((rule) => rule.pfWageBase);
+  const wageBase = operationalRules.find((rule) => rule.pfWageBase);
   const grossEarnings = round2(rows.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.amount, 0));
-  const allowances = round2(rows.filter((row, index) => row.kind === "earning" && rules[index].code !== wageBase?.code).reduce((sum, row) => sum + row.amount, 0));
+  const allowances = round2(rows.filter((row, index) => row.kind === "earning" && operationalRules[index].code !== wageBase?.code).reduce((sum, row) => sum + row.amount, 0));
   return { basic: wageBase ? values.get(wageBase.code) ?? 0 : 0, allowances, grossEarnings, deductions: round2(rows.filter((row) => row.kind === "deduction").reduce((sum, row) => sum + row.amount, 0)), rows };
 }
 
