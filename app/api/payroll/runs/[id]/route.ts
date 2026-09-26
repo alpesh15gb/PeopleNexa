@@ -3,13 +3,16 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { canTransitionPayrollRun, payrollRunAuditData, payrollRunTransitionData, type PayrollRunStatus } from "@/lib/payroll-runs";
 import { payrollRunPreflight } from "@/lib/payroll-preflight";
+import { managerLocationId } from "@/lib/location-scope";
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const target = String((await req.json().catch(() => ({}))).status ?? "") as PayrollRunStatus;
-  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!canTransitionPayrollRun(run.status, target)) return NextResponse.json({ error: `Cannot move a ${run.status} run directly to ${target}.` }, { status: 409 });
   if (target === "approved" && run.createdBy === session.sub) return NextResponse.json({ error: "The run creator cannot approve their own payroll run." }, { status: 403 });

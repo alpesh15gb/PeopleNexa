@@ -20,7 +20,7 @@ export default async function AdminPayrollPage({
   const { month: monthParam } = await searchParams;
   const month = monthParam || monthKey(new Date());
 
-  const [employees, runs, payslips] = await Promise.all([
+  const [employees, runs, payslips, recentRuns] = await Promise.all([
     prisma.employee.findMany({
       where: { tenantId: session.tenantId, ...employeeScope },
       select: {
@@ -37,10 +37,23 @@ export default async function AdminPayrollPage({
       },
       orderBy: { employeeNumber: "asc" },
     }),
-    prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) }, orderBy: { createdAt: "desc" }, take: 1, include: { _count: { select: { payslips: true } } } }),
+    prisma.payrollRun.findMany({
+      where: { tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) },
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: { select: { payslips: true, members: true } },
+        members: { where: { exception: { not: null } }, select: { id: true, exception: true, employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true } } } },
+      },
+    }),
     prisma.payslip.findMany({
       where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
+    }),
+    prisma.payrollRun.findMany({
+      where: { tenantId: session.tenantId, ...(locationId ? { locationId } : {}) },
+      orderBy: [{ month: "desc" }, { createdAt: "desc" }],
+      take: 6,
+      include: { _count: { select: { payslips: true, members: true } } },
     }),
   ]);
 
@@ -68,10 +81,10 @@ export default async function AdminPayrollPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Payroll" description="Run-controlled monthly payroll. Compliance exports are operational summaries, not filing-ready." />
+      <PageHeader title="Payroll" description="Run-controlled payroll operations. Policy configuration is kept separate from this workspace." />
       <Card>
         <CardContent className="p-0">
-          <PayrollPanel month={month} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} />
+          <PayrollPanel month={month} locationLabel={locationId ? "Assigned location" : "All locations"} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} history={recentRuns} />
         </CardContent>
       </Card>
     </div>

@@ -1,1049 +1,118 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, CheckCircle2, Eye, Banknote, Download, Landmark, Settings2, SlidersHorizontal, Trash2, Plus, FileSpreadsheet, Scale, RefreshCw, FileArchive } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, FileArchive, FileSpreadsheet, Landmark, Play, Settings2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusPill } from "@/components/ui/badge";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
-import { ConfirmDialog } from "@/components/ui/confirm";
-import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
 import { formatDate } from "@/lib/dates";
+import { useToast } from "@/components/ui/toast";
 
-interface Employee {
-  id: string;
-  employeeNumber: string;
-  firstName: string;
-  lastName: string;
-  salary: number | null;
-  accountNumber: string | null;
-  ifscCode: string | null;
-  bankName: string | null;
-  payMode?: string;
-  department: { name: string } | null;
-  branch: { name: string } | null;
-}
+type Employee = { id: string; employeeNumber: string; firstName: string; lastName: string; salary: number | null; accountNumber: string | null; ifscCode: string | null; department: { name: string } | null; branch: { name: string } | null };
+type Payslip = { id: string; payrollRunId?: string | null; month: string; grossEarnings: number; deductions: number; netSalary: number; status: string; presentDays: number; lateDays: number; halfDays: number; absentDays: number; absentDeduction?: number; adjustments: { label: string; amount: number }[] | null; paidAt: string | Date | null };
+type Row = { employee: Employee; payslip: Payslip | null };
+type Run = { id: string; month: string; status: string; createdBy: string; createdAt: string | Date; reviewedAt?: string | Date | null; approvedAt?: string | Date | null; finalizedAt?: string | Date | null; paidAt?: string | Date | null; _count: { payslips: number; members?: number }; members?: { id: string; exception: string | null; employee: { id: string; employeeNumber: string; firstName: string; lastName: string } }[] };
 
-interface Payslip {
-  id: string;
-  payrollRunId?: string | null;
-  month: string;
-  baseSalary: number;
-  basicSalary: number;
-  allowances: number;
-  overtimePay: number;
-  grossEarnings: number;
-  pfEmployee: number;
-  pfEmployer: number;
-  esicEmployee: number;
-  esicEmployer: number;
-  professionalTax: number;
-  lwf: number;
-  tds: number;
-  lateFines: number;
-  loanDeduction: number;
-  absentDeduction?: number;
-  gratuity?: number;
-  deductions: number;
-  netSalary: number;
-  status: string;
-  note: string | null;
-  paidVia: string | null;
-  paidAt: string | Date | null;
-  paymentRef: string | null;
-  presentDays: number;
-  lateDays: number;
-  halfDays: number;
-  absentDays: number;
-  overtimeHours: number;
-  workedHours: number;
-  adjustments: { label: string; amount: number }[] | null;
-  salaryBreakdown?: { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] | null;
-}
+const lifecycle = ["draft", "reviewed", "approved", "finalized", "paid"];
+const labels: Record<string, string> = { draft: "Draft", reviewed: "Review", approved: "Approved", finalized: "Finalized", paid: "Paid" };
 
-interface Row {
-  employee: Employee;
-  payslip: Payslip | null;
-}
+function person(employee: Pick<Employee, "firstName" | "lastName">) { return `${employee.firstName} ${employee.lastName}`.trim(); }
 
-const BANKS = [
-  { key: "generic", label: "Generic NEFT (SBI/Axis/Kotak)" },
-  { key: "hdfc", label: "HDFC eNET salary" },
-  { key: "icici", label: "ICICI PAB-SAL salary transfer" },
-];
-
-const STATES = ["Gujarat", "Maharashtra", "Karnataka", "Tamil Nadu", "Telangana", "Delhi", "Uttar Pradesh", "Rajasthan", "West Bengal", "Other"];
-
-const PAID_VIA_OPTIONS = [
-  { key: "bank", label: "Bank transfer" },
-  { key: "upi", label: "UPI" },
-  { key: "cash", label: "Cash" },
-  { key: "other", label: "Other" },
-];
-
-function formatPaidMeta(p: Pick<Payslip, "paidVia" | "paidAt" | "paymentRef">): string | null {
-  if (!p.paidVia && !p.paidAt) return null;
-  const date = p.paidAt
-    ? formatDate(new Date(p.paidAt))
-    : null;
-  const via = p.paidVia ? `via ${p.paidVia}` : null;
-  return [via, date].filter(Boolean).join(" · ");
-}
-
-export function PayrollPanel({
-  month,
-  rows,
-  totals,
-  generated,
-  canManageSettings,
-  run,
-}: {
-  month: string;
-  rows: Row[];
-  totals: { gross: number; deductions: number; net: number; paid: number };
-  generated: number;
-  canManageSettings: boolean;
-  run: { id: string; status: string; createdBy: string; _count: { payslips: number } } | null;
-}) {
+export function PayrollPanel({ month, locationLabel, rows, totals, generated, canManageSettings, run, history }: { month: string; locationLabel: string; rows: Row[]; totals: { gross: number; deductions: number; net: number; paid: number }; generated: number; canManageSettings: boolean; run: Run | null; history: Run[] }) {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [detail, setDetail] = useState<Row | null>(null);
   const [bank, setBank] = useState("generic");
-  const [debitAccount, setDebitAccount] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adjustmentsOpen, setAdjustmentsOpen] = useState(false);
-  const [complianceType, setComplianceType] = useState("ecr");
-  // PAYOUT-STATUS tracking (PagarBook bulk-payment parity)
-  const [payTarget, setPayTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
-  const [payVia, setPayVia] = useState("bank");
-  const [payRef, setPayRef] = useState("");
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkVia, setBulkVia] = useState("bank");
-  const [bulkRef, setBulkRef] = useState("");
-  const [markExportedOpen, setMarkExportedOpen] = useState(false);
-  const [regenTarget, setRegenTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
-  const [selectedPayslips, setSelectedPayslips] = useState<Set<string>>(new Set());
+  const exceptionRows = [
+    ...rows.filter(({ payslip }) => payslip && payslip.netSalary < 0).map(({ employee }) => ({ employee, message: "Negative net pay must be resolved before finalization." })),
+    ...rows.filter(({ payslip, employee }) => payslip && (!employee.accountNumber || !employee.ifscCode)).map(({ employee }) => ({ employee, message: "Missing bank account or IFSC. This employee will be excluded from a bank export." })),
+    ...(run?.members ?? []).filter((member) => member.exception).map((member) => ({ employee: member.employee, message: member.exception! })),
+  ];
 
-  async function transitionRun(status: string) {
-    if (!run) return;
-    setBusy(`run-${status}`);
+  function changePeriod(value: string) { if (value) router.push(`/admin/payroll?month=${value}`); }
+  async function createDraft() {
+    setBusy("create");
     try {
-      const res = await fetch(`/api/payroll/runs/${run.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
-      const data = await res.json();
-      if (!res.ok) return toast("error", data.error ?? "Run transition failed");
-      toast("success", `Payroll run ${status}`);
+      const response = await fetch("/api/payroll/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month }) });
+      const data = await response.json();
+      if (!response.ok) return toast("error", data.error ?? "Could not create payroll draft.");
+      toast("success", `Draft created: ${data.totals.created} payslips generated.`);
       router.refresh();
     } finally { setBusy(null); }
   }
-
-  const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
-  const draftSlips = rows.filter((r) => r.payslip && r.payslip.status !== "paid");
-  const exportedDraftSlips = rows.filter(
-    (r) => r.payslip && r.payslip.status !== "paid" && r.employee.accountNumber && r.employee.ifscCode
-  );
-  const generatedRows = rows.filter((row) => row.payslip);
-
-  function downloadPayslips(employeeIds: string[]) {
-    if (!employeeIds.length) return;
-    const query = new URLSearchParams({ month, ...(employeeIds.length === generatedRows.length ? {} : { employeeIds: employeeIds.join(",") }) });
-    window.location.href = `/api/payroll/payslips?${query}`;
-  }
-
-  async function generate() {
-    setBusy("generate");
+  async function transition(status: string) {
+    if (!run) return;
+    setBusy(status);
     try {
-      const res = await fetch("/api/payroll/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to generate payslips");
-        return;
-      }
-       const totals = data.totals ?? { created: data.created ?? 0, skipped: data.skipped ?? 0, failed: 0 };
-       const detail = `${totals.created} created · ${totals.skipped} skipped · ${totals.failed} failed`;
-       const failedNames = (data.results ?? []).filter((result: { error?: string }) => result.error).slice(0, 3).map((result: { employeeName?: string; error?: string }) => `${result.employeeName ?? "Employee"}: ${result.error}`).join("; ");
-       toast(totals.failed > 0 ? "error" : "success", `Payroll ${month}: ${detail}${failedNames ? ` · ${failedNames}` : ""}${data.loanApplied ? ` · ${formatMoney(data.loanApplied)} deducted for loans` : ""}`);
+      const response = await fetch(`/api/payroll/runs/${run.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const data = await response.json();
+      if (!response.ok) return toast("error", data.error ?? "Run transition failed.");
+      toast("success", `Payroll run ${status}.`);
       router.refresh();
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   }
-
-  async function setStatus(id: string, status: string, opts?: { paidVia?: string; paymentRef?: string }) {
-    setBusy(id);
+  async function exportBank() {
+    if (!run) return;
+    setBusy("bank");
     try {
-      const res = await fetch(`/api/payroll/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status,
-          ...(status === "paid" && opts?.paidVia ? { paidVia: opts.paidVia } : {}),
-          ...(status === "paid" && opts?.paymentRef !== undefined ? { paymentRef: opts.paymentRef } : {}),
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        toast("error", data.error ?? "Failed to update");
-        return false;
-      }
-      toast("success", status === "paid" ? "Payslip marked as paid" : "Payslip reverted to draft");
-      router.refresh();
-      return true;
-    } finally {
-      setBusy(null);
-    }
+      const response = await fetch(`/api/payroll/export?${new URLSearchParams({ month, bank, runId: run.id }).toString()}`);
+      if (!response.ok) { const data = await response.json().catch(() => ({})); return toast("error", data.error ?? "Bank export failed."); }
+      const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `salary-${month}.csv`; link.click(); URL.revokeObjectURL(url);
+      toast("success", "Bank file downloaded. Record payment only after the bank confirms settlement.");
+    } finally { setBusy(null); }
   }
+  function downloadSlip(row: Row) { if (row.payslip) window.location.href = `/api/payroll/payslips?${new URLSearchParams({ month, employeeIds: row.employee.id })}`; }
+  const next = !run ? { label: "Create draft run", copy: "Calculates this period using the policy in effect. It does not pay employees.", action: createDraft, key: "create" } : run.status === "draft" ? { label: "Send for review", copy: "Confirm exceptions and calculation inputs before sending this draft to a reviewer.", action: () => transition("reviewed"), key: "reviewed" } : run.status === "reviewed" ? { label: "Approve run", copy: run.createdBy ? "Approval is a separate control. The run creator cannot approve their own run." : "Approval is a separate control.", action: () => transition("approved"), key: "approved" } : run.status === "approved" ? { label: "Finalize payroll", copy: "Freezes payroll documents and enables the bank export after preflight passes.", action: () => transition("finalized"), key: "finalized" } : run.status === "finalized" ? { label: "Mark run paid", copy: "Use only after the payment batch has settled. This marks all run payslips paid.", action: () => transition("paid"), key: "paid" } : null;
 
-  async function confirmSinglePaid() {
-    if (!payTarget) return;
-    const ok = await setStatus(payTarget.payslip.id, "paid", { paidVia: payVia, paymentRef: payRef.trim() });
-    if (ok) {
-      setPayTarget(null);
-      setPayRef("");
-    }
-  }
-
-  async function confirmRegenerate() {
-    if (!regenTarget) return;
-    const id = regenTarget.payslip.id;
-    setBusy(`regen-${id}`);
-    try {
-      const res = await fetch(`/api/payroll/${id}/regenerate`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to regenerate payslip");
-        return;
-      }
-      toast("success", `Payslip regenerated · net ${formatMoney(data.payslip?.netSalary ?? regenTarget.payslip.netSalary)}`);
-      setRegenTarget(null);
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  // Bulk "Mark month paid": client-side loop over PATCH to avoid a new route.
-  // Uses Promise.allSettled so one failure doesn't abort the rest; shows a summary toast.
-  async function confirmBulkPaid() {
-    if (draftSlips.length === 0) {
-      setBulkOpen(false);
-      return;
-    }
-    setBusy("bulk-paid");
-    try {
-      const results = await Promise.allSettled(
-        draftSlips.map(({ payslip }) =>
-          fetch(`/api/payroll/${payslip!.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "paid", paidVia: bulkVia, paymentRef: bulkRef.trim() }),
-          }).then((r) => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          })
-        )
-      );
-      const okCount = results.filter((r) => r.status === "fulfilled").length;
-      const failCount = results.length - okCount;
-      if (okCount > 0 && failCount === 0) toast("success", `${okCount} payslip${okCount > 1 ? "s" : ""} marked paid via ${bulkVia}`);
-      else if (okCount > 0) toast("error", `${okCount} marked paid, ${failCount} failed — retry the remaining drafts`);
-      else toast("error", "Failed to mark payslips paid");
-      setBulkOpen(false);
-      setBulkRef("");
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  // After a bank-file export, the exported (bank-details) drafts can be marked paid via bank.
-  async function confirmMarkExportedPaid() {
-    if (exportedDraftSlips.length === 0) {
-      setMarkExportedOpen(false);
-      return;
-    }
-    setBusy("bulk-paid");
-    try {
-      const results = await Promise.allSettled(
-        exportedDraftSlips.map(({ payslip }) =>
-          fetch(`/api/payroll/${payslip!.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "paid", paidVia: "bank" }),
-          }).then((r) => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          })
-        )
-      );
-      const okCount = results.filter((r) => r.status === "fulfilled").length;
-      const failCount = results.length - okCount;
-      if (failCount === 0) toast("success", `${okCount} exported payslip${okCount > 1 ? "s" : ""} marked paid`);
-      else toast("error", `${okCount} marked paid, ${failCount} failed`);
-      setMarkExportedOpen(false);
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function exportBankFile() {
-    if (bank === "icici" && !debitAccount) {
-      toast("error", "Enter your company debit account number for the ICICI file");
-      return;
-    }
-    setBusy("export");
-    try {
-      if (!run || (run.status !== "finalized" && run.status !== "paid")) {
-        toast("error", "Finalize the payroll run before exporting a bank file");
-        return;
-      }
-      const q = new URLSearchParams({ month, bank, runId: run.id, status: "draft", ...(debitAccount ? { debitAccount } : {}) });
-      const res = await fetch(`/api/payroll/export?${q.toString()}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast("error", data.error ?? "Failed to export");
-        return;
-      }
-      const blob = await res.blob();
-      const filename = (res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/) ?? [])[1] ?? `salary-${month}.csv`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-      const skipped = res.headers.get("X-Skipped-Rows");
-      toast("success", skipped ? `Bank file downloaded (${skipped} skipped — no bank details)` : "Bank file downloaded");
-      // Offer to mark the just-exported slips paid (only those with bank details can be in the file).
-      if (exportedDraftSlips.length > 0) setMarkExportedOpen(true);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function exportCompliance() {
-    setBusy("compliance");
-    try {
-      const q = new URLSearchParams({ type: complianceType, month });
-      const res = await fetch(`/api/payroll/compliance?${q.toString()}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast("error", data.error ?? "Failed to export");
-        return;
-      }
-      const blob = await res.blob();
-      const filename = (res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/) ?? [])[1] ?? `compliance-${month}.csv`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast("success", "Compliance file downloaded");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function exportTally() {
-    setBusy("tally");
-    try {
-      const res = await fetch(`/api/payroll/tally?month=${month}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        toast("error", data.error ?? "Failed to export");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `tally-journal-${month}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast("success", "Tally journal downloaded");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const stats = [
-    { label: "Payslips", value: generated, cls: "text-foreground" },
-    { label: "Gross", value: formatMoney(totals.gross), cls: "text-emerald-300" },
-    { label: "Deductions", value: formatMoney(totals.deductions), cls: "text-rose-300" },
-    { label: "Net pay", value: formatMoney(totals.net), cls: "text-indigo-300" },
-    { label: "Paid", value: `${totals.paid}/${generated}`, cls: "text-amber-300" },
-  ];
-
-  return (
-    <>
-      <div className="grid grid-cols-1 gap-3 border-b border-edge px-5 py-4 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center lg:justify-between">
-        <div className="flex items-center gap-2">
-          <Input
-            type="month"
-            defaultValue={month}
-            aria-label="Payroll month"
-            onChange={(e) => e.target.value && router.push(`/admin/payroll?month=${e.target.value}`)}
-            className="w-full sm:w-44"
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
-          <Button size="sm" variant="ghost" onClick={() => setAdjustmentsOpen(true)}>
-            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5" /> Adjustments
-          </Button>
-          {canManageSettings && <Button size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
-            <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Settings
-          </Button>}
-          {canManageSettings && <Button size="sm" variant="ghost" onClick={() => router.push("/admin/payroll/configuration")}>
-            <Settings2 aria-hidden="true" className="h-3.5 w-3.5" /> Rule hub
-          </Button>}
-          <Select value={bank} onChange={(e) => setBank(e.target.value)} aria-label="Bank format" className="w-full sm:w-auto lg:w-52">
-            {BANKS.map((b) => (
-              <option key={b.key} value={b.key}>{b.label}</option>
-            ))}
-          </Select>
-          {bank === "icici" && (
-            <Input value={debitAccount} onChange={(e) => setDebitAccount(e.target.value)} placeholder="Debit account no." aria-label="Debit account number" className="w-full sm:w-auto lg:w-40" />
-          )}
-          <Button size="sm" variant="outline" loading={busy === "export"} onClick={exportBankFile} disabled={generated === 0}>
-            <Download aria-hidden="true" className="h-3.5 w-3.5" /> Bank file
-          </Button>
-          {run && <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/payroll/runs/${run.id}/register`; }}><FileSpreadsheet aria-hidden="true" className="h-3.5 w-3.5" /> Register CSV</Button>}
-          <Select value={complianceType} onChange={(e) => setComplianceType(e.target.value)} aria-label="Compliance type" className="w-full sm:w-auto lg:w-40">
-            <option value="ecr">PF ECR</option>
-            <option value="form16">Form 16</option>
-            <option value="form24q">Form 24Q</option>
-          </Select>
-          <Button size="sm" variant="outline" loading={busy === "compliance"} onClick={exportCompliance} disabled={generated === 0}>
-            <FileSpreadsheet aria-hidden="true" className="h-3.5 w-3.5" /> Compliance
-          </Button>
-           <Button size="sm" variant="outline" loading={busy === "tally"} onClick={exportTally} disabled={generated === 0}>
-            <Scale aria-hidden="true" className="h-3.5 w-3.5" /> Tally
-           </Button>
-           <Button size="sm" variant="outline" onClick={() => downloadPayslips(generatedRows.map((row) => row.employee.id))} disabled={generated === 0}>
-             <FileArchive aria-hidden="true" className="h-3.5 w-3.5" /> Download all
-           </Button>
-           {selectedPayslips.size > 0 && (
-             <Button size="sm" variant="outline" onClick={() => downloadPayslips([...selectedPayslips])}>
-               <Download aria-hidden="true" className="h-3.5 w-3.5" /> Download selected ({selectedPayslips.size})
-             </Button>
-           )}
-          {draftSlips.length > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)} disabled={generated === 0 || busy !== null}>
-              <Banknote aria-hidden="true" className="h-3.5 w-3.5" /> Mark month paid ({draftSlips.length})
-            </Button>
-          )}
-          <Button size="sm" loading={busy === "generate"} onClick={generate}>
-            <Sparkles aria-hidden="true" className="h-3.5 w-3.5" /> Generate payslips
-          </Button>
-        </div>
-      </div>
-
-      {missingBank > 0 && (
-        <div className="flex items-center gap-2 border-b border-amber-400/15 bg-amber-500/5 px-5 py-2.5 text-[12.5px] text-amber-300">
-          <Landmark className="h-4 w-4 shrink-0" />
-          {missingBank} employee{missingBank > 1 ? "s have" : " has"} a payslip but no bank details — add account number + IFSC under Employees to include them in the bank file.
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2 border-b border-edge bg-tint/40 px-5 py-3 text-[12.5px]">
-        <span className="font-semibold">Run control:</span>
-        {run ? <><StatusPill status={run.status} /><span className="text-muted-foreground">{run._count.payslips} slips · drafts are internal until finalized</span>
-          {run.status === "draft" && <Button size="sm" variant="outline" loading={busy === "run-reviewed"} onClick={() => transitionRun("reviewed")}>Send for review</Button>}
-          {run.status === "reviewed" && <Button size="sm" variant="outline" loading={busy === "run-approved"} onClick={() => transitionRun("approved")}>Approve</Button>}
-          {run.status === "approved" && <Button size="sm" variant="outline" loading={busy === "run-finalized"} onClick={() => transitionRun("finalized")}>Finalize</Button>}
-          {run.status === "finalized" && <Button size="sm" variant="success" loading={busy === "run-paid"} onClick={() => transitionRun("paid")}>Mark run paid</Button>}
-        </> : <span className="text-muted-foreground">No run for this period. Create a draft to calculate payroll.</span>}
-      </div>
-      <div className="border-b border-amber-400/15 bg-amber-500/5 px-5 py-2 text-[12px] text-amber-300">Compliance downloads are operational summaries only. Do not file PF, ESIC, TDS, Form 16, or 24Q outputs until a verified statutory rule set and client review are in place.</div>
-
-      <div className="grid grid-cols-2 gap-3 border-b border-edge p-5 sm:grid-cols-5">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl border border-edge bg-tint px-3.5 py-3">
-            <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">{s.label}</p>
-            <p className={`mt-1 font-display text-lg font-bold ${s.cls}`}>{s.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <Table>
-        <THead>
-          <TR>
-            <TH className="w-10"><input type="checkbox" aria-label="Select all generated payslips" checked={generatedRows.length > 0 && selectedPayslips.size === generatedRows.length} onChange={(e) => setSelectedPayslips(e.target.checked ? new Set(generatedRows.map((row) => row.employee.id)) : new Set())} /></TH>
-            <TH>Employee</TH>
-            <TH className="hidden md:table-cell">Department</TH>
-            <TH className="text-right">Base salary</TH>
-            <TH className="text-right">Net pay</TH>
-            <TH>Status</TH>
-            <TH className="w-32" />
-          </TR>
-        </THead>
-        <TBody>
-          {rows.map(({ employee, payslip }) => (
-            <TR key={employee.id}>
-              <TD><input type="checkbox" aria-label={`Select payslip for ${employee.firstName} ${employee.lastName}`} disabled={!payslip} checked={selectedPayslips.has(employee.id)} onChange={(e) => setSelectedPayslips((current) => { const next = new Set(current); if (e.target.checked) next.add(employee.id); else next.delete(employee.id); return next; })} /></TD>
-              <TD>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
-                    {(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}
-                  </div>
-                  <div>
-                    <p className="text-[13.5px] font-medium">
-                      {employee.firstName} {employee.lastName}
-                      {!employee.accountNumber && payslip && (
-                        <span className="ml-2 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-300">no bank</span>
-                      )}
-                    </p>
-                    <p className="text-[11.5px] text-muted-foreground">
-                      {employee.employeeNumber}
-                      {employee.payMode && employee.payMode !== "monthly" && (
-                        <span className="ml-2 rounded-full bg-indigo-500/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-indigo-300">
-                          {employee.payMode.replace("_", " ")}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </TD>
-              <TD className="hidden md:table-cell">
-                <span className="text-[13px] text-muted-foreground">{employee.department?.name ?? "—"}</span>
-              </TD>
-              <TD className="text-right font-mono text-[13px]">
-                {employee.salary ? formatMoney(employee.salary) : <Badge tone="neutral">no salary</Badge>}
-              </TD>
-              <TD className="text-right font-mono text-[13px] font-semibold">
-                {payslip ? formatMoney(payslip.netSalary) : "—"}
-              </TD>
-              <TD>{payslip ? (
-                <div>
-                  <StatusPill status={payslip.status} />
-                  {payslip.status === "paid" && formatPaidMeta(payslip) && (
-                    <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-                      {formatPaidMeta(payslip)}
-                      {payslip.paymentRef && <span className="block truncate font-mono" title={payslip.paymentRef}>ref: {payslip.paymentRef}</span>}
-                    </p>
-                  )}
-                </div>
-              ) : <Badge tone="neutral">not generated</Badge>}</TD>
-              <TD>
-                {payslip ? (
-                  <div className="flex items-center gap-1.5">
-                    <Button size="sm" variant="outline" onClick={() => setViewing({ employee, payslip })}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      title={payslip.status === "paid" ? "Paid payslips cannot be regenerated" : "Regenerate payslip"}
-                      loading={busy === `regen-${payslip.id}`}
-                      disabled={payslip.status === "paid" || (busy !== null && busy !== `regen-${payslip.id}`)}
-                      onClick={() => setRegenTarget({ employee, payslip })}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
-                    {payslip.status === "draft" && !payslip.payrollRunId ? (
-                      <Button
-                        size="sm"
-                        variant="success"
-                        loading={busy === payslip.id}
-                        disabled={busy === "bulk-paid"}
-                        onClick={() => {
-                          setPayTarget({ employee, payslip });
-                          setPayVia("bank");
-                          setPayRef("");
-                        }}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5" /> Pay
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  <span className="text-[12px] text-muted-foreground/60">—</span>
-                )}
-              </TD>
-            </TR>
-          ))}
-        </TBody>
-      </Table>
-
-      <PayslipModal data={viewing} onClose={() => setViewing(null)} />
-      {canManageSettings && <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
-      <AdjustmentsModal open={adjustmentsOpen} onClose={() => setAdjustmentsOpen(false)} month={month} rows={rows} />
-
-      {/* Single-payslip Mark paid (paidVia + paymentRef) */}
-      <Modal
-        open={payTarget !== null}
-        onClose={() => setPayTarget(null)}
-        title={payTarget ? `Mark paid · ${payTarget.employee.firstName} ${payTarget.employee.lastName}` : "Mark paid"}
-        description={payTarget ? `${formatMoney(payTarget.payslip.netSalary)} for ${payTarget.payslip.month}` : undefined}
-        size="sm"
-      >
-        <div className="space-y-3">
-          <Field label="Paid via">
-            <Select value={payVia} onChange={(e) => setPayVia(e.target.value)}>
-              {PAID_VIA_OPTIONS.map((o) => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
-            </Select>
-          </Field>
-          {payTarget && (payTarget.payslip.absentDeduction ?? 0) > 0 && (
-            <p className="rounded-lg bg-tint px-3 py-2 text-[12px] text-muted-foreground">
-              Includes absent deduction of {formatMoney(payTarget.payslip.absentDeduction as number)} ({payTarget.payslip.absentDays} day{payTarget.payslip.absentDays === 1 ? "" : "s"} absent).
-            </p>
-          )}
-          <Field label="Payment ref (optional)" hint="UTR / batch id / receipt no.">
-            <Input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="e.g. UTIB1234567890" maxLength={120} />
-          </Field>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setPayTarget(null)}>Cancel</Button>
-            <Button variant="success" loading={payTarget ? busy === payTarget.payslip.id : false} onClick={confirmSinglePaid}>
-              <CheckCircle2 className="h-4 w-4" /> Mark paid
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Bulk Mark month paid (client loop of PATCH, no new route) */}
-      <Modal
-        open={bulkOpen}
-        onClose={() => setBulkOpen(false)}
-        title={`Mark month paid · ${month}`}
-        description={`${draftSlips.length} draft payslip${draftSlips.length === 1 ? "" : "s"} will be marked paid`}
-        size="sm"
-      >
-        <div className="space-y-3">
-          <Field label="Paid via (applies to all)">
-            <Select value={bulkVia} onChange={(e) => setBulkVia(e.target.value)}>
-              {PAID_VIA_OPTIONS.map((o) => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Payment ref (optional)" hint="Same ref applied to all slips">
-            <Input value={bulkRef} onChange={(e) => setBulkRef(e.target.value)} placeholder="e.g. batch / UTR" maxLength={120} />
-          </Field>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={() => setBulkOpen(false)}>Cancel</Button>
-            <Button variant="success" loading={busy === "bulk-paid"} onClick={confirmBulkPaid}>
-              <CheckCircle2 className="h-4 w-4" /> Mark {draftSlips.length} paid
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <ConfirmDialog
-        open={markExportedOpen}
-        title="Mark exported slips paid?"
-        description={`${exportedDraftSlips.length} exported draft payslip${exportedDraftSlips.length === 1 ? "" : "s"} (with bank details) will be marked paid via bank.`}
-        confirmLabel="Mark paid"
-        busy={busy === "bulk-paid"}
-        onCancel={() => setMarkExportedOpen(false)}
-        onConfirm={confirmMarkExportedPaid}
-      />
-
-      <ConfirmDialog
-        open={regenTarget !== null}
-        title={regenTarget ? `Regenerate payslip · ${regenTarget.employee.firstName} ${regenTarget.employee.lastName}` : "Regenerate payslip"}
-        description={regenTarget ? `Recompute ${regenTarget.payslip.month} from current attendance, adjustments and settings?` : undefined}
-        confirmLabel="Regenerate"
-        busy={regenTarget ? busy === `regen-${regenTarget.payslip.id}` : false}
-        onCancel={() => setRegenTarget(null)}
-        onConfirm={confirmRegenerate}
-      />
-    </>
-  );
-}
-
-function PayslipModal({
-  data,
-  onClose,
-}: {
-  data: { employee: Employee; payslip: Payslip } | null;
-  onClose: () => void;
-}) {
-  const p = data?.payslip;
-  const emp = data?.employee;
-  if (!p || !emp) return null;
-
-  const configuredEarnings = (p.salaryBreakdown ?? []).filter((component) => component.kind === "earning" && component.visibleOnPayslip).map((component) => ({ label: component.label, value: component.amount, strong: false }));
-  const configuredDeductions = (p.salaryBreakdown ?? []).filter((component) => component.kind === "deduction" && component.visibleOnPayslip).map((component) => ({ label: component.label, value: component.amount }));
-  const earnings = [
-    ...(configuredEarnings.length ? configuredEarnings : [{ label: "Basic salary", value: p.basicSalary || p.baseSalary * 0.5, strong: false }, { label: "Allowances", value: p.allowances, strong: false }]),
-    ...(p.overtimePay > 0 ? [{ label: `Overtime (${p.overtimeHours} h)`, value: p.overtimePay, strong: false }] : []),
-    ...(p.adjustments?.filter((a) => a.amount > 0).map((a) => ({ label: a.label, value: a.amount, strong: false })) ?? []),
-  ];
-  const deductions = [
-    ...configuredDeductions,
-    { label: "EPF (employee)", value: p.pfEmployee },
-    { label: "ESIC (employee)", value: p.esicEmployee },
-    { label: "Professional tax", value: p.professionalTax },
-    { label: "LWF", value: p.lwf },
-    { label: "TDS (income tax)", value: p.tds },
-    { label: `Late fines (${p.lateDays} late)`, value: p.lateFines },
-    { label: "Loan / advance", value: p.loanDeduction },
-    ...((p.absentDeduction ?? 0) > 0
-      ? [{ label: `Absent deduction (${p.absentDays} day${p.absentDays === 1 ? "" : "s"})`, value: p.absentDeduction as number }]
-      : []),
-    ...(p.adjustments?.filter((a) => a.amount < 0).map((a) => ({ label: a.label, value: Math.abs(a.amount) })) ?? []),
-  ].filter((d) => d.value > 0);
-
-  return (
-    <Modal open={data !== null} onClose={onClose} title={`Payslip · ${p.month}`} size="md">
-      <div className="flex items-center gap-3 border-b border-edge pb-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-brand text-[12px] font-bold text-white">
-          {(emp.firstName[0] ?? "") + (emp.lastName[0] ?? "")}
-        </div>
+  return <div className="min-w-0">
+    <section className="border-b border-edge px-5 py-5 sm:px-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <p className="font-display text-[15px] font-semibold">{emp.firstName} {emp.lastName}</p>
-          <p className="text-[12px] text-muted-foreground">
-            {emp.employeeNumber} · {emp.department?.name ?? "—"} · {emp.branch?.name ?? "—"}
-            {emp.payMode && emp.payMode !== "monthly" ? ` · ${emp.payMode.replace("_", " ")}` : ""}
-          </p>
+          <div className="flex flex-wrap items-center gap-2"><Badge tone="violet">Operations workspace</Badge>{run && <StatusPill status={run.status} />}</div>
+          <h2 className="mt-3 font-display text-xl font-semibold tracking-tight">{month} payroll <span className="text-muted-foreground">/ {locationLabel}</span></h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">A controlled calculation and payout workflow. Statutory files below remain unverified operational summaries.</p>
         </div>
-        <div className="ml-auto">
-          <StatusPill status={p.status} />
-        </div>
-      </div>
-      <div className="mt-3 flex justify-end">
-        <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/payroll/payslips?${new URLSearchParams({ month: p.month, employeeIds: emp.id })}`; }}>
-          <Download className="h-3.5 w-3.5" /> Download PDF
-        </Button>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-2 text-[11.5px] text-muted-foreground">
-        <span className="rounded-md bg-tint px-2 py-1">{p.presentDays} present</span>
-        <span className="rounded-md bg-tint px-2 py-1">{p.lateDays} late</span>
-        <span className="rounded-md bg-tint px-2 py-1">{p.halfDays} half-day</span>
-        <span className="rounded-md bg-tint px-2 py-1">{p.absentDays} absent</span>
-        {p.workedHours > 0 && <span className="rounded-md bg-tint px-2 py-1">{p.workedHours}h worked</span>}
-      </div>
-
-      <div className="mt-3 space-y-3">
-        <div className="rounded-xl border border-edge bg-tint/50 p-3.5">
-          <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-emerald-300">Earnings</p>
-          {earnings.map((r) => (
-            <div key={r.label} className="flex items-center justify-between py-1 text-[13px]">
-              <span className="text-muted-foreground">{r.label}</span>
-              <span className="font-mono">{formatMoney(r.value)}</span>
-            </div>
-          ))}
-          <div className="mt-1 flex items-center justify-between border-t border-edge pt-2">
-            <span className="text-[13px] font-medium">Gross earnings</span>
-            <span className="font-mono font-semibold">{formatMoney(p.grossEarnings)}</span>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-edge bg-tint/50 p-3.5">
-          <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-rose-300">Deductions</p>
-          {deductions.length === 0 && <p className="py-1 text-[13px] text-muted-foreground">No deductions this month.</p>}
-          {deductions.map((r) => (
-            <div key={r.label} className="flex items-center justify-between py-1 text-[13px]">
-              <span className="text-muted-foreground">{r.label}</span>
-              <span className="font-mono">− {formatMoney(r.value)}</span>
-            </div>
-          ))}
-          <div className="mt-1 flex items-center justify-between border-t border-edge pt-2">
-            <span className="text-[13px] font-medium">Total deductions</span>
-            <span className="font-mono font-semibold">− {formatMoney(p.deductions)}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between rounded-xl border border-indigo-400/15 bg-indigo-500/5 px-4 py-3">
-          <span className="font-display text-sm font-semibold">Net pay</span>
-          <span className="font-display text-xl font-bold text-indigo-300">{formatMoney(p.netSalary)}</span>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:w-[25rem]">
+          <label className="text-xs font-medium text-muted-foreground">Pay period<input aria-label="Payroll period" type="month" value={month} onChange={(event) => changePeriod(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></label>
+          <label className="text-xs font-medium text-muted-foreground">Scope<select aria-label="Payroll location scope" disabled value={locationLabel} className="mt-1 h-11 w-full rounded-xl border border-input bg-tint px-3 text-sm text-foreground disabled:opacity-100"><option>{locationLabel}</option></select></label>
+          {canManageSettings && <Button variant="ghost" className="sm:col-span-2 justify-start" onClick={() => { window.location.href = "/admin/payroll/configuration"; }}><Settings2 aria-hidden="true" className="h-4 w-4" />Policy configuration</Button>}
         </div>
       </div>
+      <Lifecycle status={run?.status} />
+    </section>
 
-      <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12.5px] text-emerald-300">
-        <Banknote className="h-4 w-4" />
-        {p.status === "paid"
-          ? `This salary has been disbursed${formatPaidMeta(p) ? ` (${formatPaidMeta(p)})` : ""}${p.paymentRef ? ` · ref ${p.paymentRef}` : ""}.`
-          : "Draft — not yet disbursed."}
-      </div>
-    </Modal>
-  );
+    {next ? <section className="flex flex-col gap-3 border-b border-primary/20 bg-primary/[0.055] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><p className="text-sm font-semibold">Next control: {next.label}</p><p className="mt-0.5 text-xs text-muted-foreground">{next.copy}</p></div><Button className="w-full sm:w-auto" loading={busy === next.key} onClick={next.action}>{next.label}<ArrowRight aria-hidden="true" className="h-4 w-4" /></Button></section> : <section className="border-b border-edge bg-tint/40 px-5 py-4 text-sm text-muted-foreground">This run is terminal. Its records remain available for audit and document retrieval.</section>}
+
+    {!run && <EmptyState canManageSettings={canManageSettings} />}
+    {run && <>
+      <section className="grid gap-px border-b border-edge bg-edge sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Employees calculated" value={String(generated)} detail={`${rows.length - generated} not generated`} />
+        <Kpi label="Gross earnings" value={formatMoney(totals.gross)} />
+        <Kpi label="Deductions" value={formatMoney(totals.deductions)} />
+        <Kpi label="Net pay" value={formatMoney(totals.net)} detail={run.status === "paid" ? `${totals.paid} paid` : "Not a payment confirmation"} prominent />
+      </section>
+      <section className="grid gap-4 border-b border-edge p-5 lg:grid-cols-[1.25fr_.75fr] sm:p-6">
+        <div className="rounded-xl border border-edge bg-card p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Action required</h3><p className="text-xs text-muted-foreground">Resolve or acknowledge blockers before finalization.</p></div><Badge tone={exceptionRows.length ? "warning" : "success"}>{exceptionRows.length ? `${exceptionRows.length} items` : "Clear"}</Badge></div>{exceptionRows.length ? <ul className="mt-3 divide-y divide-edge">{exceptionRows.slice(0, 4).map((item, index) => <li key={`${item.employee.id}-${index}`} className="flex gap-3 py-3"><AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><p className="text-sm"><button className="font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setDetail(rows.find((row) => row.employee.id === item.employee.id) ?? null)}>{person(item.employee)}</button><span className="block text-xs text-muted-foreground">{item.message}</span></p></li>)}</ul> : <p className="mt-4 text-sm text-muted-foreground">No calculation, member, or bank-detail exceptions found in this run.</p>}</div>
+        <div className="rounded-xl border border-edge bg-tint/40 p-4"><h3 className="font-semibold">Run tools</h3><p className="mt-1 text-xs text-muted-foreground">Documents and exports are grouped away from lifecycle controls.</p><div className="mt-4 grid gap-2"><Button variant="outline" onClick={() => setReviewOpen(true)}><FileSpreadsheet aria-hidden="true" className="h-4 w-4" />Review run</Button>{(run.status === "finalized" || run.status === "paid") && <><div className="flex gap-2"><Select aria-label="Bank export format" value={bank} onChange={(event) => setBank(event.target.value)}><option value="generic">Generic NEFT</option><option value="hdfc">HDFC eNET</option><option value="icici">ICICI PAB-SAL</option></Select><Button variant="outline" loading={busy === "bank"} onClick={exportBank}><Landmark aria-hidden="true" className="h-4 w-4" />Bank file</Button></div><Button variant="outline" onClick={() => { window.location.href = `/api/payroll/runs/${run.id}/register`; }}><Download aria-hidden="true" className="h-4 w-4" />Payroll register CSV</Button></>}</div></div>
+      </section>
+      <Register rows={rows} onOpen={setDetail} />
+      <History history={history} current={run.id} />
+    </>}
+    <section className="border-t border-amber-400/25 bg-amber-500/[0.06] px-5 py-3 sm:px-6"><div className="flex gap-2 text-xs text-amber-200"><ShieldAlert aria-hidden="true" className="h-4 w-4 shrink-0" /><p><strong>Compliance exports are unverified.</strong> PF, ESIC, TDS, Form 16, and 24Q downloads are calculation summaries only. Validate statutory rules and complete a client review before filing.</p></div></section>
+    <ReviewModal open={reviewOpen} onClose={() => setReviewOpen(false)} run={run} rows={rows} totals={totals} onSlip={downloadSlip} />
+    <EmployeeDetail data={detail} onClose={() => setDetail(null)} onSlip={downloadSlip} />
+  </div>;
 }
 
-// ─── Payroll settings ───────────────────────────────────────────────────────
-
-function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const toast = useToast();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [cfg, setCfg] = useState<any>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    fetch("/api/config/payroll")
-      .then((r) => r.json())
-      .then((d) => setCfg(d.config))
-      .catch(() => toast("error", "Failed to load settings"))
-      .finally(() => setLoading(false));
-  }, [open, toast]);
-
-  const set = (path: string, value: unknown) => {
-    setCfg((c: any) => {
-      const next = { ...c };
-      const parts = path.split(".");
-      let cur = next;
-      for (let i = 0; i < parts.length - 1; i++) cur = cur[parts[i]];
-      cur[parts[parts.length - 1]] = value;
-      return next;
-    });
-  };
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/config/payroll", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cfg),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to save");
-      toast("success", "Payroll settings saved — regenerate payslips to apply");
-      onClose();
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Payroll settings" size="md">
-      {loading || !cfg ? (
-        <p className="py-8 text-center text-[13px] text-muted-foreground">Loading…</p>
-      ) : (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Basic % of salary (PF wage base)">
-              <Input type="number" value={cfg.basicPercent} onChange={(e) => set("basicPercent", Number(e.target.value))} />
-            </Field>
-            <Field label="Allowances %">
-              <Input type="number" value={cfg.allowancesPercent} onChange={(e) => set("allowancesPercent", Number(e.target.value))} />
-            </Field>
-            <Field label="Late fine per late day (₹)">
-              <Input type="number" value={cfg.lateFinePerLateDay} onChange={(e) => set("lateFinePerLateDay", Number(e.target.value))} />
-            </Field>
-            <Field label="OT multiplier">
-              <Input type="number" step="0.1" value={cfg.otMultiplier} onChange={(e) => set("otMultiplier", Number(e.target.value))} />
-            </Field>
-            <ToggleRow label="Deduct for absent days" checked={Boolean(cfg.deductAbsentDays)} onChange={(v) => set("deductAbsentDays", v)} />
-          </div>
-
-          <div className="space-y-3 rounded-xl border border-edge bg-tint p-4">
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Statutory</p>
-            <div className="grid grid-cols-2 gap-3">
-              <ToggleRow label="PF" checked={cfg.pf.enabled} onChange={(v) => set("pf.enabled", v)} />
-              <Field label="PF wage ceiling (₹)">
-                <Input type="number" value={cfg.pf.wageCeiling} onChange={(e) => set("pf.wageCeiling", Number(e.target.value))} />
-              </Field>
-              <ToggleRow label="ESIC" checked={cfg.esic.enabled} onChange={(v) => set("esic.enabled", v)} />
-              <Field label="ESIC gross ceiling (₹)">
-                <Input type="number" value={cfg.esic.grossCeiling} onChange={(e) => set("esic.grossCeiling", Number(e.target.value))} />
-              </Field>
-              <ToggleRow label="Professional tax" checked={cfg.pt.enabled} onChange={(v) => set("pt.enabled", v)} />
-              <Field label="State (PT + LWF slabs)">
-                <Select value={cfg.pt.state} onChange={(e) => set("pt.state", e.target.value)}>
-                  {STATES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </Select>
-              </Field>
-              <ToggleRow label="LWF (Labour Welfare Fund)" checked={cfg.lwf.enabled} onChange={(v) => set("lwf.enabled", v)} />
-              <ToggleRow label="TDS" checked={cfg.tds.enabled} onChange={(v) => set("tds.enabled", v)} />
-              <Field label="TDS regime">
-                <Select value={cfg.tds.regime} onChange={(e) => set("tds.regime", e.target.value)}>
-                  <option value="new">New regime</option>
-                  <option value="old">Old regime</option>
-                </Select>
-              </Field>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={save} loading={saving}>
-              <Settings2 className="h-4 w-4" /> Save settings
-            </Button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-edge bg-card px-3.5 py-2.5">
-      <span className="text-[13px] font-medium">{label}</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? "bg-gradient-brand" : "bg-muted"}`}
-      >
-        <span aria-hidden="true" className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
-      </button>
-    </div>
-  );
-}
-
-// ─── Adjustments (arrears / bonus / one-off) ────────────────────────────────
-
-function AdjustmentsModal({ open, onClose, month, rows }: { open: boolean; onClose: () => void; month: string; rows: Row[] }) {
-  const toast = useToast();
-  const router = useRouter();
-  const [list, setList] = useState<any[] | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ employeeId: "", type: "arrears", label: "", amount: "", note: "" });
-  const [deleteAdjTarget, setDeleteAdjTarget] = useState<{ id: string; label: string } | null>(null);
-  const [deletingAdj, setDeletingAdj] = useState(false);
-
-  const load = () => {
-    fetch(`/api/payroll/adjustments?month=${month}`)
-      .then((r) => r.json())
-      .then((d) => setList(d.adjustments))
-      .catch(() => toast("error", "Failed to load adjustments"));
-  };
-  useEffect(() => {
-    if (open) {
-      setList(null);
-      load();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, month]);
-
-  async function create() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/payroll/adjustments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, month, amount: Number(form.amount) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to create");
-      toast("success", "Adjustment added — regenerate payslips to include it");
-      setForm({ employeeId: "", type: "arrears", label: "", amount: "", note: "" });
-      load();
-      router.refresh();
-    } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to create");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function confirmRemoveAdjustment() {
-    if (!deleteAdjTarget) return;
-    setDeletingAdj(true);
-    try {
-      const res = await fetch(`/api/payroll/adjustments/${deleteAdjTarget.id}`, { method: "DELETE" });
-      if (!res.ok) {
-        toast("error", "Failed to delete");
-        return;
-      }
-      toast("success", "Adjustment removed");
-      setDeleteAdjTarget(null);
-      load();
-      router.refresh();
-    } finally {
-      setDeletingAdj(false);
-    }
-  }
-
-  const total = (list ?? []).reduce((s: number, a: any) => s + a.amount, 0);
-
-  return (
-    <>
-    <Modal open={open} onClose={onClose} title={`Adjustments · ${month}`} size="md">
-      <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Employee" className="col-span-2">
-            <Select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
-              <option value="">Select employee…</option>
-              {rows.map((r) => (
-                <option key={r.employee.id} value={r.employee.id}>
-                  {r.employee.firstName} {r.employee.lastName} ({r.employee.employeeNumber})
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Type">
-            <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              <option value="arrears">Arrears</option>
-              <option value="bonus">Bonus / incentive</option>
-              <option value="deduction">Deduction</option>
-              <option value="other">Other</option>
-            </Select>
-          </Field>
-          <Field label="Label" hint="e.g. Dec revision arrears">
-            <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Label" />
-          </Field>
-          <Field label="Amount (₹)" hint="Negative = deduction">
-            <Input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="e.g. 5000 or -2000" />
-          </Field>
-          <Field label="Note (optional)">
-            <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="Optional" />
-          </Field>
-        </div>
-        <Button onClick={create} loading={saving} className="w-full">
-          <Plus className="h-4 w-4" /> Add adjustment
-        </Button>
-
-        <div>
-          <p className="mb-2 flex items-center justify-between text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>For {month}</span>
-            <span className="font-mono text-foreground">net {formatMoney(total)}</span>
-          </p>
-          {list === null ? (
-            <p className="py-4 text-center text-[13px] text-muted-foreground">Loading…</p>
-          ) : list.length === 0 ? (
-            <p className="py-4 text-center text-[13px] text-muted-foreground">No adjustments yet for this month.</p>
-          ) : (
-            <div className="divide-y divide-[color:var(--border)] rounded-xl border border-edge">
-              {list.map((a: any) => (
-                <div key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium">{a.label}</p>
-                    <p className="text-[11.5px] text-muted-foreground">
-                      {a.employee?.firstName} {a.employee?.lastName} · {a.type}
-                    </p>
-                  </div>
-                  <span className={`font-mono text-[13px] ${a.amount >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
-                    {a.amount >= 0 ? "+" : "−"}{formatMoney(Math.abs(a.amount))}
-                  </span>
-                  <button onClick={() => setDeleteAdjTarget({ id: a.id, label: a.label })} className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-rose-300" aria-label={`Delete adjustment ${a.label}`}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </Modal>
-    <ConfirmDialog
-      open={deleteAdjTarget !== null}
-      title="Delete adjustment?"
-      description={deleteAdjTarget ? `“${deleteAdjTarget.label}” will be removed. Regenerate payslips to apply.` : undefined}
-      confirmLabel="Delete"
-      busy={deletingAdj}
-      onCancel={() => setDeleteAdjTarget(null)}
-      onConfirm={confirmRemoveAdjustment}
-    />
-    </>
-  );
-}
+function Lifecycle({ status }: { status?: string }) { const current = status ? lifecycle.indexOf(status) : -1; return <ol aria-label="Payroll lifecycle" className="mt-6 grid grid-cols-5 gap-1">{lifecycle.map((step, index) => <li key={step} className="min-w-0"><div className={`h-1 rounded-full ${current >= index ? "bg-primary" : "bg-muted"}`} /><p className={`mt-2 text-[11px] font-medium ${current === index ? "text-foreground" : "text-muted-foreground"}`}>{labels[step]}</p></li>)}</ol>; }
+function Kpi({ label, value, detail, prominent }: { label: string; value: string; detail?: string; prominent?: boolean }) { return <div className="bg-card p-4 sm:p-5"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><p className={`mt-1 font-display text-xl font-bold tabular-nums ${prominent ? "text-primary" : "text-foreground"}`}>{value}</p>{detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}</div>; }
+function EmptyState({ canManageSettings }: { canManageSettings: boolean }) { return <section className="p-5 sm:p-6"><div className="rounded-2xl border border-edge bg-tint/40 p-5 sm:p-7"><Badge tone="info">First payroll</Badge><h3 className="mt-3 font-display text-xl font-semibold">Start with a controlled draft</h3><p className="mt-2 max-w-xl text-sm text-muted-foreground">Set the policy first, create a calculation draft, then review, approve, finalize, and pay. No employee payment is created at this stage.</p><ol className="mt-5 grid gap-3 sm:grid-cols-5">{["Configure policy", "Create draft", "Review", "Approve", "Finalize & pay"].map((step, index) => <li key={step} className="rounded-xl border border-edge bg-card p-3 text-sm"><span className="text-xs font-semibold text-primary">0{index + 1}</span><p className="mt-1 font-medium">{step}</p></li>)}</ol>{canManageSettings && <Button variant="outline" className="mt-5" onClick={() => { window.location.href = "/admin/payroll/configuration"; }}><Settings2 aria-hidden="true" className="h-4 w-4" />Configure payroll policy</Button>}</div></section>; }
+function Register({ rows, onOpen }: { rows: Row[]; onOpen: (row: Row) => void }) { return <section className="border-b border-edge"><div className="flex flex-wrap items-end justify-between gap-3 px-5 py-4 sm:px-6"><div><h3 className="font-semibold">Payroll register</h3><p className="text-xs text-muted-foreground">Select an employee to inspect calculation inputs and documents.</p></div><Badge tone="neutral">{rows.length} employees</Badge></div><div className="w-full overflow-x-auto"><table className="min-w-[760px] w-full text-sm"><thead className="border-y border-edge bg-tint/40 text-left text-[11px] uppercase tracking-wider text-muted-foreground"><tr><th className="sticky left-0 z-10 bg-tint/40 px-5 py-3 sm:px-6">Employee</th><th className="px-4 py-3">Department</th><th className="px-4 py-3 text-right">Gross</th><th className="px-4 py-3 text-right">Deductions</th><th className="px-4 py-3 text-right">Net pay</th><th className="px-4 py-3">Status</th><th className="px-5 py-3" /></tr></thead><tbody className="divide-y divide-edge">{rows.map((row) => <tr key={row.employee.id} className="hover:bg-primary/[0.035]"><td className="sticky left-0 z-10 bg-card px-5 py-3 sm:px-6"><p className="font-medium">{person(row.employee)}</p><p className="text-xs text-muted-foreground">{row.employee.employeeNumber}</p></td><td className="px-4 py-3 text-muted-foreground">{row.employee.department?.name ?? "-"}</td><td className="px-4 py-3 text-right font-mono tabular-nums">{row.payslip ? formatMoney(row.payslip.grossEarnings) : "-"}</td><td className="px-4 py-3 text-right font-mono tabular-nums">{row.payslip ? formatMoney(row.payslip.deductions) : "-"}</td><td className="px-4 py-3 text-right font-mono font-semibold tabular-nums">{row.payslip ? formatMoney(row.payslip.netSalary) : "-"}</td><td className="px-4 py-3">{row.payslip ? <StatusPill status={row.payslip.status} /> : <Badge tone="neutral">Not calculated</Badge>}</td><td className="px-5 py-3"><Button size="sm" variant="ghost" onClick={() => onOpen(row)}>Details</Button></td></tr>)}</tbody></table></div></section>; }
+function History({ history, current }: { history: Run[]; current: string }) { const prior = history.filter((run) => run.id !== current); if (!prior.length) return null; return <section className="p-5 sm:p-6"><h3 className="font-semibold">Recent payroll runs</h3><p className="mt-1 text-xs text-muted-foreground">Drafts and completed runs in this operational scope.</p><div className="mt-3 grid gap-2">{prior.map((run) => <div key={run.id} className="flex items-center justify-between rounded-xl border border-edge px-4 py-3 text-sm"><span><strong>{run.month}</strong> <span className="text-muted-foreground">{run._count.payslips} payslips · created {formatDate(new Date(run.createdAt))}</span></span><StatusPill status={run.status} /></div>)}</div></section>; }
+function ReviewModal({ open, onClose, run, rows, totals, onSlip }: { open: boolean; onClose: () => void; run: Run | null; rows: Row[]; totals: { gross: number; deductions: number; net: number }; onSlip: (row: Row) => void }) { if (!run) return null; const adjustments = rows.flatMap((row) => row.payslip?.adjustments?.map((item) => ({ ...item, employee: person(row.employee) })) ?? []); const lop = rows.filter((row) => (row.payslip?.absentDeduction ?? 0) > 0); const timeline = [["Draft created", run.createdAt], ["Reviewed", run.reviewedAt], ["Approved", run.approvedAt], ["Finalized", run.finalizedAt], ["Paid", run.paidAt]].filter((entry): entry is [string, string | Date] => Boolean(entry[1])); return <Modal open={open} onClose={onClose} title={`Run review · ${run.month}`} description="Calculation summary, payroll documents, and immutable lifecycle evidence." size="xl"><div className="grid gap-3 sm:grid-cols-3"><Kpi label="Gross" value={formatMoney(totals.gross)} /><Kpi label="Deductions" value={formatMoney(totals.deductions)} /><Kpi label="Net pay" value={formatMoney(totals.net)} prominent /></div><div className="mt-6 grid gap-6 lg:grid-cols-2"><section><h3 className="font-semibold">Variance, LOP & adjustments</h3><div className="mt-3 space-y-2"><p className="rounded-lg bg-tint p-3 text-sm"><strong>{lop.length}</strong> employees have loss-of-pay deductions.</p>{adjustments.length ? adjustments.map((item, index) => <p key={`${item.employee}-${index}`} className="rounded-lg border border-edge p-3 text-sm">{item.employee}: {item.label} <span className="float-right font-mono">{item.amount >= 0 ? "+" : "-"}{formatMoney(Math.abs(item.amount))}</span></p>) : <p className="text-sm text-muted-foreground">No one-off adjustments recorded.</p>}</div></section><section><h3 className="font-semibold">Audit timeline</h3><ol className="mt-3 space-y-3 border-l border-edge pl-4">{timeline.map(([label, date]) => <li key={label}><p className="text-sm font-medium">{label}</p><p className="text-xs text-muted-foreground">{formatDate(new Date(date))}</p></li>)}</ol></section></div><section className="mt-6"><h3 className="font-semibold">Employee documents</h3><div className="mt-3 max-h-56 divide-y divide-edge overflow-y-auto rounded-xl border border-edge">{rows.filter((row) => row.payslip).map((row) => <div key={row.employee.id} className="flex items-center justify-between gap-3 px-3 py-2"><span className="text-sm">{person(row.employee)}</span><Button size="sm" variant="ghost" onClick={() => onSlip(row)}><FileArchive aria-hidden="true" className="h-3.5 w-3.5" />Payslip</Button></div>)}</div></section><div className="mt-5 rounded-xl border border-amber-400/25 bg-amber-500/[0.06] p-3 text-xs text-amber-200">Compliance exports are intentionally not filing-ready. Validate the applicable statutory rules before filing any output.</div></Modal>; }
+function EmployeeDetail({ data, onClose, onSlip }: { data: Row | null; onClose: () => void; onSlip: (row: Row) => void }) { if (!data) return null; const p = data.payslip; return <Modal open={Boolean(data)} onClose={onClose} title={person(data.employee)} description={`${data.employee.employeeNumber} · ${data.employee.department?.name ?? "No department"}`} size="md">{p ? <div className="space-y-4"><div className="grid grid-cols-3 gap-2"><Kpi label="Gross" value={formatMoney(p.grossEarnings)} /><Kpi label="Deductions" value={formatMoney(p.deductions)} /><Kpi label="Net" value={formatMoney(p.netSalary)} prominent /></div><div className="rounded-xl bg-tint p-3 text-sm"><p>{p.presentDays} present · {p.absentDays} absent · {p.lateDays} late · {p.halfDays} half-days</p>{(p.absentDeduction ?? 0) > 0 && <p className="mt-1 text-muted-foreground">Loss of pay: {formatMoney(p.absentDeduction ?? 0)}</p>}</div>{p.adjustments?.length ? <div><h3 className="text-sm font-semibold">Adjustments</h3>{p.adjustments.map((item, index) => <p key={index} className="mt-1 text-sm text-muted-foreground">{item.label}: {formatMoney(item.amount)}</p>)}</div> : null}<Button variant="outline" className="w-full" onClick={() => onSlip(data)}><Download aria-hidden="true" className="h-4 w-4" />Download payslip</Button></div> : <div className="rounded-xl bg-tint p-4 text-sm text-muted-foreground">No payroll calculation exists for this employee in this period. Legacy payslips are documents only and are not exposed as active run controls.</div>}</Modal>; }
