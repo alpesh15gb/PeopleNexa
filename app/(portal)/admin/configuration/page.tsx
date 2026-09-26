@@ -13,5 +13,5 @@ export default async function ConfigurationPage() {
     prisma.location.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true, code: true, profile: true }, orderBy: { name: "asc" } }),
     prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId }, include: { location: { select: { name: true } } }, orderBy: [{ createdAt: "desc" }] }),
   ]);
-  return <div className="animate-fade-up space-y-6"><PageHeader title="Configuration" description="Draft company, location, dashboard, ID-card, leave, and payroll configuration without changing current live behavior." /><ConfigurationManager tenant={tenant} locations={locations} records={records} /></div>;
+  return <div className="animate-fade-up space-y-6"><PageHeader title="Configuration" description="Detailed legacy configuration editor. Company Settings is the consolidated workspace; this URL remains supported." /><a className="inline-flex min-h-11 items-center rounded-[11px] border border-edge px-3.5 text-sm font-medium text-primary" href="/admin/configuration/company-settings">Open Company Settings workspace</a><ConfigurationManager tenant={tenant} locations={locations} records={records} /></div>;
 }

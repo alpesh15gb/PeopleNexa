@@ -5,6 +5,7 @@ import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
+import { resolveSalaryRevision } from "@/lib/salary-revisions";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
     throw error;
   }
-  const [tenant, policyRecords, employees] = await Promise.all([
+  const [tenant, policyRecords, employees, revisions] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
       where: { tenantId: session.tenantId, kind: "payroll_policy", active: true },
@@ -43,13 +44,16 @@ export async function POST(req: NextRequest) {
       where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
       select: { id: true, employeeNumber: true, firstName: true, lastName: true, position: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { locationId: true, name: true } }, department: { select: { name: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
+    prisma.salaryRevision.findMany({ where: { tenantId: session.tenantId, status: "approved", effectiveFrom: { lte: new Date(`${month}-01T00:00:00.000Z`) } }, select: { id: true, employeeId: true, newSalary: true, effectiveFrom: true } }),
   ]);
 
   const withSalary = employees
     .filter((e) => e.salary != null && e.salary > 0)
-    .map((e) => ({
+    .map((e) => {
+      const revision = resolveSalaryRevision(revisions, e.id, month);
+      return ({
       id: e.id,
-      salary: e.salary!,
+      salary: revision?.newSalary ?? e.salary!,
       salaryStructure: e.salaryStructure,
       payMode: e.payMode,
       workBasisRate: e.workBasisRate,
@@ -71,8 +75,9 @@ export async function POST(req: NextRequest) {
        ifscCode: e.ifscCode,
        pfAllowed: e.employmentProfile?.pfAllowed,
        esicAllowed: e.employmentProfile?.esicAllowed,
-       tdsAllowed: e.employmentProfile?.tdsAllowed,
-    }));
+      tdsAllowed: e.employmentProfile?.tdsAllowed,
+    });
+    });
   let created = 0;
   let totalLoanApplied = 0;
 

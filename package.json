@@ -19,6 +19,7 @@
     "test:payroll-runs": "tsx scripts/test-payroll-run-foundation.ts",
     "test:payroll-configuration": "tsx scripts/test-payroll-configuration.ts",
     "test:payroll-workspace": "tsx scripts/test-payroll-workspace.ts",
+    "test:salary-revisions": "tsx scripts/test-salary-revisions.ts",
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
     "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",
     "test:id-card-pdf": "tsx scripts/test-id-card-pdf.ts",

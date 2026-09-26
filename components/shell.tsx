@@ -85,6 +85,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices", section: "Operations" },
   { href: "/admin/journeys", label: "Journey Tracker", icon: <Route className="h-4 w-4" />, module: "journey", section: "Operations" },
   { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
+  { href: "/admin/payroll/salary-revisions", label: "Salary Revisions", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
@@ -100,7 +101,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform", section: "Platform" },
   { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" />, section: "Workspace" },
-  { href: "/admin/configuration", label: "Configuration", icon: <SlidersHorizontal className="h-4 w-4" />, section: "Workspace" },
+  { href: "/admin/configuration/company-settings", label: "Company Settings", icon: <SlidersHorizontal className="h-4 w-4" />, section: "Workspace" },
   { href: "/admin/audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" />, section: "Workspace" },
 ];
 
