@@ -9,7 +9,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const target = String((await req.json().catch(() => ({}))).status ?? "") as PayrollRunStatus;
-  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true } } } });
+  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!canTransitionPayrollRun(run.status, target)) return NextResponse.json({ error: `Cannot move a ${run.status} run directly to ${target}.` }, { status: 409 });
   if (target === "approved" && run.createdBy === session.sub) return NextResponse.json({ error: "The run creator cannot approve their own payroll run." }, { status: 403 });

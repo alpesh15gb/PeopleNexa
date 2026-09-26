@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Banknote, FileText } from "lucide-react";
+import { Eye, Banknote, FileText, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -35,6 +35,7 @@ interface Payslip {
   overtimeHours: number;
   workedHours: number;
   adjustments: { label: string; amount: number }[] | null;
+  document?: { days: { payable: number; paid: number; lop: number }; components: { label: string; category: string; earned: number; visibleOnPayslip: boolean }[]; totals: { gross: number; deductions: number; net: number } } | null;
 }
 
 export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Payslip[]; name: string; lang?: Lang }) {
@@ -66,7 +67,7 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
           {payslips.map((p) => (
             <TR key={p.id}>
               <TD className="font-mono text-[13px] font-medium">{p.month}</TD>
-              <TD className="text-right font-mono text-[13px]">{formatMoney(p.basicSalary || p.baseSalary * 0.5)}</TD>
+              <TD className="text-right font-mono text-[13px]">{formatMoney(p.document?.totals.gross ?? p.grossEarnings)}</TD>
               <TD className="text-right font-mono text-[13px] font-semibold">{formatMoney(p.netSalary)}</TD>
               <TD><StatusPill status={p.status} lang={lang} /></TD>
               <TD>
@@ -138,6 +139,9 @@ export function PayslipsPanel({ payslips, name, lang = "en" }: { payslips: Paysl
               <Banknote className="h-4 w-4" />
               {viewing.status === "paid" ? t(lang, "payslips.disbursed") : t(lang, "payslips.draft")}
             </div>
+            <Button className="mt-3 w-full" variant="outline" onClick={() => { window.location.href = `/api/payroll/payslips?id=${encodeURIComponent(viewing.id)}&month=${encodeURIComponent(viewing.month)}`; }}>
+              <Download className="h-4 w-4" /> Download official PDF
+            </Button>
           </div>
         )}
       </Modal>

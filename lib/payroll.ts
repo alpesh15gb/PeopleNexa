@@ -5,6 +5,7 @@ import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
 import type { PayrollPolicySnapshot } from "./payroll-policy";
 import type { PayrollComponentRule } from "./configuration";
+import { mask, type PayslipComponent, type PayslipDocumentSnapshot } from "./payslip-document";
 
 // ─── Payroll configuration (per tenant; stored under tenant.config.payroll) ─
 
@@ -105,6 +106,9 @@ export interface AttendanceSummary {
   halfDays: number;
   absentDays: number;
   onLeaveDays: number;
+  paidLeaveDays?: number;
+  unpaidLeaveDays?: number;
+  legacyLeavePayWarning?: boolean;
   overtimeHours: number;
   workingDays: number;
   workedHours: number; // actual hours clocked (used for hourly pay)
@@ -124,7 +128,7 @@ export async function attendanceSummary(
     }),
     prisma.leaveRequest.findMany({
       where: { tenantId, employeeId: employee.id, status: "approved", fromDate: { lt: end }, toDate: { gte: start } },
-      select: { fromDate: true, toDate: true },
+      select: { fromDate: true, toDate: true, leaveType: { select: { paid: true } }, leavePolicySnapshot: true },
     }),
     prisma.holiday.findMany({
       where: { tenantId, OR: [{ date: { gte: start, lt: end } }, { isRecurring: true }] },
@@ -149,6 +153,9 @@ export async function attendanceSummary(
     halfDays: 0,
     absentDays: 0,
     onLeaveDays: 0,
+    paidLeaveDays: 0,
+    unpaidLeaveDays: 0,
+    legacyLeavePayWarning: false,
     overtimeHours: 0,
     workingDays: 0,
     workedHours: 0,
@@ -183,9 +190,13 @@ export async function attendanceSummary(
       continue;
     }
 
-    const onLeave = leaves.some((l) => istStartOfDay(l.fromDate).getTime() <= d.getTime() && istStartOfDay(l.toDate).getTime() >= d.getTime());
-    if (onLeave) {
+    const leave = leaves.find((l) => istStartOfDay(l.fromDate).getTime() <= d.getTime() && istStartOfDay(l.toDate).getTime() >= d.getTime());
+    if (leave) {
       summary.onLeaveDays++;
+      const snapshotPaid = (leave.leavePolicySnapshot as { rules?: { paid?: unknown } } | null)?.rules?.paid;
+      const paid = typeof snapshotPaid === "boolean" ? snapshotPaid : leave.leaveType.paid;
+      if (paid === false) summary.unpaidLeaveDays = (summary.unpaidLeaveDays ?? 0) + 1;
+      else { summary.paidLeaveDays = (summary.paidLeaveDays ?? 0) + 1; if (paid == null) summary.legacyLeavePayWarning = true; }
       accumulateHours(key, recordByDay.get(key));
       continue;
     }
@@ -466,6 +477,8 @@ export interface PayrollResult {
   workedHours: number;
   workingDays: number;
   onLeaveDays: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
   divisorUsed: number;
   adjustments: { label: string; amount: number }[];
   salaryBreakdown: { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[];
@@ -577,7 +590,7 @@ export function computePayroll(
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   // For daily/hourly/work-basis pay, `base` is already pro-rated by attendance —
   // applying an extra absent deduction would deduct twice.
-  const unpaidDayFractions = summary.absentDays + summary.halfDays * 0.5;
+  const unpaidDayFractions = summary.absentDays + summary.halfDays * 0.5 + (summary.unpaidLeaveDays ?? 0);
   const absentDeduction =
     config.deductAbsentDays && mode === "monthly" && divisor > 0
       ? round2((base / divisor) * unpaidDayFractions)
@@ -635,6 +648,8 @@ export function computePayroll(
     workedHours: round2(summary.workedHours),
     workingDays: summary.workingDays,
     onLeaveDays: summary.onLeaveDays,
+    paidLeaveDays: summary.paidLeaveDays ?? 0,
+    unpaidLeaveDays: summary.unpaidLeaveDays ?? 0,
     divisorUsed,
     adjustments: adj.list,
     salaryBreakdown: configured?.rows ?? [],
@@ -668,6 +683,24 @@ function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, mo
   return { basic: wageBase ? values.get(wageBase.code) ?? 0 : 0, allowances, grossEarnings, deductions: round2(rows.filter((row) => row.kind === "deduction").reduce((sum, row) => sum + row.amount, 0)), rows };
 }
 
+function documentComponents(result: PayrollResult): PayslipComponent[] {
+  const configured = (result.salaryBreakdown ?? []).map((row, index) => ({
+    code: `CONFIG_${index}`, label: row.label, category: row.kind, contractual: row.amount,
+    // LOP is a separately rendered deduction in the existing ledger, so the
+    // earning register remains the contractual gross and reconciles to gross.
+    earned: row.amount,
+    includeInGross: row.includeInGross, visibleOnPayslip: row.visibleOnPayslip, nonCash: false,
+  } satisfies PayslipComponent));
+  const rows: PayslipComponent[] = configured.length ? configured : [
+    { code: "BASIC", label: "Basic", category: "earning" as const, contractual: result.basic, earned: result.basic, includeInGross: true, visibleOnPayslip: true, nonCash: false },
+    { code: "ALLOWANCES", label: "Allowances", category: "earning" as const, contractual: result.allowances, earned: result.allowances, includeInGross: true, visibleOnPayslip: true, nonCash: false },
+  ];
+  const add = (code: string, label: string, earned: number, category: "earning" | "deduction") => { if (earned) rows.push({ code, label, category, contractual: null, earned, includeInGross: category === "earning", visibleOnPayslip: true, nonCash: false }); };
+  add("OVERTIME", "Overtime", result.overtimePay, "earning"); add("ADJUSTMENTS", "Adjustments", result.adjustmentEarnings, "earning");
+  add("EPF", "EPF", result.pfEmployee, "deduction"); add("ESIC", "ESIC", result.esicEmployee, "deduction"); add("PT", "Professional Tax", result.professionalTax, "deduction"); add("LWF", "Labour Welfare Fund", result.lwf, "deduction"); add("TDS", "TDS", result.tds, "deduction"); add("LATE_FINE", "Late Fine", result.lateFines, "deduction"); add("LOAN", "Loan / Advance", result.loanDeduction, "deduction"); add("LOP", "LOP Deduction", result.absentDeduction, "deduction"); add("ADJUSTMENTS_DEDUCTION", "Adjustments", result.adjustmentDeductions, "deduction");
+  return rows;
+}
+
 // ─── One-click generator used by the API route and the seed ─────────────────
 
 export async function generatePayslipForEmployee(
@@ -692,6 +725,7 @@ export async function generatePayslipForEmployee(
     departmentName?: string | null;
     pan?: string | null;
     uan?: string | null;
+    esiIpNumber?: string | null;
     pfAllowed?: boolean | null;
     esicAllowed?: boolean | null;
     tdsAllowed?: boolean | null;
@@ -725,7 +759,7 @@ export async function generatePayslipForEmployee(
   };
   const summary = await attendanceSummary(tenantId, employee, month);
 
-  const [loans, adjustments, taxDecl] = await Promise.all([
+  const [loans, adjustments, taxDecl, tenant] = await Promise.all([
     prisma.employeeLoan.findMany({
       where: { tenantId, employeeId: employee.id },
       select: { id: true, status: true, startMonth: true, lastDeductedMonth: true, outstanding: true, emiAmount: true },
@@ -738,6 +772,7 @@ export async function generatePayslipForEmployee(
       where: { employeeId_fy: { employeeId: employee.id, fy: fyFromMonth(month) } },
       select: { sections: true, status: true },
     }),
+    prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true, address: true, email: true, phone: true, profile: { select: { legalName: true, displayName: true, address: true, contactEmail: true, contactPhone: true, logoUrl: true } } } }),
   ]);
   const { total: loanDeduction } = loanDeductionForMonth(loans, month);
 
@@ -756,6 +791,14 @@ export async function generatePayslipForEmployee(
     if (existing) return { created: false, netSalary: existing.netSalary, loanApplied: cappedLoanTotal };
 
     try {
+      const documentSnapshot: PayslipDocumentSnapshot = {
+        version: 1, generatedAt: new Date().toISOString(), period: month,
+        policy: { id: policySnapshot?.configurationId ?? null, version: policySnapshot?.configurationVersion ?? null, source: policySnapshot ? "configuration_record" : "tenant_config" },
+        branding: { legalName: tenant?.profile?.legalName ?? tenant?.name ?? "Company", displayName: tenant?.profile?.displayName ?? tenant?.name ?? "Company", address: tenant?.profile?.address ?? tenant?.address ?? null, contact: tenant?.profile?.contactEmail ?? tenant?.profile?.contactPhone ?? tenant?.email ?? tenant?.phone ?? null, logoUrl: tenant?.profile?.logoUrl ?? null },
+        employee: { name: `${employee.firstName ?? ""} ${employee.lastName ?? ""}`.trim(), employeeNumber: employee.employeeNumber ?? employee.id, designation: employee.position ?? null, department: employee.departmentName ?? null, joiningDate: employee.joiningDate?.toISOString() ?? null, bankName: employee.bankName ?? null, accountMasked: mask(employee.accountNumber), panMasked: mask(employee.pan), uan: employee.uan ?? null, esiIpNumber: employee.esiIpNumber ?? null },
+        days: { payable: result.workingDays + result.onLeaveDays, paid: result.presentDays + result.lateDays + result.halfDays * 0.5 + result.paidLeaveDays, lop: result.absentDays + result.halfDays * 0.5 + result.unpaidLeaveDays },
+        components: documentComponents(result), totals: { gross: result.grossEarnings, deductions: result.deductions, net: result.netSalary },
+      };
       await tx.payslip.create({
         data: {
           tenantId,
@@ -796,7 +839,7 @@ export async function generatePayslipForEmployee(
           payrollPolicyRules: policySnapshot?.appliedRules as unknown as Prisma.InputJsonValue | undefined,
           inputSnapshot: {
             version: 1,
-            employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName, position: employee.position ?? null, joiningDate: employee.joiningDate ?? null, branchId: employee.branchId, branchName: employee.branchName ?? null, locationId: employee.locationId, departmentId: employee.departmentId, departmentName: employee.departmentName ?? null, pan: employee.pan ?? null, uan: employee.uan ?? null, payMode: employee.payMode ?? "monthly", salary: employee.salary },
+            employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName, position: employee.position ?? null, joiningDate: employee.joiningDate ?? null, branchId: employee.branchId, branchName: employee.branchName ?? null, locationId: employee.locationId, departmentId: employee.departmentId, departmentName: employee.departmentName ?? null, pan: employee.pan ?? null, uan: employee.uan ?? null, esiIpNumber: employee.esiIpNumber ?? null, payMode: employee.payMode ?? "monthly", salary: employee.salary },
             statutory: { pfAllowed: employee.pfAllowed ?? null, esicAllowed: employee.esicAllowed ?? null, tdsAllowed: employee.tdsAllowed ?? null },
             // This private snapshot is never returned to employee/admin list UI;
             // it preserves the payment instruction selected at run generation.
@@ -805,6 +848,7 @@ export async function generatePayslipForEmployee(
             policy: policySnapshot?.appliedRules ?? { source: "tenant_config", payrollConfig: config },
             result,
           } as unknown as Prisma.InputJsonValue,
+          documentSnapshot: documentSnapshot as unknown as Prisma.InputJsonValue,
         },
       });
       if (payrollRunId) {

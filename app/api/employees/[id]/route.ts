@@ -44,6 +44,7 @@ const PHONE_RE = /^\+?[0-9]{10,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const UAN_RE = /^\d{12}$/;
+const ESI_IP_RE = /^[A-Z0-9-]{6,30}$/i;
 const ACCOUNT_RE = /^[0-9]{6,20}$/;
 const MIN_JOINING_MS = Date.parse("1990-01-01T00:00:00Z");
 
@@ -159,7 +160,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       "accountNumber",
       "ifscCode",
       "pan",
-      "uan",
+       "uan",
+       "esiIpNumber",
     ]) {
       delete (body as Record<string, unknown>)[k];
     }
@@ -353,6 +355,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: "UAN must be a 12-digit number." }, { status: 400 });
     }
   }
+  let nextEsiIpNumber = employee.esiIpNumber;
+  if (body.esiIpNumber !== undefined) {
+    nextEsiIpNumber = body.esiIpNumber === null || String(body.esiIpNumber).trim() === "" ? null : String(body.esiIpNumber).trim().toUpperCase();
+    if (nextEsiIpNumber != null && !ESI_IP_RE.test(nextEsiIpNumber)) return NextResponse.json({ error: "ESI/IP number must be 6-30 letters, numbers, or hyphens." }, { status: 400 });
+  }
   let nextAccount = employee.accountNumber;
   if (body.accountNumber !== undefined) {
     nextAccount = body.accountNumber === null || String(body.accountNumber).trim() === "" ? null : String(body.accountNumber).trim();
@@ -438,7 +445,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       accountNumber: nextAccount,
       ifscCode: nextIfsc,
       pan: nextPan,
-      uan: nextUan,
+       uan: nextUan,
+       esiIpNumber: nextEsiIpNumber,
       payMode: nextPayMode,
        workBasisRate: body.workBasisRate !== undefined ? (body.workBasisRate != null && body.workBasisRate !== "" ? Number(body.workBasisRate) : null) : employee.workBasisRate,
        profilePicture: photo ? photo.value : employee.profilePicture,

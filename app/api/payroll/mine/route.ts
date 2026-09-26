@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { documentSnapshotForResponse } from "@/lib/payslip-document";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -11,5 +12,6 @@ export async function GET() {
     orderBy: { month: "desc" },
   });
 
-  return NextResponse.json({ payslips });
+  // Never serialize private inputSnapshot (bank instructions, IFSC, Aadhaar).
+  return NextResponse.json({ payslips: payslips.map(({ inputSnapshot: _inputSnapshot, documentSnapshot, ...slip }) => ({ ...slip, document: documentSnapshotForResponse(documentSnapshot) })) });
 }

@@ -37,6 +37,7 @@ interface Emp {
   ifscCode?: string | null;
   pan?: string | null;
   uan?: string | null;
+  esiIpNumber?: string | null;
   aadhaarNumber: string | null;
   drivingLicenseNumber: string | null;
   drivingLicenseExpiresAt: Date | null;
@@ -250,6 +251,7 @@ export function EmployeesTable({
       ifscCode: form.get("ifscCode") || null,
       pan: form.get("pan") || null,
       uan: form.get("uan") || null,
+      esiIpNumber: form.get("esiIpNumber") || null,
       aadhaarNumber: form.get("aadhaarNumber") || null,
       drivingLicenseNumber: form.get("drivingLicenseNumber") || null,
       drivingLicenseExpiresAt: form.get("drivingLicenseExpiresAt") || null,
@@ -585,6 +587,7 @@ export function EmployeesTable({
             {!restricted && (
               <Field label="UAN (EPF)">
                 <Input name="uan" defaultValue={editing?.uan ?? ""} placeholder="12-digit UAN" />
+                <Input name="esiIpNumber" defaultValue={editing?.esiIpNumber ?? ""} placeholder="ESI / IP number (optional)" />
               </Field>
             )}
             <Field label="Aadhaar Number">

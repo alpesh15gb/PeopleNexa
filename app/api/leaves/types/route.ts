@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
         unlimitedEntitlement: body.unlimitedEntitlement === true,
         isCarryForward: Boolean(body.isCarryForward),
         requiresApproval: body.requiresApproval !== false,
+        // New direct leave types require an explicit paid/unpaid decision.
+        paid: typeof body.paid === "boolean" ? body.paid : null,
         color: body.color || "#3b82f6",
       },
     });

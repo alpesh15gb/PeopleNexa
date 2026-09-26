@@ -20,6 +20,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       unlimitedEntitlement: body.unlimitedEntitlement === undefined ? type.unlimitedEntitlement : body.unlimitedEntitlement === true,
       isCarryForward: body.isCarryForward != null ? Boolean(body.isCarryForward) : type.isCarryForward,
       requiresApproval: body.requiresApproval != null ? Boolean(body.requiresApproval) : type.requiresApproval,
+      paid: typeof body.paid === "boolean" ? body.paid : type.paid,
       color: body.color ?? type.color,
     },
   });

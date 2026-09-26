@@ -13,7 +13,7 @@ export type PayslipDocumentData = {
   companyContact?: string | null;
   companyLogoUrl?: string | null;
   month: string;
-  employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null };
+  employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null; esiIpNumber?: string | null };
   payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null; salaryBreakdown?: SalaryComponent[] | null };
 };
 
@@ -68,7 +68,8 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
     ["Employee Name", `${e.firstName} ${e.lastName}`.trim() || "-"],
     ["Designation", value(e.position)],
     ["Department", value(e.department?.name)],
-    ["ESIC / UAN", value(e.uan)],
+    ["UAN", value(e.uan)],
+    ["ESI / IP No.", value(e.esiIpNumber)],
   ];
   const rightDetails: [string, string][] = [
     ["Employee ID", value(e.deviceCode ?? e.employeeNumber)],
@@ -124,10 +125,9 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
     bold("DEDUCTIONS", middle, top + 7, { width: WIDTH / 2, align: "center" });
     doc.rect(LEFT, top + titleHeight, WIDTH, subheadHeight).fillAndStroke(SHADE, BORDER);
     doc.moveTo(middle, top).lineTo(middle, top + height).strokeColor(BORDER).stroke();
-    doc.moveTo(LEFT + 178, top + titleHeight).lineTo(LEFT + 178, top + height).strokeColor(BORDER).stroke();
     doc.moveTo(LEFT + 238, top + titleHeight).lineTo(LEFT + 238, top + height).strokeColor(BORDER).stroke();
     doc.moveTo(RIGHT - 78, top + titleHeight).lineTo(RIGHT - 78, top + height).strokeColor(BORDER).stroke();
-    bold("PARTICULARS", LEFT + 7, top + 27); bold("ACTUALS", LEFT + 180, top + 27, { width: 54, align: "right" }); bold("EARNINGS", LEFT + 240, top + 27, { width: 72, align: "right" });
+    bold("PARTICULARS", LEFT + 7, top + 27); bold("AMOUNT", LEFT + 240, top + 27, { width: 72, align: "right" });
     bold("PARTICULARS", middle + 7, top + 27); bold("DEDUCTIONS", RIGHT - 76, top + 27, { width: 68, align: "right" });
     for (let index = 0; index < rowCount; index++) {
       const rowY = top + titleHeight + subheadHeight + index * rowHeight;
@@ -136,8 +136,7 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
       const earning = earningRows[index];
       const deduction = deductionRows[index];
       if (earning) {
-        text(earning.label, LEFT + 7, rowY + 5, { width: 166, ellipsis: true });
-        text(earning.actual === undefined ? "-" : money(earning.actual), LEFT + 180, rowY + 5, { width: 54, align: "right" });
+        text(earning.label, LEFT + 7, rowY + 5, { width: 226, ellipsis: true });
         text(money(earning.amount), LEFT + 240, rowY + 5, { width: 72, align: "right" });
       }
       if (deduction) {

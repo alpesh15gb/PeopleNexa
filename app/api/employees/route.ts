@@ -27,6 +27,7 @@ const select = {
   ifscCode: true,
   pan: true,
   uan: true,
+  esiIpNumber: true,
   payMode: true,
   workBasisRate: true,
   aadhaarNumber: true,
@@ -70,6 +71,7 @@ const safeSelect = {
   ifscCode: true,
   pan: true,
   uan: true,
+  esiIpNumber: true,
   joiningDate: true,
   payMode: true,
   workBasisRate: true,
@@ -87,6 +89,7 @@ const PHONE_RE = /^\+?[0-9]{10,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const UAN_RE = /^\d{12}$/;
+const ESI_IP_RE = /^[A-Z0-9-]{6,30}$/i;
 const ACCOUNT_RE = /^[0-9]{6,20}$/;
 const MIN_JOINING_MS = Date.parse("1990-01-01T00:00:00Z");
 
@@ -298,6 +301,8 @@ export async function POST(req: NextRequest) {
     if (uan != null && !UAN_RE.test(uan)) {
       return NextResponse.json({ error: "UAN must be a 12-digit number." }, { status: 400 });
     }
+    const esiIpNumber = body.esiIpNumber != null && String(body.esiIpNumber).trim() !== "" ? String(body.esiIpNumber).trim().toUpperCase() : null;
+    if (esiIpNumber != null && !ESI_IP_RE.test(esiIpNumber)) return NextResponse.json({ error: "ESI/IP number must be 6-30 letters, numbers, or hyphens." }, { status: 400 });
     const accountNumber = body.accountNumber != null && String(body.accountNumber).trim() !== "" ? String(body.accountNumber).trim() : null;
     if (accountNumber != null && !ACCOUNT_RE.test(accountNumber)) {
       return NextResponse.json({ error: "Account number must be 6–20 digits." }, { status: 400 });
@@ -364,7 +369,8 @@ export async function POST(req: NextRequest) {
           accountNumber: loginOnly ? null : accountNumber,
           ifscCode: loginOnly ? null : ifscCode,
           pan: loginOnly ? null : pan,
-          uan: loginOnly ? null : uan,
+           uan: loginOnly ? null : uan,
+           esiIpNumber: loginOnly ? null : esiIpNumber,
           payMode,
           workBasisRate: loginOnly ? null : workBasisRate,
           managerId: loginOnly ? null : body.managerId || null,

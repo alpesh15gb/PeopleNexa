@@ -6,6 +6,7 @@ import { renderPayslipPdf } from "@/lib/payslip-pdf";
 import { requireActiveSession } from "@/lib/session";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { resolveCompanyBranding } from "@/lib/company-branding";
+import { documentSnapshotForResponse } from "@/lib/payslip-document";
 
 export const runtime = "nodejs";
 
@@ -13,24 +14,37 @@ const safeName = (value: string) => value.replace(/[^a-z0-9_-]/gi, "_");
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!session || !["admin", "location_manager", "employee"].includes(session.role)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
-  const ids = [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
+  const ids = session.role === "employee" ? [session.sub] : [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
+  const slipId = req.nextUrl.searchParams.get("id");
   if (ids.length > 500) return NextResponse.json({ error: "Select at most 500 employees at once." }, { status: 400 });
   const [tenant, slips] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...(ids.length ? { employeeId: { in: ids } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
-      include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { location: { select: { profile: true } } } }, location: { select: { profile: true } } } } },
+      where: { tenantId: session.tenantId, month, ...(slipId ? { id: slipId } : {}), ...(ids.length ? { employeeId: { in: ids } } : {}), ...(session.role === "employee" ? { status: { in: ["finalized", "paid"] } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
+      include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, esiIpNumber: true, branch: { select: { location: { select: { profile: true } } } }, location: { select: { profile: true } } } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     }),
   ]);
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
   const pdfs = await Promise.all(slips.map(async (slip) => {
     const branding = resolveCompanyBranding(tenant, slip.employee.branch?.location ?? slip.employee.location);
+    const document = (slip.status === "finalized" || slip.status === "paid") ? documentSnapshotForResponse(slip.documentSnapshot) : null;
+    if (document) {
+      const [firstName, ...last] = document.employee.name.split(" ");
+      return {
+        name: `${safeName(document.employee.employeeNumber)}-${safeName(document.employee.name)}-${month}.pdf`,
+        data: await renderPayslipPdf({
+          companyName: document.branding.displayName || document.branding.legalName, companyAddress: document.branding.address, companyContact: document.branding.contact, companyLogoUrl: document.branding.logoUrl, month: document.period,
+          employee: { employeeNumber: document.employee.employeeNumber, deviceCode: null, firstName, lastName: last.join(" "), position: document.employee.designation, joiningDate: document.employee.joiningDate ? new Date(document.employee.joiningDate) : null, department: document.employee.department ? { name: document.employee.department } : null, bankName: document.employee.bankName, accountNumber: document.employee.accountMasked, ifscCode: null, pan: document.employee.panMasked, uan: document.employee.uan, esiIpNumber: document.employee.esiIpNumber },
+          payslip: { basicSalary: 0, allowances: 0, overtimePay: 0, adjustmentEarnings: 0, grossEarnings: document.totals.gross, pfEmployee: 0, esicEmployee: 0, professionalTax: 0, lwf: 0, tds: 0, lateFines: 0, loanDeduction: 0, absentDeduction: 0, deductions: document.totals.deductions, netSalary: document.totals.net, presentDays: document.days.paid, lateDays: 0, halfDays: 0, absentDays: document.days.lop, workingDays: document.days.payable, adjustments: null, salaryBreakdown: document.components.filter((row) => row.category === "earning" || row.category === "deduction").map((row) => ({ label: row.label, amount: row.earned, kind: row.category as "earning" | "deduction", includeInGross: row.includeInGross, visibleOnPayslip: row.visibleOnPayslip })) },
+        }),
+      };
+    }
     const snapshot = slip.status === "finalized" || slip.status === "paid"
       ? (slip.inputSnapshot as { employee?: { employeeNumber?: string; firstName?: string; lastName?: string; position?: string | null; joiningDate?: string | Date | null; departmentName?: string | null; pan?: string | null; uan?: string | null }; bank?: { bankName?: string | null; accountNumber?: string | null; ifscCode?: string | null } } | null)
       : null;

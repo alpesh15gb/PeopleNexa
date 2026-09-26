@@ -457,6 +457,7 @@ model Employee {
   // Statutory identifiers for compliance exports (ECR / Form 16 / 24Q).
   pan                     String?
   uan                     String?
+  esiIpNumber             String?
   aadhaarNumber           String?
   drivingLicenseNumber    String?
   // Transport / non_transport / no_license. Null preserves legacy records
@@ -822,6 +823,8 @@ model LeaveType {
   unlimitedEntitlement Boolean @default(false)
   isCarryForward   Boolean  @default(false)
   requiresApproval Boolean  @default(true)
+  // Null retains historic implicit treatment; new policies must opt in explicitly.
+  paid             Boolean?
   color            String   @default("#3b82f6")
   encashable       Boolean  @default(false) // unused balance is paid out (F&F / year-end)
   createdAt        DateTime @default(now())
@@ -1074,6 +1077,8 @@ model Payslip {
   // Frozen employee/master, policy, attendance and calculation inputs. New
   // run slips must render from this after finalization.
   inputSnapshot               Json?
+  // Public-document-safe snapshot, distinct from private generation inputs.
+  documentSnapshot            Json?
   // Payout tracking (bulk/online/offline payment reconciliation).
   paidVia    String? // cash | upi | bank | other
   paidAt     DateTime?
