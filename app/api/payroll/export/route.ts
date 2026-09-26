@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { buildBankFile, bankFileName, type BankFormat } from "@/lib/bank-file";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { createHash } from "crypto";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -23,6 +24,11 @@ export async function GET(req: NextRequest) {
   const bankParam = (req.nextUrl.searchParams.get("bank") || "generic").toLowerCase();
   const bank: BankFormat = bankParam === "hdfc" || bankParam === "icici" ? bankParam : "generic";
   const debitAccount = req.nextUrl.searchParams.get("debitAccount") || "";
+  const runId = req.nextUrl.searchParams.get("runId") || "";
+  if (!runId) return NextResponse.json({ error: "A finalized payroll run is required for bank export." }, { status: 400 });
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month } });
+  if (!run) return NextResponse.json({ error: "Payroll run not found for this period." }, { status: 404 });
+  if (run.status !== "finalized" && run.status !== "paid") return NextResponse.json({ error: "Bank export is available only after finalization." }, { status: 409 });
 
   // Bank files are for unpaid slips unless a caller explicitly requests otherwise.
   const statusParam = (req.nextUrl.searchParams.get("status") || "draft").toLowerCase();
@@ -34,20 +40,22 @@ export async function GET(req: NextRequest) {
     where: {
       tenantId: session.tenantId,
       month,
+      payrollRunId: runId,
       ...(statusParam === "all" ? {} : { status: statusParam }),
       ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
     },
     include: {
-      employee: { select: { id: true, firstName: true, lastName: true, accountNumber: true, ifscCode: true } },
+      employee: { select: { id: true, firstName: true, lastName: true } },
     },
   });
 
   const rows = payslips
-    .filter((p) => p.employee.accountNumber && p.employee.ifscCode)
-    .map((p) => ({
+    .map((p) => ({ p, bank: (p.inputSnapshot as { bank?: { accountNumber?: string; ifscCode?: string } } | null)?.bank }))
+    .filter(({ bank }) => bank?.accountNumber && bank?.ifscCode)
+    .map(({ p, bank }) => ({
       name: `${p.employee.firstName} ${p.employee.lastName}`.trim(),
-      accountNumber: p.employee.accountNumber!,
-      ifscCode: p.employee.ifscCode!,
+      accountNumber: bank!.accountNumber!,
+      ifscCode: bank!.ifscCode!,
       amount: p.netSalary,
     }));
 
@@ -61,6 +69,8 @@ export async function GET(req: NextRequest) {
 
   const narration = `Salary ${month}`;
   const content = buildBankFile(bank, rows, debitAccount, narration);
+  const hash = createHash("sha256").update(content).digest("hex");
+  await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.bank_export", entity: "PayrollRun", entityId: runId, summary: `Immutable bank export ${bank} (${rows.length} rows)`, after: { sha256: hash, rowCount: rows.length } } });
 
   const res = new NextResponse(content, {
     headers: {

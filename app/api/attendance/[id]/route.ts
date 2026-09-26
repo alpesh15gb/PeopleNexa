@@ -95,14 +95,15 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
 
-  // A paid payslip locks the month: edits must go through payroll regeneration.
+  // A finalized/paid run locks the month. Changes must be recorded as a later
+  // adjustment, never silently rewrite the payroll input snapshot.
   const month = istDateKey(record.date).slice(0, 7);
   const paidSlip = await prisma.payslip.findFirst({
-    where: { employeeId: record.employeeId, month, status: "paid" },
+    where: { employeeId: record.employeeId, month, status: { in: ["finalized", "paid"] } },
   });
   if (paidSlip) {
     return NextResponse.json(
-      { error: `A paid payslip already exists for ${month}. Regenerate payroll for that month to pick up attendance changes.` },
+      { error: `Payroll is locked for ${month}. Record a reviewed next-period adjustment; attendance cannot rewrite a finalized payroll run.` },
       { status: 403 }
     );
   }

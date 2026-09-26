@@ -20,6 +20,7 @@ export interface PayrollConfig {
   lwf: { enabled: boolean }; // Labour Welfare Fund — uses the same statutory state as PT
   tds: { enabled: boolean; regime: "new" | "old" };
   components?: PayrollComponentRule[];
+  monthlyDivisor?: number;
 }
 
 export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
@@ -72,6 +73,7 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     lwf: { ...DEFAULT_PAYROLL_CONFIG.lwf, ...p.lwf },
     tds: { ...DEFAULT_PAYROLL_CONFIG.tds, ...p.tds },
     components: Array.isArray(p.components) ? p.components as PayrollComponentRule[] : undefined,
+    monthlyDivisor: Math.max(1, Math.min(366, nonNeg(p.monthlyDivisor, 26) || 26)),
   };
 }
 
@@ -542,9 +544,9 @@ export function computePayroll(
 
   // `base` already includes the basic+allowances split, so gross must NOT add
   // allowances again (that double-counted pay).
-  // Statutory divisor is FROZEN at 26 for monthly pay (no workingDays float).
-  const divisor = 26;
-  const divisorUsed = 26;
+  // A policy's monthly divisor is applied consistently to LOP and monthly OT.
+  const divisor = config.monthlyDivisor ?? 26;
+  const divisorUsed = divisor;
   // Overtime branches by pay mode:
   // - hourly: rate is the hourly rate → pay rate × multiplier × hours (no /26).
   // - daily / work_basis: day rate is the daily rate → (rate/8) × multiplier.
@@ -639,18 +641,20 @@ export function computePayroll(
   };
 }
 
-function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, ctc: number) {
+function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, monthlyBase: number) {
   if (!rules?.length) return null;
   const values = new Map<string, number>();
   const rows: PayrollResult["salaryBreakdown"] = [];
   for (const rule of rules) {
-    const eligible = (rule.minCtc === null || ctc >= rule.minCtc) && (rule.maxCtc === null || ctc <= rule.maxCtc);
+    // Component rules are evaluated against the monthly payroll base. Their
+    // historical "CTC" labels are not treated as annual CTC implicitly.
+    const eligible = (rule.minCtc === null || monthlyBase >= rule.minCtc) && (rule.maxCtc === null || monthlyBase <= rule.maxCtc);
     let amount = 0;
     if (eligible) {
       if (rule.formula === "fixed") amount = rule.amount;
-      else if (rule.formula === "percent_of_ctc") amount = ctc * rule.amount / 100;
+      else if (rule.formula === "percent_of_ctc") amount = monthlyBase * rule.amount / 100;
       else if (rule.formula === "percent_of_component") amount = (values.get(rule.basisComponentCode!) ?? 0) * rule.amount / 100;
-      else amount = rule.bands?.find((band) => ctc >= band.minCtc && (band.maxCtc === null || ctc <= band.maxCtc))?.amount ?? 0;
+      else amount = rule.bands?.find((band) => monthlyBase >= band.minCtc && (band.maxCtc === null || monthlyBase <= band.maxCtc))?.amount ?? 0;
     }
     amount = round2(amount); values.set(rule.code, amount);
     rows.push({ label: rule.label, amount, kind: rule.kind, includeInGross: rule.includeInGross, visibleOnPayslip: rule.visibleOnPayslip });
@@ -674,9 +678,22 @@ export async function generatePayslipForEmployee(
     workBasisRate?: number | null;
     shiftId: string | null;
     joiningDate?: Date | null;
+    employeeNumber?: string;
+    firstName?: string;
+    lastName?: string;
+    branchId?: string | null;
+    locationId?: string | null;
+    departmentId?: string | null;
+    pfAllowed?: boolean | null;
+    esicAllowed?: boolean | null;
+    tdsAllowed?: boolean | null;
+    bankName?: string | null;
+    accountNumber?: string | null;
+    ifscCode?: string | null;
   },
   month: string,
-  policySnapshot?: PayrollPolicySnapshot
+  policySnapshot?: PayrollPolicySnapshot,
+  payrollRunId?: string
 ): Promise<{ created: boolean; netSalary?: number; loanApplied?: number; skipped?: string }> {
   // Skip employees who join on/after the month's exclusive end.
   const { start: mStart, end: mEnd } = monthRange(month);
@@ -689,7 +706,15 @@ export async function generatePayslipForEmployee(
   // Daily/hourly paths stay attendance-driven via baseForPayMode.
   const payEmployee = payrollEmployeeForMonth(employee, month);
 
-  const config = policySnapshot?.appliedRules.payrollConfig ?? getPayrollConfig(tenantConfig);
+  const configured = policySnapshot?.appliedRules.payrollConfig ?? getPayrollConfig(tenantConfig);
+  // Employee-level applicability is an explicit opt-out; policy rates remain
+  // tenant-configured rather than being hardcoded here.
+  const config: PayrollConfig = {
+    ...configured,
+    pf: { ...configured.pf, enabled: configured.pf.enabled && employee.pfAllowed !== false },
+    esic: { ...configured.esic, enabled: configured.esic.enabled && employee.esicAllowed !== false },
+    tds: { ...configured.tds, enabled: configured.tds.enabled && employee.tdsAllowed !== false },
+  };
   const summary = await attendanceSummary(tenantId, employee, month);
 
   const [loans, adjustments, taxDecl] = await Promise.all([
@@ -717,9 +742,9 @@ export async function generatePayslipForEmployee(
   const { total: cappedLoanTotal, updates: cappedUpdates } = loanDeductionForMonth(loans, month, result.loanDeduction);
 
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.payslip.findUnique({
-      where: { employeeId_month: { employeeId: employee.id, month } },
-    });
+    const existing = payrollRunId
+      ? await tx.payslip.findUnique({ where: { payrollRunId_employeeId: { payrollRunId, employeeId: employee.id } } })
+      : await tx.payslip.findFirst({ where: { employeeId: employee.id, month } });
     if (existing) return { created: false, netSalary: existing.netSalary, loanApplied: cappedLoanTotal };
 
     try {
@@ -727,6 +752,7 @@ export async function generatePayslipForEmployee(
         data: {
           tenantId,
           employeeId: employee.id,
+          payrollRunId,
           month,
           baseSalary: result.baseSalary,
           basicSalary: result.basic,
@@ -760,15 +786,30 @@ export async function generatePayslipForEmployee(
           payrollConfigurationId: policySnapshot?.configurationId,
           payrollConfigurationVersion: policySnapshot?.configurationVersion,
           payrollPolicyRules: policySnapshot?.appliedRules as unknown as Prisma.InputJsonValue | undefined,
+          inputSnapshot: {
+            version: 1,
+            employee: { id: employee.id, employeeNumber: employee.employeeNumber, name: `${employee.firstName ?? ""} ${employee.lastName ?? ""}`.trim(), branchId: employee.branchId, locationId: employee.locationId, departmentId: employee.departmentId, payMode: employee.payMode ?? "monthly", salary: employee.salary },
+            statutory: { pfAllowed: employee.pfAllowed ?? null, esicAllowed: employee.esicAllowed ?? null, tdsAllowed: employee.tdsAllowed ?? null },
+            // This private snapshot is never returned to employee/admin list UI;
+            // it preserves the payment instruction selected at run generation.
+            bank: { bankName: employee.bankName ?? null, accountNumber: employee.accountNumber ?? null, accountMasked: employee.accountNumber ? `****${employee.accountNumber.slice(-4)}` : null, ifscCode: employee.ifscCode ?? null },
+            attendance: summary,
+            policy: policySnapshot?.appliedRules ?? { source: "tenant_config", payrollConfig: config },
+            result,
+          } as unknown as Prisma.InputJsonValue,
         },
       });
+      if (payrollRunId) {
+        const created = await tx.payslip.findUnique({ where: { payrollRunId_employeeId: { payrollRunId, employeeId: employee.id } }, select: { id: true, inputSnapshot: true } });
+        if (created) await tx.payrollRunMember.create({ data: { payrollRunId, employeeId: employee.id, payslipId: created.id, inputSnapshot: created.inputSnapshot ?? {} } });
+      }
     } catch (err: unknown) {
       // Concurrent double-run: second writer loses the race on the unique
       // (employeeId, month). Treat as "already exists" instead of 500.
       if (typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002") {
-        const dup = await tx.payslip.findUnique({
-          where: { employeeId_month: { employeeId: employee.id, month } },
-        });
+        const dup = payrollRunId
+          ? await tx.payslip.findUnique({ where: { payrollRunId_employeeId: { payrollRunId, employeeId: employee.id } } })
+          : await tx.payslip.findFirst({ where: { employeeId: employee.id, month } });
         return { created: false, netSalary: dup?.netSalary, loanApplied: cappedLoanTotal };
       }
       throw err;

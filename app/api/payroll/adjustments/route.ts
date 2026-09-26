@@ -63,6 +63,8 @@ export async function POST(req: NextRequest) {
     select: { id: true },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 400 });
+  const lockedRun = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, month, status: { in: ["finalized", "paid"] } }, select: { id: true } });
+  if (lockedRun) return NextResponse.json({ error: `Payroll is locked for ${month}. Create a reviewed adjustment for the next period instead.` }, { status: 409 });
 
   const adjustment = await prisma.payrollAdjustment.create({
     data: {

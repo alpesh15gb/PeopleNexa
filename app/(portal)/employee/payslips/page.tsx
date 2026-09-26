@@ -15,7 +15,8 @@ export default async function EmployeePayslipsPage() {
     select: { firstName: true, lastName: true },
   });
   const raw = await prisma.payslip.findMany({
-    where: { employeeId: session.sub },
+    // Drafts, including historical standalone drafts, are not employee-visible.
+    where: { employeeId: session.sub, status: { in: ["finalized", "paid"] } },
     orderBy: { month: "desc" },
     select: {
       id: true,

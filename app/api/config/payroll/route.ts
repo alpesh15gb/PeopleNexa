@@ -67,6 +67,8 @@ export async function PUT(req: NextRequest) {
       enabled: body.tds?.enabled !== undefined ? Boolean(body.tds.enabled) : current.tds.enabled,
       regime: body.tds?.regime === "old" ? "old" : body.tds?.regime === "new" ? "new" : current.tds.regime,
     },
+    monthlyDivisor: Math.max(1, Math.min(366, num(body.monthlyDivisor, current.monthlyDivisor ?? 26))),
+    components: current.components,
   };
 
   const tenant = await prisma.tenant.update({

@@ -64,6 +64,7 @@ model Tenant {
   webhooks           WebhookEndpoint[]
   taxDeclarations    TaxDeclaration[]
   payrollAdjustments PayrollAdjustment[]
+  payrollRuns         PayrollRun[]
   profile            TenantProfile?
   configurationRecords ConfigurationRecord[]
 }
@@ -505,6 +506,7 @@ model Employee {
   leaveBalanceImportEntries LeaveBalanceImportEntry[]
   notifications     Notification[]
   payslips          Payslip[]
+  payrollRunMembers PayrollRunMember[]
   loans             EmployeeLoan[]
   assetAssignments  AssetAssignment[]
   corrections       PunchCorrection[]
@@ -1021,6 +1023,9 @@ model Payslip {
   tenantId    String
   employeeId  String
   employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // Null identifies an immutable legacy slip generated before payroll runs.
+  payrollRunId String?
+  payrollRun   PayrollRun? @relation(fields: [payrollRunId], references: [id], onDelete: Restrict)
   month       String // "2026-08"
   baseSalary  Float
   basicSalary Float    @default(0) // PF / gratuity wage base used by the payroll engine
@@ -1066,6 +1071,9 @@ model Payslip {
   payrollConfigurationVersion Int?
   payrollPolicyRules          Json?
   salaryBreakdown             Json?
+  // Frozen employee/master, policy, attendance and calculation inputs. New
+  // run slips must render from this after finalization.
+  inputSnapshot               Json?
   // Payout tracking (bulk/online/offline payment reconciliation).
   paidVia    String? // cash | upi | bank | other
   paidAt     DateTime?
@@ -1073,8 +1081,57 @@ model Payslip {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  @@unique([employeeId, month])
+  @@unique([payrollRunId, employeeId])
   @@index([tenantId, month])
+  @@index([payrollRunId])
+}
+
+// A run owns the approval workflow. scopeKey is "tenant" or "location:<id>".
+// The unique key prevents a second active or historical run for the same scope
+// and period; cancelled runs are retained rather than overwritten.
+model PayrollRun {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scopeKey    String
+  locationId  String?
+  month       String
+  status      String   @default("draft") // draft | reviewed | approved | finalized | paid | cancelled | reversed
+  createdBy   String
+  createdAt   DateTime @default(now())
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  approvedBy  String?
+  approvedAt  DateTime?
+  finalizedBy String?
+  finalizedAt DateTime?
+  paidBy      String?
+  paidAt      DateTime?
+  cancelledBy String?
+  cancelledAt DateTime?
+  note        String?
+  members     PayrollRunMember[]
+  payslips    Payslip[]
+
+  @@unique([tenantId, scopeKey, month])
+  @@index([tenantId, month, status])
+}
+
+// Membership is retained independently of a payslip so omissions and
+// exceptions are auditable. inputSnapshot is copied from the linked payslip.
+model PayrollRunMember {
+  id            String     @id @default(cuid())
+  payrollRunId  String
+  payrollRun    PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employeeId    String
+  employee      Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  payslipId     String?    @unique
+  inputSnapshot Json
+  exception     String?
+  createdAt     DateTime   @default(now())
+
+  @@unique([payrollRunId, employeeId])
+  @@index([employeeId])
 }
 
 // ─── Cashbook (cash-in / cash-out + vendor payments, SME ledger lite) ───────

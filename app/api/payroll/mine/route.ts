@@ -7,7 +7,7 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const payslips = await prisma.payslip.findMany({
-    where: { employeeId: session.sub, tenantId: session.tenantId },
+    where: { employeeId: session.sub, tenantId: session.tenantId, status: { in: ["finalized", "paid"] } },
     orderBy: { month: "desc" },
   });
 

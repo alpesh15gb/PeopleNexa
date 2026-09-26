@@ -27,6 +27,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
   });
   if (!payslip) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (payslip.payrollRunId) {
+    return NextResponse.json({ error: "Run-controlled payslips cannot be paid or edited individually. Use the payroll run lifecycle." }, { status: 409 });
+  }
 
   if (status === "draft") {
     if (payslip.status === "paid") {

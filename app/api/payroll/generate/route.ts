@@ -3,7 +3,6 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
-import { sendWhatsApp } from "@/lib/whatsapp";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 
@@ -24,6 +23,16 @@ export async function POST(req: NextRequest) {
 
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const scopeKey = locationId ? `location:${locationId}` : "tenant";
+  let run;
+  try {
+    run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub } });
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") {
+      return NextResponse.json({ error: `A payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
+    }
+    throw error;
+  }
   const [tenant, policyRecords, employees] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
@@ -32,7 +41,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.employee.findMany({
       where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
-      select: { id: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, phone: true },
+      select: { id: true, employeeNumber: true, firstName: true, lastName: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, branch: { select: { locationId: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
   ]);
 
@@ -46,14 +55,21 @@ export async function POST(req: NextRequest) {
       workBasisRate: e.workBasisRate,
       shiftId: e.shiftId,
       joiningDate: e.joiningDate,
-      locationId: e.locationId,
+       locationId: e.branch?.locationId ?? e.locationId,
+       branchId: e.branchId,
+       departmentId: e.departmentId,
+       employeeNumber: e.employeeNumber,
+       firstName: e.firstName,
+       lastName: e.lastName,
+       bankName: e.bankName,
+       accountNumber: e.accountNumber,
+       ifscCode: e.ifscCode,
+       pfAllowed: e.employmentProfile?.pfAllowed,
+       esicAllowed: e.employmentProfile?.esicAllowed,
+       tdsAllowed: e.employmentProfile?.tdsAllowed,
     }));
   let created = 0;
   let totalLoanApplied = 0;
-
-  const phones = new Map(
-    employees.map((e) => [e.id, e.phone ?? null] as const)
-  );
 
   type GenResult = { employeeId: string; employeeName: string; created: boolean; netSalary?: number; error?: string };
   const results: GenResult[] = [];
@@ -61,7 +77,7 @@ export async function POST(req: NextRequest) {
   for (const emp of withSalary) {
     try {
       const policySnapshot = resolvePayrollPolicy(policyRecords, tenant?.config ?? null, emp.locationId, month);
-      const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month, policySnapshot);
+       const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month, policySnapshot, run.id);
       if (res.created) created++;
       totalLoanApplied += res.loanApplied ?? 0;
         const source = employees.find((candidate) => candidate.id === emp.id);
@@ -72,21 +88,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Notify outside the generation loop so a WhatsApp failure never fails the response.
-  const notifyTargets = results.filter((r) => r.created && r.netSalary != null);
-  await Promise.allSettled(
-    notifyTargets.map((r) =>
-      sendWhatsApp(session.tenantId, phones.get(r.employeeId), "payslip.generated", {
-        month,
-        amount: Number(r.netSalary).toFixed(0),
-      })
-    )
-  );
-
   const failed = results.filter((r) => r.error).length;
   return NextResponse.json({
     success: true,
     month,
+    runId: run.id,
     created,
     skipped: employees.length - withSalary.length,
     loanApplied: totalLoanApplied,

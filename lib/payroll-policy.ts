@@ -32,8 +32,6 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     return { configurationId: null, configurationVersion: null, appliedRules: { source: "tenant_config", payrollConfig: legacy } };
   }
 
-  // The engine deliberately keeps its fixed monthly divisor and pay-mode OT
-  // basis. Only rules represented by PayrollConfig are activated here.
   const payrollConfig: PayrollConfig = {
     ...legacy,
     otMultiplier: draft.overtimeMultiplier,
@@ -44,6 +42,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     lwf: { enabled: draft.statutory.labourWelfareFundEnabled },
     tds: { enabled: draft.statutory.tdsEnabled, regime: draft.statutory.tdsRegime },
     components: draft.components,
+    monthlyDivisor: draft.monthlyDivisor,
   };
   return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: "payroll_policy", payrollConfig } };
 }

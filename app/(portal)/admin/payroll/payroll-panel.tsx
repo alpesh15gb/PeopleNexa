@@ -30,6 +30,7 @@ interface Employee {
 
 interface Payslip {
   id: string;
+  payrollRunId?: string | null;
   month: string;
   baseSalary: number;
   basicSalary: number;
@@ -99,12 +100,14 @@ export function PayrollPanel({
   totals,
   generated,
   canManageSettings,
+  run,
 }: {
   month: string;
   rows: Row[];
   totals: { gross: number; deductions: number; net: number; paid: number };
   generated: number;
   canManageSettings: boolean;
+  run: { id: string; status: string; createdBy: string; _count: { payslips: number } } | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -125,6 +128,18 @@ export function PayrollPanel({
   const [markExportedOpen, setMarkExportedOpen] = useState(false);
   const [regenTarget, setRegenTarget] = useState<{ employee: Employee; payslip: Payslip } | null>(null);
   const [selectedPayslips, setSelectedPayslips] = useState<Set<string>>(new Set());
+
+  async function transitionRun(status: string) {
+    if (!run) return;
+    setBusy(`run-${status}`);
+    try {
+      const res = await fetch(`/api/payroll/runs/${run.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+      const data = await res.json();
+      if (!res.ok) return toast("error", data.error ?? "Run transition failed");
+      toast("success", `Payroll run ${status}`);
+      router.refresh();
+    } finally { setBusy(null); }
+  }
 
   const missingBank = rows.filter((r) => r.payslip && (!r.employee.accountNumber || !r.employee.ifscCode)).length;
   const draftSlips = rows.filter((r) => r.payslip && r.payslip.status !== "paid");
@@ -285,7 +300,11 @@ export function PayrollPanel({
     }
     setBusy("export");
     try {
-      const q = new URLSearchParams({ month, bank, status: "draft", ...(debitAccount ? { debitAccount } : {}) });
+      if (!run || (run.status !== "finalized" && run.status !== "paid")) {
+        toast("error", "Finalize the payroll run before exporting a bank file");
+        return;
+      }
+      const q = new URLSearchParams({ month, bank, runId: run.id, status: "draft", ...(debitAccount ? { debitAccount } : {}) });
       const res = await fetch(`/api/payroll/export?${q.toString()}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -393,6 +412,7 @@ export function PayrollPanel({
           <Button size="sm" variant="outline" loading={busy === "export"} onClick={exportBankFile} disabled={generated === 0}>
             <Download aria-hidden="true" className="h-3.5 w-3.5" /> Bank file
           </Button>
+          {run && <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/payroll/runs/${run.id}/register`; }}><FileSpreadsheet aria-hidden="true" className="h-3.5 w-3.5" /> Register CSV</Button>}
           <Select value={complianceType} onChange={(e) => setComplianceType(e.target.value)} aria-label="Compliance type" className="w-full sm:w-auto lg:w-40">
             <option value="ecr">PF ECR</option>
             <option value="form16">Form 16</option>
@@ -429,6 +449,16 @@ export function PayrollPanel({
           {missingBank} employee{missingBank > 1 ? "s have" : " has"} a payslip but no bank details — add account number + IFSC under Employees to include them in the bank file.
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-2 border-b border-edge bg-tint/40 px-5 py-3 text-[12.5px]">
+        <span className="font-semibold">Run control:</span>
+        {run ? <><StatusPill status={run.status} /><span className="text-muted-foreground">{run._count.payslips} slips · drafts are internal until finalized</span>
+          {run.status === "draft" && <Button size="sm" variant="outline" loading={busy === "run-reviewed"} onClick={() => transitionRun("reviewed")}>Send for review</Button>}
+          {run.status === "reviewed" && <Button size="sm" variant="outline" loading={busy === "run-approved"} onClick={() => transitionRun("approved")}>Approve</Button>}
+          {run.status === "approved" && <Button size="sm" variant="outline" loading={busy === "run-finalized"} onClick={() => transitionRun("finalized")}>Finalize</Button>}
+          {run.status === "finalized" && <Button size="sm" variant="success" loading={busy === "run-paid"} onClick={() => transitionRun("paid")}>Mark run paid</Button>}
+        </> : <span className="text-muted-foreground">No run for this period. Create a draft to calculate payroll.</span>}
+      </div>
+      <div className="border-b border-amber-400/15 bg-amber-500/5 px-5 py-2 text-[12px] text-amber-300">Compliance downloads are operational summaries only. Do not file PF, ESIC, TDS, Form 16, or 24Q outputs until a verified statutory rule set and client review are in place.</div>
 
       <div className="grid grid-cols-2 gap-3 border-b border-edge p-5 sm:grid-cols-5">
         {stats.map((s) => (
@@ -514,7 +544,7 @@ export function PayrollPanel({
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                     </Button>
-                    {payslip.status === "draft" ? (
+                    {payslip.status === "draft" && !payslip.payrollRunId ? (
                       <Button
                         size="sm"
                         variant="success"

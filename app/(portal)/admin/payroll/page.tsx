@@ -20,7 +20,7 @@ export default async function AdminPayrollPage({
   const { month: monthParam } = await searchParams;
   const month = monthParam || monthKey(new Date());
 
-  const [employees, payslips] = await Promise.all([
+  const [employees, runs, payslips] = await Promise.all([
     prisma.employee.findMany({
       where: { tenantId: session.tenantId, ...employeeScope },
       select: {
@@ -37,6 +37,7 @@ export default async function AdminPayrollPage({
       },
       orderBy: { employeeNumber: "asc" },
     }),
+    prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) }, orderBy: { createdAt: "desc" }, take: 1, include: { _count: { select: { payslips: true } } } }),
     prisma.payslip.findMany({
       where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },
@@ -67,10 +68,10 @@ export default async function AdminPayrollPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Payroll" description="Generate and disburse monthly payslips" />
+      <PageHeader title="Payroll" description="Run-controlled monthly payroll. Compliance exports are operational summaries, not filing-ready." />
       <Card>
         <CardContent className="p-0">
-          <PayrollPanel month={month} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} />
+          <PayrollPanel month={month} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} />
         </CardContent>
       </Card>
     </div>

@@ -16,6 +16,7 @@
     "test:leave-policy-period": "tsx scripts/test-leave-policy-period.ts",
     "test:leave-on-behalf": "tsx scripts/test-leave-on-behalf.ts",
     "test:payroll-policy": "tsx scripts/test-payroll-policy.ts",
+    "test:payroll-runs": "tsx scripts/test-payroll-run-foundation.ts",
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
     "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",
     "test:id-card-pdf": "tsx scripts/test-id-card-pdf.ts",
