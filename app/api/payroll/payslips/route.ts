@@ -21,11 +21,12 @@ export async function GET(req: NextRequest) {
   if (!isMonthKey(month)) return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   const ids = session.role === "employee" ? [session.sub] : [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
   const slipId = req.nextUrl.searchParams.get("id");
+  const runId = req.nextUrl.searchParams.get("runId");
   if (ids.length > 500) return NextResponse.json({ error: "Select at most 500 employees at once." }, { status: 400 });
   const [tenant, slips] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...(slipId ? { id: slipId } : {}), ...(ids.length ? { employeeId: { in: ids } } : {}), ...(session.role === "employee" ? { status: { in: ["finalized", "paid"] } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
+      where: { tenantId: session.tenantId, month, ...(slipId ? { id: slipId } : {}), ...(runId ? { payrollRunId: runId } : {}), ...(ids.length ? { employeeId: { in: ids } } : {}), ...(session.role === "employee" ? { status: { in: ["finalized", "paid"] } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, esiIpNumber: true, branch: { select: { location: { select: { profile: true } } } }, location: { select: { profile: true } } } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     }),

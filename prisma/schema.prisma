@@ -1141,6 +1141,12 @@ model PayrollRun {
   finalizedAt DateTime?
   paidBy      String?
   paidAt      DateTime?
+  // Settlement evidence is captured once, atomically with the paid transition.
+  paymentMethod String?
+  settlementDate DateTime?
+  paymentReference String?
+  paymentConfirmedCount Int?
+  paymentConfirmedNet   Float?
   cancelledBy String?
   cancelledAt DateTime?
   note        String?

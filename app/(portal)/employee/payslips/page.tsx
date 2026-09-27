@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { PayslipsPanel } from "./payslips-panel";
+import { documentSnapshotForResponse } from "@/lib/payslip-document";
 
 export const dynamic = "force-dynamic";
 
@@ -21,34 +22,15 @@ export default async function EmployeePayslipsPage() {
     select: {
       id: true,
       month: true,
-      baseSalary: true,
-      basicSalary: true,
-      allowances: true,
-      overtimePay: true,
-      grossEarnings: true,
-      pfEmployee: true,
-      esicEmployee: true,
-      professionalTax: true,
-      lwf: true,
-      tds: true,
-      lateFines: true,
-      loanDeduction: true,
-      deductions: true,
-      netSalary: true,
       status: true,
-      presentDays: true,
-      lateDays: true,
-      halfDays: true,
-      absentDays: true,
-      overtimeHours: true,
-      workedHours: true,
-      adjustments: true,
+      documentSnapshot: true,
     },
   });
-  const payslips = raw.map((p) => ({
-    ...p,
-    adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null,
-  }));
+  // Employee-facing values are exclusively the frozen, PDF-equivalent document.
+  const payslips = raw.flatMap((p) => {
+    const document = documentSnapshotForResponse(p.documentSnapshot);
+    return document ? [{ id: p.id, month: p.month, status: p.status, document }] : [];
+  });
 
   return (
     <div className="animate-fade-up space-y-6">

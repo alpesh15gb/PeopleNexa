@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
@@ -60,11 +60,12 @@ export async function POST(req: NextRequest) {
   }
   const employee = await prisma.employee.findFirst({
     where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
-    select: { id: true },
+    select: { id: true, branch: { select: { locationId: true } }, locationId: true },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 400 });
-  const lockedRun = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, month, status: { in: ["finalized", "paid"] } }, select: { id: true } });
-  if (lockedRun) return NextResponse.json({ error: `Payroll is locked for ${month}. Create a reviewed adjustment for the next period instead.` }, { status: 409 });
+  const employeeLocationId = employee.branch?.locationId ?? employee.locationId;
+  const lockedRun = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, month, ...(employeeLocationId ? { locationId: employeeLocationId } : {}), status: { not: "draft" } }, select: { id: true, status: true } });
+  if (lockedRun) return NextResponse.json({ error: `Adjustments cannot change a ${lockedRun.status} payroll run. Create a reviewed next-period adjustment instead.` }, { status: 409 });
 
   const adjustment = await prisma.payrollAdjustment.create({
     data: {

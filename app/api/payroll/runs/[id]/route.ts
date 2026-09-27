@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { canTransitionPayrollRun, payrollRunAuditData, payrollRunTransitionData, type PayrollRunStatus } from "@/lib/payroll-runs";
+import { canTransitionPayrollRun, paymentEvidence, payrollRunAuditData, payrollRunTransitionData, type PayrollRunStatus } from "@/lib/payroll-runs";
 import { payrollRunPreflight } from "@/lib/payroll-preflight";
 import { managerLocationId } from "@/lib/location-scope";
 
@@ -9,7 +9,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
-  const target = String((await req.json().catch(() => ({}))).status ?? "") as PayrollRunStatus;
+  const body = await req.json().catch(() => ({}));
+  const target = String(body.status ?? "") as PayrollRunStatus;
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
@@ -22,12 +23,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const errors = payrollRunPreflight(run.payslips);
     if (errors.length) return NextResponse.json({ error: errors.join(" "), preflight: errors }, { status: 409 });
   }
+  const net = run.payslips.reduce((total, slip) => total + slip.netSalary, 0);
+  const evidence = target === "paid" ? paymentEvidence(body, run.payslips.length, net) : null;
+  if (evidence && "error" in evidence) return NextResponse.json({ error: evidence.error }, { status: 400 });
   // Reversal is deliberately a terminal record only; it never mutates paid slips.
   const updated = await prisma.$transaction(async (tx) => {
-    const next = await tx.payrollRun.update({ where: { id }, data: payrollRunTransitionData(target, session.sub) });
-    if (target === "paid") await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: "paid", paidAt: new Date() } });
+    const next = await tx.payrollRun.update({ where: { id }, data: { ...payrollRunTransitionData(target, session.sub), ...(evidence?.value ?? {}) } });
+    if (target === "paid") await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: "paid", paidAt: new Date(), paidVia: evidence!.value.paymentMethod, paymentRef: evidence!.value.paymentReference } });
     if (target === "finalized") await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: "finalized" } });
-    await tx.auditLog.create({ data: payrollRunAuditData(id, session.tenantId, session.sub, session.role, run.status, target) });
+    await tx.auditLog.create({ data: { ...payrollRunAuditData(id, session.tenantId, session.sub, session.role, run.status, target), ...(target === "paid" ? { after: { status: target, ...evidence!.value, count: run.payslips.length, net } } : {}) } });
     return next;
   });
   return NextResponse.json({ run: updated });

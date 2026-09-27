@@ -32,3 +32,18 @@ export function payrollRunAuditData(runId: string, tenantId: string, actorId: st
     summary: `Payroll run ${from} -> ${to}`, before: { status: from }, after: { status: to },
   };
 }
+
+export function paymentEvidence(body: Record<string, unknown>, count: number, net: number) {
+  const method = String(body.paymentMethod ?? "").trim().toLowerCase();
+  const reference = String(body.paymentReference ?? "").trim();
+  const settlement = String(body.settlementDate ?? "").trim();
+  const confirmedCount = Number(body.confirmedCount);
+  const confirmedNet = Number(body.confirmedNet);
+  if (!['cash', 'upi', 'bank', 'other'].includes(method)) return { error: "Payment method is required." } as const;
+  if (!reference || reference.length > 120) return { error: "Payment reference or batch ID is required (max 120 characters)." } as const;
+  const settlementDate = new Date(settlement);
+  if (!settlement || Number.isNaN(settlementDate.getTime())) return { error: "A valid settlement date is required." } as const;
+  if (!Number.isInteger(confirmedCount) || confirmedCount !== count) return { error: `Confirm the exact payslip count (${count}).` } as const;
+  if (!Number.isFinite(confirmedNet) || Math.abs(confirmedNet - net) > 0.005) return { error: `Confirm the exact net total (${net.toFixed(2)}).` } as const;
+  return { value: { paymentMethod: method, paymentReference: reference, settlementDate, paymentConfirmedCount: confirmedCount, paymentConfirmedNet: confirmedNet } } as const;
+}

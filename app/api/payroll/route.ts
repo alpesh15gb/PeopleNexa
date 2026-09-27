@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   }
 
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
+  const runId = req.nextUrl.searchParams.get("run");
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
@@ -27,6 +28,9 @@ export async function GET(req: NextRequest) {
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const employeeScope = locationId ? employeeLocationScope(locationId) : {};
+  if (!runId) return NextResponse.json({ error: "A payroll run is required. Legacy payslips are read-only and are not part of the register." }, { status: 400 });
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) }, select: { id: true } });
+  if (!run) return NextResponse.json({ error: "Payroll run not found in this scope." }, { status: 404 });
   const [employees, payslips] = await Promise.all([
     prisma.employee.findMany({
       where: { tenantId: session.tenantId, ...employeeScope },
@@ -48,6 +52,7 @@ export async function GET(req: NextRequest) {
       where: {
         tenantId: session.tenantId,
         month,
+        payrollRunId: run.id,
         ...(payslipStatusFilter ? { status: payslipStatusFilter } : {}),
         ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
       },

@@ -25,15 +25,6 @@ export async function POST(req: NextRequest) {
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const scopeKey = locationId ? `location:${locationId}` : "tenant";
-  let run;
-  try {
-    run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub } });
-  } catch (error: unknown) {
-    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") {
-      return NextResponse.json({ error: `A payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
-    }
-    throw error;
-  }
   const [tenant, policyRecords, employees, revisions] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
@@ -78,6 +69,25 @@ export async function POST(req: NextRequest) {
       tdsAllowed: e.employmentProfile?.tdsAllowed,
     });
     });
+  const missingSalary = employees.filter((employee) => employee.salary == null || employee.salary <= 0);
+  const legacyAcknowledged = body.acknowledgeLegacyPolicy === true;
+  const policyFailures = withSalary.filter((employee) => !resolvePayrollPolicy(policyRecords, tenant?.config ?? null, employee.locationId, month).configurationId);
+  // A fallback tenant config is legacy behavior, never an invisible operating policy.
+  if (policyFailures.length && !legacyAcknowledged) {
+    return NextResponse.json({
+      error: "No effective published payroll policy exists for this scope and period.",
+      preflight: { eligible: withSalary.length, missingSalary: missingSalary.map((employee) => employee.id), missingPolicy: policyFailures.map((employee) => employee.id) },
+    }, { status: 409 });
+  }
+  if (!withSalary.length) return NextResponse.json({ error: "No eligible employees with a salary were found. No payroll run was created.", preflight: { eligible: 0, missingSalary: missingSalary.map((employee) => employee.id) } }, { status: 409 });
+  let run;
+  try {
+    run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub, ...(legacyAcknowledged && policyFailures.length ? { note: "Legacy policy acknowledged at generation" } : {}) } });
+    if (legacyAcknowledged && policyFailures.length) await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.legacy_policy_acknowledged", entity: "PayrollRun", entityId: run.id, summary: `Legacy policy acknowledged for ${policyFailures.length} employee(s)`, after: { month, employeeIds: policyFailures.map((employee) => employee.id) } } });
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") return NextResponse.json({ error: `A payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
+    throw error;
+  }
   let created = 0;
   let totalLoanApplied = 0;
 
@@ -99,6 +109,13 @@ export async function POST(req: NextRequest) {
   }
 
   const failed = results.filter((r) => r.error).length;
+  if (created === 0) {
+    // Do not strand an operational draft when generation yielded no documents.
+    await prisma.$transaction([
+      prisma.payrollRun.update({ where: { id: run.id }, data: { status: "cancelled", cancelledBy: session.sub, cancelledAt: new Date(), note: "Automatically cancelled: generation produced no payslips." } }),
+      prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.cancelled", entity: "PayrollRun", entityId: run.id, summary: "Automatically cancelled empty failed payroll generation", after: { failed, skipped: employees.length - withSalary.length } } }),
+    ]);
+  }
   return NextResponse.json({
     success: true,
     month,
@@ -108,5 +125,6 @@ export async function POST(req: NextRequest) {
     loanApplied: totalLoanApplied,
     results,
     totals: { created, skipped: employees.length - withSalary.length, failed, total: employees.length },
+    cancelled: created === 0,
   });
 }

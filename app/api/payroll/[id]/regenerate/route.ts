@@ -32,8 +32,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id, tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (existing.status === "paid") {
-    return NextResponse.json({ error: "Paid payslips cannot be regenerated." }, { status: 409 });
+  if (existing.status !== "draft") return NextResponse.json({ error: "Only draft payslips can be regenerated. Finalized and paid payroll is immutable." }, { status: 409 });
+  if (existing.payrollRunId) {
+    const run = await prisma.payrollRun.findFirst({ where: { id: existing.payrollRunId, tenantId: session.tenantId }, select: { status: true } });
+    if (!run || run.status !== "draft") return NextResponse.json({ error: "Only payslips in a draft run can be regenerated." }, { status: 409 });
   }
   if (existing.month < monthKeyIST()) {
     return NextResponse.json({ error: "Prior-month payslips cannot be regenerated." }, { status: 409 });

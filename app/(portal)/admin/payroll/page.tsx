@@ -10,33 +10,20 @@ export const dynamic = "force-dynamic";
 export default async function AdminPayrollPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; period?: string; location?: string; run?: string }>;
 }) {
   const session = await requireSession();
   if (session.role !== "admin" && session.role !== "location_manager") return null;
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return null;
+  const assignedLocationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !assignedLocationId) return null;
+  const params = await searchParams;
+  const month = params.period || params.month || monthKey(new Date());
+  const locations = session.role === "admin" ? await prisma.location.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }) : [];
+  const requestedLocation = params.location || null;
+  const locationId = session.role === "location_manager" ? assignedLocationId : locations.some((location) => location.id === requestedLocation) ? requestedLocation : null;
   const employeeScope = locationId ? employeeLocationScope(locationId) : {};
-  const { month: monthParam } = await searchParams;
-  const month = monthParam || monthKey(new Date());
 
-  const [employees, runs, payslips, recentRuns] = await Promise.all([
-    prisma.employee.findMany({
-      where: { tenantId: session.tenantId, ...employeeScope },
-      select: {
-        id: true,
-        employeeNumber: true,
-        firstName: true,
-        lastName: true,
-        salary: true,
-        accountNumber: true,
-        ifscCode: true,
-        bankName: true,
-        department: { select: { name: true } },
-        branch: { select: { name: true } },
-      },
-      orderBy: { employeeNumber: "asc" },
-    }),
+  const [runs, recentRuns] = await Promise.all([
     prisma.payrollRun.findMany({
       where: { tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) },
       orderBy: { createdAt: "desc" },
@@ -45,10 +32,6 @@ export default async function AdminPayrollPage({
         members: { where: { exception: { not: null } }, select: { id: true, exception: true, employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true } } } },
       },
     }),
-    prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
-      include: { employee: { select: { id: true, firstName: true, lastName: true } } },
-    }),
     prisma.payrollRun.findMany({
       where: { tenantId: session.tenantId, ...(locationId ? { locationId } : {}) },
       orderBy: [{ month: "desc" }, { createdAt: "desc" }],
@@ -56,6 +39,12 @@ export default async function AdminPayrollPage({
       include: { _count: { select: { payslips: true, members: true } } },
     }),
   ]);
+  const run = params.run ? runs.find((candidate) => candidate.id === params.run) ?? null : runs[0] ?? null;
+  const payslips = run ? await prisma.payslip.findMany({
+    where: { tenantId: session.tenantId, payrollRunId: run.id },
+    include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, salary: true, accountNumber: true, ifscCode: true, bankName: true, department: { select: { name: true } }, branch: { select: { name: true } } } } },
+    orderBy: { employee: { employeeNumber: "asc" } },
+  }) : [];
 
   const slipByEmp = new Map(
     payslips.map((p) => [
@@ -63,10 +52,7 @@ export default async function AdminPayrollPage({
        { ...p, adjustments: (p.adjustments ?? null) as unknown as { label: string; amount: number }[] | null, salaryBreakdown: Array.isArray(p.salaryBreakdown) ? p.salaryBreakdown as unknown as { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null },
     ])
   );
-  const rows = employees.map((emp) => ({
-    employee: emp,
-    payslip: slipByEmp.get(emp.id) ?? null,
-  }));
+  const rows = payslips.map((payslip) => ({ employee: payslip.employee, payslip: slipByEmp.get(payslip.employee.id) ?? null }));
 
   const totals = payslips.reduce(
     (acc, p) => {
@@ -81,7 +67,7 @@ export default async function AdminPayrollPage({
 
   return (
     <SettingsWorkspace eyebrow="PeopleNexa payroll" title="Payroll operations" description="Run-controlled calculation and payout workspace. Policy configuration remains separate from payroll run controls." tabs={session.role === "admin" ? [{ label: "Payroll configuration", href: "/admin/payroll/configuration" }, { label: "Salary revisions", href: "/admin/payroll/salary-revisions" }] : undefined}>
-      <PayrollPanel month={month} locationLabel={locationId ? "Assigned location" : "All locations"} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} history={recentRuns} />
+       <PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? "Assigned location" : "All locations"} locationId={locationId} locations={locations} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={run} history={recentRuns} />
     </SettingsWorkspace>
   );
 }
