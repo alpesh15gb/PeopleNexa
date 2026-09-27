@@ -318,6 +318,91 @@ select option {
   border: 1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03), 0 10px 28px -24px rgba(16, 24, 40, 0.28);
 }
+
+/* Centered configuration canvas shared by company and payroll workspaces. */
+.settings-workspace {
+  --workspace-accent: #0f766e;
+  --workspace-accent-soft: rgba(15, 118, 110, 0.08);
+  width: 100%;
+  max-width: 1180px;
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: 0 18px 48px -38px rgba(15, 23, 42, 0.34);
+}
+.settings-workspace__header {
+  padding: 28px 24px 22px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--tint), transparent 76%);
+}
+.settings-workspace__eyebrow {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.settings-workspace__title {
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  font-weight: 700;
+  letter-spacing: -.025em;
+  line-height: 1.15;
+}
+.settings-workspace__description {
+  max-width: 720px;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.settings-workspace__progress {
+  max-width: 640px;
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--workspace-accent) 28%, var(--border));
+  border-radius: 14px;
+  background: var(--workspace-accent-soft);
+}
+.settings-workspace__progress .text-primary { color: var(--workspace-accent); }
+.settings-workspace__track {
+  height: 6px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--muted);
+}
+.settings-workspace__track > span { display: block; height: 100%; border-radius: inherit; background: var(--workspace-accent); }
+.settings-workspace__tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.settings-workspace__tabs a {
+  min-height: 44px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-workspace__tabs a:hover { background: var(--tint); color: var(--foreground); }
+.settings-workspace__body { padding: 20px; }
+.dark .settings-workspace { --workspace-accent: #2dd4bf; --workspace-accent-soft: rgba(45, 212, 191, 0.1); }
+@media (min-width: 640px) {
+  .settings-workspace__header { padding: 32px 36px 25px; }
+  .settings-workspace__tabs { padding-inline: 28px; }
+  .settings-workspace__body { padding: 28px; }
+}
 :root {
   --card-sheen: rgba(255, 255, 255, 0.86);
 }

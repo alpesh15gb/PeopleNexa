@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { managerLocationId, employeeLocationScope } from "@/lib/location-scope";
-import { PageHeader } from "@/components/ui/card";
+import { SettingsWorkspace } from "@/components/settings-workspace";
 import { SalaryRevisions } from "./salary-revisions";
 
 export const dynamic = "force-dynamic";
@@ -16,5 +16,5 @@ export default async function SalaryRevisionsPage() {
     prisma.employee.findMany({ where, select: { id: true, employeeNumber: true, firstName: true, lastName: true, salary: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
     prisma.salaryRevision.findMany({ where: { tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) }, include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true } } }, orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }] }),
   ]);
-  return <div className="animate-fade-up space-y-6"><PageHeader title="Salary revisions" description="Effective-dated monthly payroll-base changes for future draft runs. This never rewrites employee salary or finalized and paid payroll." /><SalaryRevisions employees={employees} revisions={revisions} canApprove={session.role === "admin"} /></div>;
+  return <SettingsWorkspace eyebrow="PeopleNexa payroll" title="Salary revisions" description="Effective-dated monthly payroll-base changes for future draft runs. This never rewrites employee salary or finalized and paid payroll." tabs={[{ label: "Payroll operations", href: "/admin/payroll" }, ...(session.role === "admin" ? [{ label: "Payroll configuration", href: "/admin/payroll/configuration" }] : [])]}><SalaryRevisions employees={employees} revisions={revisions} canApprove={session.role === "admin"} /></SettingsWorkspace>;
 }

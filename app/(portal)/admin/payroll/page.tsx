@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { monthKey } from "@/lib/dates";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { SettingsWorkspace } from "@/components/settings-workspace";
 import { PayrollPanel } from "./payroll-panel";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
@@ -80,13 +80,8 @@ export default async function AdminPayrollPage({
   );
 
   return (
-    <div className="animate-fade-up space-y-6">
-      <PageHeader title="Payroll" description="Run-controlled payroll operations. Policy configuration is kept separate from this workspace." />
-      <Card>
-        <CardContent className="p-0">
-          <PayrollPanel month={month} locationLabel={locationId ? "Assigned location" : "All locations"} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} history={recentRuns} />
-        </CardContent>
-      </Card>
-    </div>
+    <SettingsWorkspace eyebrow="PeopleNexa payroll" title="Payroll operations" description="Run-controlled calculation and payout workspace. Policy configuration remains separate from payroll run controls." tabs={session.role === "admin" ? [{ label: "Payroll configuration", href: "/admin/payroll/configuration" }, { label: "Salary revisions", href: "/admin/payroll/salary-revisions" }] : undefined}>
+      <PayrollPanel month={month} locationLabel={locationId ? "Assigned location" : "All locations"} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={runs[0] ?? null} history={recentRuns} />
+    </SettingsWorkspace>
   );
 }
