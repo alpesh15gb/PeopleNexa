@@ -22,8 +22,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
 
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const assignedLocationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !assignedLocationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const requestedLocationId = String(body.locationId ?? "").trim() || null;
+  // An admin may intentionally create a location-scoped run; never accept an
+  // arbitrary tenant-external location from the client.
+  const locationId = session.role === "location_manager"
+    ? assignedLocationId
+    : requestedLocationId && await prisma.location.findFirst({ where: { id: requestedLocationId, tenantId: session.tenantId }, select: { id: true } }).then((location) => location?.id ?? null);
+  if (session.role === "admin" && requestedLocationId && !locationId) return NextResponse.json({ error: "Invalid payroll location scope." }, { status: 400 });
   const scopeKey = locationId ? `location:${locationId}` : "tenant";
   const [tenant, policyRecords, employees, revisions] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),

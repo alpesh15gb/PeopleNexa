@@ -85,7 +85,6 @@ const adminNav: NavItem[] = [
   { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices", section: "Operations" },
   { href: "/admin/journeys", label: "Journey Tracker", icon: <Route className="h-4 w-4" />, module: "journey", section: "Operations" },
   { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
-  { href: "/admin/payroll/salary-revisions", label: "Salary Revisions", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
   { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
@@ -275,8 +274,8 @@ function NavLinks({
                   {section.items.map((item) => {
                     const active = isActive(item);
                     return (
+                      <div key={item.href}>
                       <Link
-                        key={item.href}
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={active ? "page" : undefined}
@@ -296,6 +295,8 @@ function NavLinks({
                         {item.label}
                         {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
                       </Link>
+                      {item.href === "/admin/payroll" && pathname.startsWith("/admin/payroll") && <div className="ml-6 mt-1 space-y-0.5 border-l border-edge pl-2"><PayrollNavLink href="/admin/payroll" label="Dashboard" active={pathname === "/admin/payroll"} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/process" label="Process Payroll" active={pathname.startsWith("/admin/payroll/process")} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/salary-revisions" label="Salary Revisions" active={pathname.startsWith("/admin/payroll/salary-revisions")} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/variance" label="Variance Report" active={pathname.startsWith("/admin/payroll/variance")} onNavigate={onNavigate} /></div>}
+                      </div>
                     );
                   })}
                 </div>
@@ -306,6 +307,10 @@ function NavLinks({
       </nav>
     </div>
   );
+}
+
+function PayrollNavLink({ href, label, active, onNavigate }: { href: string; label: string; active: boolean; onNavigate?: () => void }) {
+  return <Link href={href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={cn("flex min-h-8 items-center rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors", active ? "bg-teal-700 text-white dark:bg-teal-400 dark:text-slate-950" : "text-muted-foreground hover:bg-primary/[0.06] hover:text-foreground")}>{label}</Link>;
 }
 
 export interface LocationTreeBranch {
