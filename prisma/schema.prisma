@@ -259,6 +259,7 @@ model Location {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name      String // e.g. Hyderabad
   code      String // e.g. HYD
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

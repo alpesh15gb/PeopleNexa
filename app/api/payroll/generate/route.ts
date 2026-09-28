@@ -3,7 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { generatePayslipForEmployee } from "@/lib/payroll";
-import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { resolveSalaryRevision } from "@/lib/salary-revisions";
 
@@ -22,16 +22,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
 
-  const assignedLocationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !assignedLocationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const requestedLocationId = String(body.locationId ?? "").trim() || null;
-  // An admin may intentionally create a location-scoped run; never accept an
-  // arbitrary tenant-external location from the client.
-  const locationId = session.role === "location_manager"
-    ? assignedLocationId
-    : requestedLocationId && await prisma.location.findFirst({ where: { id: requestedLocationId, tenantId: session.tenantId }, select: { id: true } }).then((location) => location?.id ?? null);
-  if (session.role === "admin" && requestedLocationId && !locationId) return NextResponse.json({ error: "Invalid payroll location scope." }, { status: 400 });
-  const scopeKey = locationId ? `location:${locationId}` : "tenant";
+  const scope = await payrollOperationLocationId(session, requestedLocationId);
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: session.role === "location_manager" ? 403 : 400 });
+  const locationId = scope.locationId;
+  const scopeKey = `location:${locationId}`;
   const [tenant, policyRecords, employees, revisions] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
@@ -39,7 +34,7 @@ export async function POST(req: NextRequest) {
       select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
     }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
+      where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...employeeLocationScope(locationId) },
       select: { id: true, employeeNumber: true, firstName: true, lastName: true, position: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { locationId: true, name: true } }, department: { select: { name: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
     prisma.salaryRevision.findMany({ where: { tenantId: session.tenantId, status: "approved", effectiveFrom: { lte: new Date(`${month}-01T00:00:00.000Z`) } }, select: { id: true, employeeId: true, newSalary: true, effectiveFrom: true } }),

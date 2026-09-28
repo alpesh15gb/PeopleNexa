@@ -15,9 +15,9 @@ export default async function PayrollVariancePage({ searchParams }: { searchPara
   const params = await searchParams;
   const current = isMonthKey(params.current ?? '') ? params.current! : monthKey(new Date());
   const reference = isMonthKey(params.reference ?? '') ? params.reference! : `${current.slice(0, 4)}-${String(Math.max(1, Number(current.slice(5)) - 1)).padStart(2, '0')}`;
-  const locations = session.role === 'admin' ? await prisma.location.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
+  const locations = session.role === 'admin' ? await prisma.location.findMany({ where: { tenantId: session.tenantId, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
   const locationId = session.role === 'location_manager' ? assignedLocationId : locations.some((location) => location.id === params.location) ? params.location! : null;
-  const runs = await prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month: { in: [reference, current] }, ...(locationId ? { locationId } : {}), status: { in: ['finalized', 'paid'] } }, include: { payslips: { select: { employeeId: true, grossEarnings: true, deductions: true, netSalary: true, employee: { select: { employeeNumber: true, firstName: true, lastName: true } } } } } });
+  const runs = await prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month: { in: [reference, current] }, locationId: locationId ?? '__location_required__', status: { in: ['finalized', 'paid'] } }, include: { payslips: { select: { employeeId: true, grossEarnings: true, deductions: true, netSalary: true, employee: { select: { employeeNumber: true, firstName: true, lastName: true } } } } } });
   const referenceRuns = runs.filter((run) => run.month === reference && isFinancialHistoryRun(run.status));
   const currentRuns = runs.filter((run) => run.month === current && isFinancialHistoryRun(run.status));
   const referenceSlips = referenceRuns.flatMap((run) => run.payslips);

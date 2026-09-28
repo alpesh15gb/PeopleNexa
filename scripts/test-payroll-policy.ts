@@ -9,6 +9,7 @@ const tenantConfig = { payroll: { otMultiplier: 1.5, deductAbsentDays: true, pf:
 const fallback = resolvePayrollPolicy([], tenantConfig, "loc-1", "2026-06");
 assert.equal(fallback.configurationId, null, "missing policy uses Tenant.config");
 assert.equal(fallback.appliedRules.payrollConfig.otMultiplier, 1.5);
+assert.equal(fallback.appliedRules.source, "tenant_config", "tenant fallback is explicit in provenance");
 assert.equal(resolvePayrollPolicy([record({ active: false })], tenantConfig, "loc-1", "2026-06").configurationId, null, "inactive policy falls back");
 assert.equal(resolvePayrollPolicy([record({ payload: {} })], tenantConfig, "loc-1", "2026-06").configurationId, null, "invalid policy falls back");
 
@@ -16,6 +17,8 @@ const resolved = resolvePayrollPolicy([record(), record({ id: "location-v2", loc
 assert.equal(resolved.configurationId, "location-v2", "location policy overrides tenant policy");
 assert.equal(resolved.configurationVersion, 2);
 assert.equal(resolved.appliedRules.payrollConfig.otMultiplier, 3);
+assert.equal(resolved.appliedRules.source, "location_override", "location override is explicit in provenance");
+assert.equal(resolved.appliedRules.jurisdiction, "Karnataka");
 assert.equal(resolved.appliedRules.payrollConfig.deductAbsentDays, false);
 assert.equal(resolved.appliedRules.payrollConfig.pf.enabled, false);
 assert.equal(resolved.appliedRules.payrollConfig.pt.state, "Karnataka");

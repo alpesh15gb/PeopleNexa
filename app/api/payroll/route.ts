@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
-import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -25,11 +25,12 @@ export async function GET(req: NextRequest) {
   const payslipStatusFilter =
     statusParam === "paid" ? "paid" : statusParam === "draft" || statusParam === "unpaid" ? "draft" : undefined;
 
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const employeeScope = locationId ? employeeLocationScope(locationId) : {};
+  const scope = await payrollOperationLocationId(session, req.nextUrl.searchParams.get("locationId"));
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: session.role === "location_manager" ? 403 : 400 });
+  const locationId = scope.locationId;
+  const employeeScope = employeeLocationScope(locationId);
   if (!runId) return NextResponse.json({ error: "A payroll run is required. Legacy payslips are read-only and are not part of the register." }, { status: 400 });
-  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month, ...(locationId ? { locationId } : {}) }, select: { id: true } });
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month, locationId }, select: { id: true } });
   if (!run) return NextResponse.json({ error: "Payroll run not found in this scope." }, { status: 404 });
   const [employees, payslips] = await Promise.all([
     prisma.employee.findMany({
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
         month,
         payrollRunId: run.id,
         ...(payslipStatusFilter ? { status: payslipStatusFilter } : {}),
-        ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
+        employee: employeeLocationScope(locationId),
       },
       // paidVia / paidAt / paymentRef are scalar fields so they are auto-included here.
       include: { employee: { select: { id: true, firstName: true, lastName: true } } },

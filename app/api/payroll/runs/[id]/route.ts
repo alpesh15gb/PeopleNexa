@@ -3,7 +3,7 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { canTransitionPayrollRun, paymentEvidence, payrollRunAuditData, payrollRunTransitionData, type PayrollRunStatus } from "@/lib/payroll-runs";
 import { payrollRunPreflight } from "@/lib/payroll-preflight";
-import { managerLocationId } from "@/lib/location-scope";
+import { payrollOperationLocationId } from "@/lib/location-scope";
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -11,9 +11,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const target = String(body.status ?? "") as PayrollRunStatus;
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
+  const scope = await payrollOperationLocationId(session, typeof body.locationId === "string" ? body.locationId : null);
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: session.role === "location_manager" ? 403 : 400 });
+  const run = await prisma.payrollRun.findFirst({ where: { id, tenantId: session.tenantId, locationId: scope.locationId }, include: { payslips: { select: { id: true, netSalary: true, inputSnapshot: true, documentSnapshot: true } } } });
   if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!canTransitionPayrollRun(run.status, target)) return NextResponse.json({ error: `Cannot move a ${run.status} run directly to ${target}.` }, { status: 409 });
   if (target === "approved" && run.createdBy === session.sub) return NextResponse.json({ error: "The run creator cannot approve their own payroll run." }, { status: 403 });

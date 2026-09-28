@@ -3,7 +3,7 @@ import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { buildBankFile, bankFileName, type BankFormat } from "@/lib/bank-file";
-import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { createHash } from "crypto";
 
 export async function GET(req: NextRequest) {
@@ -15,8 +15,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const scope = await payrollOperationLocationId(session, req.nextUrl.searchParams.get("locationId"));
+  if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: session.role === "location_manager" ? 403 : 400 });
+  const locationId = scope.locationId;
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   const debitAccount = req.nextUrl.searchParams.get("debitAccount") || "";
   const runId = req.nextUrl.searchParams.get("runId") || "";
   if (!runId) return NextResponse.json({ error: "A finalized payroll run is required for bank export." }, { status: 400 });
-  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month } });
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, tenantId: session.tenantId, month, locationId } });
   if (!run) return NextResponse.json({ error: "Payroll run not found for this period." }, { status: 404 });
   if (run.status !== "finalized" && run.status !== "paid") return NextResponse.json({ error: "Bank export is available only after finalization." }, { status: 409 });
 
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
       month,
       payrollRunId: runId,
       ...(statusParam === "all" ? {} : { status: statusParam }),
-      ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
+      employee: employeeLocationScope(locationId),
     },
     include: {
       employee: { select: { id: true, firstName: true, lastName: true } },

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { canTransitionPayrollRun } from "../lib/payroll-runs";
 import { computePayroll, DEFAULT_PAYROLL_CONFIG } from "../lib/payroll";
+import { employeeLocationScope } from "../lib/location-scope";
 
 assert.equal(canTransitionPayrollRun("draft", "paid"), false, "draft cannot be paid directly");
 assert.equal(canTransitionPayrollRun("approved", "finalized"), true, "approved must finalize before payment");
@@ -16,4 +17,5 @@ const result = computePayroll(
 );
 assert.equal(result.divisorUsed, 30, "configured divisor must drive LOP/OT basis");
 assert.equal(result.absentDeduction, 1000);
+assert.deepEqual(employeeLocationScope("location-a"), { OR: [{ branch: { locationId: "location-a" } }, { branchId: null, locationId: "location-a" }] }, "payroll membership uses branch location with a branchless legacy fallback only");
 console.log("payroll run foundation checks passed");

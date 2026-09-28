@@ -15,7 +15,10 @@ export type PayrollPolicySnapshot = {
   configurationId: string | null;
   configurationVersion: number | null;
   appliedRules: {
-    source: "payroll_policy" | "tenant_config";
+    source: "location_override" | "tenant_policy" | "tenant_config";
+    locationId: string | null;
+    jurisdiction: string | null;
+    profile: string;
     payrollConfig: PayrollConfig;
   };
 };
@@ -29,7 +32,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
   const policy = resolveConfiguration(valid, locationId, new Date(`${month}-01T12:00:00.000Z`));
   const draft = policy && payrollPolicyDraft(policy.payload);
   if (!policy || !draft) {
-    return { configurationId: null, configurationVersion: null, appliedRules: { source: "tenant_config", payrollConfig: legacy } };
+    return { configurationId: null, configurationVersion: null, appliedRules: { source: "tenant_config", locationId, jurisdiction: legacy.pt.state || null, profile: "Tenant configuration fallback", payrollConfig: legacy } };
   }
 
   const payrollConfig: PayrollConfig = {
@@ -44,7 +47,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     components: draft.components,
     monthlyDivisor: draft.monthlyDivisor,
   };
-  return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: "payroll_policy", payrollConfig } };
+  return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: policy.locationId ? "location_override" : "tenant_policy", locationId: policy.locationId, jurisdiction: payrollConfig.pt.state || null, profile: policy.locationId ? "Location payroll policy override" : "Tenant payroll policy", payrollConfig } };
 }
 
 export function payrollConfigFromSnapshot(snapshot: unknown): PayrollConfig | null {
