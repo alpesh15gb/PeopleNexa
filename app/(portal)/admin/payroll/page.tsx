@@ -1,35 +1,24 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { monthKey } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";
-import { isFinancialHistoryRun } from "@/lib/payroll-reporting";
-import { PayrollDashboard } from "./payroll-dashboard";
+import { PayrollPanel } from "./payroll-panel";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminPayrollDashboard({ searchParams }: { searchParams: Promise<{ from?: string; to?: string; location?: string }> }) {
+export default async function PayrollPage({ searchParams }: { searchParams: Promise<{ month?: string; period?: string; location?: string; run?: string }> }) {
   const session = await requireSession();
   if (!['admin', 'location_manager'].includes(session.role)) return null;
   const assignedLocationId = await managerLocationId(session);
   if (session.role === 'location_manager' && !assignedLocationId) return null;
   const params = await searchParams;
-  const thisMonth = monthKey(new Date());
-  const to = isMonthKey(params.to ?? '') ? params.to! : thisMonth;
-  const from = isMonthKey(params.from ?? '') && params.from! <= to ? params.from! : `${to.slice(0, 4)}-01`;
-  const locations = session.role === 'admin' ? await prisma.location.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
+  const month = params.period || params.month || monthKey(new Date());
+  const locations = session.role === 'admin' ? await prisma.location.findMany({ where: { tenantId: session.tenantId, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
   const locationId = session.role === 'location_manager' ? assignedLocationId : locations.some((location) => location.id === params.location) ? params.location! : null;
-  const runs = await prisma.payrollRun.findMany({
-    where: { tenantId: session.tenantId, month: { gte: from, lte: to }, ...(locationId ? { locationId } : {}), status: { in: ['finalized', 'paid'] } },
-    include: { payslips: { select: { employeeId: true, grossEarnings: true, deductions: true, netSalary: true, employee: { select: { department: { select: { name: true } }, branch: { select: { name: true } } } } } } },
-    orderBy: { month: 'asc' },
-  });
-  const financialRuns = runs.filter((run) => isFinancialHistoryRun(run.status));
-  const monthlyByPeriod = new Map<string, { net: number; employees: number }>();
-  financialRuns.forEach((run) => { const total = monthlyByPeriod.get(run.month) ?? { net: 0, employees: 0 }; total.net += run.payslips.reduce((sum, slip) => sum + slip.netSalary, 0); total.employees += run.payslips.length; monthlyByPeriod.set(run.month, total); });
-  const monthly = [...monthlyByPeriod.entries()].map(([month, value]) => ({ month, ...value }));
-  const slips = financialRuns.flatMap((run) => run.payslips);
-  const totals = slips.reduce((sum, slip) => ({ gross: sum.gross + slip.grossEarnings, deductions: sum.deductions + slip.deductions, net: sum.net + slip.netSalary }), { gross: 0, deductions: 0, net: 0 });
-  const costs = new Map<string, number>();
-  slips.forEach((slip) => { const name = slip.employee.department?.name ?? slip.employee.branch?.name ?? 'Unassigned'; costs.set(name, (costs.get(name) ?? 0) + slip.netSalary); });
-  return <PayrollDashboard from={from} to={to} locationId={locationId} locations={locations} monthly={monthly} totals={totals} costs={[...costs.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 5)} hasHistory={financialRuns.length > 0} />;
+  const payrolls = await prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month, locationId: locationId ?? '__location_required__' }, orderBy: { createdAt: 'desc' }, include: { _count: { select: { payslips: true, members: true } }, members: { where: { exception: { not: null } }, select: { id: true, exception: true, employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true } } } } } });
+  const payroll = params.run ? payrolls.find((candidate) => candidate.id === params.run) ?? null : payrolls[0] ?? null;
+  const payslips = payroll ? await prisma.payslip.findMany({ where: { tenantId: session.tenantId, payrollRunId: payroll.id }, include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, accountNumber: true, ifscCode: true, department: { select: { name: true } } } } }, orderBy: { employee: { employeeNumber: 'asc' } } }) : [];
+  const totals = payslips.reduce((value, payslip) => ({ gross: value.gross + payslip.grossEarnings, deductions: value.deductions + payslip.deductions, net: value.net + payslip.netSalary, paid: value.paid + (payslip.status === 'paid' ? 1 : 0) }), { gross: 0, deductions: 0, net: 0, paid: 0 });
+  const source = payslips.find((payslip) => payslip.payrollConfigurationId)?.payrollPolicyRules as { source?: string } | null;
+  return <PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? 'Assigned location' : 'Select location'} locationId={locationId} locations={locations} rows={payslips.map((payslip) => ({ employee: payslip.employee, payslip: { ...payslip, adjustments: (payslip.adjustments ?? null) as { label: string; amount: number }[] | null } }))} totals={totals} generated={payslips.length} canManageSettings={session.role === 'admin'} payroll={payroll} provenance={source ? { source: source.source ?? 'recorded' } : null} />;
 }

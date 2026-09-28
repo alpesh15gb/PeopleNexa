@@ -1,23 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowRight, BarChart3, CalendarDays, WalletCards } from "lucide-react";
-import { formatMoney } from "@/lib/utils";
+import { ArrowRight, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type Monthly = { month: string; net: number; employees: number };
-
-export function PayrollDashboard({ from, to, locationId, locations, monthly, totals, costs, hasHistory }: { from: string; to: string; locationId: string | null; locations: { id: string; name: string }[]; monthly: Monthly[]; totals: { gross: number; deductions: number; net: number }; costs: { name: string; value: number }[]; hasHistory: boolean }) {
+/** Kept for existing links while the operational page is served by PayrollPanel. */
+export function PayrollDashboard() {
   const router = useRouter();
-  const change = (next: Partial<{ from: string; to: string; location: string }>) => { const query = new URLSearchParams({ from: next.from ?? from, to: next.to ?? to }); const location = next.location ?? locationId ?? ''; if (location) query.set('location', location); router.push(`/admin/payroll?${query}`); };
-  const max = Math.max(...monthly.map((item) => item.net), 1);
   return <main className="payroll-canvas animate-fade-up">
-    <header className="payroll-header"><div><p className="payroll-eyebrow">PeopleNexa payroll</p><h1>Payroll dashboard</h1><p>Finalized and paid history may aggregate locations; payroll processing never does.</p></div><Button className="bg-teal-700 hover:bg-teal-800 dark:bg-teal-400 dark:text-slate-950" onClick={() => router.push(`/admin/payroll/process${locationId ? `?location=${locationId}` : ''}`)}><WalletCards aria-hidden="true" className="h-4 w-4" />Process payroll</Button></header>
-    <section className="payroll-filter" aria-label="Dashboard filters"><label>From month<input type="month" value={from} onChange={(event) => change({ from: event.target.value })} /></label><label>To month<input type="month" value={to} onChange={(event) => change({ to: event.target.value })} /></label><label>Location<select value={locationId ?? ''} onChange={(event) => change({ location: event.target.value })}><option value="">All locations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><Button variant="outline" onClick={() => router.push('/admin/payroll')}>Reset</Button></section>
-    {!hasHistory ? <section className="payroll-empty"><CalendarDays aria-hidden="true" className="h-8 w-8 text-teal-700 dark:text-teal-300" /><div><h2>No financial payroll history in this range</h2><p>Drafts and runs awaiting approval are deliberately excluded. Complete a controlled run to see financial trends here.</p><Button className="mt-4 bg-teal-700 hover:bg-teal-800 dark:bg-teal-400 dark:text-slate-950" onClick={() => router.push('/admin/payroll/process')} >Open process payroll <ArrowRight aria-hidden="true" className="h-4 w-4" /></Button></div></section> : <>
-      <section className="payroll-kpis"><Metric label="Net payroll" value={formatMoney(totals.net)} tone="teal" /><Metric label="Gross earnings" value={formatMoney(totals.gross)} tone="blue" /><Metric label="Deductions" value={formatMoney(totals.deductions)} tone="violet" /><Metric label="Completed runs" value={String(monthly.length)} tone="slate" /></section>
-      <section className="payroll-grid"><article className="payroll-card payroll-chart"><div><h2>Monthly payroll trend</h2><p>Net pay from finalized or paid runs.</p></div><div className="payroll-bars" aria-label="Monthly net payroll chart">{monthly.map((item) => <div key={item.month} className="payroll-bar"><span>{formatMoney(item.net)}</span><i style={{ height: `${Math.max((item.net / max) * 100, 4)}%` }} /><b>{item.month.slice(5)}</b></div>)}</div></article><article className="payroll-card"><h2>Top payroll cost centers</h2><p>Department first, then branch when department is unavailable.</p><div className="mt-5 space-y-4">{costs.map((cost) => <div key={cost.name}><div className="flex justify-between gap-3 text-sm"><span>{cost.name}</span><strong className="tnum">{formatMoney(cost.value)}</strong></div><div className="mt-2 h-2 rounded-full bg-muted"><div className="h-full rounded-full bg-teal-700 dark:bg-teal-400" style={{ width: `${(cost.value / Math.max(...costs.map((item) => item.value), 1)) * 100}%` }} /></div></div>)}</div></article><article className="payroll-card"><h2>Employee coverage</h2><p>Employees represented in each completed run.</p><div className="mt-5 space-y-3">{monthly.map((item) => <div key={item.month} className="flex items-center justify-between rounded-lg bg-tint px-3 py-2 text-sm"><span>{item.month}</span><strong className="tnum">{item.employees} employees</strong></div>)}</div></article><article className="payroll-card payroll-variance"><BarChart3 aria-hidden="true" className="h-6 w-6 text-primary" /><h2>Investigate changes</h2><p>Compare two completed payroll periods, including employee-level gross, deductions and net-pay deltas.</p><Button variant="outline" className="mt-4" onClick={() => router.push('/admin/payroll/variance')}>Open variance report <ArrowRight aria-hidden="true" className="h-4 w-4" /></Button></article></section>
-    </>}
+    <section className="rounded-2xl border border-edge bg-card p-6">
+      <h1 className="font-display text-2xl font-semibold">Payroll</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Open the monthly payroll workflow to choose a location and month.</p>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <Button onClick={() => router.push("/admin/payroll/process")}><ArrowRight aria-hidden="true" className="h-4 w-4" />Open monthly payroll</Button>
+        <Button variant="outline" onClick={() => router.push("/admin/payroll/configuration")}><Settings2 aria-hidden="true" className="h-4 w-4" />Payroll settings</Button>
+      </div>
+    </section>
   </main>;
 }
-function Metric({ label, value, tone }: { label: string; value: string; tone: string }) { return <article className={`payroll-metric payroll-metric--${tone}`}><p>{label}</p><strong className="tnum">{value}</strong></article>; }

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { monthKey } from "@/lib/dates";
-import { SettingsWorkspace } from "@/components/settings-workspace";
+import { redirect } from "next/navigation";
 import { PayrollPanel } from "../payroll-panel";
 import { managerLocationId } from "@/lib/location-scope";
 
@@ -27,5 +27,6 @@ export default async function ProcessPayrollPage({ searchParams }: { searchParam
   const totals = payslips.reduce((acc, payslip) => ({ gross: acc.gross + payslip.grossEarnings, deductions: acc.deductions + payslip.deductions, net: acc.net + payslip.netSalary, paid: acc.paid + (payslip.status === "paid" ? 1 : 0) }), { gross: 0, deductions: 0, net: 0, paid: 0 });
   const provenance = payslips.find((payslip) => payslip.payrollConfigurationId) ?? null;
   const rules = provenance?.payrollPolicyRules as { source?: string; jurisdiction?: string | null; profile?: string } | null;
-  return <SettingsWorkspace eyebrow="PeopleNexa payroll" title="Payroll management" description="Every payroll run is isolated to one active location. Historical tenant-wide slips are read-only." tabs={[{ label: "Dashboard", href: "/admin/payroll" }, { label: "Process payroll", href: "/admin/payroll/process" }, { label: "Salary revisions", href: "/admin/payroll/salary-revisions" }, { label: "Variance report", href: "/admin/payroll/variance" }]}><PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? "Assigned location" : "Select an active location"} locationId={locationId} locations={locations} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} run={run} history={recentRuns} provenance={provenance ? { version: provenance.payrollConfigurationVersion, source: rules?.source ?? "legacy", jurisdiction: rules?.jurisdiction ?? null, profile: rules?.profile ?? "Legacy recorded policy" } : null} /></SettingsWorkspace>;
+  if (!run) redirect(`/admin/payroll?${new URLSearchParams({ period: month, ...(locationId ? { location: locationId } : {}) })}`);
+  return <PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? "Assigned location" : "Select location"} locationId={locationId} locations={locations} rows={rows} totals={totals} generated={payslips.length} canManageSettings={session.role === "admin"} payroll={run} provenance={provenance ? { source: rules?.source ?? "recorded" } : null} reviewMode />;
 }
