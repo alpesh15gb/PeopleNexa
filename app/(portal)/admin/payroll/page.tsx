@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { monthKey } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";
 import { PayrollPanel } from "./payroll-panel";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,8 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
   const assignedLocationId = await managerLocationId(session);
   if (session.role === 'location_manager' && !assignedLocationId) return null;
   const params = await searchParams;
-  const month = params.period || params.month || monthKey(new Date());
+  if (params.month && !params.period) redirect(`/admin/payroll?${new URLSearchParams({ period: params.month, ...(params.location ? { location: params.location } : {}), ...(params.run ? { run: params.run } : {}) })}`);
+  const month = params.period || monthKey(new Date());
   const locations = session.role === 'admin' ? await prisma.location.findMany({ where: { tenantId: session.tenantId, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
   const locationId = session.role === 'location_manager' ? assignedLocationId : locations.some((location) => location.id === params.location) ? params.location! : null;
   const payrolls = await prisma.payrollRun.findMany({ where: { tenantId: session.tenantId, month, locationId: locationId ?? '__location_required__' }, orderBy: { createdAt: 'desc' }, include: { _count: { select: { payslips: true, members: true } }, members: { where: { exception: { not: null } }, select: { id: true, exception: true, employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true } } } } } });

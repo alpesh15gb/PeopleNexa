@@ -169,9 +169,11 @@ function TopbarDate() {
 function NavLinks({
   items,
   onNavigate,
+  canManagePayrollPolicy = false,
 }: {
   items: NavItem[];
   onNavigate?: () => void;
+  canManagePayrollPolicy?: boolean;
 }) {
   const pathname = usePathname();
   const [query, setQuery] = useState("");
@@ -295,7 +297,7 @@ function NavLinks({
                         {item.label}
                         {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
                       </Link>
-                       {item.href === "/admin/payroll" && pathname.startsWith("/admin/payroll") && <div className="ml-6 mt-1 space-y-0.5 border-l border-edge pl-2"><PayrollNavLink href="/admin/payroll" label="Payroll" active={pathname === "/admin/payroll"} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/configuration" label="Payroll settings" active={pathname.startsWith("/admin/payroll/configuration") || pathname.startsWith("/admin/payroll/salary-revisions") || pathname.startsWith("/admin/payroll/variance")} onNavigate={onNavigate} /></div>}
+                       {item.href === "/admin/payroll" && pathname.startsWith("/admin/payroll") && <div className="ml-6 mt-1 space-y-0.5 border-l border-edge pl-2"><PayrollNavLink href="/admin/payroll" label="Monthly payroll" active={pathname === "/admin/payroll"} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/variance" label="Payroll history & variance" active={pathname.startsWith("/admin/payroll/variance")} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/salary-revisions" label="Future pay changes" active={pathname.startsWith("/admin/payroll/salary-revisions")} onNavigate={onNavigate} />{canManagePayrollPolicy && <PayrollNavLink href="/admin/payroll/configuration" label="Payroll policy" active={pathname.startsWith("/admin/payroll/configuration")} onNavigate={onNavigate} />}</div>}
                       </div>
                     );
                   })}
@@ -456,7 +458,7 @@ export function Shell({
           </p>
           <p className="mt-1 truncate text-[13px] font-semibold text-foreground">{companyName}</p>
         </div>
-        <NavLinks items={nav} onNavigate={() => setOpen(false)} />
+        <NavLinks items={nav} canManagePayrollPolicy={isAdmin} onNavigate={() => setOpen(false)} />
         {(role === "admin" || role === "supervisor" || role === "location_manager") && locationTree.length > 0 && (
           <LocationTreeNav tree={locationTree} onNavigate={() => setOpen(false)} />
         )}

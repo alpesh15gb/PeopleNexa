@@ -23,15 +23,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const errors = payrollRunPreflight(run.payslips);
     if (errors.length) return NextResponse.json({ error: errors.join(" "), preflight: errors }, { status: 409 });
   }
+  const cancellationReason = target === "cancelled" ? String(body.reason ?? "").trim() : "";
+  if (target === "cancelled" && (!cancellationReason || cancellationReason.length > 500)) return NextResponse.json({ error: "A cancellation reason is required (max 500 characters)." }, { status: 400 });
   const net = run.payslips.reduce((total, slip) => total + slip.netSalary, 0);
   const evidence = target === "paid" ? paymentEvidence(body, run.payslips.length, net) : null;
   if (evidence && "error" in evidence) return NextResponse.json({ error: evidence.error }, { status: 400 });
   // Reversal is deliberately a terminal record only; it never mutates paid slips.
   const updated = await prisma.$transaction(async (tx) => {
-    const next = await tx.payrollRun.update({ where: { id }, data: { ...payrollRunTransitionData(target, session.sub), ...(evidence?.value ?? {}) } });
+    const next = await tx.payrollRun.update({ where: { id }, data: { ...payrollRunTransitionData(target, session.sub), ...(evidence?.value ?? {}), ...(target === "cancelled" ? { note: cancellationReason } : {}) } });
     if (target === "paid") await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: "paid", paidAt: new Date(), paidVia: evidence!.value.paymentMethod, paymentRef: evidence!.value.paymentReference } });
     if (target === "finalized") await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: "finalized" } });
-    await tx.auditLog.create({ data: { ...payrollRunAuditData(id, session.tenantId, session.sub, session.role, run.status, target), ...(target === "paid" ? { after: { status: target, ...evidence!.value, count: run.payslips.length, net } } : {}) } });
+    await tx.auditLog.create({ data: { ...payrollRunAuditData(id, session.tenantId, session.sub, session.role, run.status, target), ...((target === "paid" || target === "cancelled") ? { after: { status: target, ...(target === "paid" ? { ...evidence!.value, count: run.payslips.length, net } : { reason: cancellationReason }) } } : {}) } });
     return next;
   });
   return NextResponse.json({ run: updated });

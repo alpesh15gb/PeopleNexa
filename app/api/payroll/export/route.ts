@@ -31,18 +31,15 @@ export async function GET(req: NextRequest) {
   if (!run) return NextResponse.json({ error: "Payroll run not found for this period." }, { status: 404 });
   if (run.status !== "finalized" && run.status !== "paid") return NextResponse.json({ error: "Bank export is available only after finalization." }, { status: 409 });
 
-  // Bank files are for unpaid slips unless a caller explicitly requests otherwise.
-  const statusParam = (req.nextUrl.searchParams.get("status") || "draft").toLowerCase();
-  if (!["all", "paid", "draft"].includes(statusParam)) {
-    return NextResponse.json({ error: "status must be one of: all, paid, draft." }, { status: 400 });
-  }
-
+  // Never permit a query parameter to substitute mutable drafts for the
+  // locked documents belonging to this finalized or paid run.
+  const slipStatus = run.status === "paid" ? "paid" : "finalized";
   const payslips = await prisma.payslip.findMany({
     where: {
       tenantId: session.tenantId,
       month,
       payrollRunId: runId,
-      ...(statusParam === "all" ? {} : { status: statusParam }),
+      status: slipStatus,
       employee: employeeLocationScope(locationId),
     },
     include: {
@@ -71,7 +68,7 @@ export async function GET(req: NextRequest) {
   const narration = `Salary ${month}`;
   const content = buildBankFile(bank, rows, debitAccount, narration);
   const hash = createHash("sha256").update(content).digest("hex");
-  await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.bank_export", entity: "PayrollRun", entityId: runId, summary: `Immutable bank export ${bank} (${rows.length} rows)`, after: { sha256: hash, rowCount: rows.length } } });
+  await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.bank_export", entity: "PayrollRun", entityId: runId, summary: `Immutable bank export ${bank} (${rows.length} rows)`, after: { sha256: hash, rowCount: rows.length, runStatus: run.status, payslipStatus: slipStatus } } });
 
   const res = new NextResponse(content, {
     headers: {
