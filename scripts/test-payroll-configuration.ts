@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { payrollPolicyDraft, resolveConfiguration } from "../lib/configuration";
 import { payrollRunPreflight } from "../lib/payroll-preflight";
+import { DEFAULT_PAYROLL_CONFIG } from "../lib/payroll";
+import { payrollPolicyEditorBaseline, payrollPolicyEditorDraft, payrollScheduleExample, resolvePayrollPolicyEditorSource } from "../lib/payroll-policy-editor";
 
 const policy = {
   monthlyDivisor: 26, deductLossOfPay: true, overtimeMultiplier: 1.5, overtimeBasis: "basic_hourly" as const,
@@ -14,4 +17,43 @@ const selected = resolveConfiguration([{ id: "tenant", locationId: null, active:
 assert.equal(selected?.id, "location", "location override resolves over tenant default");
 assert.deepEqual(payrollRunPreflight([{ inputSnapshot: { policy: { payrollConfig: {} } } }]), [], "stored payroll snapshot is finalizable");
 assert.equal(payrollRunPreflight([{ inputSnapshot: {} }]).length, 1, "missing required operating snapshot blocks finalization");
+
+const baseline = payrollPolicyEditorBaseline(DEFAULT_PAYROLL_CONFIG);
+const tenantPayload = {
+  ...policy,
+  editorExtension: { source: "preserve-me" },
+  statutory: { ...policy.statutory, hiddenStatutoryFlag: true },
+  components: [{ ...policy.components[0], taxWageBase: true, hiddenCalculatorFlag: "keep" }],
+  schedule: { ...policy.schedule, hiddenScheduleKey: 9 },
+  statutoryRules: [{ ...policy.statutoryRules[0], calculatorInputs: { ceilingSource: "external" }, hiddenReviewFlag: true }],
+};
+const editorRecords = [
+  { id: "tenant-v1", locationId: null, version: 1, active: true, effectiveFrom: "2026-01-01", effectiveTo: null, payload: tenantPayload },
+  { id: "location-v2", locationId: "L1", version: 2, active: true, effectiveFrom: "2026-02-01", effectiveTo: null, payload: { ...tenantPayload, overtimeMultiplier: 2 } },
+];
+assert.equal(resolvePayrollPolicyEditorSource(editorRecords, "L1", "2026-03-01").record?.id, "location-v2", "editor resolves the selected location override");
+assert.equal(resolvePayrollPolicyEditorSource(editorRecords, "L2", "2026-03-01").record?.id, "tenant-v1", "editor resolves the tenant fallback for a location without an override");
+assert.equal(resolvePayrollPolicyEditorSource(editorRecords, "L2", "2026-03-01").kind, "tenant_fallback", "tenant fallback is clearly identified");
+const cloned = payrollPolicyEditorDraft(tenantPayload, baseline);
+assert.equal(cloned.components.length, 1, "existing effective-policy components load into the editor");
+assert.equal(cloned.components[0].hiddenCalculatorFlag, "keep", "hidden component fields survive draft creation");
+assert.deepEqual(cloned.editorExtension, { source: "preserve-me" }, "unknown top-level policy fields survive draft creation");
+assert.equal(cloned.statutory.hiddenStatutoryFlag, true, "hidden statutory fields survive draft creation");
+assert.equal(cloned.schedule.hiddenScheduleKey, 9, "hidden schedule fields survive draft creation");
+assert.equal(cloned.statutoryRules[0].hiddenReviewFlag, true, "hidden source-review fields survive draft creation");
+const editedComponent = { ...cloned.components[0], label: "Edited Basic" };
+assert.equal((editedComponent as Record<string, unknown>).hiddenCalculatorFlag, "keep", "editing a visible component field preserves hidden attributes");
+
+assert.deepEqual(payrollScheduleExample(30_000, 2, 26, true), { deduction: 2307.69, salaryAfterLop: 27692.31 }, "schedule example matches the engine's fixed-divisor LOP formula");
+assert.deepEqual(payrollScheduleExample(30_000, 2, 26, false), { deduction: 0, salaryAfterLop: 30000 }, "schedule example reflects the LOP switch");
+
+const hub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
+for (const section of ["Pay Schedule", "Statutory Components", "Salary Components", "Tax Details", "Advanced"]) assert.match(hub, new RegExp(section), `${section} navigation is present`);
+assert.match(hub, /useSearchParams/, "policy navigation is URL-addressable");
+assert.match(hub, /aria-current=\{active \? "page"/, "policy navigation exposes a clear active state");
+assert.match(hub, /Preview changes/, "preview action remains available across policy sections");
+assert.match(hub, /Save draft/, "single-draft save action remains available across policy sections");
+assert.match(hub, /Publish version/, "publishing remains an explicit version-history action");
+assert.match(hub, /Deactivate/, "published versions can still be deactivated");
+assert.doesNotMatch(hub, /work[- ]week|calendar[- ]day/i, "unsupported work-week and calendar divisor controls are not exposed");
 console.log("payroll configuration tests passed");
