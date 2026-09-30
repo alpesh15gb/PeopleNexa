@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
   const pdfs = await Promise.all(slips.map(async (slip) => {
     const branding = resolveCompanyBranding(tenant, slip.employee.branch?.location ?? slip.employee.location);
-    const document = (slip.status === "finalized" || slip.status === "paid") ? documentSnapshotForResponse(slip.documentSnapshot) : null;
+    const document = documentSnapshotForResponse(slip.documentSnapshot);
     if (document) {
       const [firstName, ...last] = document.employee.name.split(" ");
       return {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
         data: await renderPayslipPdf({
           companyName: document.branding.displayName || document.branding.legalName, companyAddress: document.branding.address, companyContact: document.branding.contact, companyLogoUrl: document.branding.logoUrl, month: document.period,
           employee: { employeeNumber: document.employee.employeeNumber, deviceCode: null, firstName, lastName: last.join(" "), position: document.employee.designation, joiningDate: document.employee.joiningDate ? new Date(document.employee.joiningDate) : null, department: document.employee.department ? { name: document.employee.department } : null, bankName: document.employee.bankName, accountNumber: document.employee.accountMasked, ifscCode: null, pan: document.employee.panMasked, uan: document.employee.uan, esiIpNumber: document.employee.esiIpNumber },
-          payslip: { basicSalary: 0, allowances: 0, overtimePay: 0, adjustmentEarnings: 0, grossEarnings: document.totals.gross, pfEmployee: 0, esicEmployee: 0, professionalTax: 0, lwf: 0, tds: 0, lateFines: 0, loanDeduction: 0, absentDeduction: 0, deductions: document.totals.deductions, netSalary: document.totals.net, presentDays: document.days.paid, lateDays: 0, halfDays: 0, absentDays: document.days.lop, workingDays: document.days.payable, adjustments: null, salaryBreakdown: document.components.filter((row) => row.category === "earning" || row.category === "deduction").map((row) => ({ label: row.label, amount: row.earned, kind: row.category as "earning" | "deduction", includeInGross: row.includeInGross, visibleOnPayslip: row.visibleOnPayslip })) },
+          payslip: { basicSalary: 0, allowances: 0, overtimePay: 0, adjustmentEarnings: 0, grossEarnings: document.totals.gross, earnedGross: document.totals.earnedGross, pfEmployee: 0, esicEmployee: 0, professionalTax: 0, lwf: 0, tds: 0, lateFines: 0, loanDeduction: 0, absentDeduction: 0, deductions: document.totals.deductions, netSalary: document.totals.net, presentDays: document.days.paid, lateDays: 0, halfDays: 0, absentDays: document.days.lop, workingDays: document.days.payable, adjustments: null, salaryBreakdown: document.components.filter((row) => row.category === "earning" || row.category === "deduction").map((row) => ({ label: row.label, amount: row.earned, contractual: row.contractual, earned: row.earned, kind: row.category as "earning" | "deduction", includeInGross: row.includeInGross, visibleOnPayslip: row.visibleOnPayslip })) },
         }),
       };
     }
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     } : slip.employee;
     return {
       name: `${safeName(slip.employee.employeeNumber)}-${safeName(`${slip.employee.firstName}-${slip.employee.lastName}`)}-${month}.pdf`,
-        data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, month, employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
+        data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, month, employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; contractual?: number | null; earned?: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
     };
   }));
   if (pdfs.length === 1) return new NextResponse(new Uint8Array(pdfs[0].data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdfs[0].name}"` } });

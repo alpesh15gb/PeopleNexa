@@ -4,8 +4,8 @@ import path from "node:path";
 import { loadBrandLogo } from "@/lib/company-branding";
 
 type Adjustment = { label: string; amount: number };
-type SalaryComponent = { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean };
-type PayRow = { label: string; actual?: number; amount: number };
+type SalaryComponent = { label: string; amount: number; contractual?: number | null; earned?: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean };
+type PayRow = { label: string; actual?: number | null; amount: number };
 
 export type PayslipDocumentData = {
   companyName: string;
@@ -14,7 +14,7 @@ export type PayslipDocumentData = {
   companyLogoUrl?: string | null;
   month: string;
   employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null; esiIpNumber?: string | null };
-  payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null; salaryBreakdown?: SalaryComponent[] | null };
+  payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; earnedGross?: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null; salaryBreakdown?: SalaryComponent[] | null };
 };
 
 const PAGE_WIDTH = 595.28;
@@ -34,6 +34,7 @@ const date = (value: Date | null) => value ? new Intl.DateTimeFormat("en-GB", { 
 const value = (input: string | null | undefined) => input?.trim() || "-";
 
 export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffer> {
+  const showContractualEarned = data.payslip.earnedGross !== undefined;
   const doc = new PDFDocument({ size: "A4", margin: LEFT, bufferPages: true, info: { Title: `Payslip - ${data.month}`, Author: data.companyName } });
   const chunks: Buffer[] = [];
   doc.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -91,8 +92,8 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   dayMetric(LEFT + 402, "LOPS", lops);
   y += 43;
 
-  const configuredEarnings = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "earning" && component.visibleOnPayslip).map((component) => ({ label: component.label, amount: component.amount }));
-  const configuredDeductions = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "deduction" && component.visibleOnPayslip).map((component) => ({ label: component.label, amount: component.amount }));
+  const configuredEarnings = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "earning" && component.visibleOnPayslip).map((component) => ({ label: component.label, actual: component.contractual === undefined ? component.amount : component.contractual, amount: component.earned ?? component.amount }));
+  const configuredDeductions = (data.payslip.salaryBreakdown ?? []).filter((component) => component.kind === "deduction" && component.visibleOnPayslip).map((component) => ({ label: component.label, actual: component.contractual === undefined ? component.amount : component.contractual, amount: component.earned ?? component.amount }));
   const earnings: PayRow[] = [
     ...(configuredEarnings.length ? configuredEarnings : [{ label: "Basic Salary", actual: data.payslip.basicSalary, amount: data.payslip.basicSalary }, { label: "Allowances", actual: data.payslip.allowances, amount: data.payslip.allowances }]),
     { label: "Overtime Pay", amount: data.payslip.overtimePay },
@@ -125,10 +126,19 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
     bold("DEDUCTIONS", middle, top + 7, { width: WIDTH / 2, align: "center" });
     doc.rect(LEFT, top + titleHeight, WIDTH, subheadHeight).fillAndStroke(SHADE, BORDER);
     doc.moveTo(middle, top).lineTo(middle, top + height).strokeColor(BORDER).stroke();
-    doc.moveTo(LEFT + 238, top + titleHeight).lineTo(LEFT + 238, top + height).strokeColor(BORDER).stroke();
-    doc.moveTo(RIGHT - 78, top + titleHeight).lineTo(RIGHT - 78, top + height).strokeColor(BORDER).stroke();
-    bold("PARTICULARS", LEFT + 7, top + 27); bold("AMOUNT", LEFT + 240, top + 27, { width: 72, align: "right" });
-    bold("PARTICULARS", middle + 7, top + 27); bold("DEDUCTIONS", RIGHT - 76, top + 27, { width: 68, align: "right" });
+    if (showContractualEarned) {
+      doc.moveTo(LEFT + 142, top + titleHeight).lineTo(LEFT + 142, top + height).strokeColor(BORDER).stroke();
+      doc.moveTo(LEFT + 202, top + titleHeight).lineTo(LEFT + 202, top + height).strokeColor(BORDER).stroke();
+      doc.moveTo(middle + 142, top + titleHeight).lineTo(middle + 142, top + height).strokeColor(BORDER).stroke();
+      doc.moveTo(middle + 202, top + titleHeight).lineTo(middle + 202, top + height).strokeColor(BORDER).stroke();
+      bold("PARTICULARS", LEFT + 7, top + 27); bold("CONTRACT", LEFT + 144, top + 27, { width: 54, align: "right" }); bold("EARNED", LEFT + 204, top + 27, { width: 54, align: "right" });
+      bold("PARTICULARS", middle + 7, top + 27); bold("CONTRACT", middle + 144, top + 27, { width: 54, align: "right" }); bold("DEDUCTED", middle + 204, top + 27, { width: 54, align: "right" });
+    } else {
+      doc.moveTo(LEFT + 238, top + titleHeight).lineTo(LEFT + 238, top + height).strokeColor(BORDER).stroke();
+      doc.moveTo(RIGHT - 78, top + titleHeight).lineTo(RIGHT - 78, top + height).strokeColor(BORDER).stroke();
+      bold("PARTICULARS", LEFT + 7, top + 27); bold("AMOUNT", LEFT + 240, top + 27, { width: 72, align: "right" });
+      bold("PARTICULARS", middle + 7, top + 27); bold("DEDUCTIONS", RIGHT - 76, top + 27, { width: 68, align: "right" });
+    }
     for (let index = 0; index < rowCount; index++) {
       const rowY = top + titleHeight + subheadHeight + index * rowHeight;
       if (index % 2 === 0) doc.rect(LEFT + 0.5, rowY, WIDTH - 1, rowHeight).fill(SHADE);
@@ -136,12 +146,18 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
       const earning = earningRows[index];
       const deduction = deductionRows[index];
       if (earning) {
-        text(earning.label, LEFT + 7, rowY + 5, { width: 226, ellipsis: true });
-        text(money(earning.amount), LEFT + 240, rowY + 5, { width: 72, align: "right" });
+        text(earning.label, LEFT + 7, rowY + 5, { width: showContractualEarned ? 130 : 226, ellipsis: true });
+        if (showContractualEarned) {
+          text(earning.actual === null ? "-" : money(earning.actual ?? earning.amount), LEFT + 144, rowY + 5, { width: 54, align: "right" });
+          text(money(earning.amount), LEFT + 204, rowY + 5, { width: 54, align: "right" });
+        } else text(money(earning.amount), LEFT + 240, rowY + 5, { width: 72, align: "right" });
       }
       if (deduction) {
-        text(deduction.label, middle + 7, rowY + 5, { width: 185, ellipsis: true });
-        text(money(deduction.amount), RIGHT - 76, rowY + 5, { width: 68, align: "right" });
+        text(deduction.label, middle + 7, rowY + 5, { width: showContractualEarned ? 130 : 185, ellipsis: true });
+        if (showContractualEarned) {
+          text(deduction.actual === undefined || deduction.actual === null ? "-" : money(deduction.actual), middle + 144, rowY + 5, { width: 54, align: "right" });
+          text(money(deduction.amount), middle + 204, rowY + 5, { width: 54, align: "right" });
+        } else text(money(deduction.amount), RIGHT - 76, rowY + 5, { width: 68, align: "right" });
       }
     }
     return height;
@@ -158,8 +174,15 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
 
   if (y > PAGE_HEIGHT - 115) { doc.addPage(); header(true); y = 121; }
   rule(LEFT, y, WIDTH, 27);
-  bold("GROSS EARNINGS", LEFT + 8, y + 9); bold(money(data.payslip.grossEarnings), LEFT + WIDTH / 2 - 104, y + 9, { width: 94, align: "right" });
-  bold("TOTAL DEDUCTIONS", LEFT + WIDTH / 2 + 8, y + 9); bold(money(data.payslip.deductions), RIGHT - 104, y + 9, { width: 94, align: "right" });
+  if (showContractualEarned) {
+    const totalWidth = WIDTH / 3;
+    bold("CONTRACTUAL GROSS", LEFT + 8, y + 9); bold(money(data.payslip.grossEarnings), LEFT + totalWidth - 73, y + 9, { width: 65, align: "right" });
+    bold("EARNED GROSS", LEFT + totalWidth + 8, y + 9); bold(money(data.payslip.earnedGross!), LEFT + totalWidth * 2 - 73, y + 9, { width: 65, align: "right" });
+    bold("DEDUCTIONS", LEFT + totalWidth * 2 + 8, y + 9); bold(money(data.payslip.deductions), RIGHT - 73, y + 9, { width: 65, align: "right" });
+  } else {
+    bold("GROSS EARNINGS", LEFT + 8, y + 9); bold(money(data.payslip.grossEarnings), LEFT + WIDTH / 2 - 104, y + 9, { width: 94, align: "right" });
+    bold("TOTAL DEDUCTIONS", LEFT + WIDTH / 2 + 8, y + 9); bold(money(data.payslip.deductions), RIGHT - 104, y + 9, { width: 94, align: "right" });
+  }
   y += 39;
   doc.rect(LEFT, y, WIDTH, 31).fillAndStroke(HEADER, BORDER);
   doc.fillColor(INK).font("Helvetica-Bold").fontSize(10).text("NET PAY AMOUNT", LEFT + 10, y + 10);

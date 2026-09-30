@@ -69,6 +69,8 @@ export async function PUT(req: NextRequest) {
     },
     monthlyDivisor: Math.max(1, Math.min(366, num(body.monthlyDivisor, current.monthlyDivisor ?? 26))),
     components: current.components,
+    salaryDivisorMethod: current.salaryDivisorMethod,
+    earnedSalaryRounding: current.earnedSalaryRounding,
   };
 
   const tenant = await prisma.tenant.update({

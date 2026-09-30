@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
 import { CONFIGURATION_KINDS, dashboardLayout, idCardTemplate, leavePolicyDraft, payrollPolicyDraft, resolveConfiguration } from "@/lib/configuration";
-import { getPayrollConfig } from "@/lib/payroll";
+import { calendarDaysInPayrollMonth, getPayrollConfig } from "@/lib/payroll";
+import { payrollScheduleExample } from "@/lib/payroll-policy-editor";
 import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
 import { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
@@ -176,9 +177,16 @@ async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payloa
   }
   const proposed = payrollPolicyDraft(payload)!;
   const current = getPayrollConfig(tenant?.config ?? null);
+  const sampleMonth = monthKeyIST(effectiveFrom);
+  const sampleDays = calendarDaysInPayrollMonth(sampleMonth);
+  const currentDivisor = current.salaryDivisorMethod === "calendar_days" ? sampleDays : current.monthlyDivisor ?? 26;
+  const proposedDivisor = proposed.salaryDivisorMethod === "calendar_days" ? sampleDays : proposed.monthlyDivisor;
+  const currentSample = payrollScheduleExample(30_000, 2, currentDivisor, current.deductAbsentDays, current.earnedSalaryRounding);
+  const proposedSample = payrollScheduleExample(30_000, 2, proposedDivisor, proposed.deductLossOfPay, proposed.earnedSalaryRounding);
   const payrollDiff = [
-    ["Deduct loss of pay", current.deductAbsentDays, proposed.deductLossOfPay], ["OT multiplier", current.otMultiplier, proposed.overtimeMultiplier], ["Named components", "Tenant settings do not define named components", proposed.components?.map((component) => `${component.label}: ${component.formula}`).join(", ") || "None"],
+    ["Salary calculation", current.salaryDivisorMethod === "calendar_days" ? "Actual calendar days" : `Fixed divisor (${currentDivisor})`, proposed.salaryDivisorMethod === "calendar_days" ? `Actual calendar days (${sampleDays} in ${sampleMonth})` : `Fixed divisor (${proposedDivisor})`], ["Earned-salary rounding", current.earnedSalaryRounding, proposed.earnedSalaryRounding], ["Sample: ₹30,000 with 2 LOP", `₹30,000 × (${currentDivisor} − 2) ÷ ${currentDivisor} = ₹${currentSample.salaryAfterLop.toLocaleString("en-IN")}`, `₹30,000 × (${proposedDivisor} − 2) ÷ ${proposedDivisor} = ₹${proposedSample.salaryAfterLop.toLocaleString("en-IN")}`],
+    ["Deduct loss of pay", current.deductAbsentDays, proposed.deductLossOfPay], ["OT multiplier", current.otMultiplier, proposed.overtimeMultiplier], ["Named components", current.components?.map((component) => `${component.label}: ${component.formula}`).join(", ") || "None", proposed.components?.map((component) => `${component.label}: ${component.formula} / ${component.prorationBasis} / ${component.applicability}`).join(", ") || "None"],
     ["PF enabled", current.pf.enabled, proposed.statutory.pfEnabled], ["PF wage ceiling", current.pf.wageCeiling, proposed.statutory.pfWageCeiling], ["ESIC enabled", current.esic.enabled, proposed.statutory.esicEnabled], ["ESIC gross ceiling", current.esic.grossCeiling, proposed.statutory.esicGrossCeiling], ["Professional tax enabled", current.pt.enabled, proposed.statutory.professionalTaxEnabled], ["Professional tax state", current.pt.state, proposed.statutory.professionalTaxState], ["Labour welfare fund enabled", current.lwf.enabled, proposed.statutory.labourWelfareFundEnabled], ["TDS enabled", current.tds.enabled, proposed.statutory.tdsEnabled], ["TDS regime", current.tds.regime, proposed.statutory.tdsRegime],
   ].map(([label, current, proposed]) => ({ label, current, proposed, changed: current !== proposed }));
-  return NextResponse.json({ kind, affectedEmployees: affectedEmployees.length, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (Tenant.config / getPayrollConfig)", effectiveFrom, payroll: payrollDiff, unsupportedRules: ["Monthly divisor remains fixed at 26 in the current payroll engine.", "Overtime basis remains determined by the employee pay mode in the current payroll engine."] });
+  return NextResponse.json({ kind, affectedEmployees: affectedEmployees.length, proposedSource: locationId ? "location" : "tenant", resolvedStoredSource, currentBehaviorSource: "current default (Tenant.config / getPayrollConfig)", effectiveFrom, payroll: payrollDiff });
 }

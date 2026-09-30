@@ -36,6 +36,10 @@ assert.equal(resolvePayrollPolicyEditorSource(editorRecords, "L2", "2026-03-01")
 assert.equal(resolvePayrollPolicyEditorSource(editorRecords, "L2", "2026-03-01").kind, "tenant_fallback", "tenant fallback is clearly identified");
 const cloned = payrollPolicyEditorDraft(tenantPayload, baseline);
 assert.equal(cloned.components.length, 1, "existing effective-policy components load into the editor");
+assert.equal(cloned.salaryDivisorMethod, "fixed_divisor", "legacy policies default to the existing fixed divisor");
+assert.equal(cloned.earnedSalaryRounding, "two_decimals", "legacy policies default to two-decimal rounding");
+assert.equal(cloned.components[0].prorationBasis, "none", "legacy components remain unprorated");
+assert.equal(cloned.components[0].applicability, "all", "legacy components remain applicable to all employees");
 assert.equal(cloned.components[0].hiddenCalculatorFlag, "keep", "hidden component fields survive draft creation");
 assert.deepEqual(cloned.editorExtension, { source: "preserve-me" }, "unknown top-level policy fields survive draft creation");
 assert.equal(cloned.statutory.hiddenStatutoryFlag, true, "hidden statutory fields survive draft creation");
@@ -55,5 +59,8 @@ assert.match(hub, /Preview changes/, "preview action remains available across po
 assert.match(hub, /Save draft/, "single-draft save action remains available across policy sections");
 assert.match(hub, /Publish version/, "publishing remains an explicit version-history action");
 assert.match(hub, /Deactivate/, "published versions can still be deactivated");
-assert.doesNotMatch(hub, /work[- ]week|calendar[- ]day/i, "unsupported work-week and calendar divisor controls are not exposed");
+assert.match(hub, /Actual calendar days/, "calendar-day salary calculation is exposed");
+assert.match(hub, /Payable days/, "component payable-day proration is exposed");
+assert.match(hub, /Selected employees/, "component assignment applicability is exposed");
+assert.doesNotMatch(hub, /work[- ]week/i, "unsupported work-week controls are not exposed");
 console.log("payroll configuration tests passed");

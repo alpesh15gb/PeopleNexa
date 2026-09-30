@@ -4,6 +4,7 @@ import { monthKey } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";
 import { PayrollPanel } from "./payroll-panel";
 import { redirect } from "next/navigation";
+import { documentSnapshotForResponse } from "@/lib/payslip-document";
 
 export const dynamic = "force-dynamic";
 
@@ -22,5 +23,5 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
   const payslips = payroll ? await prisma.payslip.findMany({ where: { tenantId: session.tenantId, payrollRunId: payroll.id }, include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, accountNumber: true, ifscCode: true, department: { select: { name: true } } } } }, orderBy: { employee: { employeeNumber: 'asc' } } }) : [];
   const totals = payslips.reduce((value, payslip) => ({ gross: value.gross + payslip.grossEarnings, deductions: value.deductions + payslip.deductions, net: value.net + payslip.netSalary, paid: value.paid + (payslip.status === 'paid' ? 1 : 0) }), { gross: 0, deductions: 0, net: 0, paid: 0 });
   const source = payslips.find((payslip) => payslip.payrollConfigurationId)?.payrollPolicyRules as { source?: string } | null;
-  return <PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? 'Assigned location' : 'Select location'} locationId={locationId} locations={locations} rows={payslips.map((payslip) => ({ employee: payslip.employee, payslip: { ...payslip, adjustments: (payslip.adjustments ?? null) as { label: string; amount: number }[] | null } }))} totals={totals} generated={payslips.length} canManageSettings={session.role === 'admin'} payroll={payroll} provenance={source ? { source: source.source ?? 'recorded' } : null} />;
+  return <PayrollPanel month={month} locationLabel={locationId ? locations.find((location) => location.id === locationId)?.name ?? 'Assigned location' : 'Select location'} locationId={locationId} locations={locations} rows={payslips.map((payslip) => ({ employee: payslip.employee, payslip: { ...payslip, adjustments: (payslip.adjustments ?? null) as { label: string; amount: number }[] | null, document: documentSnapshotForResponse(payslip.documentSnapshot) } }))} totals={totals} generated={payslips.length} canManageSettings={session.role === 'admin'} payroll={payroll} provenance={source ? { source: source.source ?? 'recorded' } : null} />;
 }

@@ -4,7 +4,7 @@ import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
 import type { PayrollPolicySnapshot } from "./payroll-policy";
-import type { PayrollComponentRule } from "./configuration";
+import type { PayrollComponentRule, PayrollRoundingMode, SalaryDivisorMethod } from "./configuration";
 import { mask, type PayslipComponent, type PayslipDocumentSnapshot } from "./payslip-document";
 
 // ─── Payroll configuration (per tenant; stored under tenant.config.payroll) ─
@@ -22,6 +22,8 @@ export interface PayrollConfig {
   tds: { enabled: boolean; regime: "new" | "old" };
   components?: PayrollComponentRule[];
   monthlyDivisor?: number;
+  salaryDivisorMethod: SalaryDivisorMethod;
+  earnedSalaryRounding: PayrollRoundingMode;
 }
 
 export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
@@ -35,6 +37,8 @@ export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
   pt: { enabled: true, state: "Gujarat" },
   lwf: { enabled: false },
   tds: { enabled: true, regime: "new" },
+  salaryDivisorMethod: "fixed_divisor",
+  earnedSalaryRounding: "two_decimals",
 };
 
 export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
@@ -75,6 +79,8 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     tds: { ...DEFAULT_PAYROLL_CONFIG.tds, ...p.tds },
     components: Array.isArray(p.components) ? p.components as PayrollComponentRule[] : undefined,
     monthlyDivisor: Math.max(1, Math.min(366, nonNeg(p.monthlyDivisor, 26) || 26)),
+    salaryDivisorMethod: p.salaryDivisorMethod === "calendar_days" ? "calendar_days" : "fixed_divisor",
+    earnedSalaryRounding: p.earnedSalaryRounding === "floor_rupee" || p.earnedSalaryRounding === "nearest_rupee" ? p.earnedSalaryRounding : "two_decimals",
   };
 }
 
@@ -96,6 +102,22 @@ export function monthRange(month: string): { start: Date; end: Date } {
   const endM = m === 12 ? 1 : m + 1;
   const end = parseIST(`${endY}-${String(endM).padStart(2, "0")}-01 00:00:00`)!;
   return { start, end };
+}
+
+/** Calendar-day divisor for a canonical YYYY-MM payroll period. */
+export function calendarDaysInPayrollMonth(month: string): number {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) throw new Error("Payroll month must use YYYY-MM format.");
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  if (monthNumber < 1 || monthNumber > 12) throw new Error("Payroll month must use YYYY-MM format.");
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+}
+
+export function roundPayrollAmount(amount: number, mode: PayrollRoundingMode): number {
+  if (mode === "floor_rupee") return Math.floor(amount + 1e-9);
+  if (mode === "nearest_rupee") return Math.round(amount);
+  return round2(amount);
 }
 
 // ─── Attendance summary for one employee-month ──────────────────────────────
@@ -451,10 +473,13 @@ export function splitSalary(
 export interface PayrollResult {
   baseSalary: number;
   basic: number;
+  earnedBasic: number;
   allowances: number;
+  earnedAllowances: number;
   overtimePay: number;
   adjustmentEarnings: number;
   grossEarnings: number;
+  earnedGross: number;
   gratuity: number;
   pfEmployee: number;
   pfEmployer: number;
@@ -480,9 +505,21 @@ export interface PayrollResult {
   paidLeaveDays: number;
   unpaidLeaveDays: number;
   divisorUsed: number;
+  payableDays: number;
   adjustments: { label: string; amount: number }[];
-  salaryBreakdown: { label: string; amount: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[];
+  salaryBreakdown: { code: string; label: string; amount: number; contractual: number; earned: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean; prorationBasis: PayrollComponentRule["prorationBasis"] }[];
 }
+
+export interface PayrollCalculationContext {
+  assignedComponentCodes?: Iterable<string>;
+}
+
+export type PayrollComponentAssignmentSnapshot = {
+  id: string;
+  componentCode: string;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+};
 
 /** Compute the base amount for the employee's pay mode. */
 export function baseForPayMode(
@@ -536,14 +573,25 @@ export function computePayroll(
   loanDeduction: number,
   month: string,
   adjustments: PayrollAdjustmentInput[] = [],
-  investments = 0
+  investments = 0,
+  context: PayrollCalculationContext = {},
 ): PayrollResult {
   const mode = employee.payMode ?? "monthly";
   const rate = mode === "work_basis" && employee.workBasisRate != null && employee.workBasisRate > 0 ? employee.workBasisRate! : employee.salary;
   const base = baseForPayMode(mode, rate, summary);
 
+  const divisorUsed = config.salaryDivisorMethod === "calendar_days"
+    ? calendarDaysInPayrollMonth(month)
+    : config.monthlyDivisor ?? 26;
+  const unpaidDayFractions = summary.absentDays + summary.halfDays * 0.5 + (summary.unpaidLeaveDays ?? 0);
+  const appliedLopDays = config.deductAbsentDays && mode === "monthly" ? Math.min(Math.max(unpaidDayFractions, 0), divisorUsed) : 0;
+  const payableDays = Math.max(0, divisorUsed - appliedLopDays);
+  const attendedDays = Math.min(Math.max(summary.presentDays + summary.lateDays + summary.halfDays * 0.5, 0), divisorUsed);
+  const payableRatio = divisorUsed > 0 ? payableDays / divisorUsed : 1;
+  const presentRatio = divisorUsed > 0 ? attendedDays / divisorUsed : 0;
+
   let { basic, allowances } = splitSalary(base, employee.salaryStructure, config);
-  const configured = calculatePolicyComponents(config.components, base);
+  const configured = calculatePolicyComponents(config, base, payableRatio, presentRatio, context.assignedComponentCodes);
   if (configured) {
     basic = configured.basic;
     allowances = configured.allowances;
@@ -555,11 +603,6 @@ export function computePayroll(
     allowances = 0;
   }
 
-  // `base` already includes the basic+allowances split, so gross must NOT add
-  // allowances again (that double-counted pay).
-  // A policy's monthly divisor is applied consistently to LOP and monthly OT.
-  const divisor = config.monthlyDivisor ?? 26;
-  const divisorUsed = divisor;
   // Overtime branches by pay mode:
   // - hourly: rate is the hourly rate → pay rate × multiplier × hours (no /26).
   // - daily / work_basis: day rate is the daily rate → (rate/8) × multiplier.
@@ -590,18 +633,31 @@ export function computePayroll(
   const lateFines = round2(summary.lateDays * config.lateFinePerLateDay);
   // For daily/hourly/work-basis pay, `base` is already pro-rated by attendance —
   // applying an extra absent deduction would deduct twice.
-  const unpaidDayFractions = summary.absentDays + summary.halfDays * 0.5 + (summary.unpaidLeaveDays ?? 0);
-  const absentDeduction =
-    config.deductAbsentDays && mode === "monthly" && divisor > 0
-      ? round2((base / divisor) * unpaidDayFractions)
-      : 0;
+  let absentDeduction = 0;
+  if (appliedLopDays > 0 && divisorUsed > 0) {
+    // Keep the historical operation order for policies that omit the new
+    // settings. This avoids even half-paise rounding drift in legacy runs.
+    absentDeduction = config.salaryDivisorMethod === "fixed_divisor" && config.earnedSalaryRounding === "two_decimals"
+      ? round2((base / divisorUsed) * appliedLopDays)
+      : round2(base - roundPayrollAmount(base * payableRatio, config.earnedSalaryRounding));
+  }
 
   // LOP is displayed separately, but statutory wage bases must reflect the pay
   // earned after LOP. Allocate LOP across basic and allowances proportionally;
   // this preserves an explicit salary structure instead of taking all LOP from
   // basic. Earnings adjustments and overtime retain their existing treatment.
-  const earnedBasic = base > 0 ? round2(Math.max(0, basic - (absentDeduction * basic) / base)) : 0;
-  const earnedGross = round2(Math.max(0, gross - absentDeduction));
+  const earnedSalary = round2(Math.max(0, base - absentDeduction));
+  let earnedBasic = base > 0 ? round2(Math.max(0, basic - (absentDeduction * basic) / base)) : 0;
+  let earnedAllowances = base > 0 ? round2(Math.max(0, allowances - (absentDeduction * allowances) / base)) : 0;
+  if (configured?.wageBaseProrated) earnedBasic = configured.earnedBasic;
+  if (configured?.hasProratedEarnings) {
+    earnedAllowances = configured.earnedAllowances;
+  } else if (!configured && (config.salaryDivisorMethod !== "fixed_divisor" || config.earnedSalaryRounding !== "two_decimals")) {
+    earnedBasic = roundPayrollAmount(basic * payableRatio, config.earnedSalaryRounding);
+    earnedAllowances = roundPayrollAmount(allowances * payableRatio, config.earnedSalaryRounding);
+    earnedBasic = round2(Math.max(0, earnedBasic + (earnedSalary - earnedBasic - earnedAllowances)));
+  }
+  const earnedGross = round2(Math.max(0, (configured?.hasProratedEarnings ? configured.earnedGross : (configured?.grossEarnings ?? base) - absentDeduction) + overtimePay + adj.earnings));
   const { employee: pfEmployee, employer: pfEmployer } = calcPF(earnedBasic, config);
   const { employee: esicEmployee, employer: esicEmployer } = calcESIC(earnedGross, config);
   const pt = config.pt.enabled ? professionalTax(config.pt.state, earnedGross, month) : 0;
@@ -622,10 +678,13 @@ export function computePayroll(
   return {
     baseSalary: round2(base),
     basic,
+    earnedBasic,
     allowances,
+    earnedAllowances,
     overtimePay,
     adjustmentEarnings: adj.earnings,
     grossEarnings: gross,
+    earnedGross,
     gratuity,
     pfEmployee,
     pfEmployer,
@@ -651,15 +710,17 @@ export function computePayroll(
     paidLeaveDays: summary.paidLeaveDays ?? 0,
     unpaidLeaveDays: summary.unpaidLeaveDays ?? 0,
     divisorUsed,
+    payableDays: config.salaryDivisorMethod === "calendar_days" ? payableDays : summary.workingDays + summary.onLeaveDays,
     adjustments: adj.list,
     salaryBreakdown: configured?.rows ?? [],
   };
 }
 
-function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, monthlyBase: number) {
+function calculatePolicyComponents(config: PayrollConfig, monthlyBase: number, payableRatio: number, presentRatio: number, assignments?: Iterable<string>) {
   // Employer benefits, reimbursements, variable and one-time catalog entries
   // are deliberately not inferred into payroll amounts by this engine.
-  const operationalRules = rules?.filter((rule): rule is PayrollComponentRule & { kind: "earning" | "deduction"; formula: "fixed" | "percent_of_ctc" | "percent_of_component" | "salary_band_fixed" } => rule.active !== false && (rule.kind === "earning" || rule.kind === "deduction") && !["variable", "one_time"].includes(rule.formula)) ?? [];
+  const assignedCodes = new Set(Array.from(assignments ?? [], (code) => code.trim().toUpperCase()));
+  const operationalRules = config.components?.filter((rule): rule is PayrollComponentRule & { kind: "earning" | "deduction"; formula: "fixed" | "percent_of_ctc" | "percent_of_component" | "salary_band_fixed" } => rule.active !== false && (rule.kind === "earning" || rule.kind === "deduction") && !["variable", "one_time"].includes(rule.formula) && (rule.applicability !== "assigned_employees" || assignedCodes.has(rule.code))) ?? [];
   if (!operationalRules.length) return null;
   const values = new Map<string, number>();
   const rows: PayrollResult["salaryBreakdown"] = [];
@@ -675,25 +736,43 @@ function calculatePolicyComponents(rules: PayrollComponentRule[] | undefined, mo
       else amount = rule.bands?.find((band) => monthlyBase >= band.minCtc && (band.maxCtc === null || monthlyBase <= band.maxCtc))?.amount ?? 0;
     }
     amount = round2(amount); values.set(rule.code, amount);
-    rows.push({ label: rule.label, amount, kind: rule.kind, includeInGross: rule.includeInGross, visibleOnPayslip: rule.visibleOnPayslip });
+    const prorationBasis = rule.prorationBasis ?? "none";
+    const ratio = prorationBasis === "payable_days" ? payableRatio : prorationBasis === "present_days" ? presentRatio : 1;
+    const rounding = rule.prorationRounding ?? (prorationBasis === "payable_days" ? config.earnedSalaryRounding : "two_decimals");
+    const earned = prorationBasis === "none" ? amount : roundPayrollAmount(amount * ratio, rounding);
+    rows.push({ code: rule.code, label: rule.label, amount: earned, contractual: amount, earned, kind: rule.kind, includeInGross: rule.includeInGross, visibleOnPayslip: rule.visibleOnPayslip, prorationBasis });
   }
   const wageBase = operationalRules.find((rule) => rule.pfWageBase);
-  const grossEarnings = round2(rows.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.amount, 0));
-  const allowances = round2(rows.filter((row, index) => row.kind === "earning" && operationalRules[index].code !== wageBase?.code).reduce((sum, row) => sum + row.amount, 0));
-  return { basic: wageBase ? values.get(wageBase.code) ?? 0 : 0, allowances, grossEarnings, deductions: round2(rows.filter((row) => row.kind === "deduction").reduce((sum, row) => sum + row.amount, 0)), rows };
+  const payableEarningRows = rows.filter((row) => row.kind === "earning" && row.includeInGross && row.prorationBasis === "payable_days");
+  if (payableEarningRows.length) {
+    const target = roundPayrollAmount(payableEarningRows.reduce((sum, row) => sum + row.contractual, 0) * payableRatio, config.earnedSalaryRounding);
+    const residual = round2(target - payableEarningRows.reduce((sum, row) => sum + row.earned, 0));
+    if (residual) {
+      const preferred = payableEarningRows.find((row) => row.code === wageBase?.code);
+      const recipient = residual >= 0
+        ? preferred ?? payableEarningRows[0]
+        : [preferred, ...payableEarningRows].find((row) => row && row.earned + residual >= 0) ?? payableEarningRows[0];
+      recipient.earned = round2(recipient.earned + residual);
+      recipient.amount = recipient.earned;
+    }
+  }
+  const grossEarnings = round2(rows.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.contractual, 0));
+  const earnedGross = round2(rows.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.earned, 0));
+  const allowances = round2(rows.filter((row) => row.kind === "earning" && row.code !== wageBase?.code).reduce((sum, row) => sum + row.contractual, 0));
+  const earnedAllowances = round2(rows.filter((row) => row.kind === "earning" && row.code !== wageBase?.code).reduce((sum, row) => sum + row.earned, 0));
+  const wageBaseRow = wageBase ? rows.find((row) => row.code === wageBase.code) : undefined;
+  return { basic: wageBase ? values.get(wageBase.code) ?? 0 : 0, earnedBasic: wageBaseRow?.earned ?? 0, allowances, earnedAllowances, grossEarnings, earnedGross, hasProratedEarnings: rows.some((row) => row.kind === "earning" && row.includeInGross && row.prorationBasis !== "none"), wageBaseProrated: wageBaseRow?.prorationBasis !== undefined && wageBaseRow.prorationBasis !== "none", deductions: round2(rows.filter((row) => row.kind === "deduction").reduce((sum, row) => sum + row.earned, 0)), rows };
 }
 
-function documentComponents(result: PayrollResult): PayslipComponent[] {
-  const configured = (result.salaryBreakdown ?? []).map((row, index) => ({
-    code: `CONFIG_${index}`, label: row.label, category: row.kind, contractual: row.amount,
-    // LOP is a separately rendered deduction in the existing ledger, so the
-    // earning register remains the contractual gross and reconciles to gross.
-    earned: row.amount,
+export function documentComponents(result: PayrollResult): PayslipComponent[] {
+  const configured = (result.salaryBreakdown ?? []).map((row) => ({
+    code: row.code, label: row.label, category: row.kind, contractual: row.contractual,
+    earned: row.earned,
     includeInGross: row.includeInGross, visibleOnPayslip: row.visibleOnPayslip, nonCash: false,
   } satisfies PayslipComponent));
   const rows: PayslipComponent[] = configured.length ? configured : [
-    { code: "BASIC", label: "Basic", category: "earning" as const, contractual: result.basic, earned: result.basic, includeInGross: true, visibleOnPayslip: true, nonCash: false },
-    { code: "ALLOWANCES", label: "Allowances", category: "earning" as const, contractual: result.allowances, earned: result.allowances, includeInGross: true, visibleOnPayslip: true, nonCash: false },
+    { code: "BASIC", label: "Basic", category: "earning" as const, contractual: result.basic, earned: result.earnedBasic, includeInGross: true, visibleOnPayslip: true, nonCash: false },
+    { code: "ALLOWANCES", label: "Allowances", category: "earning" as const, contractual: result.allowances, earned: result.earnedAllowances, includeInGross: true, visibleOnPayslip: true, nonCash: false },
   ];
   const add = (code: string, label: string, earned: number, category: "earning" | "deduction") => { if (earned) rows.push({ code, label, category, contractual: null, earned, includeInGross: category === "earning", visibleOnPayslip: true, nonCash: false }); };
   add("OVERTIME", "Overtime", result.overtimePay, "earning"); add("ADJUSTMENTS", "Adjustments", result.adjustmentEarnings, "earning");
@@ -735,7 +814,8 @@ export async function generatePayslipForEmployee(
   },
   month: string,
   policySnapshot?: PayrollPolicySnapshot,
-  payrollRunId?: string
+  payrollRunId?: string,
+  componentAssignments: readonly PayrollComponentAssignmentSnapshot[] = [],
 ): Promise<{ created: boolean; netSalary?: number; loanApplied?: number; skipped?: string }> {
   // Skip employees who join on/after the month's exclusive end.
   const { start: mStart, end: mEnd } = monthRange(month);
@@ -779,7 +859,7 @@ export async function generatePayslipForEmployee(
   const decl = (taxDecl?.sections ?? {}) as Record<string, number>;
   const investments = taxDecl?.status === "verified" ? Number(decl.total ?? 0) || 0 : 0;
 
-  const result = computePayroll(config, payEmployee, summary, loanDeduction, month, adjustments, investments);
+  const result = computePayroll(config, payEmployee, summary, loanDeduction, month, adjustments, investments, { assignedComponentCodes: componentAssignments.map((assignment) => assignment.componentCode) });
   // Re-allocate the capped loan total across loans in EMI order so the
   // persisted per-loan outstanding balances match the capped deduction.
   const { total: cappedLoanTotal, updates: cappedUpdates } = loanDeductionForMonth(loans, month, result.loanDeduction);
@@ -792,12 +872,12 @@ export async function generatePayslipForEmployee(
 
     try {
       const documentSnapshot: PayslipDocumentSnapshot = {
-        version: 1, generatedAt: new Date().toISOString(), period: month,
+        version: 2, generatedAt: new Date().toISOString(), period: month,
         policy: { id: policySnapshot?.configurationId ?? null, version: policySnapshot?.configurationVersion ?? null, source: policySnapshot ? "configuration_record" : "tenant_config" },
         branding: { legalName: tenant?.profile?.legalName ?? tenant?.name ?? "Company", displayName: tenant?.profile?.displayName ?? tenant?.name ?? "Company", address: tenant?.profile?.address ?? tenant?.address ?? null, contact: tenant?.profile?.contactEmail ?? tenant?.profile?.contactPhone ?? tenant?.email ?? tenant?.phone ?? null, logoUrl: tenant?.profile?.logoUrl ?? null },
         employee: { name: `${employee.firstName ?? ""} ${employee.lastName ?? ""}`.trim(), employeeNumber: employee.employeeNumber ?? employee.id, designation: employee.position ?? null, department: employee.departmentName ?? null, joiningDate: employee.joiningDate?.toISOString() ?? null, bankName: employee.bankName ?? null, accountMasked: mask(employee.accountNumber), panMasked: mask(employee.pan), uan: employee.uan ?? null, esiIpNumber: employee.esiIpNumber ?? null },
-        days: { payable: result.workingDays + result.onLeaveDays, paid: result.presentDays + result.lateDays + result.halfDays * 0.5 + result.paidLeaveDays, lop: result.absentDays + result.halfDays * 0.5 + result.unpaidLeaveDays },
-        components: documentComponents(result), totals: { gross: result.grossEarnings, deductions: result.deductions, net: result.netSalary },
+        days: { payable: result.payableDays, paid: result.presentDays + result.lateDays + result.halfDays * 0.5 + result.paidLeaveDays, lop: result.absentDays + result.halfDays * 0.5 + result.unpaidLeaveDays },
+        components: documentComponents(result), totals: { gross: result.grossEarnings, earnedGross: result.earnedGross, deductions: result.deductions, net: result.netSalary },
       };
       await tx.payslip.create({
         data: {
@@ -838,13 +918,14 @@ export async function generatePayslipForEmployee(
           payrollConfigurationVersion: policySnapshot?.configurationVersion,
           payrollPolicyRules: policySnapshot?.appliedRules as unknown as Prisma.InputJsonValue | undefined,
           inputSnapshot: {
-            version: 1,
+            version: 2,
             employee: { id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName, position: employee.position ?? null, joiningDate: employee.joiningDate ?? null, branchId: employee.branchId, branchName: employee.branchName ?? null, locationId: employee.locationId, departmentId: employee.departmentId, departmentName: employee.departmentName ?? null, pan: employee.pan ?? null, uan: employee.uan ?? null, esiIpNumber: employee.esiIpNumber ?? null, payMode: employee.payMode ?? "monthly", salary: employee.salary },
             statutory: { pfAllowed: employee.pfAllowed ?? null, esicAllowed: employee.esicAllowed ?? null, tdsAllowed: employee.tdsAllowed ?? null },
             // This private snapshot is never returned to employee/admin list UI;
             // it preserves the payment instruction selected at run generation.
             bank: { bankName: employee.bankName ?? null, accountNumber: employee.accountNumber ?? null, accountMasked: employee.accountNumber ? `****${employee.accountNumber.slice(-4)}` : null, ifscCode: employee.ifscCode ?? null },
             attendance: summary,
+            componentAssignments: componentAssignments.map((assignment) => ({ id: assignment.id, componentCode: assignment.componentCode, effectiveFrom: assignment.effectiveFrom.toISOString(), effectiveTo: assignment.effectiveTo?.toISOString() ?? null })),
             policy: policySnapshot?.appliedRules ?? { source: "tenant_config", payrollConfig: config },
             result,
           } as unknown as Prisma.InputJsonValue,

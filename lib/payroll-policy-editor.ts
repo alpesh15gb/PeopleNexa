@@ -61,6 +61,8 @@ function clone<T>(value: T): T {
 export function payrollPolicyEditorBaseline(config: PayrollConfig): PayrollPolicyEditorDraft {
   return {
     monthlyDivisor: config.monthlyDivisor ?? 26,
+    salaryDivisorMethod: config.salaryDivisorMethod,
+    earnedSalaryRounding: config.earnedSalaryRounding,
     deductLossOfPay: config.deductAbsentDays,
     overtimeMultiplier: config.otMultiplier,
     overtimeBasis: "basic_hourly",
@@ -134,10 +136,12 @@ export function resolvePayrollPolicyEditorSource(
   return { record: original, kind: record.locationId === locationId ? "location_override" : "tenant_fallback" };
 }
 
-export function payrollScheduleExample(monthlySalary: number, lopDays: number, divisor: number, deductLossOfPay: boolean) {
-  const deduction = deductLossOfPay && divisor > 0 ? Math.round((monthlySalary / divisor) * lopDays * 100) / 100 : 0;
+export function payrollScheduleExample(monthlySalary: number, lopDays: number, divisor: number, deductLossOfPay: boolean, rounding: PayrollPolicyDraft["earnedSalaryRounding"] = "two_decimals") {
+  const round = (amount: number) => rounding === "floor_rupee" ? Math.floor(amount + 1e-9) : rounding === "nearest_rupee" ? Math.round(amount) : Math.round(amount * 100) / 100;
+  const salaryAfterLop = deductLossOfPay && divisor > 0 ? round(monthlySalary * Math.max(0, divisor - lopDays) / divisor) : monthlySalary;
+  const deduction = Math.round(Math.max(0, monthlySalary - salaryAfterLop) * 100) / 100;
   return {
     deduction,
-    salaryAfterLop: Math.max(0, Math.round((monthlySalary - deduction) * 100) / 100),
+    salaryAfterLop,
   };
 }

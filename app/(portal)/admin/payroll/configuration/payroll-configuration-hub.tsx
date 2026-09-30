@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -14,8 +14,10 @@ import {
   Info,
   Plus,
   Save,
+  Search,
   ShieldCheck,
   Trash2,
+  Users,
   WalletCards,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -320,9 +322,9 @@ function PolicyEditor({
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{errorMessages.map((message) => <li key={message}>{message}</li>)}</ul>
     </div>}
 
-    {section === "schedule" && <ScheduleSection draft={draft} errors={errors} onChange={change} />}
+    {section === "schedule" && <ScheduleSection draft={draft} effectiveMonth={effectiveFrom.slice(0, 7)} errors={errors} onChange={change} />}
     {section === "statutory" && <StatutorySection draft={draft} selectedLocation={selectedLocation} errors={errors} onChange={change} onAdvanced={() => onSectionChange("advanced")} />}
-    {section === "components" && <SalaryComponentsSection draft={draft} errors={errors} onChange={change} />}
+    {section === "components" && <SalaryComponentsSection draft={draft} selectedLocation={selectedLocation} errors={errors} onChange={change} />}
     {section === "tax" && <TaxDetailsSection draft={draft} selectedLocation={selectedLocation} organization={organization} errors={errors} onChange={change} />}
     {section === "advanced" && <AdvancedSection
       draft={draft}
@@ -371,8 +373,11 @@ function SectionPanel({ title, description, action, children }: { title: string;
   </section>;
 }
 
-function ScheduleSection({ draft, errors, onChange }: { draft: PayrollPolicyEditorDraft; errors: FieldErrors; onChange: (draft: PayrollPolicyEditorDraft, clear?: string[]) => void }) {
-  const example = payrollScheduleExample(30_000, 2, draft.monthlyDivisor, draft.deductLossOfPay);
+function ScheduleSection({ draft, effectiveMonth, errors, onChange }: { draft: PayrollPolicyEditorDraft; effectiveMonth: string; errors: FieldErrors; onChange: (draft: PayrollPolicyEditorDraft, clear?: string[]) => void }) {
+  const [year, month] = effectiveMonth.split("-").map(Number);
+  const calendarDivisor = year && month ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 30;
+  const selectedDivisor = draft.salaryDivisorMethod === "calendar_days" ? calendarDivisor : draft.monthlyDivisor;
+  const example = payrollScheduleExample(30_000, 2, selectedDivisor, draft.deductLossOfPay, draft.earnedSalaryRounding);
   const schedule = draft.schedule;
   const hasCutoff = [schedule.attendanceCutoffDay, schedule.adjustmentCutoffDay, schedule.reimbursementCutoffDay].some((value) => value !== null && value !== undefined);
 
@@ -394,9 +399,11 @@ function ScheduleSection({ draft, errors, onChange }: { draft: PayrollPolicyEdit
       <div className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Payroll frequency" hint="PeopleNexa currently generates monthly payroll runs."><Input value="Monthly" readOnly aria-readonly="true" /></Field>
-          <Field label="Salary and LOP divisor" error={errors.monthlyDivisor} hint="A fixed divisor is used for monthly LOP and the monthly OT hourly base.">
+          <Field label="Salary calculation" hint="Choose the divisor used for monthly LOP, component proration, and monthly overtime."><Select value={draft.salaryDivisorMethod} onChange={(event) => onChange({ ...draft, salaryDivisorMethod: event.target.value as PayrollPolicyEditorDraft["salaryDivisorMethod"] }, ["form"])}><option value="fixed_divisor">Fixed divisor</option><option value="calendar_days">Actual calendar days</option></Select></Field>
+          {draft.salaryDivisorMethod === "fixed_divisor" && <Field label="Fixed salary divisor" error={errors.monthlyDivisor} hint="Used for monthly LOP and the monthly overtime hourly base.">
             <Input type="number" min="1" max="366" step="1" value={draft.monthlyDivisor} aria-invalid={Boolean(errors.monthlyDivisor)} onChange={(event) => onChange({ ...draft, monthlyDivisor: Number(event.target.value) }, ["monthlyDivisor", "form"])} />
-          </Field>
+          </Field>}
+          <Field label="Earned-salary rounding" hint="Applied after monthly salary is prorated. Components can optionally override this."><Select value={draft.earnedSalaryRounding} onChange={(event) => onChange({ ...draft, earnedSalaryRounding: event.target.value as PayrollPolicyEditorDraft["earnedSalaryRounding"] }, ["form"])}><option value="two_decimals">Two decimals</option><option value="floor_rupee">Round down to whole rupee</option><option value="nearest_rupee">Nearest whole rupee</option></Select></Field>
           <Field label="Overtime multiplier" error={errors.overtimeMultiplier} hint="Applied to the engine's pay-mode-specific hourly rate.">
             <Input type="number" min="0" max="10" step="0.01" value={draft.overtimeMultiplier} aria-invalid={Boolean(errors.overtimeMultiplier)} onChange={(event) => onChange({ ...draft, overtimeMultiplier: Number(event.target.value) }, ["overtimeMultiplier", "form"])} />
           </Field>
@@ -405,7 +412,7 @@ function ScheduleSection({ draft, errors, onChange }: { draft: PayrollPolicyEdit
           </Field>
           {schedule.payDateRule === "fixed_day" && <Field label="Fixed pay day" error={errors.payDay}><Input type="number" min="1" max="31" step="1" value={schedule.payDay ?? ""} aria-invalid={Boolean(errors.payDay)} onChange={(event) => changeSchedule({ payDay: Number(event.target.value) }, ["payDay", "form"])} /></Field>}
         </div>
-        <SwitchRow checked={draft.deductLossOfPay} label="Deduct loss of pay" description="For monthly staff, deduct salary for absent days, half days, and unpaid leave using the divisor above." onChange={(checked) => onChange({ ...draft, deductLossOfPay: checked }, ["form"])} />
+        <SwitchRow checked={draft.deductLossOfPay} label="Deduct loss of pay" description="For monthly staff, payable days equal the selected divisor minus absences, half-day fractions, and unpaid leave. Approved paid leave remains payable." onChange={(checked) => onChange({ ...draft, deductLossOfPay: checked }, ["form"])} />
         <details className="rounded-lg border border-edge bg-tint/30 p-4" open={hasCutoff || undefined}>
           <summary className="cursor-pointer text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Optional cutoff days</summary>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">These dates are stored for payroll planning and review. The current engine does not enforce a lock at these cutoffs.</p>
@@ -420,12 +427,12 @@ function ScheduleSection({ draft, errors, onChange }: { draft: PayrollPolicyEdit
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><WalletCards aria-hidden="true" className="h-5 w-5" /></div>
         <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-primary">Live example</p>
         <h3 className="mt-1 font-display text-lg font-semibold">₹30,000 salary · 2 LOP days</h3>
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">₹30,000 ÷ {draft.monthlyDivisor || "—"} × 2</p>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">₹30,000 × ({selectedDivisor} − 2) ÷ {selectedDivisor}</p>
         <dl className="mt-4 space-y-3 border-t border-primary/15 pt-4 text-sm">
           <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">LOP deduction</dt><dd className="font-semibold tabular-nums">{money(example.deduction)}</dd></div>
           <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">Salary after LOP</dt><dd className="font-semibold tabular-nums">{money(example.salaryAfterLop)}</dd></div>
         </dl>
-        <p className="mt-4 text-xs leading-5 text-muted-foreground">Before statutory and other deductions. {draft.deductLossOfPay ? "The selected divisor is applied exactly as shown." : "LOP deduction is currently switched off."}</p>
+        <p className="mt-4 text-xs leading-5 text-muted-foreground">Before statutory and other deductions. {draft.deductLossOfPay ? `${draft.salaryDivisorMethod === "calendar_days" ? `${effectiveMonth} has ${calendarDivisor} calendar days` : `The fixed divisor is ${draft.monthlyDivisor}`}; earned salary uses ${roundingLabel(draft.earnedSalaryRounding).toLowerCase()}.` : "LOP deduction is currently switched off."}</p>
       </aside>
     </div>
   </SectionPanel>;
@@ -480,10 +487,11 @@ const COMPONENT_CATEGORIES: Array<{ key: PayrollComponentEditor["kind"]; label: 
   { key: "reimbursement", label: "Reimbursements" },
 ];
 
-function SalaryComponentsSection({ draft, errors, onChange }: { draft: PayrollPolicyEditorDraft; errors: FieldErrors; onChange: (draft: PayrollPolicyEditorDraft, clear?: string[]) => void }) {
+function SalaryComponentsSection({ draft, selectedLocation, errors, onChange }: { draft: PayrollPolicyEditorDraft; selectedLocation: Location | null; errors: FieldErrors; onChange: (draft: PayrollPolicyEditorDraft, clear?: string[]) => void }) {
   const [category, setCategory] = useState<PayrollComponentEditor["kind"]>("earning");
   const [editor, setEditor] = useState<{ index: number | null; value: PayrollComponentEditor } | null>(null);
   const [removeIndex, setRemoveIndex] = useState<number | null>(null);
+  const [assignmentComponent, setAssignmentComponent] = useState<PayrollComponentEditor | null>(null);
   const components = draft.components;
   const visible = components.map((component, index) => ({ component, index })).filter(({ component }) => component.kind === category);
 
@@ -513,13 +521,14 @@ function SalaryComponentsSection({ draft, errors, onChange }: { draft: PayrollPo
       <div className="mt-4 hidden overflow-hidden rounded-lg border border-edge md:block">
         <table className="w-full text-left text-sm">
           <thead className="bg-tint text-xs uppercase tracking-wide text-muted-foreground"><tr><th scope="col" className="px-4 py-3">Name</th><th scope="col" className="px-4 py-3">Calculation</th><th scope="col" className="px-4 py-3">Included in</th><th scope="col" className="px-4 py-3">Effective</th><th scope="col" className="px-4 py-3">Status</th><th scope="col" className="px-4 py-3 text-right">Actions</th></tr></thead>
-          <tbody className="divide-y divide-edge">{visible.map(({ component, index }) => <tr key={`${component.code}:${index}`} className="align-top hover:bg-tint/40"><td className="px-4 py-3"><p className="font-semibold">{component.label}</p><p className="mt-0.5 text-xs text-muted-foreground">{component.code}</p></td><td className="px-4 py-3 text-muted-foreground">{componentCalculation(component)}</td><td className="px-4 py-3"><InclusionList component={component} /></td><td className="px-4 py-3 text-xs text-muted-foreground">{component.effectiveFrom ? dateLabel(component.effectiveFrom) : "Policy date"}{component.effectiveTo ? ` to ${dateLabel(component.effectiveTo)}` : " onward"}</td><td className="px-4 py-3"><StatusLabel active={component.active !== false} /></td><td className="px-4 py-2"><div className="flex justify-end gap-1"><Button type="button" size="icon" variant="ghost" aria-label={`Edit ${component.label}`} onClick={() => setEditor({ index, value: cloneValue(component) })}><Edit3 aria-hidden="true" className="h-4 w-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`Remove ${component.label}`} onClick={() => setRemoveIndex(index)}><Trash2 aria-hidden="true" className="h-4 w-4" /></Button></div></td></tr>)}</tbody>
+          <tbody className="divide-y divide-edge">{visible.map(({ component, index }) => <tr key={`${component.code}:${index}`} className="align-top hover:bg-tint/40"><td className="px-4 py-3"><p className="font-semibold">{component.label}</p><p className="mt-0.5 text-xs text-muted-foreground">{component.code}</p></td><td className="px-4 py-3 text-muted-foreground">{componentCalculation(component)}</td><td className="px-4 py-3"><InclusionList component={component} /></td><td className="px-4 py-3 text-xs text-muted-foreground">{component.effectiveFrom ? dateLabel(component.effectiveFrom) : "Policy date"}{component.effectiveTo ? ` to ${dateLabel(component.effectiveTo)}` : " onward"}</td><td className="px-4 py-3"><StatusLabel active={component.active !== false} /></td><td className="px-4 py-2"><div className="flex justify-end gap-1">{component.applicability === "assigned_employees" && selectedLocation && <Button type="button" size="sm" variant="ghost" onClick={() => setAssignmentComponent(component)}><Users aria-hidden="true" className="h-4 w-4" />Manage employees</Button>}<Button type="button" size="icon" variant="ghost" aria-label={`Edit ${component.label}`} onClick={() => setEditor({ index, value: cloneValue(component) })}><Edit3 aria-hidden="true" className="h-4 w-4" /></Button><Button type="button" size="icon" variant="ghost" aria-label={`Remove ${component.label}`} onClick={() => setRemoveIndex(index)}><Trash2 aria-hidden="true" className="h-4 w-4" /></Button></div></td></tr>)}</tbody>
         </table>
       </div>
-      <div className="mt-4 space-y-3 md:hidden">{visible.map(({ component, index }) => <article key={`${component.code}:${index}`} className="rounded-lg border border-edge p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{component.label}</h3><p className="mt-0.5 text-xs text-muted-foreground">{component.code} · {componentCalculation(component)}</p></div><StatusLabel active={component.active !== false} /></div><div className="mt-3"><InclusionList component={component} /></div><p className="mt-3 text-xs text-muted-foreground">Effective {component.effectiveFrom ? dateLabel(component.effectiveFrom) : "with policy"}{component.effectiveTo ? ` to ${dateLabel(component.effectiveTo)}` : " onward"}</p><div className="mt-3 flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setEditor({ index, value: cloneValue(component) })}><Edit3 aria-hidden="true" className="h-4 w-4" />Edit</Button><Button type="button" size="sm" variant="ghost" onClick={() => setRemoveIndex(index)}><Trash2 aria-hidden="true" className="h-4 w-4" />Remove</Button></div></article>)}</div>
+      <div className="mt-4 space-y-3 md:hidden">{visible.map(({ component, index }) => <article key={`${component.code}:${index}`} className="rounded-lg border border-edge p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{component.label}</h3><p className="mt-0.5 text-xs text-muted-foreground">{component.code} · {componentCalculation(component)}</p></div><StatusLabel active={component.active !== false} /></div><div className="mt-3"><InclusionList component={component} /></div><p className="mt-3 text-xs text-muted-foreground">Effective {component.effectiveFrom ? dateLabel(component.effectiveFrom) : "with policy"}{component.effectiveTo ? ` to ${dateLabel(component.effectiveTo)}` : " onward"}</p><div className="mt-3 flex flex-wrap gap-2">{component.applicability === "assigned_employees" && selectedLocation && <Button type="button" size="sm" variant="outline" onClick={() => setAssignmentComponent(component)}><Users aria-hidden="true" className="h-4 w-4" />Manage employees</Button>}<Button type="button" size="sm" variant="outline" onClick={() => setEditor({ index, value: cloneValue(component) })}><Edit3 aria-hidden="true" className="h-4 w-4" />Edit</Button><Button type="button" size="sm" variant="ghost" onClick={() => setRemoveIndex(index)}><Trash2 aria-hidden="true" className="h-4 w-4" />Remove</Button></div></article>)}</div>
     </>}
 
     <ComponentDialog editor={editor} components={components} onClose={() => setEditor(null)} onSave={saveComponent} />
+    <AssignmentDialog component={assignmentComponent} location={selectedLocation} onClose={() => setAssignmentComponent(null)} />
     <ConfirmDialog open={removeIndex !== null} title="Remove salary component?" description={removeIndex !== null ? `${components[removeIndex]?.label ?? "This component"} will be removed only from this unsaved draft.` : undefined} onCancel={() => setRemoveIndex(null)} onConfirm={removeComponent} />
   </SectionPanel>;
 }
@@ -585,6 +594,9 @@ function ComponentDialogContent({ editor, components, onClose, onSave }: { edito
         <Field label="Calculation" error={errors.formula}><Select value={value.formula} onChange={(event) => setFormula(event.target.value as PayrollComponentEditor["formula"])}><option value="fixed">Fixed monthly amount</option><option value="percent_of_ctc">Percentage of monthly salary</option><option value="percent_of_component">Percentage of another component</option><option value="salary_band_fixed">Fixed amount by salary band</option><option value="variable">Variable (catalog only)</option><option value="one_time">One-time (catalog only)</option></Select></Field>
         {!(["variable", "one_time", "salary_band_fixed"] as string[]).includes(value.formula) && <Field label={value.formula.startsWith("percent") ? "Percentage" : "Monthly amount"} error={errors.amount}><Input type="number" min="0" max="10000000" step="0.01" value={value.amount} aria-invalid={Boolean(errors.amount)} onChange={(event) => update({ amount: Number(event.target.value) }, ["amount"])} /></Field>}
         {value.formula === "percent_of_component" && <Field label="Base component" error={errors.basisComponentCode} hint="Components are calculated in list order."><Select value={value.basisComponentCode ?? ""} aria-invalid={Boolean(errors.basisComponentCode)} onChange={(event) => update({ basisComponentCode: event.target.value }, ["basisComponentCode"])}><option value="" disabled>Select an earlier component</option>{availableBases.map((component) => <option key={component.code} value={component.code}>{component.label} ({component.code})</option>)}</Select></Field>}
+        <Field label="Proration" error={errors.prorationBasis} hint="Payable days exclude LOP. Present days include present, late, permission, and half-day fractions."><Select value={value.prorationBasis} onChange={(event) => update({ prorationBasis: event.target.value as PayrollComponentEditor["prorationBasis"], ...(event.target.value === "none" ? { prorationRounding: undefined } : {}) }, ["prorationBasis"])}><option value="none">None</option><option value="payable_days">Payable days</option><option value="present_days">Present days</option></Select></Field>
+        <Field label="Applicability" error={errors.applicability} hint="Selected employees are managed from the component row after the policy draft is saved."><Select value={value.applicability} onChange={(event) => update({ applicability: event.target.value as PayrollComponentEditor["applicability"] }, ["applicability"])}><option value="all">All employees</option><option value="assigned_employees">Selected employees</option></Select></Field>
+        {value.prorationBasis !== "none" && <Field label="Proration rounding" error={errors.prorationRounding} hint="Payable-day earnings inherit the policy setting unless overridden."><Select value={value.prorationRounding ?? ""} onChange={(event) => update({ prorationRounding: event.target.value ? event.target.value as NonNullable<PayrollComponentEditor["prorationRounding"]> : undefined }, ["prorationRounding"])}><option value="">Use policy/default rounding</option><option value="two_decimals">Two decimals</option><option value="floor_rupee">Round down to whole rupee</option><option value="nearest_rupee">Nearest whole rupee</option></Select></Field>}
         <Field label="Effective from" error={errors.componentDates}><Input type="date" value={value.effectiveFrom ?? ""} aria-invalid={Boolean(errors.componentDates)} onChange={(event) => update({ effectiveFrom: event.target.value || undefined }, ["componentDates"])} /></Field>
         <Field label="Effective until" error={errors.componentDates}><Input type="date" value={value.effectiveTo ?? ""} aria-invalid={Boolean(errors.componentDates)} onChange={(event) => update({ effectiveTo: event.target.value || null }, ["componentDates"])} /></Field>
       </div>
@@ -606,6 +618,113 @@ function ComponentDialogContent({ editor, components, onClose, onSave }: { edito
       {errors.form && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-foreground">{errors.form}</p>}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit">{editor.index === null ? "Add component" : "Save component"}</Button></div>
     </form>
+  </Modal>;
+}
+
+type AssignmentEmployee = {
+  id: string;
+  employeeNumber: string;
+  firstName: string;
+  lastName: string;
+  department: { name: string } | null;
+  payrollComponentAssignments: Array<{ id: string; effectiveFrom: string; effectiveTo: string | null; active: boolean }>;
+};
+
+function AssignmentDialog({ component, location, onClose }: { component: PayrollComponentEditor | null; location: Location | null; onClose: () => void }) {
+  if (!component || !location) return null;
+  return <AssignmentDialogContent key={`${location.id}:${component.code}`} component={component} location={location} onClose={onClose} />;
+}
+
+function AssignmentDialogContent({ component, location, onClose }: { component: PayrollComponentEditor; location: Location; onClose: () => void }) {
+  const toast = useToast();
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [reload, setReload] = useState(0);
+  const [employees, setEmployees] = useState<AssignmentEmployee[]>([]);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [effectiveFrom, setEffectiveFrom] = useState(`${todayKey().slice(0, 7)}-01`);
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [busy, setBusy] = useState<"load" | "save" | null>("load");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const query = new URLSearchParams({ locationId: location.id, componentCode: component.code, page: String(page), ...(search ? { search } : {}) });
+    setBusy("load");
+    setError(null);
+    fetch(`/api/payroll/component-assignments?${query}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error ?? "Could not load employees.");
+        setEmployees(data.employees ?? []);
+        setPagination(data.pagination ?? { page: 1, pages: 1, total: 0 });
+      })
+      .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load employees."); })
+      .finally(() => { if (!controller.signal.aborted) setBusy(null); });
+    return () => controller.abort();
+  }, [component.code, location.id, page, reload, search]);
+
+  function toggle(employeeId: string, checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(employeeId); else next.delete(employeeId);
+      return next;
+    });
+  }
+
+  async function assign(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected.size) return setError("Select at least one employee.");
+    setBusy("save");
+    setError(null);
+    try {
+      const response = await fetch("/api/payroll/component-assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationId: location.id, componentCode: component.code, employeeIds: [...selected], effectiveFrom, effectiveTo: effectiveTo || null }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not assign employees.");
+      toast("success", `${selected.size} employee${selected.size === 1 ? "" : "s"} assigned.`);
+      setSelected(new Set());
+      setReload((value) => value + 1);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not assign employees.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return <Modal open onClose={onClose} title={`Manage employees · ${component.label}`} description={`${location.name} · ${component.code} · assignments resolve on the first day of each payroll month`} size="xl">
+    <div className="space-y-4">
+      <form onSubmit={(event) => { event.preventDefault(); setPage(1); setSearch(searchInput.trim()); }} role="search" className="flex flex-col gap-2 sm:flex-row">
+        <Field label="Search employees" className="flex-1"><Input value={searchInput} placeholder="Name or employee number" onChange={(event) => setSearchInput(event.target.value)} /></Field>
+        <Button type="submit" variant="outline" className="sm:mt-6"><Search aria-hidden="true" className="h-4 w-4" />Search</Button>
+      </form>
+
+      {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-foreground">{error}</p>}
+      <p aria-live="polite" className="text-xs text-muted-foreground">{busy === "load" ? "Loading employees..." : `${pagination.total} matching employee${pagination.total === 1 ? "" : "s"}. ${selected.size} selected.`}</p>
+
+      <div className="overflow-x-auto rounded-lg border border-edge">
+        <table className="w-full min-w-[42rem] text-left text-sm">
+          <thead className="bg-tint text-xs uppercase tracking-wide text-muted-foreground"><tr><th scope="col" className="w-12 px-4 py-3">Select</th><th scope="col" className="px-4 py-3">Employee</th><th scope="col" className="px-4 py-3">Department</th><th scope="col" className="px-4 py-3">Existing assignments</th></tr></thead>
+          <tbody className="divide-y divide-edge">{employees.map((employee) => <tr key={employee.id} className="align-top"><td className="px-4 py-3"><input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" aria-label={`Select ${employee.firstName} ${employee.lastName}`} checked={selected.has(employee.id)} onChange={(event) => toggle(employee.id, event.target.checked)} /></td><td className="px-4 py-3"><p className="font-semibold">{employee.firstName} {employee.lastName}</p><p className="text-xs text-muted-foreground">{employee.employeeNumber}</p></td><td className="px-4 py-3 text-muted-foreground">{employee.department?.name ?? "Not assigned"}</td><td className="px-4 py-3 text-xs text-muted-foreground">{employee.payrollComponentAssignments.length ? employee.payrollComponentAssignments.map((assignment) => <span key={assignment.id} className="mb-1 block">{dateLabel(assignment.effectiveFrom)} to {assignment.effectiveTo ? dateLabel(assignment.effectiveTo) : "ongoing"}</span>) : "None"}</td></tr>)}</tbody>
+        </table>
+        {!busy && employees.length === 0 && <div className="p-8 text-center"><p className="font-semibold">No matching employees</p><p className="mt-1 text-sm text-muted-foreground">Try a different name or employee number in this location.</p></div>}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">Page {pagination.page} of {pagination.pages}</p>
+        <div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={page <= 1 || busy === "load"} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</Button><Button type="button" size="sm" variant="outline" disabled={page >= pagination.pages || busy === "load"} onClick={() => setPage((value) => value + 1)}>Next</Button></div>
+      </div>
+
+      <form onSubmit={assign} className="rounded-lg border border-edge bg-tint/30 p-4">
+        <div className="grid gap-4 sm:grid-cols-2"><Field label="Effective from" hint="Use the first day of the first payroll month."><Input type="date" required value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></Field><Field label="Effective until (optional)"><Input type="date" min={effectiveFrom} value={effectiveTo} onChange={(event) => setEffectiveTo(event.target.value)} /></Field></div>
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end"><Button type="button" variant="ghost" onClick={onClose}>Close</Button><Button type="submit" loading={busy === "save"} disabled={!selected.size || busy === "load"}><Users aria-hidden="true" className="h-4 w-4" />Assign selected</Button></div>
+      </form>
+    </div>
   </Modal>;
 }
 
@@ -758,6 +877,8 @@ function blankComponent(kind: PayrollComponentEditor["kind"]): PayrollComponentE
     reimbursementLimit: null,
     reimbursementFrequency: kind === "reimbursement" ? "monthly" : null,
     registerPresentation: "included",
+    prorationBasis: "none",
+    applicability: "all",
   };
 }
 
@@ -770,6 +891,8 @@ function validatePolicy(draft: PayrollPolicyEditorDraft, effectiveFrom: string, 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) errors.effectiveFrom = "Choose a valid effective-from date.";
   if (effectiveTo && (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveTo) || effectiveTo < effectiveFrom)) errors.effectiveTo = "Effective until must be on or after effective from.";
   if (!Number.isInteger(draft.monthlyDivisor) || draft.monthlyDivisor < 1 || draft.monthlyDivisor > 366) errors.monthlyDivisor = "Enter a whole-number divisor from 1 to 366.";
+  if (!(["fixed_divisor", "calendar_days"] as string[]).includes(draft.salaryDivisorMethod)) errors.salaryDivisorMethod = "Choose a supported salary calculation.";
+  if (!(["two_decimals", "floor_rupee", "nearest_rupee"] as string[]).includes(draft.earnedSalaryRounding)) errors.earnedSalaryRounding = "Choose a supported earned-salary rounding mode.";
   if (!Number.isFinite(draft.overtimeMultiplier) || draft.overtimeMultiplier < 0 || draft.overtimeMultiplier > 10) errors.overtimeMultiplier = "Enter an overtime multiplier from 0 to 10.";
   if (!Number.isInteger(draft.statutory.pfWageCeiling) || draft.statutory.pfWageCeiling < 0) errors.pfWageCeiling = "Enter a non-negative whole-number PF wage ceiling.";
   if (!Number.isInteger(draft.statutory.esicGrossCeiling) || draft.statutory.esicGrossCeiling < 0) errors.esicGrossCeiling = "Enter a non-negative whole-number ESI gross ceiling.";
@@ -809,6 +932,9 @@ function validateComponent(component: PayrollComponentEditor, components: Payrol
   if (component.minCtc !== null && (!Number.isFinite(component.minCtc) || component.minCtc < 0) || component.maxCtc !== null && (!Number.isFinite(component.maxCtc) || component.maxCtc < 0) || component.minCtc !== null && component.maxCtc !== null && component.minCtc > component.maxCtc) errors.eligibility = "Enter a valid salary eligibility range.";
   if (component.effectiveFrom && !/^\d{4}-\d{2}-\d{2}$/.test(component.effectiveFrom) || component.effectiveTo && (!/^\d{4}-\d{2}-\d{2}$/.test(component.effectiveTo) || Boolean(component.effectiveFrom && component.effectiveTo < component.effectiveFrom))) errors.componentDates = "Enter a valid component effective date range.";
   if (component.pfWageBase && (component.kind !== "earning" || components.some((candidate, candidateIndex) => candidateIndex !== index && candidate.pfWageBase))) errors.pfWageBase = "Only one earning component can be the PF wage base.";
+  if (!(["none", "payable_days", "present_days"] as string[]).includes(component.prorationBasis)) errors.prorationBasis = "Choose a supported proration basis.";
+  if (!(["all", "assigned_employees"] as string[]).includes(component.applicability)) errors.applicability = "Choose who receives this component.";
+  if (component.prorationRounding && !(["two_decimals", "floor_rupee", "nearest_rupee"] as string[]).includes(component.prorationRounding)) errors.prorationRounding = "Choose a supported proration rounding mode.";
   if (component.kind === "reimbursement" && !(["monthly", "annual", "per_claim"] as unknown[]).includes(component.reimbursementFrequency)) errors.reimbursementFrequency = "Choose a reimbursement limit frequency.";
   if (component.reimbursementLimit !== null && component.reimbursementLimit !== undefined && (!Number.isFinite(component.reimbursementLimit) || component.reimbursementLimit < 0)) errors.reimbursementLimit = "Enter a non-negative reimbursement limit.";
   if (component.formula === "salary_band_fixed") {
@@ -831,12 +957,16 @@ function validateRule(rule: PayrollStatutoryRuleEditor): FieldErrors {
 }
 
 function componentCalculation(component: PayrollComponentEditor) {
-  if (component.formula === "fixed") return `${money(component.amount)} monthly`;
-  if (component.formula === "percent_of_ctc") return `${component.amount}% of monthly salary`;
-  if (component.formula === "percent_of_component") return `${component.amount}% of ${component.basisComponentCode}`;
-  if (component.formula === "salary_band_fixed") return `${component.bands?.length ?? 0} salary band${component.bands?.length === 1 ? "" : "s"}`;
-  if (component.formula === "variable") return "Variable · not auto-calculated";
-  return "One-time · not auto-calculated";
+  let calculation: string;
+  if (component.formula === "fixed") calculation = `${money(component.amount)} monthly`;
+  else if (component.formula === "percent_of_ctc") calculation = `${component.amount}% of monthly salary`;
+  else if (component.formula === "percent_of_component") calculation = `${component.amount}% of ${component.basisComponentCode}`;
+  else if (component.formula === "salary_band_fixed") calculation = `${component.bands?.length ?? 0} salary band${component.bands?.length === 1 ? "" : "s"}`;
+  else if (component.formula === "variable") return "Variable · not auto-calculated";
+  else return "One-time · not auto-calculated";
+  const proration = component.prorationBasis === "payable_days" ? "payable days" : component.prorationBasis === "present_days" ? "present days" : "not prorated";
+  const applicability = component.applicability === "assigned_employees" ? "selected employees" : "all employees";
+  return `${calculation} · ${proration} · ${applicability}`;
 }
 
 function componentCount(payload: unknown) {
@@ -862,6 +992,12 @@ function dateLabel(value: Date | string) {
 
 function money(value: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: Number.isInteger(value) ? 0 : 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function roundingLabel(value: PayrollPolicyEditorDraft["earnedSalaryRounding"]) {
+  if (value === "floor_rupee") return "Round down to whole rupee";
+  if (value === "nearest_rupee") return "Nearest whole rupee";
+  return "Two decimals";
 }
 
 function previewValue(value: unknown) {

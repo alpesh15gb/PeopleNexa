@@ -5,12 +5,14 @@ import type { Prisma } from "@/generated/prisma/client";
 import {
   attendanceSummary,
   computePayroll,
+  documentComponents,
   fyFromMonth,
   getPayrollConfig,
   payrollEmployeeForMonth,
   loanDeductionForMonth,
 } from "@/lib/payroll";
 import { payrollConfigFromSnapshot } from "@/lib/payroll-policy";
+import { documentSnapshotForResponse } from "@/lib/payslip-document";
 import { appendAudit } from "@/lib/audit";
 import { monthKeyIST } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
@@ -98,6 +100,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   });
   const restoredLoanTotal = Number(existing.loanDeduction) - restoreRemaining;
   const { total: loanDeduction } = loanDeductionForMonth(restoredLoans, existing.month);
+  const savedInput = existing.inputSnapshot && typeof existing.inputSnapshot === "object" && !Array.isArray(existing.inputSnapshot) ? existing.inputSnapshot as Record<string, unknown> : {};
+  const savedAssignments = Array.isArray(savedInput.componentAssignments) ? savedInput.componentAssignments : [];
+  const assignedComponentCodes = savedAssignments.flatMap((assignment) => assignment && typeof assignment === "object" && !Array.isArray(assignment) && typeof (assignment as { componentCode?: unknown }).componentCode === "string" ? [(assignment as { componentCode: string }).componentCode] : []);
   const result = computePayroll(
     config,
     payrollEmployeeForMonth({
@@ -111,10 +116,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     loanDeduction,
     existing.month,
     adjustments,
-    investments
+    investments,
+    { assignedComponentCodes },
   );
 
   const iso = new Date().toISOString();
+  const previousDocument = documentSnapshotForResponse(existing.documentSnapshot);
+  const documentSnapshot = previousDocument ? {
+    ...previousDocument,
+    version: 2 as const,
+    generatedAt: iso,
+    days: { payable: result.payableDays, paid: result.presentDays + result.lateDays + result.halfDays * 0.5 + result.paidLeaveDays, lop: result.absentDays + result.halfDays * 0.5 + result.unpaidLeaveDays },
+    components: documentComponents(result),
+    totals: { gross: result.grossEarnings, earnedGross: result.earnedGross, deductions: result.deductions, net: result.netSalary },
+  } : null;
+  const inputSnapshot = { ...savedInput, version: 2, attendance: summary, result };
   const updated = await prisma.$transaction(async (tx) => {
     for (const loan of loans) {
       const restored = restoredLoans.find((candidate) => candidate.id === loan.id);
@@ -151,6 +167,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       netSalary: result.netSalary,
        adjustments: result.adjustments as unknown as Prisma.InputJsonValue,
        salaryBreakdown: result.salaryBreakdown as unknown as Prisma.InputJsonValue,
+       inputSnapshot: inputSnapshot as unknown as Prisma.InputJsonValue,
+       ...(documentSnapshot ? { documentSnapshot: documentSnapshot as unknown as Prisma.InputJsonValue } : {}),
       presentDays: result.presentDays,
       lateDays: result.lateDays,
       halfDays: result.halfDays,
@@ -160,6 +178,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         note: existing.note ? `${existing.note} | regenerated ${iso}` : `regenerated ${iso}`,
       },
     });
+    if (existing.payrollRunId) await tx.payrollRunMember.updateMany({ where: { payrollRunId: existing.payrollRunId, employeeId: existing.employeeId }, data: { inputSnapshot: inputSnapshot as unknown as Prisma.InputJsonValue } });
     const allocations = loanDeductionForMonth(restoredLoans, existing.month, result.loanDeduction).updates;
     for (const loan of allocations) {
       await tx.employeeLoan.update({

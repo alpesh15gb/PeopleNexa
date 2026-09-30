@@ -6,6 +6,7 @@ import { generatePayslipForEmployee } from "@/lib/payroll";
 import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { resolveSalaryRevision } from "@/lib/salary-revisions";
+import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -27,7 +28,8 @@ export async function POST(req: NextRequest) {
   if ("error" in scope) return NextResponse.json({ error: scope.error }, { status: session.role === "location_manager" ? 403 : 400 });
   const locationId = scope.locationId;
   const scopeKey = `location:${locationId}`;
-  const [tenant, policyRecords, employees, revisions] = await Promise.all([
+  const periodAt = payrollMonthAnchor(month);
+  const [tenant, policyRecords, employees, revisions, componentAssignments] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
       where: { tenantId: session.tenantId, kind: "payroll_policy", active: true },
@@ -38,6 +40,10 @@ export async function POST(req: NextRequest) {
       select: { id: true, employeeNumber: true, firstName: true, lastName: true, position: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { locationId: true, name: true } }, department: { select: { name: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
     prisma.salaryRevision.findMany({ where: { tenantId: session.tenantId, status: "approved", effectiveFrom: { lte: new Date(`${month}-01T00:00:00.000Z`) } }, select: { id: true, employeeId: true, newSalary: true, effectiveFrom: true } }),
+    prisma.payrollComponentAssignment.findMany({
+      where: { tenantId: session.tenantId, locationId, active: true, effectiveFrom: { lte: periodAt }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: periodAt } }] },
+      select: { id: true, employeeId: true, componentCode: true, effectiveFrom: true, effectiveTo: true },
+    }),
   ]);
 
   const withSalary = employees
@@ -99,7 +105,7 @@ export async function POST(req: NextRequest) {
   for (const emp of withSalary) {
     try {
       const policySnapshot = resolvePayrollPolicy(policyRecords, tenant?.config ?? null, emp.locationId, month);
-       const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month, policySnapshot, run.id);
+       const res = await generatePayslipForEmployee(session.tenantId, tenant?.config ?? null, emp, month, policySnapshot, run.id, componentAssignments.filter((assignment) => assignment.employeeId === emp.id));
       if (res.created) created++;
       totalLoanApplied += res.loanApplied ?? 0;
         const source = employees.find((candidate) => candidate.id === emp.id);
