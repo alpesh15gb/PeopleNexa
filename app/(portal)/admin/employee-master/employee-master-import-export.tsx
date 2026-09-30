@@ -1,0 +1,75 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { Download, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
+import { useToast } from "@/components/ui/toast";
+import { useRouter } from "next/navigation";
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let cell = ""; let row: string[] = []; let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') { cell += '"'; index++; } else quoted = !quoted;
+    } else if (character === "," && !quoted) { row.push(cell.trim()); cell = ""; }
+    else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && text[index + 1] === "\n") index++;
+      row.push(cell.trim()); if (row.some(Boolean)) rows.push(row); row = []; cell = "";
+    } else cell += character;
+  }
+  row.push(cell.trim()); if (row.some(Boolean)) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((value) => value.trim());
+  return rows.slice(1, 2501).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
+}
+
+export function EmployeeMasterImportExport() {
+  const router = useRouter();
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function chooseFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) { setError("Choose a CSV file."); return; }
+    const parsed = parseCsv(await file.text());
+    if (!parsed.length) { setError("The CSV needs a header row and at least one employee row."); return; }
+    setFileName(file.name); setRows(parsed); setError(null);
+  }
+
+  async function submit() {
+    if (!rows.length) return;
+    setBusy(true); setError(null);
+    try {
+      const response = await fetch("/api/employees/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Bulk import failed.");
+      const failed = data.failed ?? [];
+      if (failed.length) throw new Error(`${data.created ?? 0} created, ${data.updated ?? 0} updated. ${failed.length} row(s) need correction.`);
+      toast("success", `${data.created ?? 0} employee(s) created · ${data.updated ?? 0} updated.`);
+      setOpen(false); setRows([]); setFileName(""); router.refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Bulk import failed."); } finally { setBusy(false); }
+  }
+
+  return <>
+    <a href="/api/employees/export" download="employees-export.csv"><Button type="button" variant="outline"><Download aria-hidden="true" className="h-4 w-4" />Export employees</Button></a>
+    <Button type="button" variant="outline" onClick={() => setOpen(true)}><Upload aria-hidden="true" className="h-4 w-4" />Import employees</Button>
+    <Modal open={open} onClose={() => !busy && setOpen(false)} title="Import employees" description="Upload the completed CSV template. Existing employees are matched by Device Code, Employee Code, or email.">
+      <div className="space-y-4">
+        <a href="/api/employees/bulk" download="employees-template.csv" className="inline-flex text-sm font-semibold text-primary hover:underline">Download CSV template</a>
+        <input ref={fileRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => void chooseFile(event.target.files?.[0])} />
+        <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>Choose CSV file</Button>
+        {fileName && <p className="text-sm text-muted-foreground">{fileName} · {rows.length} row{rows.length === 1 ? "" : "s"} ready</p>}
+        {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-foreground">{error}</p>}
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="button" loading={busy} disabled={!rows.length} onClick={() => void submit()}>Import employees</Button></div>
+      </div>
+    </Modal>
+  </>;
+}

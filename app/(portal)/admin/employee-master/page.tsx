@@ -11,6 +11,7 @@ import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master
 import { EmployeeDeviceAccess } from "./employee-device-access";
 import { EmployeeTransfer } from "./employee-transfer";
 import { EmployeeStatusAction } from "./employee-status-action";
+import { EmployeeMasterImportExport } from "./employee-master-import-export";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
 
 export const dynamic = "force-dynamic";
@@ -136,7 +137,7 @@ export default async function EmployeeMasterPage({
       <PageHeader
         title="Employee Master"
         description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
-        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap gap-2"><EmployeeMasterCreate branches={branches} positions={positions.flatMap((row) => row.position ? [row.position] : [])} requireBranch={isLocationManager} /><Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Download master data</Link></div> : undefined}
+        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap gap-2">{isAdmin && <EmployeeMasterImportExport />}<EmployeeMasterCreate branches={branches} positions={positions.flatMap((row) => row.position ? [row.position] : [])} requireBranch={isLocationManager} /><Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">Download master data</Link></div> : undefined}
       />
       {isLocationManager && !locationId && (
         <Card>

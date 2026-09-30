@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   optionalEmployeeEmail,
   optionalEmployeePosition,
@@ -60,5 +61,11 @@ assert.deepEqual(
   ),
   { ...editedSpouseProfile, maritalStatus: "Married" },
 );
+
+const masterPage = readFileSync(new URL("../app/(portal)/admin/employee-master/page.tsx", import.meta.url), "utf8");
+const importExport = readFileSync(new URL("../app/(portal)/admin/employee-master/employee-master-import-export.tsx", import.meta.url), "utf8");
+assert.match(masterPage, /EmployeeMasterImportExport/, "Employee Master exposes the admin import/export toolbar");
+assert.match(importExport, /\/api\/employees\/export/, "employee export remains available from Employee Master");
+assert.match(importExport, /\/api\/employees\/bulk/, "employee bulk import remains available from Employee Master");
 
 console.log("employee master position/licence workflow tests passed");
