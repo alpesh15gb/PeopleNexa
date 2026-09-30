@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { appendAudit } from "@/lib/audit";
 import { optionalEmployeeEmail, optionalEmployeePosition } from "@/lib/employee-input";
 import { ensureDesignations, normalizeDesignationName } from "@/lib/designation";
 
@@ -181,6 +182,8 @@ export async function POST(req: NextRequest) {
   let created = 0;
   let updated = 0;
   const failed: { email: string; error: string }[] = [];
+  const createdEmployees: Array<{ id: string; employeeNumber: string; name: string }> = [];
+  const updatedEmployees: Array<{ id: string; employeeNumber: string; name: string }> = [];
   const seenInBatch = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
     const raw = rows[i] as BulkRow;
@@ -299,7 +302,7 @@ export async function POST(req: NextRequest) {
       const deviceCode = deviceCodeInput || null;
       if (deviceCode && deviceCode.length > 100) throw new Error("Device Code must be at most 100 characters.");
 
-      await prisma.$transaction(async (tx) => {
+      const outcome = await prisma.$transaction(async (tx) => {
         await ensureDesignations(tx, session.tenantId, position ? [position] : []);
         if (existingForRow) {
           const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
@@ -323,11 +326,10 @@ export async function POST(req: NextRequest) {
               ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
             },
           });
-          updated++;
-          return;
+          return { action: "updated" as const, id: existingForRow.id, employeeNumber: employeeNumberInput || existingForRow.employeeNumber, name: `${firstName || existingForRow.firstName} ${bulkLastName || existingForRow.lastName}`.trim() };
         }
         if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
-        await tx.employee.create({
+        const employee = await tx.employee.create({
           data: {
             tenantId: session.tenantId,
             employeeNumber,
@@ -356,8 +358,10 @@ export async function POST(req: NextRequest) {
             salaryStructure: Object.keys(salaryStructure).length ? (salaryStructure as Prisma.InputJsonValue) : extra.salaryStructure !== undefined && extra.salaryStructure !== null && extra.salaryStructure !== "" ? (extra.salaryStructure as Prisma.InputJsonValue) : undefined,
           },
         });
-        created++;
+        return { action: "created" as const, id: employee.id, employeeNumber: employee.employeeNumber, name: `${employee.firstName} ${employee.lastName}`.trim() };
       });
+      if (outcome.action === "created") { created++; createdEmployees.push(outcome); }
+      else { updated++; updatedEmployees.push(outcome); }
     } catch (err: unknown) {
       if (
         typeof err === "object" &&
@@ -382,5 +386,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ created, updated, failed });
+  await appendAudit({
+    tenantId: session.tenantId,
+    actorId: session.sub,
+    actorRole: session.role,
+    action: "employee.bulk_import",
+    entity: "Employee",
+    entityId: `bulk:${new Date().toISOString()}`,
+    summary: `Bulk employee import: ${created} created, ${updated} updated, ${failed.length} failed`,
+    after: { createdEmployees, updatedEmployees, failed },
+  });
+  return NextResponse.json({ created, updated, failed, createdEmployees, updatedEmployees });
 }

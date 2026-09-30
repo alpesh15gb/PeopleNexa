@@ -35,13 +35,14 @@ export function EmployeeMasterImportExport() {
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ createdEmployees: Array<{ employeeNumber: string; name: string }>; updatedEmployees: Array<{ employeeNumber: string; name: string }> } | null>(null);
 
   async function chooseFile(file: File | undefined) {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith(".csv")) { setError("Choose a CSV file."); return; }
     const parsed = parseCsv(await file.text());
     if (!parsed.length) { setError("The CSV needs a header row and at least one employee row."); return; }
-    setFileName(file.name); setRows(parsed); setError(null);
+    setFileName(file.name); setRows(parsed); setError(null); setResult(null);
   }
 
   async function submit() {
@@ -54,7 +55,7 @@ export function EmployeeMasterImportExport() {
       const failed = data.failed ?? [];
       if (failed.length) throw new Error(`${data.created ?? 0} created, ${data.updated ?? 0} updated. ${failed.length} row(s) need correction.`);
       toast("success", `${data.created ?? 0} employee(s) created · ${data.updated ?? 0} updated.`);
-      setOpen(false); setRows([]); setFileName(""); router.refresh();
+      setResult({ createdEmployees: data.createdEmployees ?? [], updatedEmployees: data.updatedEmployees ?? [] }); router.refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Bulk import failed."); } finally { setBusy(false); }
   }
 
@@ -68,6 +69,7 @@ export function EmployeeMasterImportExport() {
         <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>Choose CSV file</Button>
         {fileName && <p className="text-sm text-muted-foreground">{fileName} · {rows.length} row{rows.length === 1 ? "" : "s"} ready</p>}
         {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-foreground">{error}</p>}
+        {result && <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3 text-sm"><p className="font-semibold">Import completed</p><p className="mt-1 text-muted-foreground">Created: {result.createdEmployees.length} · Updated: {result.updatedEmployees.length}. The complete result is retained in the audit log.</p>{result.createdEmployees.length > 0 && <details className="mt-3"><summary className="cursor-pointer font-medium">Created employees</summary><p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{result.createdEmployees.map((employee) => `${employee.employeeNumber} · ${employee.name}`).join("\n")}</p></details>}{result.updatedEmployees.length > 0 && <details className="mt-3"><summary className="cursor-pointer font-medium">Updated employees</summary><p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{result.updatedEmployees.map((employee) => `${employee.employeeNumber} · ${employee.name}`).join("\n")}</p></details>}</div>}
         <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="button" loading={busy} disabled={!rows.length} onClick={() => void submit()}>Import employees</Button></div>
       </div>
     </Modal>
