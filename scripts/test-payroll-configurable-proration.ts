@@ -150,5 +150,11 @@ assert.match(migration, /EXCLUDE USING GIST/, "database prevents concurrent over
 const regenerateApi = readFileSync(new URL("../app/api/payroll/[id]/regenerate/route.ts", import.meta.url), "utf8");
 assert.match(regenerateApi, /existing\.status !== "draft"/, "finalized and paid document snapshots cannot be regenerated");
 assert.match(regenerateApi, /savedInput\.componentAssignments/, "draft regeneration reuses frozen assignment inputs instead of current assignments");
+const planApi = readFileSync(new URL("../app/api/payroll/component-plans/route.ts", import.meta.url), "utf8");
+assert.match(planApi, /session\?\.role !== "admin"/, "only admins can change employee component plans");
+assert.match(planApi, /employeeLocationScope\(locationId\)/, "plan changes validate employee location scope");
+assert.match(planApi, /effectiveTo: previousDay/, "replacing a plan preserves the previous assignment history");
+const configurationHub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
+assert.match(configurationHub, /Manage Mess plans/, "Mess plans are managed from one employee-plan list");
 
 console.log("configurable payroll proration and assignment tests passed");
