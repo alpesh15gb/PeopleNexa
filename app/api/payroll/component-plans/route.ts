@@ -18,7 +18,11 @@ async function context(tenantId: string, locationId: string, componentCodes: str
     prisma.location.findFirst({ where: { id: locationId, tenantId, isActive: true }, select: { id: true, name: true } }),
     prisma.configurationRecord.findMany({ where: { tenantId, kind: "payroll_policy", OR: [{ locationId }, { locationId: null }] }, select: { payload: true } }),
   ]);
-  const components = records.flatMap((record) => payrollPolicyDraft(record.payload)?.components ?? []).filter((component) => componentCodes.includes(component.code) && component.applicability === "assigned_employees");
+  const candidates = records.flatMap((record) => payrollPolicyDraft(record.payload)?.components ?? []).filter((component) => componentCodes.includes(component.code) && component.applicability === "assigned_employees");
+  // Older drafts can contain the same plan codes. One code represents one
+  // plan, so resolve each requested code once instead of rejecting duplicates.
+  const byCode = new Map(candidates.map((component) => [component.code, component]));
+  const components = componentCodes.map((code) => byCode.get(code)).filter((component): component is NonNullable<typeof component> => Boolean(component));
   return location && components.length === componentCodes.length ? { location, components } : null;
 }
 

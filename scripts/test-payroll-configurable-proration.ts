@@ -155,6 +155,6 @@ assert.match(planApi, /session\?\.role !== "admin"/, "only admins can change emp
 assert.match(planApi, /employeeLocationScope\(locationId\)/, "plan changes validate employee location scope");
 assert.match(planApi, /effectiveTo: previousDay/, "replacing a plan preserves the previous assignment history");
 const configurationHub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
-assert.match(configurationHub, /Manage Mess plans/, "Mess plans are managed from one employee-plan list");
+assert.match(configurationHub, /Manage \{component\.label\} plans/, "same-named employee plans are managed from one list without hardcoded plan codes");
 
 console.log("configurable payroll proration and assignment tests passed");
