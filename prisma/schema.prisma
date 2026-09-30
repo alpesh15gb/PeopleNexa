@@ -1158,6 +1158,10 @@ model PayrollRun {
   locationId            String?
   month                 String
   status                String             @default("draft") // draft | reviewed | approved | finalized | paid | cancelled | reversed
+  // How the initial membership was chosen. Individual member snapshots remain
+  // the authoritative record when a draft is incrementally expanded.
+  selectionMode         String             @default("all_eligible") // all_eligible | selected
+  selectedEmployeeCount Int                @default(0)
   createdBy             String
   createdAt             DateTime           @default(now())
   reviewedBy            String?

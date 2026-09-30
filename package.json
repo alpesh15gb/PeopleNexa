@@ -21,6 +21,7 @@
     "test:payroll-configuration": "tsx scripts/test-payroll-configuration.ts",
     "test:payroll-field-mapping": "tsx scripts/test-payroll-field-mapping.ts",
     "test:payroll-workspace": "tsx scripts/test-payroll-workspace.ts",
+    "test:payroll-selected-members": "tsx scripts/test-payroll-selected-members.ts",
     "test:payroll-revamp": "tsx scripts/test-payroll-revamp.ts",
     "test:payroll-reporting": "tsx scripts/test-payroll-reporting.ts",
     "test:salary-revisions": "tsx scripts/test-salary-revisions.ts",

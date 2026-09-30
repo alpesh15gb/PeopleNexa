@@ -865,6 +865,13 @@ export async function generatePayslipForEmployee(
   const { total: cappedLoanTotal, updates: cappedUpdates } = loanDeductionForMonth(loans, month, result.loanDeduction);
 
   return prisma.$transaction(async (tx) => {
+    if (payrollRunId) {
+      // This conditional write takes a row lock for the whole payslip/member
+      // transaction. A concurrent review transition either finishes first and
+      // rejects this generation, or waits until this draft member is complete.
+      const draft = await tx.payrollRun.updateMany({ where: { id: payrollRunId, status: "draft" }, data: { status: "draft" } });
+      if (draft.count !== 1) throw new Error("Employees can be added only while the payroll run is Draft.");
+    }
     const existing = payrollRunId
       ? await tx.payslip.findUnique({ where: { payrollRunId_employeeId: { payrollRunId, employeeId: employee.id } } })
       : await tx.payslip.findFirst({ where: { employeeId: employee.id, month } });

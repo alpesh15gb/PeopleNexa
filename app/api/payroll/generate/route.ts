@@ -29,6 +29,16 @@ export async function POST(req: NextRequest) {
   const locationId = scope.locationId;
   const scopeKey = `location:${locationId}`;
   const periodAt = payrollMonthAnchor(month);
+  const selectionMode = body.selectionMode === "selected" ? "selected" : "all_eligible";
+  const submittedEmployeeIds: unknown[] = Array.isArray(body.employeeIds) ? body.employeeIds : [];
+  const selectedEmployeeIds: string[] = [...new Set(submittedEmployeeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0).map((id: string) => id.trim()))];
+  if (selectionMode === "selected" && !selectedEmployeeIds.length) return NextResponse.json({ error: "Select at least one eligible employee before creating payroll." }, { status: 400 });
+  if (selectedEmployeeIds.length > 1000) return NextResponse.json({ error: "Select at most 1,000 employees in one payroll action." }, { status: 400 });
+  const requestedRunId = typeof body.runId === "string" ? body.runId.trim() : "";
+  const existingRun = requestedRunId ? await prisma.payrollRun.findFirst({ where: { id: requestedRunId, tenantId: session.tenantId, locationId, month }, select: { id: true, status: true } }) : null;
+  if (requestedRunId && !existingRun) return NextResponse.json({ error: "Payroll draft not found for this location and month." }, { status: 404 });
+  if (existingRun && existingRun.status !== "draft") return NextResponse.json({ error: `Employees can be added only while this payroll is Draft. This run is ${existingRun.status}.` }, { status: 409 });
+  if (existingRun && selectionMode !== "selected") return NextResponse.json({ error: "Adding employees to a draft payroll requires an explicit selected-employee list." }, { status: 400 });
   const [tenant, policyRecords, employees, revisions, componentAssignments] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({
@@ -36,7 +46,7 @@ export async function POST(req: NextRequest) {
       select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
     }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...employeeLocationScope(locationId) },
+      where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...employeeLocationScope(locationId), ...(selectionMode === "selected" ? { id: { in: selectedEmployeeIds } } : {}) },
       select: { id: true, employeeNumber: true, firstName: true, lastName: true, position: true, salary: true, salaryStructure: true, payMode: true, workBasisRate: true, shiftId: true, joiningDate: true, locationId: true, branchId: true, departmentId: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, branch: { select: { locationId: true, name: true } }, department: { select: { name: true } }, employmentProfile: { select: { pfAllowed: true, esicAllowed: true, tdsAllowed: true } } },
     }),
     prisma.salaryRevision.findMany({ where: { tenantId: session.tenantId, status: "approved", effectiveFrom: { lte: new Date(`${month}-01T00:00:00.000Z`) } }, select: { id: true, employeeId: true, newSalary: true, effectiveFrom: true } }),
@@ -45,6 +55,21 @@ export async function POST(req: NextRequest) {
       select: { id: true, employeeId: true, componentCode: true, effectiveFrom: true, effectiveTo: true },
     }),
   ]);
+  if (selectionMode === "selected") {
+    const found = new Set(employees.map((employee) => employee.id));
+    const invalidIds = selectedEmployeeIds.filter((id) => !found.has(id));
+    const monthEnd = new Date(`${month}-01T00:00:00.000Z`); monthEnd.setUTCMonth(monthEnd.getUTCMonth() + 1);
+    const ineligible = employees.filter((employee) => employee.salary == null || employee.salary <= 0 || (employee.joiningDate && employee.joiningDate >= monthEnd));
+    if (invalidIds.length || ineligible.length) return NextResponse.json({
+      error: invalidIds.length ? "One or more selected employees are outside your active location scope." : "Every selected employee must have a current salary and have joined by this month.",
+      invalidEmployeeIds: invalidIds,
+      ineligibleEmployeeIds: ineligible.map((employee) => employee.id),
+    }, { status: 400 });
+    if (existingRun) {
+      const alreadyIncluded = await prisma.payslip.findMany({ where: { payrollRunId: existingRun.id, employeeId: { in: selectedEmployeeIds } }, select: { employeeId: true } });
+      if (alreadyIncluded.length) return NextResponse.json({ error: "One or more selected employees are already included in this draft payroll.", duplicateEmployeeIds: alreadyIncluded.map((slip) => slip.employeeId) }, { status: 409 });
+    }
+  }
 
   const withSalary = employees
     .filter((e) => e.salary != null && e.salary > 0)
@@ -88,9 +113,9 @@ export async function POST(req: NextRequest) {
     }, { status: 409 });
   }
   if (!withSalary.length) return NextResponse.json({ error: "No eligible employees with a salary were found. No payroll run was created.", preflight: { eligible: 0, missingSalary: missingSalary.map((employee) => employee.id) } }, { status: 409 });
-  let run;
+  let run = existingRun;
   try {
-    run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub, ...(legacyAcknowledged && policyFailures.length ? { note: "Legacy policy acknowledged at generation" } : {}) } });
+    if (!run) run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub, selectionMode, selectedEmployeeCount: 0, ...(legacyAcknowledged && policyFailures.length ? { note: "Legacy policy acknowledged at generation" } : {}) } });
     if (legacyAcknowledged && policyFailures.length) await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.legacy_policy_acknowledged", entity: "PayrollRun", entityId: run.id, summary: `Legacy policy acknowledged for ${policyFailures.length} employee(s)`, after: { month, employeeIds: policyFailures.map((employee) => employee.id) } } });
   } catch (error: unknown) {
     if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") return NextResponse.json({ error: `A payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
@@ -117,13 +142,23 @@ export async function POST(req: NextRequest) {
   }
 
   const failed = results.filter((r) => r.error).length;
-  if (created === 0) {
+  if (created === 0 && !existingRun) {
     // Do not strand an operational draft when generation yielded no documents.
     await prisma.$transaction([
       prisma.payrollRun.update({ where: { id: run.id }, data: { status: "cancelled", cancelledBy: session.sub, cancelledAt: new Date(), note: "Automatically cancelled: generation produced no payslips." } }),
       prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.cancelled", entity: "PayrollRun", entityId: run.id, summary: "Automatically cancelled empty failed payroll generation", after: { failed, skipped: employees.length - withSalary.length } } }),
     ]);
   }
+  const membershipCount = await prisma.payrollRunMember.count({ where: { payrollRunId: run.id } });
+  await prisma.$transaction([
+    prisma.payrollRun.update({ where: { id: run.id }, data: { selectedEmployeeCount: membershipCount } }),
+    prisma.auditLog.create({ data: {
+      tenantId: session.tenantId, actorId: session.sub, actorRole: session.role,
+      action: existingRun ? "payroll_run.members_added" : "payroll_run.members_selected", entity: "PayrollRun", entityId: run.id,
+      summary: `${existingRun ? "Added" : "Selected"} ${created} employee(s) using ${selectionMode}.`,
+      after: { selectionMode, requestedEmployeeCount: selectionMode === "selected" ? selectedEmployeeIds.length : withSalary.length, createdEmployeeCount: created, memberCount: membershipCount, ...(selectionMode === "selected" ? { employeeIds: selectedEmployeeIds } : {}) },
+    } }),
+  ]);
   return NextResponse.json({
     success: true,
     month,
