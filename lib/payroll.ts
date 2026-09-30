@@ -4,7 +4,7 @@ import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
 import type { PayrollPolicySnapshot } from "./payroll-policy";
-import type { PayrollComponentRule, PayrollRoundingMode, SalaryDivisorMethod } from "./configuration";
+import type { EarnedSalaryAggregation, PayrollComponentRule, PayrollRoundingMode, SalaryDivisorMethod } from "./configuration";
 import { mask, type PayslipComponent, type PayslipDocumentSnapshot } from "./payslip-document";
 
 // ─── Payroll configuration (per tenant; stored under tenant.config.payroll) ─
@@ -24,6 +24,7 @@ export interface PayrollConfig {
   monthlyDivisor?: number;
   salaryDivisorMethod: SalaryDivisorMethod;
   earnedSalaryRounding: PayrollRoundingMode;
+  earnedSalaryAggregation: EarnedSalaryAggregation;
 }
 
 export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
@@ -39,6 +40,7 @@ export const DEFAULT_PAYROLL_CONFIG: PayrollConfig = {
   tds: { enabled: true, regime: "new" },
   salaryDivisorMethod: "fixed_divisor",
   earnedSalaryRounding: "two_decimals",
+  earnedSalaryAggregation: "rounded_total",
 };
 
 export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
@@ -81,6 +83,7 @@ export function getPayrollConfig(tenantConfig: unknown): PayrollConfig {
     monthlyDivisor: Math.max(1, Math.min(366, nonNeg(p.monthlyDivisor, 26) || 26)),
     salaryDivisorMethod: p.salaryDivisorMethod === "calendar_days" ? "calendar_days" : "fixed_divisor",
     earnedSalaryRounding: p.earnedSalaryRounding === "floor_rupee" || p.earnedSalaryRounding === "nearest_rupee" ? p.earnedSalaryRounding : "two_decimals",
+    earnedSalaryAggregation: p.earnedSalaryAggregation === "sum_rounded_components" ? "sum_rounded_components" : "rounded_total",
   };
 }
 
@@ -641,6 +644,10 @@ export function computePayroll(
       ? round2((base / divisorUsed) * appliedLopDays)
       : round2(base - roundPayrollAmount(base * payableRatio, config.earnedSalaryRounding));
   }
+  if (config.earnedSalaryAggregation === "sum_rounded_components" && configured?.hasProratedEarnings) {
+    // The displayed LOP must bridge the contractual and individually-rounded component gross.
+    absentDeduction = round2(Math.max(0, configured.grossEarnings - configured.earnedGross));
+  }
 
   // LOP is displayed separately, but statutory wage bases must reflect the pay
   // earned after LOP. Allocate LOP across basic and allowances proportionally;
@@ -744,7 +751,7 @@ function calculatePolicyComponents(config: PayrollConfig, monthlyBase: number, p
   }
   const wageBase = operationalRules.find((rule) => rule.pfWageBase);
   const payableEarningRows = rows.filter((row) => row.kind === "earning" && row.includeInGross && row.prorationBasis === "payable_days");
-  if (payableEarningRows.length) {
+  if (payableEarningRows.length && config.earnedSalaryAggregation === "rounded_total") {
     const target = roundPayrollAmount(payableEarningRows.reduce((sum, row) => sum + row.contractual, 0) * payableRatio, config.earnedSalaryRounding);
     const residual = round2(target - payableEarningRows.reduce((sum, row) => sum + row.earned, 0));
     if (residual) {

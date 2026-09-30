@@ -38,6 +38,7 @@ const cloned = payrollPolicyEditorDraft(tenantPayload, baseline);
 assert.equal(cloned.components.length, 1, "existing effective-policy components load into the editor");
 assert.equal(cloned.salaryDivisorMethod, "fixed_divisor", "legacy policies default to the existing fixed divisor");
 assert.equal(cloned.earnedSalaryRounding, "two_decimals", "legacy policies default to two-decimal rounding");
+assert.equal(cloned.earnedSalaryAggregation, "rounded_total", "legacy policies retain aggregate earned-salary rounding");
 assert.equal(cloned.components[0].prorationBasis, "none", "legacy components remain unprorated");
 assert.equal(cloned.components[0].applicability, "all", "legacy components remain applicable to all employees");
 assert.equal(cloned.components[0].hiddenCalculatorFlag, "keep", "hidden component fields survive draft creation");
@@ -60,6 +61,7 @@ assert.match(hub, /Save draft/, "single-draft save action remains available acro
 assert.match(hub, /Publish version/, "publishing remains an explicit version-history action");
 assert.match(hub, /Deactivate/, "published versions can still be deactivated");
 assert.match(hub, /Actual calendar days/, "calendar-day salary calculation is exposed");
+assert.match(hub, /Round each component, then sum/, "component-level earned-salary aggregation is exposed");
 assert.match(hub, /Payable days/, "component payable-day proration is exposed");
 assert.match(hub, /Selected employees/, "component assignment applicability is exposed");
 assert.doesNotMatch(hub, /work[- ]week/i, "unsupported work-week controls are not exposed");

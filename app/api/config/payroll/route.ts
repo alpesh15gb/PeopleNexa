@@ -71,6 +71,7 @@ export async function PUT(req: NextRequest) {
     components: current.components,
     salaryDivisorMethod: current.salaryDivisorMethod,
     earnedSalaryRounding: current.earnedSalaryRounding,
+    earnedSalaryAggregation: current.earnedSalaryAggregation,
   };
 
   const tenant = await prisma.tenant.update({

@@ -66,6 +66,27 @@ const second = computePayroll(config, { salary: 44_000 }, attendance(29, 2), 0, 
 assert.equal(second.earnedGross, 41_161);
 assert.equal(second.salaryBreakdown.filter((row) => row.kind === "earning" && row.includeInGross).reduce((sum, row) => sum + row.earned, 0), 41_161, "deterministic residual closes the whole-rupee total");
 assert.equal(second.salaryBreakdown[0].earned, 16_465, "rounding residual uses the configured wage-base rather than a component name");
+const ylrConfig: PayrollConfig = {
+  ...config,
+  earnedSalaryRounding: "nearest_rupee",
+  earnedSalaryAggregation: "sum_rounded_components",
+  components: [
+    ...earnings,
+    component({ code: "WELFARE", label: "Welfare", kind: "deduction", formula: "fixed", amount: 250, includeInGross: false, prorationBasis: "none" }),
+    component({ code: "MESS", label: "Mess", kind: "deduction", formula: "fixed", amount: 1_500, includeInGross: false, prorationBasis: "present_days", prorationRounding: "nearest_rupee" }),
+  ],
+  pt: { enabled: true, state: "Gujarat" },
+  tds: { enabled: true, regime: "old" },
+};
+const ylr110 = computePayroll(ylrConfig, { salary: 110_000 }, { ...attendance(25, 4), onLeaveDays: 2, paidLeaveDays: 2, workingDays: 31 }, 0, "2026-07", [], 431_414.77);
+assert.equal(ylr110.earnedGross, 95_807, "YLR rounds each earning component before summing 110000 × 27 ÷ 31");
+assert.equal(ylr110.absentDeduction, 14_193, "YLR LOP is contractual component gross less earned component gross");
+assert.equal(ylr110.salaryBreakdown.find((row) => row.code === "MESS")?.earned, 1_210, "YLR mess deduction rounds 1500 × 25 ÷ 31 to the nearest rupee");
+assert.equal(ylr110.tds, 4_000);
+assert.equal(ylr110.professionalTax, 200);
+assert.equal(ylr110.netSalary, 90_147, "YLR net deducts TDS, PT, welfare, mess, and LOP exactly once");
+assert.equal(computePayroll(ylrConfig, { salary: 55_000 }, attendance(24, 7), 0, "2026-07").earnedGross, 42_580, "YLR component rounding produces 55000 × 24 ÷ 31 = 42580");
+assert.equal(computePayroll(ylrConfig, { salary: 44_000 }, attendance(29, 2), 0, "2026-07").earnedGross, 41_161, "YLR component rounding produces 44000 × 29 ÷ 31 = 41161");
 const paidLeaveSummary = { ...attendance(23, 0), paidLeaveDays: 7, onLeaveDays: 7 };
 assert.equal(computePayroll(config, { salary: 55_000 }, paidLeaveSummary, 0, "2026-07").earnedGross, 55_000, "approved paid leave remains payable and is not LOP");
 
@@ -97,6 +118,7 @@ const legacyPayload = {
 const parsedLegacy = payrollPolicyDraft(legacyPayload);
 assert.equal(parsedLegacy?.salaryDivisorMethod, "fixed_divisor");
 assert.equal(parsedLegacy?.earnedSalaryRounding, "two_decimals");
+assert.equal(parsedLegacy?.earnedSalaryAggregation, "rounded_total");
 const baseRecord = { id: "policy", locationId: null, version: 1, active: true, effectiveFrom: new Date("2026-01-01T12:00:00.000Z"), effectiveTo: null, payload: legacyPayload };
 const explicitRecord = { ...baseRecord, id: "explicit", payload: { ...legacyPayload, salaryDivisorMethod: "fixed_divisor", earnedSalaryRounding: "two_decimals" } };
 const legacyConfig = resolvePayrollPolicy([baseRecord], {}, "location", "2026-07").appliedRules.payrollConfig;

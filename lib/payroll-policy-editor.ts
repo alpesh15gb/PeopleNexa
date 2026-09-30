@@ -63,6 +63,7 @@ export function payrollPolicyEditorBaseline(config: PayrollConfig): PayrollPolic
     monthlyDivisor: config.monthlyDivisor ?? 26,
     salaryDivisorMethod: config.salaryDivisorMethod,
     earnedSalaryRounding: config.earnedSalaryRounding,
+    earnedSalaryAggregation: config.earnedSalaryAggregation,
     deductLossOfPay: config.deductAbsentDays,
     overtimeMultiplier: config.otMultiplier,
     overtimeBasis: "basic_hourly",

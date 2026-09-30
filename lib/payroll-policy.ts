@@ -48,6 +48,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     monthlyDivisor: draft.monthlyDivisor,
     salaryDivisorMethod: draft.salaryDivisorMethod,
     earnedSalaryRounding: draft.earnedSalaryRounding,
+    earnedSalaryAggregation: draft.earnedSalaryAggregation,
   };
   return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: policy.locationId ? "location_override" : "tenant_policy", locationId: policy.locationId, jurisdiction: payrollConfig.pt.state || null, profile: policy.locationId ? "Location payroll policy override" : "Tenant payroll policy", payrollConfig } };
 }
