@@ -75,6 +75,26 @@ export async function POST(request: NextRequest) {
     return policyPreview({ tenantId: session.tenantId, kind, locationId, effectiveFrom, payload: body.payload });
   }
   const scopeKey = locationId ?? "tenant";
+  // Payroll configuration is edited as one working draft per scope. Published
+  // records remain immutable because payroll runs snapshot their resolved rules.
+  if (kind === "payroll_policy") {
+    const saved = await prisma.$transaction(async (tx) => {
+      const currentPublished = await tx.configurationRecord.findFirst({ where: { tenantId: session.tenantId, scopeKey, kind, active: true }, orderBy: { version: "desc" }, select: { version: true } });
+      const currentDraft = await tx.configurationRecord.findFirst({
+        where: { tenantId: session.tenantId, scopeKey, kind, active: false, ...(currentPublished ? { version: { gt: currentPublished.version } } : {}) },
+        orderBy: { version: "desc" },
+      });
+      if (currentDraft) {
+        const record = await tx.configurationRecord.update({ where: { id: currentDraft.id }, data: { effectiveFrom, effectiveTo, payload: body.payload, createdBy: session.sub } });
+        return { record, previous: currentDraft, created: false };
+      }
+      const latest = await tx.configurationRecord.aggregate({ where: { tenantId: session.tenantId, scopeKey, kind }, _max: { version: true } });
+      const record = await tx.configurationRecord.create({ data: { tenantId: session.tenantId, locationId, scopeKey, kind, version: (latest._max.version ?? 0) + 1, effectiveFrom, effectiveTo, payload: body.payload, createdBy: session.sub } });
+      return { record, previous: null, created: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: saved.created ? "configuration.create" : "configuration.update_draft", entity: "ConfigurationRecord", entityId: saved.record.id, summary: `${saved.created ? "Created" : "Updated"} payroll policy draft v${saved.record.version}`, before: saved.previous ?? undefined, after: saved.record });
+    return NextResponse.json({ record: saved.record }, { status: saved.created ? 201 : 200 });
+  }
   const latest = await prisma.configurationRecord.aggregate({ where: { tenantId: session.tenantId, scopeKey, kind }, _max: { version: true } });
   const record = await prisma.configurationRecord.create({ data: { tenantId: session.tenantId, locationId, scopeKey, kind, version: (latest._max.version ?? 0) + 1, effectiveFrom, effectiveTo, payload: body.payload, createdBy: session.sub } });
   await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "configuration.create", entity: "ConfigurationRecord", entityId: record.id, summary: `Created inactive ${kind} v${record.version}`, after: record });

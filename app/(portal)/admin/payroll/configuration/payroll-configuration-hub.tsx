@@ -53,6 +53,7 @@ type Location = { id: string; name: string; code: string; profile: Profile };
 type PolicyRecord = PayrollPolicyEditorRecord & {
   location: { name: string } | null;
   createdAt: string;
+  updatedAt: string;
   activatedAt: string | null;
   createdBy: string;
   activatedBy: string | null;
@@ -282,7 +283,7 @@ function PolicyEditor({
         onSectionChange("advanced");
         toast("success", "Policy preview ready. Nothing was saved.");
       } else {
-        setNotice(`Draft v${data.record?.version ?? ""} saved. Publish it from Advanced after review.`);
+        setNotice("Draft saved. Publish it from Advanced after review.");
         toast("success", "Payroll policy draft saved.");
         router.refresh();
       }
@@ -343,7 +344,7 @@ function PolicyEditor({
 
     <div className="bottom-3 z-10 flex flex-col gap-3 rounded-xl border border-edge-strong bg-card/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between md:sticky">
       <div aria-live="polite" className="min-h-5 text-xs leading-5 text-muted-foreground">
-        {notice ?? <>Both actions use this complete draft across all sections. {selectedLocation ? `Saving creates a new ${selectedLocation.name} version.` : "Saving creates a tenant template version, not an operational payroll scope."}</>}
+        {notice ?? <>Both actions use this complete draft across all sections. {selectedLocation ? `Saving updates the current ${selectedLocation.name} draft.` : "Saving updates the tenant template draft, not an operational payroll scope."}</>}
       </div>
       <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row">
         <Button type="button" variant="outline" loading={busy === "preview"} disabled={Boolean(busy && busy !== "preview")} onClick={() => void submit("preview")}><Eye aria-hidden="true" className="h-4 w-4" />Preview changes</Button>
@@ -772,6 +773,9 @@ function AdvancedSection({ draft, effectiveFrom, effectiveTo, setEffectiveTo, se
   const [ruleEditor, setRuleEditor] = useState<{ index: number | null; value: PayrollStatutoryRuleEditor } | null>(null);
   const [removeRule, setRemoveRule] = useState<number | null>(null);
   const scopeRecords = records.filter((record) => record.locationId === selectedLocationId);
+  const currentPublished = scopeRecords.find((record) => record.active) ?? null;
+  const currentDraft = scopeRecords.find((record) => !record.active && (!currentPublished || record.version > currentPublished.version)) ?? null;
+  const visibleRecords = [currentDraft, currentPublished].filter((record): record is PolicyRecord => Boolean(record));
 
   function saveRule(index: number | null, rule: PayrollStatutoryRuleEditor) {
     const next = index === null ? [...draft.statutoryRules, rule] : draft.statutoryRules.map((current, currentIndex) => currentIndex === index ? rule : current);
@@ -803,8 +807,8 @@ function AdvancedSection({ draft, effectiveFrom, effectiveTo, setEffectiveTo, se
       {!preview ? <div className="flex items-start gap-3 rounded-lg border border-dashed border-edge p-5"><Eye aria-hidden="true" className="mt-0.5 h-5 w-5 text-primary" /><div><p className="font-semibold">No preview generated yet</p><p className="mt-1 text-sm text-muted-foreground">Use Preview changes in the action bar to validate the complete draft and compare operating inputs.</p></div></div> : <div className="space-y-4"><div className="rounded-lg border border-sky-500/25 bg-sky-500/10 p-3 text-xs leading-5 text-foreground">Effective {dateLabel(preview.effectiveFrom)} · stored source: <strong>{preview.resolvedStoredSource}</strong> · comparison source: <strong>{preview.currentBehaviorSource}</strong> · {preview.affectedEmployees} active employee{preview.affectedEmployees === 1 ? "" : "s"} in scope.</div><div className="overflow-hidden rounded-lg border border-edge"><div className="hidden grid-cols-[1.2fr_1fr_1fr] bg-tint px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:grid"><span>Rule</span><span>Current</span><span>Proposed</span></div><div className="divide-y divide-edge">{preview.payroll.map((row) => <div key={row.label} className={`grid gap-1 px-4 py-3 text-sm sm:grid-cols-[1.2fr_1fr_1fr] sm:gap-3 ${row.changed ? "bg-amber-500/5" : ""}`}><strong>{row.label}</strong><span className="text-muted-foreground"><span className="sm:hidden">Current: </span>{previewValue(row.current)}</span><span><span className="sm:hidden">Proposed: </span>{previewValue(row.proposed)}</span></div>)}</div></div></div>}
     </SectionPanel>
 
-    <SectionPanel title="Version History" description={`Draft and published versions for ${selectedLocation?.name ?? "the tenant default template"}. Publishing and deactivation are available only here.`}>
-      {scopeRecords.length === 0 ? <div className="rounded-lg border border-dashed border-edge p-6 text-sm text-muted-foreground">No versions exist for this scope. Save the current editor as a draft first.</div> : <div className="space-y-2">{scopeRecords.map((record) => <article key={record.id} className="flex flex-col gap-3 rounded-lg border border-edge p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">Version {record.version}</p><StatusLabel active={record.active} activeText="Published" inactiveText="Draft" /></div><p className="mt-1 text-xs leading-5 text-muted-foreground">Effective {dateLabel(record.effectiveFrom)}{record.effectiveTo ? ` to ${dateLabel(record.effectiveTo)}` : " onward"} · {componentCount(record.payload)} component{componentCount(record.payload) === 1 ? "" : "s"} · created {dateLabel(record.createdAt)}</p></div><Button type="button" size="sm" variant={record.active ? "outline" : "primary"} loading={busy === record.id} disabled={Boolean(busy && busy !== record.id)} onClick={() => onRequestToggle(record)}>{record.active ? "Deactivate" : <><CheckCircle2 aria-hidden="true" className="h-4 w-4" />Publish version</>}</Button></article>)}</div>}
+    <SectionPanel title="Current Policy" description={`The working draft and current published policy for ${selectedLocation?.name ?? "the tenant default template"}. Intermediate drafts are retained in the audit log, not shown to HR.`}>
+      {visibleRecords.length === 0 ? <div className="rounded-lg border border-dashed border-edge p-6 text-sm text-muted-foreground">No policy exists for this scope. Save the current editor as a draft first.</div> : <div className="space-y-2">{visibleRecords.map((record) => <article key={record.id} className="flex flex-col gap-3 rounded-lg border border-edge p-4 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{record.active ? "Current policy" : "Working draft"}</p><StatusLabel active={record.active} activeText="Published" inactiveText="Draft" /></div><p className="mt-1 text-xs leading-5 text-muted-foreground">Effective {dateLabel(record.effectiveFrom)}{record.effectiveTo ? ` to ${dateLabel(record.effectiveTo)}` : " onward"} · {componentCount(record.payload)} component{componentCount(record.payload) === 1 ? "" : "s"} · saved {dateLabel(record.updatedAt ?? record.createdAt)}</p></div><Button type="button" size="sm" variant={record.active ? "outline" : "primary"} loading={busy === record.id} disabled={Boolean(busy && busy !== record.id)} onClick={() => onRequestToggle(record)}>{record.active ? "Deactivate" : <><CheckCircle2 aria-hidden="true" className="h-4 w-4" />Publish policy</>}</Button></article>)}</div>}
     </SectionPanel>
 
     <details id="register-field-reference" className="rounded-xl border border-edge bg-card p-4 shadow-sm sm:p-5">

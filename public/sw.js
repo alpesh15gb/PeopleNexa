@@ -1,8 +1,8 @@
 // Bump CACHE_VERSION (e.g. v1 -> v2) whenever the offline SHELL list or the
 // navigation-fallback mapping below changes. Old caches are purged on activate.
-// v5: hashed Next.js chunks are no longer cached (see fetch handler) — this
-// bump purges any pre-v5 chunk entries that could mismatch fresh HTML.
-const CACHE_VERSION = "v5";
+// v6: Next.js App Router prefetches are not treated as static assets. This
+// bump purges cache entries that may contain aborted route-prefetch requests.
+const CACHE_VERSION = "v6";
 const CACHE = "peoplenexa-" + CACHE_VERSION;
 const SHELL = ["/", "/login", "/admin", "/superadmin/login", "/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/profile"];
 
@@ -83,6 +83,11 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
+
+  // App Router route prefetches and RSC requests have an empty destination.
+  // They are application data, not assets; intercepting an aborted prefetch
+  // here produced a synthetic 504 and the misleading "asset fetch failed" log.
+  if (!req.destination) return;
 
   // Static assets: stale-while-revalidate, never rejects.
   // EXCEPT hashed Next.js build output (/_next/static): filenames already

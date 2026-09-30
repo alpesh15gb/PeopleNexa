@@ -45,6 +45,7 @@ export default async function PayrollConfigurationPage() {
         effectiveFrom: record.effectiveFrom.toISOString(),
         effectiveTo: record.effectiveTo?.toISOString() ?? null,
         createdAt: record.createdAt.toISOString(),
+        updatedAt: record.updatedAt.toISOString(),
         activatedAt: record.activatedAt?.toISOString() ?? null,
       }))}
       baseline={payrollPolicyEditorBaseline(getPayrollConfig(tenant.config))}
