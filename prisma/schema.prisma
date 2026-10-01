@@ -1148,8 +1148,8 @@ model Payslip {
 }
 
 // A run owns the approval workflow. scopeKey is "tenant" or "location:<id>".
-// The unique key prevents a second active or historical run for the same scope
-// and period; cancelled runs are retained rather than overwritten.
+// PostgreSQL enforces one active run per scope and period with a partial unique
+// index. Cancelled and reversed runs are retained as immutable history.
 model PayrollRun {
   id                    String             @id @default(cuid())
   tenantId              String
@@ -1181,11 +1181,15 @@ model PayrollRun {
   cancelledBy           String?
   cancelledAt           DateTime?
   note                  String?
+  // A replacement never rewrites its predecessor's payslips, members, or audit.
+  replacedRunId         String?
+  replacedRun           PayrollRun?        @relation("PayrollRunReplacement", fields: [replacedRunId], references: [id], onDelete: Restrict)
+  replacementRuns       PayrollRun[]       @relation("PayrollRunReplacement")
   members               PayrollRunMember[]
   payslips              Payslip[]
 
-  @@unique([tenantId, scopeKey, month])
   @@index([tenantId, month, status])
+  @@index([replacedRunId])
 }
 
 // Membership is retained independently of a payslip so omissions and

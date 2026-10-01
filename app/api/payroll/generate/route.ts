@@ -36,12 +36,6 @@ export async function POST(req: NextRequest) {
   if (selectedEmployeeIds.length > 1000) return NextResponse.json({ error: "Select at most 1,000 employees in one payroll action." }, { status: 400 });
   const requestedRunId = typeof body.runId === "string" ? body.runId.trim() : "";
   let existingRun = requestedRunId ? await prisma.payrollRun.findFirst({ where: { id: requestedRunId, tenantId: session.tenantId, locationId, month }, select: { id: true, status: true } }) : null;
-  if (!existingRun && !requestedRunId) {
-    const cancelled = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, locationId, month, status: "cancelled" }, select: { id: true } });
-    if (cancelled) {
-      return NextResponse.json({ error: "A cancelled payroll exists for this location and month. It is retained as an audit record and cannot be restarted without creating a replacement run." }, { status: 409 });
-    }
-  }
   if (requestedRunId && !existingRun) return NextResponse.json({ error: "Payroll draft not found for this location and month." }, { status: 404 });
   if (existingRun && existingRun.status !== "draft") return NextResponse.json({ error: `Employees can be added only while this payroll is Draft. This run is ${existingRun.status}.` }, { status: 409 });
   if (existingRun && selectionMode !== "selected") return NextResponse.json({ error: "Adding employees to a draft payroll requires an explicit selected-employee list." }, { status: 400 });
@@ -120,11 +114,25 @@ export async function POST(req: NextRequest) {
   }
   if (!withSalary.length) return NextResponse.json({ error: "No eligible employees with a salary were found. No payroll run was created.", preflight: { eligible: 0, missingSalary: missingSalary.map((employee) => employee.id) } }, { status: 409 });
   let run = existingRun;
+  let replacedRunId: string | null = null;
   try {
-    if (!run) run = await prisma.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub, selectionMode, selectedEmployeeCount: 0, ...(legacyAcknowledged && policyFailures.length ? { note: "Legacy policy acknowledged at generation" } : {}) } });
+    if (!run) {
+      // Historical runs remain intact; this new draft only points back to them.
+      const replacedRun = await prisma.payrollRun.findFirst({
+        where: { tenantId: session.tenantId, locationId, month, status: { in: ["cancelled", "reversed"] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      replacedRunId = replacedRun?.id ?? null;
+      run = await prisma.$transaction(async (tx) => {
+        const createdRun = await tx.payrollRun.create({ data: { tenantId: session.tenantId, scopeKey, locationId, month, createdBy: session.sub, selectionMode, selectedEmployeeCount: 0, ...(replacedRunId ? { replacedRunId } : {}), ...(legacyAcknowledged && policyFailures.length ? { note: "Legacy policy acknowledged at generation" } : {}) } });
+        if (replacedRunId) await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.replacement_created", entity: "PayrollRun", entityId: createdRun.id, summary: "Created replacement payroll run without changing the historical run.", after: { replacedRunId } } });
+        return createdRun;
+      });
+    }
     if (legacyAcknowledged && policyFailures.length) await prisma.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_run.legacy_policy_acknowledged", entity: "PayrollRun", entityId: run.id, summary: `Legacy policy acknowledged for ${policyFailures.length} employee(s)`, after: { month, employeeIds: policyFailures.map((employee) => employee.id) } } });
   } catch (error: unknown) {
-    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") return NextResponse.json({ error: `A payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
+    if (typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002") return NextResponse.json({ error: `An active payroll run already exists for ${month} in this scope. Review or cancel that run; do not generate a duplicate.` }, { status: 409 });
     throw error;
   }
   let created = 0;
