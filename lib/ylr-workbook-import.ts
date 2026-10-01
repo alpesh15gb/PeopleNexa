@@ -32,7 +32,7 @@ export async function previewYlrWorkbook(buffer: ArrayBuffer): Promise<YlrWorkbo
     if (code === undefined || name === undefined || designation === undefined || gross === undefined) continue;
     const find = (prefix: string) => [...columns.entries()].find(([key]) => key.startsWith(prefix))?.[1]; sheets.push(worksheetName.trim());
     for (let index = combined ? 1 : 6; index < values.length; index++) {
-      const row = values[index] ?? []; const employeeCode = text(row[code]); if (!employeeCode || !/^YLR\//i.test(employeeCode)) continue; const key = employeeCode.toUpperCase(); const rowNumber = index + 1;
+      const row = values[index] ?? []; const employeeCode = text(row[code]); if (!employeeCode || !/^YLR[/-]?\d+/i.test(employeeCode)) continue; const key = employeeCode.toUpperCase().replace(/[^A-Z0-9]/g, ""); const rowNumber = index + 1;
       if (seen.has(key)) exceptions.push(`${worksheetName.trim()} row ${rowNumber}: duplicate Emp Code ${employeeCode}; resolve before import.`); seen.add(key);
       const employeeName = text(row[name]), employeeDesignation = text(row[designation]), grossSalary = numberValue(row[gross]); if (!employeeName || !employeeDesignation || grossSalary == null || grossSalary < 0) { exceptions.push(`${worksheetName.trim()} row ${rowNumber}: incomplete employee details for ${employeeCode}; skipped.`); continue; }
       const messPlan = inferMessPlan(numberValue(row[find("mess") ?? -1]), numberValue(row[find("daysin") ?? -1]), numberValue(row[find("presentdays") ?? -1]), numberValue(row[find("totalpayabledays") ?? -1])); if (messPlan == null) exceptions.push(`${worksheetName.trim()} row ${rowNumber}: could not infer a Mess plan for ${employeeCode}.`);
