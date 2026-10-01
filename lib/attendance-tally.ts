@@ -15,16 +15,21 @@ type AttendanceRow = { employeeId: string; status: string; punchInTime?: Date | 
 
 /**
  * Produces daily display buckets for an already-scoped employee population.
- * `livePresent` is intentionally independent of finalized attendance status:
- * any reconciled valid IN punch makes an employee presently visible, even when
- * the missing-OUT policy later marks the day half-day or absent.
+ * `livePresent` is intentionally independent of finalized attendance status.
+ * It is sourced from authorized raw Punch employee IDs so ingestion is visible
+ * before reconciliation creates an Attendance row.
  */
 export function tallyDailyAttendance(
   employeeIds: Iterable<string>,
   records: Iterable<AttendanceRow>,
   approvedLeaveEmployeeIds: Iterable<string>,
+  authorizedPunchEmployeeIds: Iterable<string> = [],
 ): AttendanceTally {
   const population = new Set(employeeIds);
+  const livePresentEmployeeIds = new Set<string>();
+  for (const employeeId of authorizedPunchEmployeeIds) {
+    if (population.has(employeeId)) livePresentEmployeeIds.add(employeeId);
+  }
   const recordByEmployee = new Map<string, AttendanceRow>();
   for (const record of records) {
     if (population.has(record.employeeId)) recordByEmployee.set(record.employeeId, record);
@@ -35,7 +40,7 @@ export function tallyDailyAttendance(
   for (const employeeId of population) {
     const record = recordByEmployee.get(employeeId);
     const status = record?.status;
-    if (record?.punchInTime) tally.livePresent++;
+    if (livePresentEmployeeIds.has(employeeId)) tally.livePresent++;
     if (status === "present") { tally.present++; tally.marked++; }
     else if (status === "late") { tally.late++; tally.marked++; }
     else if (status === "half_day") { tally.halfDay++; tally.marked++; }

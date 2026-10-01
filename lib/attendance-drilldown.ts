@@ -1,3 +1,5 @@
+import { authorizedPunchDayFilter } from "./attendance-presence";
+
 export type AttendanceDrilldownStatus = "present" | "late";
 
 export function attendanceDrilldownStatus(value: string | undefined): AttendanceDrilldownStatus | null {
@@ -23,11 +25,14 @@ export function attendanceEmployeeScope({
 }
 
 export function attendanceStatusFilter(status: AttendanceDrilldownStatus, start: Date, end: Date) {
+  if (status === "present") {
+    return {
+      punches: { some: authorizedPunchDayFilter(start, end) },
+    };
+  }
   return {
     attendance: {
-      some: status === "present"
-        ? { date: { gte: start, lt: end }, punchInTime: { not: null } }
-        : { status, date: { gte: start, lt: end } },
+      some: { status, date: { gte: start, lt: end } },
     },
   };
 }

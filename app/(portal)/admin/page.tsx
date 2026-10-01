@@ -13,6 +13,7 @@ import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 import { BranchPicker } from "./attendance/branch-picker";
 import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
+import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
 import { dashboardLayout, resolveConfiguration, type DashboardWidgetKey } from "@/lib/configuration";
 
 export const dynamic = "force-dynamic";
@@ -91,7 +92,7 @@ export default async function AdminDashboardPage({
   const attendanceWhere = branchId
     ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active", loginOnly: false } }
     : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } };
-  const [employees, attendance, attendanceTotal, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles] = await Promise.all([
+  const [employees, attendance, attendanceTotal, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } }, profile: { select: { gender: true } } },
@@ -155,6 +156,10 @@ export default async function AdminDashboardPage({
       where: { employee: empScope, OR: [{ dateOfBirthCertificate: { not: null } }, { actualDateOfBirth: { not: null } }, { marriageDate: { not: null } }] },
       select: { dateOfBirthCertificate: true, actualDateOfBirth: true, marriageDate: true, employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true, branch: { select: { name: true } } } } },
     }),
+    prisma.punch.findMany({
+      where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: empScope },
+      select: { employeeId: true },
+    }),
   ]);
 
   // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
@@ -176,7 +181,7 @@ export default async function AdminDashboardPage({
     weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
   }
 
-  const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendanceRecords, approvedLeaves.map((leave) => leave.employeeId));
+  const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendanceRecords, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
   const maleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "male").length;
   const femaleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "female").length;
   const reportedGenderTotal = maleEmployees + femaleEmployees;
@@ -211,6 +216,7 @@ export default async function AdminDashboardPage({
   const projectEmployeeIds = new Map<string, string[]>();
   const projectRecords = new Map<string, Array<{ employeeId: string; status: string }>>();
   const projectLeaveIds = new Map<string, string[]>();
+  const projectPunchIds = new Map<string, string[]>();
   const employeeProject = new Map(employees.map((employee) => [employee.id, employee.branch?.name ?? "Unassigned"]));
   for (const employee of employees) {
     const name = employeeProject.get(employee.id)!;
@@ -224,9 +230,13 @@ export default async function AdminDashboardPage({
     const name = employeeProject.get(leave.employeeId);
     if (name) projectLeaveIds.set(name, [...(projectLeaveIds.get(name) ?? []), leave.employeeId]);
   }
+  for (const punch of todayPunches) {
+    const name = employeeProject.get(punch.employeeId);
+    if (name) projectPunchIds.set(name, [...(projectPunchIds.get(name) ?? []), punch.employeeId]);
+  }
   const projectAttendanceCounts = new Map<string, AttendanceTally>();
   for (const [name, employeeIds] of projectEmployeeIds) {
-    projectAttendanceCounts.set(name, tallyDailyAttendance(employeeIds, projectRecords.get(name) ?? [], projectLeaveIds.get(name) ?? []));
+    projectAttendanceCounts.set(name, tallyDailyAttendance(employeeIds, projectRecords.get(name) ?? [], projectLeaveIds.get(name) ?? [], projectPunchIds.get(name) ?? []));
   }
 
   const week = [];

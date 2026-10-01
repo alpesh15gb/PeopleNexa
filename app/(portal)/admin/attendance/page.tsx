@@ -10,6 +10,7 @@ import { DatePicker } from "./date-picker";
 import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 import { tallyDailyAttendance } from "@/lib/attendance-tally";
+import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
 import { attendanceDrilldownStatus, attendanceEmployeeScope, attendanceStatusFilter } from "@/lib/attendance-drilldown";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +62,7 @@ export default async function AdminAttendancePage({
   const totalPages = Math.max(1, Math.ceil(totalEmployees / pageSize));
   const page = Math.min(requestedPage, totalPages);
 
-  const [employees, tallyEmployees, holidays, branches, tallyRecords, tallyLeaves] = await Promise.all([
+  const [employees, tallyEmployees, holidays, branches, tallyRecords, tallyLeaves, tallyPunches] = await Promise.all([
     prisma.employee.findMany({
        where: employeeWhere,
       select: {
@@ -86,6 +87,7 @@ export default async function AdminAttendancePage({
     }),
     prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true, punchInTime: true } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, employee: employeeScope }, select: { employeeId: true } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(dayStart, dayEnd), employee: employeeScope }, select: { employeeId: true } }),
   ]);
 
   const employeeIds = employees.map((employee) => employee.id);
@@ -123,7 +125,7 @@ export default async function AdminAttendancePage({
     };
   });
 
-  const counts = tallyDailyAttendance(tallyEmployees.map((employee) => employee.id), tallyRecords, tallyLeaves.map((leave) => leave.employeeId));
+  const counts = tallyDailyAttendance(tallyEmployees.map((employee) => employee.id), tallyRecords, tallyLeaves.map((leave) => leave.employeeId), tallyPunches.map((punch) => punch.employeeId));
   const dashboardHref = branchId ? `/admin?branch=${encodeURIComponent(branchId)}` : "/admin";
 
   const statCards = [

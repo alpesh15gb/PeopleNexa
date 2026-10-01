@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { addDays, dayRangeIST, monthKeyIST } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { tallyDailyAttendance } from "@/lib/attendance-tally";
+import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -21,7 +22,7 @@ export async function GET() {
       return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
     }
     const branchId = manager.branchId;
-    const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
+    const [employees, attendance, departments, pendingLeaves, weekRecords, todayPunches] = await Promise.all([
       prisma.employee.findMany({
         where: { tenantId: session.tenantId, status: "active", loginOnly: false, branchId },
         select: {
@@ -67,6 +68,10 @@ export async function GET() {
         where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId, status: "active", loginOnly: false } },
         _count: true,
       }),
+      prisma.punch.findMany({
+        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { branchId, status: "active", loginOnly: false } },
+        select: { employeeId: true },
+      }),
     ]);
 
     const approvedLeaves = await prisma.leaveRequest.findMany({
@@ -79,7 +84,7 @@ export async function GET() {
       },
       select: { employeeId: true },
     });
-    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId));
+    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
 
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -113,7 +118,7 @@ export async function GET() {
   }
 
   if (session.role === "admin") {
-    const [employees, attendance, departments, pendingLeaves, weekRecords] = await Promise.all([
+    const [employees, attendance, departments, pendingLeaves, weekRecords, todayPunches] = await Promise.all([
       prisma.employee.findMany({
         where: { tenantId: session.tenantId, status: "active", loginOnly: false },
         select: {
@@ -159,6 +164,10 @@ export async function GET() {
         where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { status: "active", loginOnly: false } },
         _count: true,
       }),
+      prisma.punch.findMany({
+        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { status: "active", loginOnly: false } },
+        select: { employeeId: true },
+      }),
     ]);
 
     const approvedLeaves = await prisma.leaveRequest.findMany({
@@ -171,7 +180,7 @@ export async function GET() {
       },
       select: { employeeId: true },
     });
-    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId));
+    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
 
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
