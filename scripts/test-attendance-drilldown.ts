@@ -8,7 +8,7 @@ assert.equal(attendanceDrilldownStatus("present"), "present");
 assert.equal(attendanceDrilldownStatus("late"), "late");
 assert.equal(attendanceDrilldownStatus("half_day"), null);
 assert.deepEqual(attendanceStatusFilter("present", start, end), {
-  attendance: { some: { status: "present", date: { gte: start, lt: end } } },
+  attendance: { some: { date: { gte: start, lt: end }, punchInTime: { not: null } } },
 });
 assert.deepEqual(attendanceEmployeeScope({ tenantId: "tenant-a", branchId: "branch-a" }), {
   tenantId: "tenant-a", status: "active", loginOnly: false, branchId: "branch-a",

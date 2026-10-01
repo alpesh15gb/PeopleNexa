@@ -84,7 +84,7 @@ export default async function AdminAttendancePage({
       select: { id: true, name: true },
        orderBy: { name: "asc" },
     }),
-    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true } }),
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true, punchInTime: true } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, employee: employeeScope }, select: { employeeId: true } }),
   ]);
 
@@ -127,7 +127,7 @@ export default async function AdminAttendancePage({
   const dashboardHref = branchId ? `/admin?branch=${encodeURIComponent(branchId)}` : "/admin";
 
   const statCards = [
-    { label: "Present", value: counts.present, cls: "text-emerald-300" },
+    { label: "Present", value: counts.livePresent, cls: "text-emerald-300" },
     { label: "Late", value: counts.late, cls: "text-amber-300" },
     { label: "Half day", value: counts.halfDay, cls: "text-violet-300" },
     { label: "Permission", value: counts.permission, cls: "text-sky-300" },

@@ -23,5 +23,11 @@ export function attendanceEmployeeScope({
 }
 
 export function attendanceStatusFilter(status: AttendanceDrilldownStatus, start: Date, end: Date) {
-  return { attendance: { some: { status, date: { gte: start, lt: end } } } };
+  return {
+    attendance: {
+      some: status === "present"
+        ? { date: { gte: start, lt: end }, punchInTime: { not: null } }
+        : { status, date: { gte: start, lt: end } },
+    },
+  };
 }

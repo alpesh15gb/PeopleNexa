@@ -11,6 +11,7 @@
     "test:payroll": "tsx scripts/test-payroll-lop.ts",
     "test:payroll-configurable": "tsx scripts/test-payroll-configurable-proration.ts",
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
+    "test:attendance-tally": "tsx scripts/test-attendance-tally.ts",
     "test:attendance-drilldown": "tsx scripts/test-attendance-drilldown.ts",
     "test:report-month-range": "tsx scripts/test-report-month-range.ts",
     "test:leave-policy": "tsx scripts/test-leave-policy.ts",

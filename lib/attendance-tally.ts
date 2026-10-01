@@ -1,6 +1,7 @@
 export type AttendanceTally = {
   total: number;
   marked: number;
+  livePresent: number;
   present: number;
   late: number;
   halfDay: number;
@@ -10,11 +11,13 @@ export type AttendanceTally = {
   noRecord: number;
 };
 
-type AttendanceRow = { employeeId: string; status: string };
+type AttendanceRow = { employeeId: string; status: string; punchInTime?: Date | null };
 
 /**
- * Produces mutually exclusive daily display buckets for an already-scoped
- * employee population. An explicit attendance record always wins over leave.
+ * Produces daily display buckets for an already-scoped employee population.
+ * `livePresent` is intentionally independent of finalized attendance status:
+ * any reconciled valid IN punch makes an employee presently visible, even when
+ * the missing-OUT policy later marks the day half-day or absent.
  */
 export function tallyDailyAttendance(
   employeeIds: Iterable<string>,
@@ -22,15 +25,17 @@ export function tallyDailyAttendance(
   approvedLeaveEmployeeIds: Iterable<string>,
 ): AttendanceTally {
   const population = new Set(employeeIds);
-  const recordByEmployee = new Map<string, string>();
+  const recordByEmployee = new Map<string, AttendanceRow>();
   for (const record of records) {
-    if (population.has(record.employeeId)) recordByEmployee.set(record.employeeId, record.status);
+    if (population.has(record.employeeId)) recordByEmployee.set(record.employeeId, record);
   }
   const onLeaveEmployeeIds = new Set(approvedLeaveEmployeeIds);
-  const tally: AttendanceTally = { total: population.size, marked: 0, present: 0, late: 0, halfDay: 0, permission: 0, onLeave: 0, absent: 0, noRecord: 0 };
+  const tally: AttendanceTally = { total: population.size, marked: 0, livePresent: 0, present: 0, late: 0, halfDay: 0, permission: 0, onLeave: 0, absent: 0, noRecord: 0 };
 
   for (const employeeId of population) {
-    const status = recordByEmployee.get(employeeId);
+    const record = recordByEmployee.get(employeeId);
+    const status = record?.status;
+    if (record?.punchInTime) tally.livePresent++;
     if (status === "present") { tally.present++; tally.marked++; }
     else if (status === "late") { tally.late++; tally.marked++; }
     else if (status === "half_day") { tally.halfDay++; tally.marked++; }

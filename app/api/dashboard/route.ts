@@ -96,7 +96,7 @@ export async function GET() {
     return NextResponse.json({
       summary: {
         totalEmployees: counts.total,
-        present: counts.present,
+        present: counts.livePresent,
         late: counts.late,
         permission: counts.permission,
         absent: counts.absent,
@@ -188,7 +188,7 @@ export async function GET() {
     return NextResponse.json({
       summary: {
         totalEmployees: counts.total,
-        present: counts.present,
+        present: counts.livePresent,
         late: counts.late,
         permission: counts.permission,
         absent: counts.absent,
