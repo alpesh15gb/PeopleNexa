@@ -146,6 +146,8 @@ assert.equal(recoveredMissingOutStatus("half_day", "present"), "half_day", "reco
 assert.equal(recoveredMissingOutStatus("full_day", "present"), "absent", "recovery applies the active full-day IN-only policy");
 assert.equal(recoveredMissingOutStatus("review", "present"), "present", "review-only policy does not rewrite attendance");
 assert.equal(isFinalizedInOnlyDay({ finalized: true, punchInTime: new Date(), punchOutTime: null, reviewStatus: "missed_punch" }), true, "only finalized missed-punch IN-only days are recoverable");
+assert.equal(isFinalizedInOnlyDay({ finalized: true, punchInTime: new Date(), punchOutTime: null, reviewStatus: null }), true, "legacy finalized IN-only rows without a review flag are recoverable");
+assert.equal(isFinalizedInOnlyDay({ finalized: true, punchInTime: new Date(), punchOutTime: null, reviewStatus: "manual_override" }), false, "manual overrides are never changed by recovery");
 
 const assignmentApi = readFileSync(new URL("../app/api/payroll/component-assignments/route.ts", import.meta.url), "utf8");
 assert.match(assignmentApi, /session\?\.role !== "admin"/, "only admins can edit component assignments");

@@ -7,5 +7,7 @@ export function recoveredMissingOutStatus(treatment: PayrollAttendanceTreatment[
 }
 
 export function isFinalizedInOnlyDay(record: { finalized: boolean; punchInTime: Date | null; punchOutTime: Date | null; reviewStatus: string | null }): boolean {
-  return record.finalized && Boolean(record.punchInTime) && !record.punchOutTime && record.reviewStatus === "missed_punch";
+  // Older finalizers did not persist missed_punch. Keep explicit manual
+  // overrides authoritative while allowing those legacy derived rows to recover.
+  return record.finalized && Boolean(record.punchInTime) && !record.punchOutTime && (record.reviewStatus === "missed_punch" || record.reviewStatus === null);
 }

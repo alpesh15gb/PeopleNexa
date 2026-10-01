@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { payrollPolicyDraft, resolveConfiguration } from "../lib/configuration";
+import { configurationEffectiveAtISTDay, payrollPolicyDraft, resolveConfiguration } from "../lib/configuration";
+import { parseIST } from "../lib/ist";
 import { payrollRunPreflight } from "../lib/payroll-preflight";
 import { DEFAULT_PAYROLL_CONFIG } from "../lib/payroll";
 import { payrollPolicyEditorBaseline, payrollPolicyEditorDraft, payrollScheduleExample, resolvePayrollPolicyEditorSource } from "../lib/payroll-policy-editor";
@@ -15,6 +16,9 @@ const policy = {
 assert.ok(payrollPolicyDraft(policy), "catalog formula and source metadata validate");
 const selected = resolveConfiguration([{ id: "tenant", locationId: null, active: true, effectiveFrom: new Date("2026-01-01"), effectiveTo: null }, { id: "location", locationId: "L1", active: true, effectiveFrom: new Date("2026-02-01"), effectiveTo: null }], "L1", new Date("2026-03-01"));
 assert.equal(selected?.id, "location", "location override resolves over tenant default");
+const firstIstDay = parseIST("2026-02-01 00:00:00")!;
+assert.equal(configurationEffectiveAtISTDay(firstIstDay).toISOString(), "2026-02-01T12:00:00.000Z", "IST attendance dates resolve policies on their intended calendar day");
+assert.equal(resolveConfiguration([{ id: "effective-first-day", locationId: "L1", active: true, effectiveFrom: new Date("2026-02-01T00:00:00.000Z"), effectiveTo: null }], "L1", configurationEffectiveAtISTDay(firstIstDay))?.id, "effective-first-day", "a policy effective on the first IST day applies during attendance finalization");
 assert.deepEqual(payrollRunPreflight([{ inputSnapshot: { policy: { payrollConfig: {} } } }]), [], "stored payroll snapshot is finalizable");
 assert.equal(payrollRunPreflight([{ inputSnapshot: {} }]).length, 1, "missing required operating snapshot blocks finalization");
 

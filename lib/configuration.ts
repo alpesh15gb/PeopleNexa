@@ -1,4 +1,5 @@
 import { parseMediaUrl } from "@/lib/media-url";
+import { istDateKey } from "@/lib/ist";
 
 export const CONFIGURATION_KINDS = ["dashboard", "id_card", "leave_policy", "payroll_policy"] as const;
 export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
@@ -185,4 +186,12 @@ export function resolveConfiguration<T extends { locationId: string | null; acti
     .filter((record) => record.active && record.effectiveFrom <= at && (!record.effectiveTo || record.effectiveTo >= at))
     .filter((record) => record.locationId === locationId || record.locationId === null)
     .sort((a, b) => Number(b.locationId === locationId) - Number(a.locationId === locationId) || b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null;
+}
+
+/**
+ * Configuration dates are calendar dates. Resolve an IST attendance day at UTC
+ * noon so its stored IST-midnight instant cannot precede an effective-on date.
+ */
+export function configurationEffectiveAtISTDay(istDay: Date): Date {
+  return new Date(`${istDateKey(istDay)}T12:00:00.000Z`);
 }

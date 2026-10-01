@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
-import { payrollPolicyDraft, resolveConfiguration } from "@/lib/configuration";
+import { configurationEffectiveAtISTDay, payrollPolicyDraft, resolveConfiguration } from "@/lib/configuration";
 import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { payrollMonthAnchor, payrollMonthEnd } from "@/lib/payroll-component-assignments";
 import { isFinalizedInOnlyDay, recoveredMissingOutStatus } from "@/lib/payroll-recovery";
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   const policies = await prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "payroll_policy", active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } });
   const changes = attendance.flatMap((record) => {
     if (!isFinalizedInOnlyDay(record)) return [];
-    const policy = resolveConfiguration(policies.filter((candidate) => payrollPolicyDraft(candidate.payload)), scope.locationId, record.date);
+    const policy = resolveConfiguration(policies.filter((candidate) => payrollPolicyDraft(candidate.payload)), scope.locationId, configurationEffectiveAtISTDay(record.date));
     const treatment = payrollPolicyDraft(policy?.payload)?.attendanceTreatment.missingOutPunch ?? "review";
     const status = recoveredMissingOutStatus(treatment, record.status);
     return status === record.status ? [] : [{ record, treatment, status }];

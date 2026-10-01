@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { istStartOfDay, istDateKey, IST_OFFSET_MS } from "./ist";
 import { computePunchStatusIST } from "./attendance";
 import { minutesOfDay } from "./dates";
-import { payrollPolicyDraft, resolveConfiguration, type PayrollAttendanceTreatment } from "./configuration";
+import { configurationEffectiveAtISTDay, payrollPolicyDraft, resolveConfiguration, type PayrollAttendanceTreatment } from "./configuration";
 import type { Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
 
 // A day is finalizable once its IST window has closed plus a grace period,
@@ -214,7 +214,7 @@ export function punchDayForShift(
  */
 export async function reconcileEmployeeDay(
   tenant: Pick<Tenant, "id" | "config">,
-  employee: Pick<Employee, "id" | "shiftId" | "tenantId" | "branchId">,
+  employee: Pick<Employee, "id" | "shiftId" | "tenantId" | "branchId"> & { locationId?: string | null },
   istDay: Date,
   opts: { finalize?: boolean; mode?: PunchMode } = {}
 ): Promise<ReconcileResult> {
@@ -235,8 +235,10 @@ export async function reconcileEmployeeDay(
     orderBy: { punchTime: "asc" },
   });
   const branch = employee.branchId ? await prisma.branch.findUnique({ where: { id: employee.branchId }, select: { locationId: true } }) : null;
-  const policies = branch?.locationId ? await prisma.configurationRecord.findMany({ where: { tenantId: tenant.id, kind: "payroll_policy", active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }) : [];
-  const policy = branch?.locationId ? resolveConfiguration(policies.filter((record) => payrollPolicyDraft(record.payload)), branch.locationId, attendanceDate) : null;
+  // Branch ownership wins; legacy branchless employees retain their direct location.
+  const locationId = branch?.locationId ?? employee.locationId ?? null;
+  const policies = locationId ? await prisma.configurationRecord.findMany({ where: { tenantId: tenant.id, kind: "payroll_policy", active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }) : [];
+  const policy = locationId ? resolveConfiguration(policies.filter((record) => payrollPolicyDraft(record.payload)), locationId, configurationEffectiveAtISTDay(attendanceDate)) : null;
   const missingOutTreatment = payrollPolicyDraft(policy?.payload)?.attendanceTreatment.missingOutPunch ?? "review";
 
   const devices = await prisma.device.findMany({
