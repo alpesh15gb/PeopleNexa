@@ -12,10 +12,22 @@ export type PayslipDocumentData = {
   companyAddress?: string | null;
   companyContact?: string | null;
   companyLogoUrl?: string | null;
+  // A bulk export can resolve this once and share the immutable image across PDFs.
+  companyLogo?: Buffer | null;
   month: string;
   employee: { employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: Date | null; department: { name: string } | null; bankName: string | null; accountNumber: string | null; ifscCode: string | null; pan: string | null; uan: string | null; esiIpNumber?: string | null };
   payslip: { basicSalary: number; allowances: number; overtimePay: number; adjustmentEarnings: number; grossEarnings: number; earnedGross?: number; pfEmployee: number; esicEmployee: number; professionalTax: number; lwf: number; tds: number; lateFines: number; loanDeduction: number; absentDeduction: number; deductions: number; netSalary: number; presentDays: number; lateDays: number; halfDays: number; absentDays: number; workingDays: number; adjustments: Adjustment[] | null; salaryBreakdown?: SalaryComponent[] | null };
 };
+
+let defaultLogo: Promise<Buffer | null> | undefined;
+
+export function loadPayslipLogo(source: string | null | undefined) {
+  return loadBrandLogo(source ?? null).then((logo) => {
+    if (logo) return logo;
+    defaultLogo ??= readFile(path.join(process.cwd(), "public", "logo.png")).catch(() => null);
+    return defaultLogo;
+  });
+}
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -43,7 +55,7 @@ export async function renderPayslipPdf(data: PayslipDocumentData): Promise<Buffe
   const text = (content: string, x: number, y: number, options: PDFKit.Mixins.TextOptions = {}) => doc.fillColor(INK).font("Helvetica").fontSize(8).text(content, x, y, options);
   const bold = (content: string, x: number, y: number, options: PDFKit.Mixins.TextOptions = {}) => doc.fillColor(INK).font("Helvetica-Bold").fontSize(8).text(content, x, y, options);
 
-  const logo = await loadBrandLogo(data.companyLogoUrl ?? null) ?? await readFile(path.join(process.cwd(), "public", "logo.png")).catch(() => null);
+  const logo = data.companyLogo === undefined ? await loadPayslipLogo(data.companyLogoUrl) : data.companyLogo;
   const header = (continued = false) => {
     if (logo) { try { doc.image(logo, LEFT + 6, 31, { fit: [54, 54] }); } catch { /* A malformed logo must not prevent payslip delivery. */ } }
     doc.font("Helvetica-Bold").fontSize(14).fillColor(INK).text(data.companyName || "Company", LEFT + 70, 34, { width: WIDTH - 140, align: "center", ellipsis: true });
