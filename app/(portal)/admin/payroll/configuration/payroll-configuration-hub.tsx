@@ -748,9 +748,11 @@ function MessPlanDialogContent({ components, location, onClose }: { components: 
   const [employees, setEmployees] = useState<PlanEmployee[]>([]);
   const [plans, setPlans] = useState<Record<string, string>>({});
   const [initialPlans, setInitialPlans] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPlan, setBulkPlan] = useState("");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0 });
-  const [effectiveFrom, setEffectiveFrom] = useState(`${todayKey().slice(0, 7)}-01`);
+  const [effectiveMonth, setEffectiveMonth] = useState(todayKey().slice(0, 7));
   const [busy, setBusy] = useState<"load" | "save" | null>("load");
   const [error, setError] = useState<string | null>(null);
   const codes = components.map((component) => component.code);
@@ -764,7 +766,7 @@ function MessPlanDialogContent({ components, location, onClose }: { components: 
       if (!response.ok) throw new Error(data.error ?? "Could not load employee plans.");
       const loaded = data.employees ?? [];
       const current = Object.fromEntries(loaded.map((employee: PlanEmployee) => [employee.id, employee.payrollComponentAssignments[0]?.componentCode ?? ""]));
-      setEmployees(loaded); setPagination(data.pagination ?? { page: 1, pages: 1, total: 0 }); setPlans(current); setInitialPlans(current);
+      setEmployees(loaded); setPagination(data.pagination ?? { page: 1, pages: 1, total: 0 }); setPlans(current); setInitialPlans(current); setSelected(new Set());
     }).catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load employee plans."); }).finally(() => { if (!controller.signal.aborted) setBusy(null); });
     return () => controller.abort();
   }, [codes.join(","), location.id, page]);
@@ -774,7 +776,7 @@ function MessPlanDialogContent({ components, location, onClose }: { components: 
     if (!changed.length) return;
     setBusy("save"); setError(null);
     try {
-      const response = await fetch("/api/payroll/component-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: location.id, componentCodes: codes, effectiveFrom, plans: changed.map((employee) => ({ employeeId: employee.id, componentCode: plans[employee.id] || null })) }) });
+      const response = await fetch("/api/payroll/component-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locationId: location.id, componentCodes: codes, month: effectiveMonth, plans: changed.map((employee) => ({ employeeId: employee.id, componentCode: plans[employee.id] || null })) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Could not save employee plans.");
       toast("success", `${changed.length} Mess plan${changed.length === 1 ? "" : "s"} updated.`);
@@ -782,13 +784,19 @@ function MessPlanDialogContent({ components, location, onClose }: { components: 
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save employee plans."); } finally { setBusy(null); }
   }
 
-  return <Modal open onClose={onClose} title="Manage Mess plans" description={`${location.name} · select one plan per employee. No Mess removes the deduction from the effective date.`} size="xl">
+  const visibleIds = new Set(employees.map((employee) => employee.id));
+  const allVisibleSelected = employees.length > 0 && employees.every((employee) => selected.has(employee.id));
+  function toggleVisible() { setSelected((current) => allVisibleSelected ? new Set([...current].filter((id) => !visibleIds.has(id))) : new Set([...current, ...visibleIds])); }
+  function applyBulkPlan() { if (!selected.size) return; setPlans((current) => ({ ...current, ...Object.fromEntries([...selected].filter((id) => visibleIds.has(id)).map((id) => [id, bulkPlan])) })); }
+
+  return <Modal open onClose={onClose} title="Manage Mess plans" description={`${location.name} · assign one Mess plan per employee for a payroll month. No Mess removes the deduction from that month.`} size="xl">
     <div className="space-y-4">
       {error && <p role="alert" className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-foreground">{error}</p>}
-      <p aria-live="polite" className="text-xs text-muted-foreground">{busy === "load" ? "Loading employees..." : `${pagination.total} employees. ${changed.length} changed on this page.`}</p>
-      <div className="overflow-x-auto rounded-lg border border-edge"><table className="w-full min-w-[42rem] text-left text-sm"><thead className="bg-tint text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Department</th><th className="px-4 py-3">Mess plan</th></tr></thead><tbody className="divide-y divide-edge">{employees.map((employee) => <tr key={employee.id}><td className="px-4 py-3"><p className="font-semibold">{employee.firstName} {employee.lastName}</p><p className="text-xs text-muted-foreground">{employee.employeeNumber}</p></td><td className="px-4 py-3 text-muted-foreground">{employee.department?.name ?? "Not assigned"}</td><td className="px-4 py-3"><Select aria-label={`Mess plan for ${employee.firstName} ${employee.lastName}`} value={plans[employee.id] ?? ""} onChange={(event) => setPlans((current) => ({ ...current, [employee.id]: event.target.value }))}><option value="">No Mess</option>{components.map((component) => <option key={component.code} value={component.code}>{component.amount.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })} per month</option>)}</Select></td></tr>)}</tbody></table></div>
+      <p aria-live="polite" className="text-xs text-muted-foreground">{busy === "load" ? "Loading employees..." : `${pagination.total} employees. ${selected.size} selected. ${changed.length} changed on this page.`}</p>
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-edge bg-tint/30 p-3"><Button type="button" size="sm" variant="outline" disabled={!employees.length} onClick={toggleVisible}>{allVisibleSelected ? "Clear visible" : "Select visible"}</Button><Button type="button" size="sm" variant="ghost" disabled={!selected.size} onClick={() => setSelected(new Set())}>Clear selection</Button><div className="min-w-52 flex-1"><Field label="Plan for selected employees"><Select aria-label="Mess plan for selected employees" value={bulkPlan} onChange={(event) => setBulkPlan(event.target.value)}><option value="">No Mess</option>{components.map((component) => <option key={component.code} value={component.code}>{component.amount.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })} per month</option>)}</Select></Field></div><Button type="button" size="sm" disabled={!selected.size} onClick={applyBulkPlan}>Apply to selected</Button></div>
+      <div className="overflow-x-auto rounded-lg border border-edge"><table className="w-full min-w-[42rem] text-left text-sm"><thead className="bg-tint text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="w-12 px-4 py-3">Select</th><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Department</th><th className="px-4 py-3">Mess plan</th></tr></thead><tbody className="divide-y divide-edge">{employees.map((employee) => <tr key={employee.id}><td className="px-4 py-3"><input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" aria-label={`Select ${employee.firstName} ${employee.lastName}`} checked={selected.has(employee.id)} onChange={(event) => setSelected((current) => { const next = new Set(current); event.target.checked ? next.add(employee.id) : next.delete(employee.id); return next; })} /></td><td className="px-4 py-3"><p className="font-semibold">{employee.firstName} {employee.lastName}</p><p className="text-xs text-muted-foreground">{employee.employeeNumber}</p></td><td className="px-4 py-3 text-muted-foreground">{employee.department?.name ?? "Not assigned"}</td><td className="px-4 py-3"><Select aria-label={`Mess plan for ${employee.firstName} ${employee.lastName}`} value={plans[employee.id] ?? ""} onChange={(event) => setPlans((current) => ({ ...current, [employee.id]: event.target.value }))}><option value="">No Mess</option>{components.map((component) => <option key={component.code} value={component.code}>{component.amount.toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })} per month</option>)}</Select></td></tr>)}</tbody></table></div>
       <div className="flex items-center justify-between gap-3"><p className="text-xs text-muted-foreground">Page {pagination.page} of {pagination.pages}</p><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={page <= 1 || busy === "load"} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button type="button" size="sm" variant="outline" disabled={page >= pagination.pages || busy === "load"} onClick={() => setPage((value) => value + 1)}>Next</Button></div></div>
-      <div className="flex flex-col gap-3 rounded-lg border border-edge bg-tint/30 p-4 sm:flex-row sm:items-end sm:justify-between"><div className="w-full sm:max-w-xs"><Field label="Effective from"><Input type="date" required value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></Field></div><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onClose}>Close</Button><Button type="button" loading={busy === "save"} disabled={!changed.length || busy === "load"} onClick={() => void save()}>Save changed plans</Button></div></div>
+      <div className="flex flex-col gap-3 rounded-lg border border-edge bg-tint/30 p-4 sm:flex-row sm:items-end sm:justify-between"><div className="w-full sm:max-w-xs"><Field label="Effective payroll month" hint="Assignments take effect on the first day of this month."><Input type="month" required value={effectiveMonth} onChange={(event) => setEffectiveMonth(event.target.value)} /></Field></div><div className="flex gap-2"><Button type="button" variant="ghost" onClick={onClose}>Close</Button><Button type="button" loading={busy === "save"} disabled={!changed.length || busy === "load"} onClick={() => void save()}>Save changed plans</Button></div></div>
     </div>
   </Modal>;
 }

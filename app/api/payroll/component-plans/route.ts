@@ -8,6 +8,15 @@ import { requireActiveSession } from "@/lib/session";
 
 const PAGE_SIZE = 20;
 
+function effectivePayrollMonth(body: Record<string, unknown>): { key: string; date: Date } | null {
+  const month = typeof body.month === "string" ? body.month : null;
+  const date = typeof body.effectiveFrom === "string" ? body.effectiveFrom : null;
+  const key = month ?? date?.slice(0, 7);
+  if (!key || !/^\d{4}-(0[1-9]|1[0-2])$/.test(key) || date && date !== `${key}-01`) return null;
+  const value = new Date(`${key}-01T12:00:00.000Z`);
+  return Number.isNaN(value.getTime()) ? null : { key, date: value };
+}
+
 function codes(input: unknown): string[] {
   const raw = Array.isArray(input) ? input : typeof input === "string" ? input.split(",") : [];
   return [...new Set(raw.map(normalizePayrollComponentCode).filter((code): code is string => Boolean(code)))];
@@ -51,9 +60,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const locationId = typeof body.locationId === "string" ? body.locationId.trim() : "";
   const componentCodes = codes(body.componentCodes);
-  const effectiveFromKey = typeof body.effectiveFrom === "string" ? body.effectiveFrom : "";
+  const effectiveMonth = effectivePayrollMonth(body);
   const plans: unknown[] = Array.isArray(body.plans) ? body.plans : [];
-  if (!locationId || componentCodes.length < 2 || !plans.length || plans.length > 100 || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFromKey)) return NextResponse.json({ error: "Choose valid plans, employees, and an effective date." }, { status: 400 });
+  if (!locationId || componentCodes.length < 2 || !plans.length || plans.length > 100 || !effectiveMonth) return NextResponse.json({ error: "Choose valid plans, employees, and an effective payroll month." }, { status: 400 });
   const normalized = plans.map((plan): { employeeId: string; componentCode: string | null } => {
     const value = plan && typeof plan === "object" && !Array.isArray(plan) ? plan as Record<string, unknown> : {};
     return { employeeId: typeof value.employeeId === "string" ? value.employeeId.trim() : "", componentCode: value.componentCode === null ? null : normalizePayrollComponentCode(value.componentCode) || null };
@@ -63,7 +72,7 @@ export async function POST(request: NextRequest) {
   if (!planContext) return NextResponse.json({ error: "The selected employee plans are not configured for this location." }, { status: 404 });
   const employees = await prisma.employee.findMany({ where: { tenantId: session.tenantId, id: { in: normalized.map((plan) => plan.employeeId) }, status: "active", loginOnly: false, AND: [employeeLocationScope(locationId)] }, select: { id: true } });
   if (employees.length !== normalized.length) return NextResponse.json({ error: "Every selected employee must be active and belong to this location." }, { status: 400 });
-  const effectiveFrom = new Date(`${effectiveFromKey}T12:00:00.000Z`);
+  const { key: effectiveFromKey, date: effectiveFrom } = effectiveMonth;
   const previousDay = new Date(effectiveFrom); previousDay.setUTCDate(previousDay.getUTCDate() - 1);
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId, employeeId: { in: normalized.map((plan) => plan.employeeId) }, componentCode: { in: componentCodes }, active: true, effectiveFrom: { lte: new Date("9999-12-31T12:00:00.000Z") }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom } }] } });

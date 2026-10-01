@@ -28,17 +28,23 @@ export async function POST(request: NextRequest) {
   if (action === "mess_backdate") {
     const policies = await prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "payroll_policy", active: true, OR: [{ locationId: scope.locationId }, { locationId: null }] }, select: { payload: true } });
     const messCodes = new Set(policies.flatMap((record) => payrollPolicyDraft(record.payload)?.components ?? []).filter((component) => component.applicability === "assigned_employees" && /mess/i.test(`${component.code} ${component.label}`)).map((component) => component.code));
-    const candidates = messCodes.size ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, componentCode: { in: [...messCodes] }, active: true, effectiveTo: null, effectiveFrom: { gt: start } }, include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true } } }, orderBy: { effectiveFrom: "asc" } }) : [];
-    // Only assignments that began after the selected month are eligible; older
-    // history is preserved by ending it the day before the recovered period.
-    const eligible = candidates.filter((candidate) => candidate.effectiveFrom > start);
+    // The legacy workbook importer gave an assignment its import-day effective
+    // date. Limit recovery to that precise signal, while allowing an older
+    // import to be repaired for the selected historical payroll month.
+    const candidates = messCodes.size ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, componentCode: { in: [...messCodes] }, active: true, effectiveTo: null, effectiveFrom: { gt: end } }, include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true } } }, orderBy: { effectiveFrom: "asc" } }) : [];
+    const legacyImported = candidates.filter((candidate) => candidate.createdAt.getUTCFullYear() === candidate.effectiveFrom.getUTCFullYear() && candidate.createdAt.getUTCMonth() === candidate.effectiveFrom.getUTCMonth() && candidate.createdAt.getUTCDate() === candidate.effectiveFrom.getUTCDate());
+    const candidateCounts = new Map<string, number>(); for (const candidate of legacyImported) candidateCounts.set(candidate.employeeId, (candidateCounts.get(candidate.employeeId) ?? 0) + 1);
+    const sameMonthAssignments = legacyImported.length ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, employeeId: { in: legacyImported.map((candidate) => candidate.employeeId) }, componentCode: { in: [...messCodes] }, active: true, effectiveFrom: { gte: start, lte: end } }, select: { id: true, employeeId: true } }) : [];
+    const eligible = legacyImported.filter((candidate) => candidateCounts.get(candidate.employeeId) === 1 && !sameMonthAssignments.some((row) => row.employeeId === candidate.employeeId && row.id !== candidate.id));
     if (!apply) return NextResponse.json({ action, month: payrollMonth, count: eligible.length, records: eligible.map((row) => ({ id: row.id, employee: `${row.employee.firstName} ${row.employee.lastName}`.trim(), employeeNumber: row.employee.employeeNumber, componentCode: row.componentCode, from: row.effectiveFrom })) });
     await prisma.$transaction(async (tx) => {
       for (const assignment of eligible) {
-        const previous = await tx.payrollComponentAssignment.findFirst({ where: { tenantId: session.tenantId, locationId: scope.locationId, employeeId: assignment.employeeId, componentCode: assignment.componentCode, active: true, id: { not: assignment.id }, effectiveFrom: { lt: start }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: start } }] }, orderBy: { effectiveFrom: "desc" } });
-        if (previous) await tx.payrollComponentAssignment.update({ where: { id: previous.id }, data: { effectiveTo: new Date(start.getTime() - 24 * 60 * 60 * 1000) } });
-        const updated = await tx.payrollComponentAssignment.update({ where: { id: assignment.id }, data: { effectiveFrom: start } });
-        await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_recovery.mess_backdate", entity: "PayrollComponentAssignment", entityId: assignment.id, summary: `Backdated Mess assignment to ${payrollMonth}`, before: { effectiveFrom: assignment.effectiveFrom.toISOString() }, after: { effectiveFrom: updated.effectiveFrom.toISOString(), previousAssignmentId: previous?.id ?? null } } });
+        const group = await tx.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, employeeId: assignment.employeeId, componentCode: { in: [...messCodes] }, active: true }, orderBy: { effectiveFrom: "asc" } });
+        const future = group.find((row) => row.id !== assignment.id && row.effectiveFrom > end);
+        const previous = group.filter((row) => row.id !== assignment.id && row.effectiveFrom < start && (!row.effectiveTo || row.effectiveTo >= start));
+        for (const row of previous) await tx.payrollComponentAssignment.update({ where: { id: row.id }, data: { effectiveTo: new Date(start.getTime() - 24 * 60 * 60 * 1000) } });
+        const updated = await tx.payrollComponentAssignment.update({ where: { id: assignment.id }, data: { effectiveFrom: start, effectiveTo: future ? new Date(future.effectiveFrom.getTime() - 24 * 60 * 60 * 1000) : assignment.effectiveTo } });
+        await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "payroll_recovery.mess_backdate", entity: "PayrollComponentAssignment", entityId: assignment.id, summary: `Recovered legacy Mess assignment to ${payrollMonth}`, before: { effectiveFrom: assignment.effectiveFrom.toISOString() }, after: { effectiveFrom: updated.effectiveFrom.toISOString(), effectiveTo: updated.effectiveTo?.toISOString() ?? null, previousAssignmentIds: previous.map((row) => row.id), futureAssignmentId: future?.id ?? null } } });
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return NextResponse.json({ action, changed: eligible.length });

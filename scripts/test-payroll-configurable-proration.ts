@@ -159,12 +159,19 @@ const planApi = readFileSync(new URL("../app/api/payroll/component-plans/route.t
 assert.match(planApi, /session\?\.role !== "admin"/, "only admins can change employee component plans");
 assert.match(planApi, /employeeLocationScope\(locationId\)/, "plan changes validate employee location scope");
 assert.match(planApi, /effectiveTo: previousDay/, "replacing a plan preserves the previous assignment history");
+assert.match(planApi, /effectivePayrollMonth/, "plan changes accept a payroll month and anchor it on its first day");
+assert.match(planApi, /date !== `\$\{key\}-01`/, "legacy effective dates must be the first day of a month");
 const recoveryApi = readFileSync(new URL("../app/api/payroll/recovery/route.ts", import.meta.url), "utf8");
 assert.match(recoveryApi, /session\?\.role !== "admin"/, "only admins can run payroll recovery");
 assert.match(recoveryApi, /status: \{ in: \["finalized", "paid"\] \}/, "recovery rejects finalized and paid payroll months");
 assert.match(recoveryApi, /payroll_recovery\.attendance_reprocess/, "attendance recovery audits each changed attendance record");
 assert.match(recoveryApi, /payroll_recovery\.mess_backdate/, "Mess recovery audits each changed assignment");
+assert.match(recoveryApi, /effectiveFrom: \{ gt: end \}/, "Mess recovery only backdates a plan that starts after the recovered month");
+assert.match(recoveryApi, /const legacyImported = candidates\.filter/, "Mess recovery verifies the legacy import-date assignment signature");
+assert.match(recoveryApi, /componentCode: \{ in: \[\.\.\.messCodes\] \}/, "Mess recovery treats configured Mess plans as one exclusive group");
 const configurationHub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
 assert.match(configurationHub, /Manage \{component\.label\} plans/, "same-named employee plans are managed from one list without hardcoded plan codes");
+assert.match(configurationHub, /Effective payroll month/, "Mess plans are assigned by payroll month");
+assert.match(configurationHub, /Apply to selected/, "Mess plans support a controlled bulk assignment action");
 
 console.log("configurable payroll proration and assignment tests passed");
