@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import JSZip from "jszip";
+import { ZipArchive } from "archiver";
+import { PassThrough, Readable } from "node:stream";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
 import { loadPayslipLogo, renderPayslipPdf } from "@/lib/payslip-pdf";
@@ -11,21 +12,6 @@ import { documentSnapshotForResponse } from "@/lib/payslip-document";
 export const runtime = "nodejs";
 
 const safeName = (value: string) => value.replace(/[^a-z0-9_-]/gi, "_");
-const PDF_CONCURRENCY = 4;
-
-type PdfResult = { name: string; data: Buffer } | { error: true; employeeNumber: string };
-
-async function mapWithConcurrency<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>) {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await work(items[index]);
-    }
-  }));
-  return results;
-}
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -37,7 +23,6 @@ export async function GET(req: NextRequest) {
   const ids = session.role === "employee" ? [session.sub] : [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
   const slipId = req.nextUrl.searchParams.get("id");
   const runId = req.nextUrl.searchParams.get("runId");
-  if (ids.length > 500) return NextResponse.json({ error: "Select at most 500 employees at once." }, { status: 400 });
   const [tenant, slips] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
     prisma.payslip.findMany({
@@ -47,7 +32,7 @@ export async function GET(req: NextRequest) {
     }),
   ]);
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
-  // Cache promises, rather than completed values, so concurrent workers share one fetch per source.
+  // Keep each logo in memory once per export instead of fetching it for every PDF.
   const logos = new Map<string, Promise<Buffer | null>>();
   const logoFor = (source: string | null | undefined) => {
     const key = source ?? "";
@@ -58,8 +43,7 @@ export async function GET(req: NextRequest) {
     }
     return logo;
   };
-  const pdfs = await mapWithConcurrency(slips, PDF_CONCURRENCY, async (slip): Promise<PdfResult> => {
-    try {
+  const renderPdf = async (slip: typeof slips[number]) => {
     const branding = resolveCompanyBranding(tenant, slip.employee.branch?.location ?? slip.employee.location);
     const document = documentSnapshotForResponse(slip.documentSnapshot);
     if (document) {
@@ -94,16 +78,43 @@ export async function GET(req: NextRequest) {
       name: `${safeName(employee.employeeNumber)}-${month}.pdf`,
         data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, companyLogo: await logoFor(branding.logoUrl), month, employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; contractual?: number | null; earned?: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
     };
-    } catch {
-      // Do not create a partial ZIP when one payslip cannot be generated.
-      return { error: true, employeeNumber: slip.employee.employeeNumber };
+  };
+  if (slips.length === 1) {
+    try {
+      const pdf = await renderPdf(slips[0]);
+      return new NextResponse(new Uint8Array(pdf.data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdf.name}"` } });
+    } catch (error) {
+      console.error("Unable to generate payslip PDF", { tenantId: session.tenantId, employeeNumber: slips[0].employee.employeeNumber, error });
+      return NextResponse.json({ error: "Unable to generate the requested payslip." }, { status: 500 });
     }
-  });
-  const failed = pdfs.filter((pdf): pdf is Extract<PdfResult, { error: true }> => "error" in pdf);
-  if (failed.length) return NextResponse.json({ error: "Unable to generate all requested payslips.", failedPayslips: failed.map(({ employeeNumber }) => ({ employeeNumber })) }, { status: 500 });
-  const generated = pdfs as Extract<PdfResult, { data: Buffer }>[];
-  if (generated.length === 1) return new NextResponse(new Uint8Array(generated[0].data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${generated[0].name}"` } });
-  const zip = new JSZip(); generated.forEach((pdf) => zip.file(pdf.name, pdf.data));
-  const content = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
-  return new NextResponse(new Uint8Array(content), { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="payslips-${month}.zip"` } });
+  }
+
+  const output = new PassThrough();
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    console.error("Payslip ZIP export failed", { tenantId: session.tenantId, month, error });
+    try { archive.abort(); } catch { /* The output stream is still destroyed below. */ }
+    if (!output.destroyed) output.destroy(error instanceof Error ? error : new Error("Payslip ZIP export failed"));
+  };
+  archive.on("error", fail);
+  output.on("error", () => { /* The web stream receives this error; keep Node from treating it as uncaught. */ });
+  archive.pipe(output);
+
+  // Generate one PDF at a time, so the response starts after the first file and memory stays bounded.
+  void (async () => {
+    try {
+      for (const slip of slips) {
+        const pdf = await renderPdf(slip);
+        archive.append(pdf.data, { name: pdf.name });
+      }
+      await archive.finalize();
+    } catch (error) {
+      fail(error);
+    }
+  })();
+
+  return new NextResponse(Readable.toWeb(output) as ReadableStream, { headers: { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="payslips-${month}.zip"`, "Cache-Control": "no-store" } });
 }
