@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import { istStartOfDay, istDateKey, IST_OFFSET_MS } from "./ist";
 import { computePunchStatusIST } from "./attendance";
 import { minutesOfDay } from "./dates";
+import { payrollPolicyDraft, resolveConfiguration, type PayrollAttendanceTreatment } from "./configuration";
 import type { Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
 
 // A day is finalizable once its IST window has closed plus a grace period,
@@ -22,6 +23,10 @@ export const MAX_SPAN_HOURS = 14;
 export const HALF_DAY_HOURS = 4;
 
 export type PunchMode = "first_last" | "alternating" | "strict";
+
+export function missingOutAttendanceStatus(finalize: boolean, inAt: Date | null, outAt: Date | null, treatment: PayrollAttendanceTreatment["missingOutPunch"]) {
+  return finalize && inAt && !outAt ? treatment === "half_day" ? "half_day" : treatment === "full_day" ? "absent" : null : null;
+}
 
 export interface PunchEntry {
   id: string;
@@ -229,6 +234,10 @@ export async function reconcileEmployeeDay(
     where: { employeeId: employee.id, authStatus: { not: "pending" }, punchTime: { gte: dayStart, lt: dayEnd } },
     orderBy: { punchTime: "asc" },
   });
+  const branch = employee.branchId ? await prisma.branch.findUnique({ where: { id: employee.branchId }, select: { locationId: true } }) : null;
+  const policies = branch?.locationId ? await prisma.configurationRecord.findMany({ where: { tenantId: tenant.id, kind: "payroll_policy", active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }) : [];
+  const policy = branch?.locationId ? resolveConfiguration(policies.filter((record) => payrollPolicyDraft(record.payload)), branch.locationId, attendanceDate) : null;
+  const missingOutTreatment = payrollPolicyDraft(policy?.payload)?.attendanceTreatment.missingOutPunch ?? "review";
 
   const devices = await prisma.device.findMany({
     where: { id: { in: punches.map((p) => p.deviceId).filter(Boolean) as string[] } },
@@ -330,6 +339,9 @@ export async function reconcileEmployeeDay(
     if (finalize && !outAt) {
       // Window closed with a lone punch → probable missed punch-out.
       reviewStatus = "missed_punch";
+      // Payroll policy controls whether a finalized IN-only day is review-only,
+      // half day, or full-day LOP. The review flag remains for correction.
+      status = missingOutAttendanceStatus(finalize, inAt, outAt, missingOutTreatment) ?? status;
     } else if (outAt && span !== null && span > MAX_SPAN_HOURS) {
       // Implausible span (e.g. next-day punch glued on) → needs a human.
       reviewStatus = "needs_review";

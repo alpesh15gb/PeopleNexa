@@ -24,6 +24,7 @@
     "test:payroll-selected-members": "tsx scripts/test-payroll-selected-members.ts",
     "test:payroll-revamp": "tsx scripts/test-payroll-revamp.ts",
     "test:payroll-reporting": "tsx scripts/test-payroll-reporting.ts",
+    "test:payroll-register": "tsx scripts/test-payroll-register.ts",
     "test:salary-revisions": "tsx scripts/test-salary-revisions.ts",
     "test:tenant-media": "tsx scripts/test-tenant-media.ts",
     "test:id-card-layout": "tsx scripts/test-id-card-layout.ts",

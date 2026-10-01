@@ -65,6 +65,7 @@ export function payrollPolicyEditorBaseline(config: PayrollConfig): PayrollPolic
     earnedSalaryRounding: config.earnedSalaryRounding,
     earnedSalaryAggregation: config.earnedSalaryAggregation,
     deductLossOfPay: config.deductAbsentDays,
+    attendanceTreatment: { missingOutPunch: "review", noPunch: "full_day" },
     overtimeMultiplier: config.otMultiplier,
     overtimeBasis: "basic_hourly",
     statutory: {
