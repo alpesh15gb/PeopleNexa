@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { attendanceDayKey, punchDayForShift, shiftWindow, missingOutAttendanceStatus } from "../lib/reconcile";
+import { attendanceDayKey, attendanceWindow, isFinalizable, pairPunches, punchDayForShift, shiftWindow, missingOutAttendanceStatus } from "../lib/reconcile";
 import { parseIST } from "../lib/ist";
 
 const ist = (value: string) => parseIST(value)!;
@@ -17,5 +17,19 @@ assert.equal(attendanceDayKey(nightWindow.start).toISOString(), nightDay.toISOSt
 assert.equal(missingOutAttendanceStatus(true, new Date(), null, "half_day"), "half_day");
 assert.equal(missingOutAttendanceStatus(true, new Date(), null, "full_day"), "absent");
 assert.equal(missingOutAttendanceStatus(false, new Date(), null, "half_day"), null);
+
+const noShiftIn = ist("2026-08-12 09:00:00");
+const noShiftWindow = attendanceWindow(nightDay, null, 18, noShiftIn);
+assert.equal(noShiftWindow.end.toISOString(), ist("2026-08-13 03:00:00").toISOString(), "no-shift window closes after the configured duration from the first punch");
+assert.equal(isFinalizable(nightDay, ist("2026-08-13 05:01:00"), null, 18, noShiftIn), true, "no-shift IN-only days finalize after their window and normal grace");
+assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, "half_day"), "half_day", "a finalized no-shift IN-only day follows the location half-day policy");
+assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, "full_day"), "absent", "a finalized no-shift IN-only day follows the location full-day policy");
+assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, "review"), null, "review policy leaves a finalized no-shift IN-only day for review");
+const pairedNoShiftPunches = pairPunches([
+  { id: "in", punchTime: ist("2026-08-12 09:00:00"), source: "device", inOutHint: "unknown", deviceId: null },
+  { id: "out", punchTime: ist("2026-08-13 02:00:00"), source: "device", inOutHint: "unknown", deviceId: null },
+] as never, "first_last", new Map());
+assert.deepEqual(pairedNoShiftPunches.map((p) => p.type), ["in", "out"], "a next-day punch within the no-shift window pairs with the original workday");
+assert.deepEqual(attendanceWindow(nightDay, dayShift, 18), shiftWindow(nightDay, dayShift), "configured no-shift windows do not change shift attendance windows");
 
 console.log("attendance day-key tests passed");

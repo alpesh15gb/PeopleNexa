@@ -14,6 +14,8 @@ const policy = {
   components: [{ code: "BASIC", label: "Basic", kind: "earning" as const, formula: "percent_of_ctc" as const, amount: 50, minCtc: null, maxCtc: null, includeInGross: true, visibleOnPayslip: true, pfWageBase: true, taxWageBase: true, esicWageBase: true, active: true, reimbursementLimit: null, reimbursementFrequency: null, registerPresentation: "included" as const }],
 };
 assert.ok(payrollPolicyDraft(policy), "catalog formula and source metadata validate");
+assert.equal(payrollPolicyDraft(policy)?.attendanceTreatment.noShiftAttendanceWindowHours, 18, "legacy payroll policies default no-shift attendance windows to 18 hours");
+assert.equal(payrollPolicyDraft({ ...policy, attendanceTreatment: { noShiftAttendanceWindowHours: 25 } }), null, "no-shift attendance windows above 24 hours are rejected");
 const selected = resolveConfiguration([{ id: "tenant", locationId: null, active: true, effectiveFrom: new Date("2026-01-01"), effectiveTo: null }, { id: "location", locationId: "L1", active: true, effectiveFrom: new Date("2026-02-01"), effectiveTo: null }], "L1", new Date("2026-03-01"));
 assert.equal(selected?.id, "location", "location override resolves over tenant default");
 const firstIstDay = parseIST("2026-02-01 00:00:00")!;
@@ -43,6 +45,7 @@ assert.equal(cloned.components.length, 1, "existing effective-policy components 
 assert.equal(cloned.salaryDivisorMethod, "fixed_divisor", "legacy policies default to the existing fixed divisor");
 assert.equal(cloned.earnedSalaryRounding, "two_decimals", "legacy policies default to two-decimal rounding");
 assert.equal(cloned.earnedSalaryAggregation, "rounded_total", "legacy policies retain aggregate earned-salary rounding");
+assert.equal(cloned.attendanceTreatment.noShiftAttendanceWindowHours, 18, "editor exposes the default no-shift attendance window");
 assert.equal(cloned.components[0].prorationBasis, "none", "legacy components remain unprorated");
 assert.equal(cloned.components[0].applicability, "all", "legacy components remain applicable to all employees");
 assert.equal(cloned.components[0].hiddenCalculatorFlag, "keep", "hidden component fields survive draft creation");
@@ -67,6 +70,7 @@ assert.match(hub, /Current Policy/, "HR sees the current policy rather than ever
 assert.match(hub, /Publish policy/, "publishing remains an explicit current-policy action");
 assert.match(hub, /Deactivate/, "published versions can still be deactivated");
 assert.match(hub, /Actual calendar days/, "calendar-day salary calculation is exposed");
+assert.match(hub, /No-shift attendance window/, "no-shift attendance finalization is configurable per policy");
 assert.match(hub, /Round each component, then sum/, "component-level earned-salary aggregation is exposed");
 assert.match(hub, /Payable days/, "component payable-day proration is exposed");
 assert.match(hub, /Selected employees/, "component assignment applicability is exposed");

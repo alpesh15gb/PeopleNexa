@@ -5,6 +5,7 @@ import {
   type PayrollPolicyDraft,
   type PayrollSchedule,
   type PayrollStatutoryRule,
+  DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS,
 } from "./configuration";
 import type { PayrollConfig } from "./payroll";
 
@@ -65,7 +66,7 @@ export function payrollPolicyEditorBaseline(config: PayrollConfig): PayrollPolic
     earnedSalaryRounding: config.earnedSalaryRounding,
     earnedSalaryAggregation: config.earnedSalaryAggregation,
     deductLossOfPay: config.deductAbsentDays,
-    attendanceTreatment: { missingOutPunch: "review", noPunch: "full_day" },
+    attendanceTreatment: { missingOutPunch: "review", noPunch: "full_day", noShiftAttendanceWindowHours: DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS },
     overtimeMultiplier: config.otMultiplier,
     overtimeBasis: "basic_hourly",
     statutory: {

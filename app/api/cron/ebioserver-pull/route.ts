@@ -51,15 +51,18 @@ export async function POST(req: NextRequest) {  const secret = process.env.CRON_
     const results: Array<Record<string, unknown>> = [];
     for (const tenant of tenants) {
       if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) continue;
-      const profile = getEbioserverConfig(tenant);
-      if (!profile.enabled || !profile.url || !getEbioserverPassword(profile)) continue;
-
       try {
-        const res = await pullTenant(tenant.id, profile);
-        const now = new Date().toISOString();
-        // Drain the day-finalization backlog here (bounded), so read paths stay fast.
+        const profile = getEbioserverConfig(tenant);
+        const canPull = profile.enabled && profile.url && getEbioserverPassword(profile);
+        const res = canPull ? await pullTenant(tenant.id, profile) : null;
+        // Finalize after ingesting the device backlog so a valid OUT already
+        // present on a device is not classified as missing prematurely. This
+        // still runs for tenants without an eBio connection.
         const finalized = await finalizeEligibleDays(tenant.id, 500);
-        if (res.ok) {
+        const now = new Date().toISOString();
+        if (!res) {
+          results.push({ tenant: tenant.slug, ok: true, pulled: 0, ingested: 0, devices: 0, skipped: 0, finalized });
+        } else if (res.ok) {
           await updateEbioserverStatus(tenant.id, { lastPulledAt: now, lastError: null, lastErrorAt: null });
           results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, finalized });
         } else {
