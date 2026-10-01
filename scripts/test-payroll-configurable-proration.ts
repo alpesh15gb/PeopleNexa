@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { PayrollComponentRule } from "../lib/configuration";
 import { payrollPolicyDraft } from "../lib/configuration";
 import { assignmentRangesOverlap, resolveAssignedComponentCodes, type PayrollComponentAssignmentRecord } from "../lib/payroll-component-assignments";
+import { isFinalizedInOnlyDay, recoveredMissingOutStatus } from "../lib/payroll-recovery";
 import { resolvePayrollPolicy } from "../lib/payroll-policy";
 import { calendarDaysInPayrollMonth, computePayroll, DEFAULT_PAYROLL_CONFIG, documentComponents, type AttendanceSummary, type PayrollConfig } from "../lib/payroll";
 import { payslipReconciliation } from "../lib/payslip-document";
@@ -141,6 +142,10 @@ const assignmentRecords = [assignment(), assignment({ id: "wrong-location", loca
 assert.deepEqual(resolveAssignedComponentCodes(assignmentRecords, { tenantId: "tenant-a", locationId: "location-a", employeeId: "employee-a" }, "2026-07"), ["ATTENDANCE_SERVICE"], "assignment resolution is tenant, location, and employee scoped");
 assert.equal(assignmentRangesOverlap({ effectiveFrom: new Date("2026-01-01"), effectiveTo: new Date("2026-06-30") }, { effectiveFrom: new Date("2026-06-30"), effectiveTo: null }), true, "inclusive assignment boundaries cannot overlap");
 assert.equal(assignmentRangesOverlap({ effectiveFrom: new Date("2026-01-01"), effectiveTo: new Date("2026-06-29") }, { effectiveFrom: new Date("2026-06-30"), effectiveTo: null }), false);
+assert.equal(recoveredMissingOutStatus("half_day", "present"), "half_day", "recovery applies the active half-day IN-only policy");
+assert.equal(recoveredMissingOutStatus("full_day", "present"), "absent", "recovery applies the active full-day IN-only policy");
+assert.equal(recoveredMissingOutStatus("review", "present"), "present", "review-only policy does not rewrite attendance");
+assert.equal(isFinalizedInOnlyDay({ finalized: true, punchInTime: new Date(), punchOutTime: null, reviewStatus: "missed_punch" }), true, "only finalized missed-punch IN-only days are recoverable");
 
 const assignmentApi = readFileSync(new URL("../app/api/payroll/component-assignments/route.ts", import.meta.url), "utf8");
 assert.match(assignmentApi, /session\?\.role !== "admin"/, "only admins can edit component assignments");
@@ -154,6 +159,11 @@ const planApi = readFileSync(new URL("../app/api/payroll/component-plans/route.t
 assert.match(planApi, /session\?\.role !== "admin"/, "only admins can change employee component plans");
 assert.match(planApi, /employeeLocationScope\(locationId\)/, "plan changes validate employee location scope");
 assert.match(planApi, /effectiveTo: previousDay/, "replacing a plan preserves the previous assignment history");
+const recoveryApi = readFileSync(new URL("../app/api/payroll/recovery/route.ts", import.meta.url), "utf8");
+assert.match(recoveryApi, /session\?\.role !== "admin"/, "only admins can run payroll recovery");
+assert.match(recoveryApi, /status: \{ in: \["finalized", "paid"\] \}/, "recovery rejects finalized and paid payroll months");
+assert.match(recoveryApi, /payroll_recovery\.attendance_reprocess/, "attendance recovery audits each changed attendance record");
+assert.match(recoveryApi, /payroll_recovery\.mess_backdate/, "Mess recovery audits each changed assignment");
 const configurationHub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
 assert.match(configurationHub, /Manage \{component\.label\} plans/, "same-named employee plans are managed from one list without hardcoded plan codes");
 

@@ -40,6 +40,7 @@ export function EmployeeMasterImportExport() {
   const [ylrFile, setYlrFile] = useState<File | null>(null);
   const [ylrPreview, setYlrPreview] = useState<{ rows: Array<{ employeeCode: string; name: string; designation: string; department: string; messPlan: number | null }>; sheets: string[]; exceptions: string[] } | null>(null);
   const [ylrResult, setYlrResult] = useState<{ created: string[]; updated: string[]; assignments: string[]; exceptions: string[] } | null>(null);
+  const [ylrEffectiveMonth, setYlrEffectiveMonth] = useState("");
 
   async function chooseFile(file: File | undefined) {
     if (!file) return;
@@ -86,7 +87,8 @@ export function EmployeeMasterImportExport() {
     setBusy(true); setError(null);
     try {
       const form = new FormData(); form.append("file", ylrFile);
-      const response = await fetch("/api/employees/ylr-workbook-import?confirm=true", { method: "POST", body: form });
+      const query = new URLSearchParams({ confirm: "true", ...(ylrEffectiveMonth ? { effectiveMonth: ylrEffectiveMonth } : {}) });
+      const response = await fetch(`/api/employees/ylr-workbook-import?${query}`, { method: "POST", body: form });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "YLR workbook import failed.");
       setYlrResult(data); router.refresh();
@@ -104,7 +106,7 @@ export function EmployeeMasterImportExport() {
           <p className="mt-1 text-sm text-muted-foreground">Previews active YLR payroll tabs before it creates or updates employees. Summary, leave, and duplicate tabs are ignored.</p>
           <input ref={ylrFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" onChange={(event) => void previewYlr(event.target.files?.[0])} />
           <Button className="mt-3" type="button" variant="outline" loading={busy} onClick={() => ylrFileRef.current?.click()}>Choose YLR workbook</Button>
-          {ylrPreview && <div className="mt-3 rounded-md bg-muted/50 p-3 text-sm"><p className="font-medium">Preview: {ylrPreview.sheets.length} active sheets, {ylrPreview.rows.length} employees</p><p className="mt-1 text-muted-foreground">{ylrPreview.sheets.join(" · ")}</p><details className="mt-2"><summary className="cursor-pointer font-medium">Preview employees and exceptions</summary><p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{ylrPreview.rows.slice(0, 30).map((row) => `${row.employeeCode} · ${row.name} · ${row.designation} · ${row.department} · Mess ${row.messPlan ?? "review"}`).join("\n")}{ylrPreview.rows.length > 30 ? `\n...and ${ylrPreview.rows.length - 30} more` : ""}{ylrPreview.exceptions.length ? `\n\nExceptions:\n${ylrPreview.exceptions.join("\n")}` : ""}</p></details><Button className="mt-3" type="button" loading={busy} onClick={() => void importYlr()}>Confirm YLR import</Button></div>}
+           {ylrPreview && <div className="mt-3 rounded-md bg-muted/50 p-3 text-sm"><p className="font-medium">Preview: {ylrPreview.sheets.length} active sheets, {ylrPreview.rows.length} employees</p><p className="mt-1 text-muted-foreground">{ylrPreview.sheets.join(" · ")}</p><label className="mt-3 block text-xs font-medium">Mess plan effective payroll month (optional)<input type="month" value={ylrEffectiveMonth} onChange={(event) => setYlrEffectiveMonth(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-input bg-card px-2 text-sm" /></label><p className="mt-1 text-xs text-muted-foreground">Use this when the workbook belongs to an earlier payroll month. Blank uses today.</p><details className="mt-2"><summary className="cursor-pointer font-medium">Preview employees and exceptions</summary><p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{ylrPreview.rows.slice(0, 30).map((row) => `${row.employeeCode} · ${row.name} · ${row.designation} · ${row.department} · Mess ${row.messPlan ?? "review"}`).join("\n")}{ylrPreview.rows.length > 30 ? `\n...and ${ylrPreview.rows.length - 30} more` : ""}{ylrPreview.exceptions.length ? `\n\nExceptions:\n${ylrPreview.exceptions.join("\n")}` : ""}</p></details><Button className="mt-3" type="button" loading={busy} onClick={() => void importYlr()}>Confirm YLR import</Button></div>}
           {ylrResult && <p className="mt-3 text-sm text-muted-foreground">YLR import completed: {ylrResult.created.length} created, {ylrResult.updated.length} updated, {ylrResult.assignments.length} Mess assignments, {ylrResult.exceptions.length} exceptions. Full detail is in the audit log.</p>}
         </div>
         <a href="/api/employees/bulk" download="employees-template.csv" className="inline-flex text-sm font-semibold text-primary hover:underline">Download CSV template</a>

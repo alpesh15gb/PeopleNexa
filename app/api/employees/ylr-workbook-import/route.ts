@@ -6,6 +6,7 @@ import { ensureDesignations, normalizeDesignationName } from "@/lib/designation"
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { previewYlrWorkbook, YLR_BRANCH_NAME, type YlrWorkbookPreview } from "@/lib/ylr-workbook-import";
+import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
 
 export const runtime = "nodejs";
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -41,6 +42,10 @@ export async function POST(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (session?.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const confirm = request.nextUrl.searchParams.get("confirm") === "true";
+  const effectiveMonth = request.nextUrl.searchParams.get("effectiveMonth") ?? "";
+  let effectiveFrom: Date;
+  try { effectiveFrom = effectiveMonth ? payrollMonthAnchor(effectiveMonth) : new Date(); effectiveFrom.setUTCHours(12, 0, 0, 0); }
+  catch { return NextResponse.json({ error: "Effective payroll month must use YYYY-MM." }, { status: 400 }); }
   const parsed = await workbookPreview(request);
   if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const { preview } = parsed;
@@ -74,7 +79,6 @@ export async function POST(request: NextRequest) {
   const messComponents = configuredMessComponents(componentRecords.map((record) => record.payload));
   const importExceptions = [...preview.exceptions];
   const created: string[] = [], updated: string[] = [], assignments: string[] = [];
-  const effectiveFrom = new Date(); effectiveFrom.setUTCHours(12, 0, 0, 0);
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -91,13 +95,19 @@ export async function POST(request: NextRequest) {
         const componentCode = messComponents.get(row.messPlan);
         if (!branch.locationId || !componentCode) { importExceptions.push(`${row.employeeCode}: no configured selected-employee Mess ${row.messPlan} component was found.`); continue; }
         const assigned = await tx.payrollComponentAssignment.findFirst({ where: { tenantId: session.tenantId, locationId: branch.locationId, employeeId: employee.id, componentCode, active: true, effectiveFrom: { lte: effectiveFrom }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: effectiveFrom } }] }, select: { id: true } });
-        if (!assigned) { await tx.payrollComponentAssignment.create({ data: { tenantId: session.tenantId, locationId: branch.locationId, employeeId: employee.id, componentCode, effectiveFrom, createdBy: session.sub } }); assignments.push(`${row.employeeCode}:${componentCode}`); }
+        if (!assigned) {
+          // Keep an already-scheduled future plan intact when importing a
+          // historical workbook instead of creating an overlapping open range.
+          const next = await tx.payrollComponentAssignment.findFirst({ where: { tenantId: session.tenantId, locationId: branch.locationId, employeeId: employee.id, componentCode, active: true, effectiveFrom: { gt: effectiveFrom } }, orderBy: { effectiveFrom: "asc" }, select: { effectiveFrom: true } });
+          const effectiveTo = next ? new Date(next.effectiveFrom.getTime() - 24 * 60 * 60 * 1000) : null;
+          await tx.payrollComponentAssignment.create({ data: { tenantId: session.tenantId, locationId: branch.locationId, employeeId: employee.id, componentCode, effectiveFrom, effectiveTo, createdBy: session.sub } }); assignments.push(`${row.employeeCode}:${componentCode}`);
+        }
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") return NextResponse.json({ error: "Import could not be applied because a concurrent employee change created a duplicate code. Nothing was imported." }, { status: 409 });
     throw error;
   }
-  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "employee.ylr_workbook_import", entity: "Employee", entityId: `ylr:${new Date().toISOString()}`, summary: `YLR workbook import: ${created.length} created, ${updated.length} updated, ${assignments.length} Mess assignments, ${importExceptions.length} exceptions`, after: { sourceRows: preview.rows.length, importedRows: importRows.length, sheets: preview.sheets, created, updated, assignments, exceptions: importExceptions } });
+  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "employee.ylr_workbook_import", entity: "Employee", entityId: `ylr:${new Date().toISOString()}`, summary: `YLR workbook import: ${created.length} created, ${updated.length} updated, ${assignments.length} Mess assignments, ${importExceptions.length} exceptions`, after: { sourceRows: preview.rows.length, importedRows: importRows.length, sheets: preview.sheets, effectiveFrom: effectiveFrom.toISOString(), created, updated, assignments, exceptions: importExceptions } });
   return NextResponse.json({ created, updated, assignments, exceptions: importExceptions });
 }

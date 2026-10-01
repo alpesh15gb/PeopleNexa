@@ -19,6 +19,11 @@ export function payrollMonthAnchor(month: string): Date {
   return new Date(`${month}-01T12:00:00.000Z`);
 }
 
+export function payrollMonthEnd(month: string): Date {
+  const start = payrollMonthAnchor(month);
+  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 12));
+}
+
 /** Assignment ranges are date-inclusive at both ends. */
 export function assignmentRangesOverlap(
   first: { effectiveFrom: Date; effectiveTo: Date | null },
