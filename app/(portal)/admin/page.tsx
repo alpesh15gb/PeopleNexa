@@ -13,7 +13,7 @@ import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 import { BranchPicker } from "./attendance/branch-picker";
 import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
-import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
+import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
 import { dashboardLayout, resolveConfiguration, type DashboardWidgetKey } from "@/lib/configuration";
 
 export const dynamic = "force-dynamic";
@@ -92,7 +92,7 @@ export default async function AdminDashboardPage({
   const attendanceWhere = branchId
     ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active", loginOnly: false } }
     : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } };
-  const [employees, attendance, attendanceTotal, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
+  const [employees, attendance, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } }, branch: { select: { name: true } }, profile: { select: { gender: true } } },
@@ -103,10 +103,7 @@ export default async function AdminDashboardPage({
         employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } },
       },
       orderBy: { punchInTime: "asc" },
-      skip: (attendancePage - 1) * attendancePageSize,
-      take: attendancePageSize,
     }),
-    prisma.attendance.count({ where: attendanceWhere }),
     prisma.attendance.findMany({ where: attendanceWhere, select: { employeeId: true, status: true, punchInTime: true } }),
     prisma.leaveRequest.findMany({
       where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: addDays(today, 1) }, toDate: { gte: today }, employee: empScope },
@@ -158,35 +155,21 @@ export default async function AdminDashboardPage({
     }),
     prisma.punch.findMany({
       where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: empScope },
-      select: { employeeId: true },
+      select: { employeeId: true, punchTime: true, authStatus: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } } },
+      orderBy: { punchTime: "asc" },
     }),
   ]);
 
-  // Branch-scoped week trend (groupBy can't join employee, so aggregate raw
-  // rows in code when filtered; global path keeps the cheap groupBy).
-  type WeekRow = { date: Date; status: string; _count?: number };
-  let weekRows: WeekRow[];
-  if (branchId || ownLocationId) {
-    const rows = await prisma.attendance.findMany({
-      where: { tenantId: session.tenantId, date: { gte: currentMonthStart, lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : { status: "active", loginOnly: false, branch: { locationId: ownLocationId! } } },
-      select: { date: true, status: true },
-    });
-    weekRows = rows.map((r) => ({ date: r.date, status: r.status }));
-  } else {
-    const grouped = await prisma.attendance.groupBy({
-      by: ["date", "status"],
-      where: { tenantId: session.tenantId, date: { gte: currentMonthStart, lt: addDays(today, 1) }, employee: { status: "active", loginOnly: false } },
-      _count: true,
-    });
-    weekRows = grouped.map((r) => ({ date: r.date, status: r.status, _count: r._count }));
-  }
+  const trendEmployeeScope = branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false };
+  const [weekRows, weekPunches] = await Promise.all([
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: currentMonthStart, lt: addDays(today, 1) }, employee: trendEmployeeScope }, select: { employeeId: true, date: true, status: true } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(currentMonthStart, addDays(today, 1)), employee: trendEmployeeScope }, select: { employeeId: true, punchTime: true, authStatus: true } }),
+  ]);
 
   const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendanceRecords, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
   const maleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "male").length;
   const femaleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "female").length;
   const reportedGenderTotal = maleEmployees + femaleEmployees;
-  const marked = counts.marked;
-  const attendancePageCount = Math.max(1, Math.ceil(attendanceTotal / attendancePageSize));
   const attendanceHref = (page: number) => {
     const params = new URLSearchParams();
     if (branchId) params.set("branch", branchId);
@@ -207,7 +190,7 @@ export default async function AdminDashboardPage({
   });
   const anniversaries = celebrationProfiles.filter((profile) => profile.marriageDate && istDateKey(profile.marriageDate).slice(5) === todayMonthDay);
   const [devicePunches, projectAttendance] = await Promise.all([
-    prisma.punch.findMany({ where: { tenantId: session.tenantId, punchTime: { gte: today, lt: addDays(today, 1) }, employee: branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
     prisma.attendance.findMany({ where: attendanceWhere, select: { employeeId: true, status: true, employee: { select: { branch: { select: { name: true } } } } } }),
   ]);
   const deviceEmployees = new Map<string, Set<string>>();
@@ -240,15 +223,13 @@ export default async function AdminDashboardPage({
   }
 
   const week = [];
-  // Normalize both shapes (groupBy _count vs raw rows) to per-day tallies.
+  const presentByDay = dailyPresentEmployeeCounts(weekRows, weekPunches);
   const tally = new Map<string, { present: number; late: number; absent: number }>();
-  for (const r of weekRows as Array<{ date: Date; status: string; _count?: number }>) {
+  for (const r of weekRows) {
     const key = istDateKey(r.date);
     const cur = tally.get(key) ?? { present: 0, late: 0, absent: 0 };
-    const n = r._count ?? 1;
-    if (r.status === "present" || r.status === "late" || r.status === "half_day") cur.present += n;
-    if (r.status === "late") cur.late += n;
-    if (r.status === "absent") cur.absent += n;
+    if (r.status === "late") cur.late++;
+    if (r.status === "absent") cur.absent++;
     tally.set(key, cur);
   }
   const monthDayCount = Math.round((today.getTime() - currentMonthStart.getTime()) / 86_400_000);
@@ -256,8 +237,26 @@ export default async function AdminDashboardPage({
     const day = addDays(today, -i);
     const t = tally.get(istDateKey(day)) ?? { present: 0, late: 0, absent: 0 };
     const dayKey = istDateKey(day);
-    week.push({ day: dayKey, label: `${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}`, ...t });
+    week.push({ day: dayKey, label: `${dayKey.slice(8, 10)}/${dayKey.slice(5, 7)}`, ...t, present: presentByDay.get(dayKey) ?? 0 });
   }
+  const attendanceByEmployee = new Map(attendance.map((row) => [row.employeeId, row]));
+  const rawOnlyAttendance = new Map<string, typeof attendance[number]>();
+  for (const punch of todayPunches) {
+    if (!attendanceByEmployee.has(punch.employeeId) && !rawOnlyAttendance.has(punch.employeeId)) {
+      rawOnlyAttendance.set(punch.employeeId, {
+        id: `punch-${punch.employeeId}`,
+        employeeId: punch.employeeId,
+        punchInTime: punch.punchTime,
+        punchOutTime: null,
+        status: "present",
+        employee: punch.employee,
+      } as typeof attendance[number]);
+    }
+  }
+  const liveAttendance = [...attendance, ...rawOnlyAttendance.values()].sort((a, b) => (a.punchInTime?.getTime() ?? 0) - (b.punchInTime?.getTime() ?? 0));
+  const attendanceTotal = liveAttendance.length;
+  const pagedAttendance = liveAttendance.slice((attendancePage - 1) * attendancePageSize, attendancePage * attendancePageSize);
+  const attendancePageCount = Math.max(1, Math.ceil(attendanceTotal / attendancePageSize));
   const widget = (key: DashboardWidgetKey) => activeDashboardLayout?.widgets.find((item) => item.key === key);
   const widgetClass = (key: DashboardWidgetKey, base = "") => {
     const setting = widget(key);
@@ -332,12 +331,12 @@ export default async function AdminDashboardPage({
           <CardHeader>
             <div>
               <CardTitle>Today&apos;s attendance</CardTitle>
-              <CardDescription>{marked} attendance records · {counts.onLeave} on leave · {counts.noRecord} no record · {formatDate(today)}</CardDescription>
+               <CardDescription>{attendanceTotal} attendance entries · {counts.onLeave} on leave · {counts.noRecord} no record · {formatDate(today)}</CardDescription>
             </div>
             <CalendarClock className="h-4.5 w-4.5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="pt-4">
-            {attendance.length === 0 ? (
+             {pagedAttendance.length === 0 ? (
               <EmptyState
                 icon={<CalendarClock className="h-5 w-5" />}
                 title="No one has clocked in yet"
@@ -346,7 +345,7 @@ export default async function AdminDashboardPage({
             ) : (
               <>
                 <div className="divide-y divide-[color:var(--border)]">
-                {attendance.map((a) => (
+                 {pagedAttendance.map((a) => (
                   <div key={a.id} className="flex items-center gap-3 py-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
                       {(a.employee.firstName[0] ?? "") + (a.employee.lastName[0] ?? "")}

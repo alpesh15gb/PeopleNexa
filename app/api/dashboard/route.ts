@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { addDays, dayRangeIST, monthKeyIST } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { tallyDailyAttendance } from "@/lib/attendance-tally";
-import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
+import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -22,7 +22,7 @@ export async function GET() {
       return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
     }
     const branchId = manager.branchId;
-    const [employees, attendance, departments, pendingLeaves, weekRecords, todayPunches] = await Promise.all([
+    const [employees, attendance, departments, pendingLeaves, weekRecords, weekPunches, todayPunches] = await Promise.all([
       prisma.employee.findMany({
         where: { tenantId: session.tenantId, status: "active", loginOnly: false, branchId },
         select: {
@@ -63,14 +63,17 @@ export async function GET() {
         orderBy: { appliedAt: "desc" },
         take: 10,
       }),
-      prisma.attendance.groupBy({
-        by: ["date", "status"],
+      prisma.attendance.findMany({
         where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId, status: "active", loginOnly: false } },
-        _count: true,
+        select: { employeeId: true, date: true, status: true },
+      }),
+      prisma.punch.findMany({
+        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(addDays(today, -6), addDays(today, 1)), employee: { branchId, status: "active", loginOnly: false } },
+        select: { employeeId: true, punchTime: true, authStatus: true },
       }),
       prisma.punch.findMany({
         where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { branchId, status: "active", loginOnly: false } },
-        select: { employeeId: true },
+        select: { employeeId: true, punchTime: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
       }),
     ]);
 
@@ -85,16 +88,26 @@ export async function GET() {
       select: { employeeId: true },
     });
     const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
+    const attendanceEmployeeIds = new Set(attendance.map((record) => record.employeeId));
+    const dashboardAttendance = [...attendance, ...todayPunches.filter((punch) => !attendanceEmployeeIds.has(punch.employeeId)).map((punch) => ({
+      id: `punch-${punch.employeeId}`,
+      employeeId: punch.employeeId,
+      punchInTime: punch.punchTime,
+      punchOutTime: null,
+      status: "present",
+      employee: punch.employee,
+    }))];
 
+    const presentByDay = dailyPresentEmployeeCounts(weekRecords, weekPunches);
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const day = addDays(today, -i);
       const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
       week.push({
         day: istDateKey(day),
-        present: recs.filter((r) => r.status === "present" || r.status === "late" || r.status === "half_day").reduce((s, r) => s + r._count, 0),
-        late: recs.filter((r) => r.status === "late").reduce((s, r) => s + r._count, 0),
-        absent: recs.filter((r) => r.status === "absent").reduce((s, r) => s + r._count, 0),
+        present: presentByDay.get(istDateKey(day)) ?? 0,
+        late: recs.filter((r) => r.status === "late").length,
+        absent: recs.filter((r) => r.status === "absent").length,
       });
     }
 
@@ -111,14 +124,14 @@ export async function GET() {
         pendingLeaves: pendingLeaves.length,
       },
       departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),
-      attendance,
+      attendance: dashboardAttendance,
       week,
       pendingLeaves,
     });
   }
 
   if (session.role === "admin") {
-    const [employees, attendance, departments, pendingLeaves, weekRecords, todayPunches] = await Promise.all([
+    const [employees, attendance, departments, pendingLeaves, weekRecords, weekPunches, todayPunches] = await Promise.all([
       prisma.employee.findMany({
         where: { tenantId: session.tenantId, status: "active", loginOnly: false },
         select: {
@@ -159,14 +172,17 @@ export async function GET() {
         orderBy: { appliedAt: "desc" },
         take: 10,
       }),
-      prisma.attendance.groupBy({
-        by: ["date", "status"],
+      prisma.attendance.findMany({
         where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { status: "active", loginOnly: false } },
-        _count: true,
+        select: { employeeId: true, date: true, status: true },
+      }),
+      prisma.punch.findMany({
+        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(addDays(today, -6), addDays(today, 1)), employee: { status: "active", loginOnly: false } },
+        select: { employeeId: true, punchTime: true, authStatus: true },
       }),
       prisma.punch.findMany({
         where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { status: "active", loginOnly: false } },
-        select: { employeeId: true },
+        select: { employeeId: true, punchTime: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
       }),
     ]);
 
@@ -181,16 +197,26 @@ export async function GET() {
       select: { employeeId: true },
     });
     const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
+    const attendanceEmployeeIds = new Set(attendance.map((record) => record.employeeId));
+    const dashboardAttendance = [...attendance, ...todayPunches.filter((punch) => !attendanceEmployeeIds.has(punch.employeeId)).map((punch) => ({
+      id: `punch-${punch.employeeId}`,
+      employeeId: punch.employeeId,
+      punchInTime: punch.punchTime,
+      punchOutTime: null,
+      status: "present",
+      employee: punch.employee,
+    }))];
 
+    const presentByDay = dailyPresentEmployeeCounts(weekRecords, weekPunches);
     const week: { day: string; present: number; late: number; absent: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const day = addDays(today, -i);
       const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
       week.push({
         day: istDateKey(day),
-        present: recs.filter((r) => r.status === "present" || r.status === "late" || r.status === "half_day").reduce((s, r) => s + r._count, 0),
-        late: recs.filter((r) => r.status === "late").reduce((s, r) => s + r._count, 0),
-        absent: recs.filter((r) => r.status === "absent").reduce((s, r) => s + r._count, 0),
+        present: presentByDay.get(istDateKey(day)) ?? 0,
+        late: recs.filter((r) => r.status === "late").length,
+        absent: recs.filter((r) => r.status === "absent").length,
       });
     }
 
@@ -207,7 +233,7 @@ export async function GET() {
         pendingLeaves: pendingLeaves.length,
       },
       departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),
-      attendance,
+      attendance: dashboardAttendance,
       week,
       pendingLeaves,
     });
