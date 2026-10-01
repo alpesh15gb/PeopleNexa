@@ -43,6 +43,7 @@
 
 /* ── Light theme (default) ─────────────────────────────────────────────── */
 :root {
+  --font-jakarta: ui-sans-serif;
   color-scheme: light;
 
   /* Compat aliases: single Jakarta family backs both legacy variable names

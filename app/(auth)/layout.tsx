@@ -14,7 +14,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1.05fr]"
       style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif" }}
     >
-      {/* Jakarta is self-hosted via next/font in app/layout.tsx — no Google
+      {/* The application shell uses its local system-font stack — no Google
           <link> here (a second copy caused unused-preload warnings). */}
       <style>{`.font-display{font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif !important}@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
       <aside className="relative hidden overflow-hidden border-r border-edge bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-10 xl:p-14">

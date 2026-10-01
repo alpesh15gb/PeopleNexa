@@ -163,7 +163,7 @@ export default async function LandingRoute() {
 
   return (
     <>
-      {/* Jakarta is self-hosted via next/font in app/layout.tsx — no Google
+      {/* The application shell uses its local system-font stack — no Google
           <link> here (a second copy caused unused-preload warnings). */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <LandingPage plans={plans.map((p) => ({ ...p, modules: [...p.modules] }))} />
