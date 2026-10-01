@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { financialExportPayslipFilter } from "@/lib/payroll-reporting";
 import { round2 } from "@/lib/utils";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
@@ -26,9 +27,16 @@ export async function GET(req: NextRequest) {
   if (!isMonthKey(month)) {
     return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
   }
-  const payslips = await prisma.payslip.findMany({ where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) } });
+  const payslips = await prisma.payslip.findMany({
+    where: {
+      tenantId: session.tenantId,
+      month,
+      ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
+      ...financialExportPayslipFilter(),
+    },
+  });
   if (payslips.length === 0) {
-    return NextResponse.json({ error: `No payslips found for ${month}. Generate payslips first.` }, { status: 400 });
+    return NextResponse.json({ error: `No finalized or paid payslips found for ${month}.` }, { status: 400 });
   }
 
   const totals = payslips.reduce(

@@ -7,7 +7,7 @@ assert.equal(calculateLeaveBalance({ cap: null, opening: 7, credited: 0, used: 2
 assert.equal(canClaimLeave(calculateLeaveBalance({ cap: null, opening: 0, credited: 0, used: 0, pending: 0 }).available, 1), false, "requests beyond an uncredited earned balance are rejected");
 assert.deepEqual(calculateLeaveBalance({ cap: null, opening: 0, credited: 4, used: 99, pending: 1, unlimitedEntitlement: true }), { available: null, committed: 100 }, "only explicit unlimited entitlement is unlimited");
 assert.equal(calculateLeaveBalance({ cap: 12, opening: 0, credited: 0, used: 8, pending: 2 }).available, 2, "numeric legacy caps remain enforced");
-assert.deepEqual(leaveBalanceScope("location_manager", { locationId: "loc-a" }), { branch: { locationId: "loc-a" } }, "location manager scope is location-only");
+assert.deepEqual(leaveBalanceScope("location_manager", { locationId: "loc-a" }), { OR: [{ branch: { locationId: "loc-a" } }, { branchId: null, locationId: "loc-a" }] }, "location manager scope includes branchless employees assigned to the location");
 assert.equal(leaveBalanceScope("location_manager", { locationId: null }), null, "unassigned location manager has no employee scope");
 assert.deepEqual(leaveBalanceScope("admin", null), {}, "admin scope remains tenant-wide after tenant filtering");
 assert.equal(leaveBalanceSource(true, true), "policy_period", "policy-period allocation remains the current calculation source when an import baseline exists");

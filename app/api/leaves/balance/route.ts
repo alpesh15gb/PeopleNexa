@@ -13,10 +13,10 @@ export async function GET() {
       where: { tenantId: session.tenantId, employeeId: session.sub, status: { in: ["approved", "pending"] } },
       select: { leaveTypeId: true, days: true, status: true, fromDate: true, leavePolicySnapshot: true },
     }),
-    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branch: { select: { locationId: true } } } }),
+    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true, branch: { select: { locationId: true } } } }),
   ]);
   const [policyBalances, importedBalances] = await Promise.all([
-    prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, policyPeriod: { effectiveFrom: { lte: new Date() }, AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }, { OR: [{ locationId: employee?.branch?.locationId ?? "" }, { locationId: null }] }] } }, include: { policyPeriod: { select: { locationId: true, id: true } } } }),
+    prisma.leavePolicyBalance.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, policyPeriod: { effectiveFrom: { lte: new Date() }, AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }, { OR: [{ locationId: employee?.branch?.locationId ?? employee?.locationId ?? "" }, { locationId: null }] }] } }, include: { policyPeriod: { select: { locationId: true, id: true } } } }),
     prisma.leaveBalanceImportEntry.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub, periodEnd: { lte: new Date() } }, orderBy: { periodEnd: "desc" } }),
   ]);
 
@@ -26,7 +26,8 @@ export async function GET() {
   }
 
   const balance = types.map((t) => {
-    const allocated = policyBalances.filter((item) => item.leaveTypeId === t.id).sort((a, b) => Number(b.policyPeriod.locationId === employee?.branch?.locationId) - Number(a.policyPeriod.locationId === employee?.branch?.locationId))[0];
+    const employeeLocationId = employee?.branch?.locationId ?? employee?.locationId;
+    const allocated = policyBalances.filter((item) => item.leaveTypeId === t.id).sort((a, b) => Number(b.policyPeriod.locationId === employeeLocationId) - Number(a.policyPeriod.locationId === employeeLocationId))[0];
     const policyUsed = allocated ? requests.filter((request) => request.leaveTypeId === t.id && request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" && (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocated.policyPeriodId).reduce((sum, request) => sum + request.days, 0) : 0;
     const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
     const usedDays = imported ? requests.filter((request) => request.leaveTypeId === t.id && request.fromDate >= imported.periodEnd).reduce((sum, request) => sum + request.days, 0) : used.get(t.id) ?? 0;

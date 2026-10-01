@@ -41,6 +41,7 @@
     "test:leave-import": "tsx scripts/test-leave-import.ts",
     "test:leave-lifecycle": "tsx scripts/test-leave-lifecycle.ts",
     "test:leave-balance": "tsx scripts/test-leave-balance.ts",
+    "test:leave-type-safeguards": "tsx scripts/test-leave-type-safeguards.ts",
     "test:ylr-workbook-import": "tsx scripts/test-ylr-workbook-import.ts"
   },
   "dependencies": {

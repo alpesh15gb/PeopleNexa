@@ -4,6 +4,17 @@ export function isFinancialHistoryRun(status: string) {
   return (FINANCIAL_HISTORY_RUN_STATUSES as readonly string[]).includes(status);
 }
 
+// Pre-run documents are immutable legacy records. Only legacy slips already
+// marked paid can be included because they have no PayrollRun lifecycle.
+export function financialExportPayslipFilter() {
+  return {
+    OR: [
+      { payrollRun: { is: { status: { in: [...FINANCIAL_HISTORY_RUN_STATUSES] } } } },
+      { payrollRunId: null, status: "paid" as const },
+    ],
+  };
+}
+
 export type PayrollVarianceSlip = {
   employeeId: string;
   grossEarnings: number;

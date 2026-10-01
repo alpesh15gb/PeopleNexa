@@ -8,6 +8,7 @@ import { canApplyLeaveOnBehalf, leaveSubmissionAttribution } from "@/lib/leave-o
 import { appendAudit } from "@/lib/audit";
 import { calculateLeaveBalance, canClaimLeave, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 import type { Prisma } from "@/generated/prisma/client";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -37,10 +38,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ requests });
   }
   if (session.role === "location_manager") {
-    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
-    if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+    const locationId = await managerLocationId(session);
+    if (!locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     const requests = await prisma.leaveRequest.findMany({
-      where: { tenantId: session.tenantId, employee: { branch: { locationId: manager.locationId } }, ...(status ? { status } : {}) },
+      where: { tenantId: session.tenantId, employee: employeeLocationScope(locationId), ...(status ? { status } : {}) },
       include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } }, leaveType: true },
       orderBy: { appliedAt: "desc" },
     });
@@ -83,14 +84,14 @@ export async function POST(req: NextRequest) {
     if (body.employeeId && String(body.employeeId) !== session.sub) {
       const target = await prisma.employee.findFirst({
         where: { id: String(body.employeeId), tenantId: session.tenantId },
-        select: { id: true, branchId: true, branch: { select: { locationId: true } } },
+        select: { id: true, branchId: true, locationId: true, branch: { select: { locationId: true } } },
       });
       if (!target) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
       const actor = await prisma.employee.findFirst({
         where: { id: session.sub, tenantId: session.tenantId },
         select: { branchId: true, locationId: true },
       });
-      if (!actor || !canApplyLeaveOnBehalf(session.role, actor, { branchId: target.branchId, locationId: target.branch?.locationId ?? null })) {
+      if (!actor || !canApplyLeaveOnBehalf(session.role, actor, { branchId: target.branchId, locationId: target.branch?.locationId ?? target.locationId })) {
         return NextResponse.json({ error: "You are not authorized to apply leave for this employee." }, { status: 403 });
       }
       employeeId = target.id;
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
     // Inactive employees can't accrue new leave.
     const applicant = await prisma.employee.findFirst({
       where: { id: employeeId, tenantId: session.tenantId },
-      select: { id: true, status: true, loginOnly: true, branch: { select: { locationId: true } } },
+      select: { id: true, status: true, loginOnly: true, locationId: true, branch: { select: { locationId: true } } },
     });
     if (!applicant || applicant.status !== "active") {
       return NextResponse.json({ error: "Only active employees can request leave." }, { status: 403 });
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest) {
               where: { tenantId: session.tenantId, kind: "leave_policy", active: true },
               select: { id: true, locationId: true, version: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
             });
-            const resolvedPolicy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? null, from, leaveType.code);
+            const resolvedPolicy = resolveLeavePolicy(policyRecords, applicant.branch?.locationId ?? applicant.locationId, from, leaveType.code);
             const allocated = resolvedPolicy ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId, leaveTypeId, policyPeriod: { configurationId: resolvedPolicy.configurationId, effectiveFrom: { lte: from }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: from } }] } }, include: { policyPeriod: { select: { id: true } } } }) : null;
             const imported = allocated ? null : await tx.leaveBalanceImportEntry.findFirst({ where: { tenantId: session.tenantId, employeeId, leaveTypeId, periodEnd: { lte: from } }, orderBy: { periodEnd: "desc" } });
             // Activated policies retain legacy behavior until this employee has

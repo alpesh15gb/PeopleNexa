@@ -36,22 +36,15 @@ export async function POST(req: NextRequest) {
   if (selectedEmployeeIds.length > 1000) return NextResponse.json({ error: "Select at most 1,000 employees in one payroll action." }, { status: 400 });
   const requestedRunId = typeof body.runId === "string" ? body.runId.trim() : "";
   let existingRun = requestedRunId ? await prisma.payrollRun.findFirst({ where: { id: requestedRunId, tenantId: session.tenantId, locationId, month }, select: { id: true, status: true } }) : null;
-  let restartedCancelledRun = false;
   if (!existingRun && !requestedRunId) {
     const cancelled = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, locationId, month, status: "cancelled" }, select: { id: true } });
     if (cancelled) {
-      await prisma.$transaction([
-        prisma.payrollRunMember.deleteMany({ where: { payrollRunId: cancelled.id } }),
-        prisma.payslip.deleteMany({ where: { payrollRunId: cancelled.id } }),
-        prisma.payrollRun.update({ where: { id: cancelled.id }, data: { status: "draft", cancelledBy: null, cancelledAt: null, note: "Restarted after cancellation", selectedEmployeeCount: 0 } }),
-      ]);
-      existingRun = { id: cancelled.id, status: "draft" };
-      restartedCancelledRun = true;
+      return NextResponse.json({ error: "A cancelled payroll exists for this location and month. It is retained as an audit record and cannot be restarted without creating a replacement run." }, { status: 409 });
     }
   }
   if (requestedRunId && !existingRun) return NextResponse.json({ error: "Payroll draft not found for this location and month." }, { status: 404 });
   if (existingRun && existingRun.status !== "draft") return NextResponse.json({ error: `Employees can be added only while this payroll is Draft. This run is ${existingRun.status}.` }, { status: 409 });
-  if (existingRun && selectionMode !== "selected" && !restartedCancelledRun) return NextResponse.json({ error: "Adding employees to a draft payroll requires an explicit selected-employee list." }, { status: 400 });
+  if (existingRun && selectionMode !== "selected") return NextResponse.json({ error: "Adding employees to a draft payroll requires an explicit selected-employee list." }, { status: 400 });
   const [tenant, policyRecords, employees, revisions, componentAssignments] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
     prisma.configurationRecord.findMany({

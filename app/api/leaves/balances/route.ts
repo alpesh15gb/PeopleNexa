@@ -3,6 +3,7 @@ import { calculateLeaveBalance, isEarnedLeave, leaveBalanceScope, leaveBalanceSo
 import { leavePolicyDraft, resolveConfiguration } from "@/lib/configuration";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
+import { managerLocationId } from "@/lib/location-scope";
 
 const PAGE_SIZE = 25;
 
@@ -10,9 +11,7 @@ export async function GET(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || !["admin", "location_manager"].includes(session.role)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const manager = session.role === "location_manager"
-    ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } })
-    : null;
+  const manager = session.role === "location_manager" ? { locationId: await managerLocationId(session) } : null;
   const scope = leaveBalanceScope(session.role, manager);
   if (!scope) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
@@ -35,7 +34,7 @@ export async function GET(request: NextRequest) {
   };
   const [total, employees, types] = await Promise.all([
     prisma.employee.count({ where }),
-    prisma.employee.findMany({ where, select: { id: true, firstName: true, lastName: true, employeeNumber: true, branch: { select: { name: true, locationId: true } } }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
+    prisma.employee.findMany({ where, select: { id: true, firstName: true, lastName: true, employeeNumber: true, locationId: true, branch: { select: { name: true, locationId: true } } }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], skip: (page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
     prisma.leaveType.findMany({ where: { tenantId: session.tenantId, ...(leaveTypeId ? { id: leaveTypeId } : {}) }, select: { id: true, name: true, code: true, color: true, maxDays: true, unlimitedEntitlement: true }, orderBy: { code: "asc" } }),
   ]);
   const employeeIds = employees.map((employee) => employee.id);
@@ -50,7 +49,8 @@ export async function GET(request: NextRequest) {
   const balances = employees.map((employee) => ({
     employee: { ...employee, location: employee.branch?.name ?? null },
     balances: types.map((type) => {
-      const allocation = allocations.filter((item) => item.employeeId === employee.id && item.leaveTypeId === type.id).sort((a, b) => Number(b.policyPeriod.locationId === employee.branch?.locationId) - Number(a.policyPeriod.locationId === employee.branch?.locationId))[0];
+      const employeeLocationId = employee.branch?.locationId ?? employee.locationId;
+      const allocation = allocations.filter((item) => item.employeeId === employee.id && item.leaveTypeId === type.id).sort((a, b) => Number(b.policyPeriod.locationId === employeeLocationId) - Number(a.policyPeriod.locationId === employeeLocationId))[0];
       const imported = imports.find((item) => item.employeeId === employee.id && item.leaveTypeId === type.id);
       const relevant = requests.filter((item) => item.employeeId === employee.id && item.leaveTypeId === type.id && (allocation ? item.leavePolicySnapshot && typeof item.leavePolicySnapshot === "object" && (item.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === allocation.policyPeriodId : !imported || item.fromDate >= imported.periodEnd));
       const used = relevant.filter((item) => item.status === "approved").reduce((sum, item) => sum + item.days, 0);
@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
       const unlimitedEntitlement = allocation ? policyHasUnlimitedEntitlement(allocation.policySnapshot) : !imported && type.unlimitedEntitlement;
       const available = calculateLeaveBalance({ cap, opening, credited, used, pending, unlimitedEntitlement }).available;
       const source = leaveBalanceSource(Boolean(allocation), Boolean(imported), unlimitedEntitlement);
-      const policy = resolveConfiguration(policyRecords.filter((record) => leavePolicyDraft(record.payload)), employee.branch?.locationId ?? null, now);
+      const policy = resolveConfiguration(policyRecords.filter((record) => leavePolicyDraft(record.payload)), employeeLocationId, now);
       const rule = leavePolicyDraft(policy?.payload)?.leaveTypes.find((item) => item.code === type.code);
       const fixedEarnedLeaveWarning = Boolean(rule && isEarnedLeave(type.code, type.name) && rule.annualEntitlement !== null && !rule.workedDayAccrual);
       return {

@@ -9,6 +9,7 @@ import { appendAudit } from "@/lib/audit";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
 import { calculateLeaveBalance, canClaimLeave, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
 import { canReviewLeaveRequest } from "@/lib/leave-lifecycle";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -44,9 +45,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
   if (session.role === "location_manager") {
-    const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
-    const target = await prisma.employee.findFirst({ where: { id: request.employeeId, tenantId: session.tenantId }, select: { branch: { select: { locationId: true } } } });
-    if (!manager?.locationId || target?.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const locationId = await managerLocationId(session);
+    const target = locationId ? await prisma.employee.findFirst({ where: { id: request.employeeId, tenantId: session.tenantId, ...employeeLocationScope(locationId) }, select: { id: true } }) : null;
+    if (!target) return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (request.status !== "pending") {
     return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });

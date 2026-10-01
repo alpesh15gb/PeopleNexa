@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
 
@@ -35,6 +36,7 @@ interface Type {
   color: string;
   isCarryForward: boolean;
   requiresApproval: boolean;
+  paid: boolean | null;
 }
 
 interface Employee {
@@ -76,6 +78,7 @@ export function LeavesAdmin({
   const [busy, setBusy] = useState<string | null>(null);
   const [typeModal, setTypeModal] = useState<Type | "new" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingType, setDeletingType] = useState<Type | null>(null);
   const [onBehalfOpen, setOnBehalfOpen] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
   const [employeeQuery, setEmployeeQuery] = useState("");
@@ -139,13 +142,15 @@ export function LeavesAdmin({
     setSaving(true);
     const form = new FormData(e.currentTarget);
     const editing = typeModal && typeof typeModal === "object" ? typeModal : null;
+    const paid = form.get("paid");
     const payload = {
       name: form.get("name"),
       code: form.get("code"),
-        maxDays: form.get("maxDays"),
-        unlimitedEntitlement: form.get("unlimitedEntitlement") === "on",
+      maxDays: form.get("maxDays"),
+      unlimitedEntitlement: form.get("unlimitedEntitlement") === "on",
       isCarryForward: form.get("isCarryForward") === "on",
       requiresApproval: form.get("requiresApproval") === "on" || form.get("requiresApproval") === null,
+      ...(paid === "paid" ? { paid: true } : paid === "unpaid" ? { paid: false } : {}),
       color: form.get("color"),
     };
     try {
@@ -168,14 +173,20 @@ export function LeavesAdmin({
   }
 
   async function removeType(t: Type) {
-    const res = await fetch(`/api/leaves/types/${t.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const data = await res.json();
-      toast("error", data.error ?? "Failed to delete");
-      return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/leaves/types/${t.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", data.error ?? "Failed to delete");
+        return;
+      }
+      toast("success", "Leave type removed");
+      setDeletingType(null);
+      router.refresh();
+    } finally {
+      setSaving(false);
     }
-    toast("success", "Leave type removed");
-    router.refresh();
   }
 
   const pending = requests.filter((r) => r.status === "pending").length;
@@ -323,7 +334,7 @@ export function LeavesAdmin({
                 <Button size="sm" variant="outline" onClick={() => setTypeModal(t)}>
                   <Pencil className="h-3 w-3" /> Edit
                 </Button>
-                <Button size="sm" variant="outline" className="text-rose-300" onClick={() => removeType(t)}>
+                <Button size="sm" variant="outline" className="text-rose-300" onClick={() => setDeletingType(t)}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
@@ -339,6 +350,15 @@ export function LeavesAdmin({
           {importBatches.length === 0 ? <p className="py-6 text-center text-[13px] text-muted-foreground">No balance imports yet.</p> : <Table><THead><TR><TH>Cutoff</TH><TH>Leave type</TH><TH>Accepted / attempted</TH><TH>Decision</TH><TH>Imported</TH><TH /></TR></THead><TBody>{importBatches.map((batch) => <TR key={batch.id}><TD>{batch.throughMonth}</TD><TD>{batch.leaveType.name} ({batch.leaveType.code})</TD><TD>{batch.acceptedCount || batch._count.entries} / {batch.attemptedCount || batch._count.entries}{batch.excludedCount ? ` (${batch.excludedCount} excluded)` : ""}</TD><TD>{batch.importDecision === "reviewed_exceptions" ? "Reviewed exceptions" : "Strict"}</TD><TD>{formatDate(batch.importedAt)}</TD><TD><a className="text-[12px] font-medium text-indigo-300 hover:underline" href={`/api/leaves/imports/${batch.id}/export`}>Export check</a></TD></TR>)}</TBody></Table>}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deletingType !== null}
+        title="Delete leave type?"
+        description={deletingType ? `Delete ${deletingType.name}? Types with leave history or balances cannot be deleted.` : undefined}
+        busy={saving}
+        onCancel={() => setDeletingType(null)}
+        onConfirm={() => { if (deletingType) void removeType(deletingType); }}
+      />
 
       <Modal open={importOpen} onClose={() => { if (!importBusy) { setImportOpen(false); setImportPreview(null); } }} title="Import leave balance ledger" size="lg">
         <div className="space-y-4">
@@ -458,6 +478,13 @@ export function LeavesAdmin({
             </Field>
             <Field label="Color">
               <Input name="color" type="color" defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.color : "#3b82f6"} className="h-10 p-1" />
+            </Field>
+            <Field label="Pay treatment">
+              <Select name="paid" required={typeModal === "new"} defaultValue={typeModal !== null && typeof typeModal === "object" ? typeModal.paid === true ? "paid" : typeModal.paid === false ? "unpaid" : "" : ""}>
+                <option value="" disabled={typeModal === "new"}>{typeModal === "new" ? "Choose paid or unpaid" : "Keep legacy treatment"}</option>
+                <option value="paid">Paid leave</option>
+                <option value="unpaid">Unpaid leave</option>
+              </Select>
             </Field>
           </div>
           <label className="flex items-center gap-2 text-[13px] text-muted-foreground">

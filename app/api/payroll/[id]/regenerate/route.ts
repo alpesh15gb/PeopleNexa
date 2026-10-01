@@ -10,6 +10,7 @@ import {
   getPayrollConfig,
   payrollEmployeeForMonth,
   loanDeductionForMonth,
+  loanDeductionAllocations,
 } from "@/lib/payroll";
 import { payrollConfigFromSnapshot } from "@/lib/payroll-policy";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
@@ -130,7 +131,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     components: documentComponents(result),
     totals: { gross: result.grossEarnings, earnedGross: result.earnedGross, deductions: result.deductions, net: result.netSalary },
   } : null;
-  const inputSnapshot = { ...savedInput, version: 2, attendance: summary, result };
+  const loanAllocations = loanDeductionAllocations(restoredLoans, loanDeductionForMonth(restoredLoans, existing.month, result.loanDeduction).updates);
+  const inputSnapshot = { ...savedInput, version: 2, attendance: summary, result, loanAllocations };
   const updated = await prisma.$transaction(async (tx) => {
     for (const loan of loans) {
       const restored = restoredLoans.find((candidate) => candidate.id === loan.id);

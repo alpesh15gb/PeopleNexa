@@ -12,7 +12,7 @@ export function canClaimLeave(balance: number | null, days: number) {
 
 export function leaveBalanceScope(role: string, manager: { locationId: string | null } | null) {
   if (role === "admin") return {};
-  if (role === "location_manager" && manager?.locationId) return { branch: { locationId: manager.locationId } };
+  if (role === "location_manager" && manager?.locationId) return { OR: [{ branch: { locationId: manager.locationId } }, { branchId: null, locationId: manager.locationId }] };
   return null;
 }
 

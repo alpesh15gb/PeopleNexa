@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { LeavesAdmin } from "./leaves-admin";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +21,12 @@ export default async function AdminLeavesPage() {
     : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
-  const branchId = isBranchManager ? ownBranchId : null;
-  const locationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
+  const locationId = isLocationManager ? await managerLocationId(session) : null;
+  const employeeScope = isBranchManager ? ownBranchId ? { branchId: ownBranchId } : { id: "__unassigned_branch__" } : isLocationManager ? locationId ? employeeLocationScope(locationId) : { id: "__unassigned_location__" } : {};
 
   const [requests, types, employees, importBatches] = await Promise.all([
     prisma.leaveRequest.findMany({
-      where: { tenantId: session.tenantId, ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}) },
+      where: { tenantId: session.tenantId, employee: employeeScope },
       include: {
         employee: { select: { firstName: true, lastName: true, employeeNumber: true } },
         leaveType: true,
@@ -34,7 +35,7 @@ export default async function AdminLeavesPage() {
     }),
     prisma.leaveType.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "asc" } }),
     prisma.employee.findMany({
-      where: { tenantId: session.tenantId, status: "active", ...(branchId ? { branchId } : locationId ? { branch: { locationId } } : {}) },
+      where: { tenantId: session.tenantId, status: "active", ...employeeScope },
       select: { id: true, firstName: true, lastName: true, employeeNumber: true },
       orderBy: { employeeNumber: "asc" },
       take: 100,

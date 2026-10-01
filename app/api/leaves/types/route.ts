@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { hasExplicitPaidValue } from "@/lib/leave-type";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -22,6 +23,9 @@ export async function POST(req: NextRequest) {
     if (!body.name || !body.code) {
       return NextResponse.json({ error: "Name and code are required." }, { status: 400 });
     }
+    if (!hasExplicitPaidValue(body.paid)) {
+      return NextResponse.json({ error: "Choose whether this leave type is paid or unpaid." }, { status: 400 });
+    }
     const code = String(body.code).toUpperCase();
     const exists = await prisma.leaveType.findFirst({ where: { tenantId: session.tenantId, code } });
     if (exists) return NextResponse.json({ error: "A leave type with this code already exists." }, { status: 400 });
@@ -35,8 +39,7 @@ export async function POST(req: NextRequest) {
         unlimitedEntitlement: body.unlimitedEntitlement === true,
         isCarryForward: Boolean(body.isCarryForward),
         requiresApproval: body.requiresApproval !== false,
-        // New direct leave types require an explicit paid/unpaid decision.
-        paid: typeof body.paid === "boolean" ? body.paid : null,
+        paid: body.paid,
         color: body.color || "#3b82f6",
       },
     });

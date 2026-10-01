@@ -6,6 +6,7 @@ import { calendarDaysInPayrollMonth, getPayrollConfig } from "@/lib/payroll";
 import { payrollScheduleExample } from "@/lib/payroll-policy-editor";
 import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
 import { Prisma } from "@/generated/prisma/client";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { requireActiveSession } from "@/lib/session";
 import { carryForwardCandidate } from "@/lib/leave-policy-period";
 import { monthlyWorkedDayAccrual, workedDaysForMonth } from "@/lib/leave-accrual";
@@ -106,7 +107,7 @@ async function openLeavePeriod(session: { tenantId: string; sub: string; role: s
   const draft = leavePolicyDraft(configuration?.payload);
   if (!configuration || !draft) return NextResponse.json({ error: "An active valid leave policy is required." }, { status: 400 });
   const scopeKey = configuration.locationId ?? "tenant";
-  const employees = await prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(configuration.locationId ? { branch: { locationId: configuration.locationId } } : {}) }, select: { id: true, joiningDate: true } });
+  const employees = await prisma.employee.findMany({ where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(configuration.locationId ? employeeLocationScope(configuration.locationId) : {}) }, select: { id: true, joiningDate: true } });
   const leaveTypes = await prisma.leaveType.findMany({ where: { tenantId: session.tenantId }, select: { id: true, code: true, maxDays: true } });
   const typeByCode = new Map(leaveTypes.map((type) => [type.code, type]));
   const requests = await prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employees.map((employee) => employee.id) }, status: { in: ["approved", "pending"] } }, select: { employeeId: true, leaveTypeId: true, days: true } });
@@ -166,7 +167,7 @@ function cleanLocationProfile(body: Record<string, unknown>, tenantId: string, l
 
 async function policyPreview({ tenantId, kind, locationId, effectiveFrom, payload }: { tenantId: string; kind: "leave_policy" | "payroll_policy"; locationId: string | null; effectiveFrom: Date; payload: unknown }) {
   const [affectedEmployees, policyRecords, tenant, leaveTypes, requests] = await Promise.all([
-    prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, firstName: true, lastName: true, joiningDate: true } }),
+    prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) }, select: { id: true, firstName: true, lastName: true, joiningDate: true } }),
     prisma.configurationRecord.findMany({ where: { tenantId, kind, active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } }),
     kind === "payroll_policy" ? prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } }) : Promise.resolve(null),
     kind === "leave_policy" ? prisma.leaveType.findMany({ where: { tenantId }, select: { id: true, name: true, code: true, maxDays: true, isCarryForward: true, requiresApproval: true }, orderBy: { code: "asc" } }) : Promise.resolve([]),

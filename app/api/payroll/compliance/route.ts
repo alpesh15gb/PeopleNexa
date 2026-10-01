@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { formatDateIST, isMonthKey, monthKeyIST } from "@/lib/dates";
 import { fyFromMonth } from "@/lib/payroll";
 import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
+import { financialExportPayslipFilter } from "@/lib/payroll-reporting";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const csv = (rows: (string | number)[][]) =>
@@ -31,10 +32,13 @@ export async function GET(req: NextRequest) {
 
   if (type === "ecr") {
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...employeeScope },
+      where: { tenantId: session.tenantId, month, ...employeeScope, ...financialExportPayslipFilter() },
       include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, uan: true, pan: true, joiningDate: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
+    if (payslips.length === 0) {
+      return NextResponse.json({ error: `No finalized or paid payslips found for ${month}.` }, { status: 400 });
+    }
     const pfPayslips = payslips.filter((p) => p.pfEmployee > 0 || p.pfEmployer > 0);
     const rows: (string | number)[][] = [
       ["S.No", "Member ID", "Member Name", "UAN", "Date of Joining", "EPF Wages (Basic)", "EE EPF (12%)", "ER EPF (3.67%)", "ER EPS (8.33%)"],
@@ -76,10 +80,13 @@ export async function GET(req: NextRequest) {
 
   if (type === "form16") {
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month: { in: fiscalYearMonths(month) }, ...employeeScope },
+      where: { tenantId: session.tenantId, month: { in: fiscalYearMonths(month) }, ...employeeScope, ...financialExportPayslipFilter() },
       include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, pan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
+    if (payslips.length === 0) {
+      return NextResponse.json({ error: `No finalized or paid payslips found for financial year ${fy}.` }, { status: 400 });
+    }
     const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; gross: number; tds: number; pf: number; net: number; months: number }>();
     for (const p of payslips) {
       const cur = byEmp.get(p.employee.id) ?? { emp: p.employee, gross: 0, tds: 0, pf: 0, net: 0, months: 0 };
@@ -119,10 +126,13 @@ export async function GET(req: NextRequest) {
   if (type === "form24q") {
     const months = quarterMonths(month);
     const payslips = await prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month: { in: months }, ...employeeScope },
+      where: { tenantId: session.tenantId, month: { in: months }, ...employeeScope, ...financialExportPayslipFilter() },
       include: { employee: { select: { id: true, employeeNumber: true, firstName: true, lastName: true, pan: true } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     });
+    if (payslips.length === 0) {
+      return NextResponse.json({ error: `No finalized or paid payslips found for quarter containing ${month}.` }, { status: 400 });
+    }
     const byEmp = new Map<string, { emp: (typeof payslips)[number]["employee"]; tds: number; salary: number }>();
     for (const p of payslips) {
       const cur = byEmp.get(p.employee.id) ?? { emp: p.employee, tds: 0, salary: 0 };

@@ -900,7 +900,7 @@ model LeaveRequest {
   employeeId          String
   employee            Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   leaveTypeId         String
-  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  leaveType           LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   fromDate            DateTime
   toDate              DateTime
   days                Float
@@ -947,7 +947,7 @@ model LeavePolicyBalance {
   employeeId     String
   employee       Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   leaveTypeId    String
-  leaveType      LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  leaveType      LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
   // Null is only an unlimited policy-period allocation when its policy
   // snapshot explicitly enables unlimitedEntitlement.
   entitlement    Float?

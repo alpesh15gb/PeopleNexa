@@ -403,6 +403,11 @@ export interface LoanDeductionUpdate {
   close: boolean;
 }
 
+export interface LoanDeductionAllocation {
+  id: string;
+  amount: number;
+}
+
 export function loanDeductionForMonth(
   loans: Array<{ id: string; status: string; startMonth: string; lastDeductedMonth: string | null; outstanding: number; emiAmount: number }>,
   month: string,
@@ -438,6 +443,38 @@ export function loanDeductionForMonth(
     });
   }
   return { total: round2(total), updates };
+}
+
+/** Persisted with a payslip so a cancelled draft can restore exact loan balances. */
+export function loanDeductionAllocations(
+  loans: Array<{ id: string; outstanding: number }>,
+  updates: LoanDeductionUpdate[]
+): LoanDeductionAllocation[] {
+  return updates.flatMap((update) => {
+    const loan = loans.find((candidate) => candidate.id === update.id);
+    const amount = loan ? round2(loan.outstanding - update.newOutstanding) : 0;
+    return amount > 0 ? [{ id: update.id, amount }] : [];
+  });
+}
+
+export function reverseLoanDeductionAllocations(
+  loans: Array<{ id: string; outstanding: number; lastDeductedMonth: string | null }>,
+  allocations: LoanDeductionAllocation[],
+  month: string
+): Array<{ id: string; outstanding: number }> | null {
+  const totals = new Map<string, number>();
+  for (const allocation of allocations) {
+    if (!allocation.id || !Number.isFinite(allocation.amount) || allocation.amount <= 0) return null;
+    totals.set(allocation.id, round2((totals.get(allocation.id) ?? 0) + allocation.amount));
+  }
+  const updates: Array<{ id: string; outstanding: number }> = [];
+  for (const [id, amount] of totals) {
+    const loan = loans.find((candidate) => candidate.id === id);
+    // A later deduction means this cancelled run can no longer be safely unwound.
+    if (!loan || loan.lastDeductedMonth !== month) return null;
+    updates.push({ id, outstanding: round2(loan.outstanding + amount) });
+  }
+  return updates;
 }
 
 // ─── Payroll result ─────────────────────────────────────────────────────────
@@ -870,6 +907,7 @@ export async function generatePayslipForEmployee(
   // Re-allocate the capped loan total across loans in EMI order so the
   // persisted per-loan outstanding balances match the capped deduction.
   const { total: cappedLoanTotal, updates: cappedUpdates } = loanDeductionForMonth(loans, month, result.loanDeduction);
+  const loanAllocations = loanDeductionAllocations(loans, cappedUpdates);
 
   return prisma.$transaction(async (tx) => {
     if (payrollRunId) {
@@ -938,8 +976,9 @@ export async function generatePayslipForEmployee(
             // This private snapshot is never returned to employee/admin list UI;
             // it preserves the payment instruction selected at run generation.
             bank: { bankName: employee.bankName ?? null, accountNumber: employee.accountNumber ?? null, accountMasked: employee.accountNumber ? `****${employee.accountNumber.slice(-4)}` : null, ifscCode: employee.ifscCode ?? null },
-            attendance: summary,
-            componentAssignments: componentAssignments.map((assignment) => ({ id: assignment.id, componentCode: assignment.componentCode, effectiveFrom: assignment.effectiveFrom.toISOString(), effectiveTo: assignment.effectiveTo?.toISOString() ?? null })),
+             attendance: summary,
+             loanAllocations,
+             componentAssignments: componentAssignments.map((assignment) => ({ id: assignment.id, componentCode: assignment.componentCode, effectiveFrom: assignment.effectiveFrom.toISOString(), effectiveTo: assignment.effectiveTo?.toISOString() ?? null })),
             policy: policySnapshot?.appliedRules ?? { source: "tenant_config", payrollConfig: config },
             result,
           } as unknown as Prisma.InputJsonValue,

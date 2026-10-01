@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const bankExport = source("../app/api/payroll/export/route.ts");
+const complianceExport = source("../app/api/payroll/compliance/route.ts");
 const registerExport = source("../app/api/payroll/runs/[id]/register/route.ts");
+const tallyExport = source("../app/api/payroll/tally/route.ts");
+const reporting = source("../lib/payroll-reporting.ts");
 const processRoute = source("../app/(portal)/admin/payroll/process/page.tsx");
 const generate = source("../app/api/payroll/generate/route.ts");
 const panel = source("../app/(portal)/admin/payroll/payroll-panel.tsx");
@@ -13,6 +16,10 @@ assert.match(bankExport, /const slipStatus = run\.status === "paid" \? "paid" : 
 assert.match(bankExport, /payrollRunId: runId/);
 assert.match(bankExport, /status: slipStatus/);
 assert.doesNotMatch(bankExport, /statusParam/);
+assert.equal([...complianceExport.matchAll(/financialExportPayslipFilter\(\)/g)].length, 3, "all compliance exports use the financial run-state filter");
+assert.match(tallyExport, /financialExportPayslipFilter\(\)/, "Tally uses the financial run-state filter");
+assert.match(reporting, /FINANCIAL_HISTORY_RUN_STATUSES/, "financial exports permit finalized and paid runs");
+assert.match(reporting, /payrollRunId: null, status: "paid"/, "only explicitly paid legacy slips are exported");
 assert.match(registerExport, /payrollOperationLocationId\(session, new URL\(req\.url\)\.searchParams\.get\("locationId"\)\)/);
 assert.match(panel, /register\?\$\{new URLSearchParams\(\{ locationId: locationId \?\? "" \}\)/);
 assert.match(processRoute, /redirect\(`\/admin\/payroll/);
