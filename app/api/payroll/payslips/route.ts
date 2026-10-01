@@ -11,6 +11,19 @@ import { documentSnapshotForResponse } from "@/lib/payslip-document";
 export const runtime = "nodejs";
 
 const safeName = (value: string) => value.replace(/[^a-z0-9_-]/gi, "_");
+const PDF_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>) {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index]);
+    }
+  }));
+  return results;
+}
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -32,13 +45,13 @@ export async function GET(req: NextRequest) {
     }),
   ]);
   if (!slips.length) return NextResponse.json({ error: "No generated payslips match this selection." }, { status: 404 });
-  const pdfs = await Promise.all(slips.map(async (slip) => {
+  const pdfs = await mapWithConcurrency(slips, PDF_CONCURRENCY, async (slip) => {
     const branding = resolveCompanyBranding(tenant, slip.employee.branch?.location ?? slip.employee.location);
     const document = documentSnapshotForResponse(slip.documentSnapshot);
     if (document) {
       const [firstName, ...last] = document.employee.name.split(" ");
       return {
-        name: `${safeName(document.employee.employeeNumber)}-${safeName(document.employee.name)}-${month}.pdf`,
+        name: `${safeName(document.employee.employeeNumber)}-${month}.pdf`,
         data: await renderPayslipPdf({
           companyName: document.branding.displayName || document.branding.legalName, companyAddress: document.branding.address, companyContact: document.branding.contact, companyLogoUrl: document.branding.logoUrl, month: document.period,
           employee: { employeeNumber: document.employee.employeeNumber, deviceCode: null, firstName, lastName: last.join(" "), position: document.employee.designation, joiningDate: document.employee.joiningDate ? new Date(document.employee.joiningDate) : null, department: document.employee.department ? { name: document.employee.department } : null, bankName: document.employee.bankName, accountNumber: document.employee.accountMasked, ifscCode: null, pan: document.employee.panMasked, uan: document.employee.uan, esiIpNumber: document.employee.esiIpNumber },
@@ -64,10 +77,10 @@ export async function GET(req: NextRequest) {
       uan: snapshot.employee.uan ?? slip.employee.uan,
     } : slip.employee;
     return {
-      name: `${safeName(slip.employee.employeeNumber)}-${safeName(`${slip.employee.firstName}-${slip.employee.lastName}`)}-${month}.pdf`,
+      name: `${safeName(employee.employeeNumber)}-${month}.pdf`,
         data: await renderPayslipPdf({ companyName: branding.companyName, companyAddress: branding.address, companyContact: branding.contact, companyLogoUrl: branding.logoUrl, month, employee, payslip: { ...slip, adjustments: Array.isArray(slip.adjustments) ? slip.adjustments as { label: string; amount: number }[] : null, salaryBreakdown: Array.isArray(slip.salaryBreakdown) ? slip.salaryBreakdown as { label: string; amount: number; contractual?: number | null; earned?: number; kind: "earning" | "deduction"; includeInGross: boolean; visibleOnPayslip: boolean }[] : null, adjustmentEarnings: 0 } }),
     };
-  }));
+  });
   if (pdfs.length === 1) return new NextResponse(new Uint8Array(pdfs[0].data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdfs[0].name}"` } });
   const zip = new JSZip(); pdfs.forEach((pdf) => zip.file(pdf.name, pdf.data));
   const content = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
