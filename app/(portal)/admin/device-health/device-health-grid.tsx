@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Fingerprint, AlertTriangle, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { deviceHealthState, deviceStatusMetadata, type DeviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, deviceStatusMetadata, ebioDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
 import { DeviceStatusBadge, DeviceStatusLegend, deviceStatusDetail } from "@/components/devices/device-status";
 import { formatDateTime } from "@/lib/dates";
 
@@ -14,6 +14,7 @@ interface Device {
   ipAddress: string | null;
   type: string;
   protocol: string;
+  ebio: boolean;
   status: string;
   lastSeenAt: Date | null;
   createdAt: Date;
@@ -30,11 +31,39 @@ export function DeviceHealthGrid({
   logMap: Record<string, number>;
   errorMap: Record<string, number>;
 }) {
+  const [currentDevices, setCurrentDevices] = useState(devices);
   const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
   const now = Date.now();
-  const stateOf = (d: Device) => deviceHealthState(d.status, d.lastSeenAt, now);
-  const visibleDevices = devices.filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
+  const stateOf = (d: Device) => d.ebio ? ebioDeviceHealthState(d.status, d.lastSeenAt, now) : deviceHealthState(d.status, d.lastSeenAt, now);
+  const visibleDevices = currentDevices.filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
     .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
+
+  useEffect(() => {
+    let disposed = false;
+    let refreshing = false;
+    async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const response = await fetch("/api/devices/ebio-health", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json() as { devices?: Array<{ id: string; status: string; lastSeenAt: string | null }> };
+        if (disposed || !data.devices) return;
+        const updates = new Map(data.devices.map((device) => [device.id, device]));
+        setCurrentDevices((previous) => previous.map((device) => {
+          const update = updates.get(device.id);
+          return update ? { ...device, status: update.status, lastSeenAt: update.lastSeenAt ? new Date(update.lastSeenAt) : null } : device;
+        }));
+      } catch {
+        // Keep the last confirmed status when the application or eBio is unavailable.
+      } finally {
+        refreshing = false;
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, []);
 
   function lastSeen(d: Device): string {
     if (!d.lastSeenAt) return "Never";
@@ -46,7 +75,7 @@ export function DeviceHealthGrid({
     return `${Math.round(hrs / 24)}d ago`;
   }
 
-  if (devices.length === 0) {
+  if (currentDevices.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
         <Fingerprint className="h-8 w-8 text-muted-foreground/40" />

@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { DeviceHealthGrid } from "./device-health-grid";
 import { istStartOfDay } from "@/lib/ist";
-import { deviceHealthState } from "@/lib/device-health";
+import { deviceHealthState, ebioDeviceHealthState } from "@/lib/device-health";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,7 @@ export default async function AdminDeviceHealthPage() {
         ipAddress: true,
         type: true,
         protocol: true,
+        config: true,
         status: true,
         lastSeenAt: true,
         createdAt: true,
@@ -47,9 +48,16 @@ export default async function AdminDeviceHealthPage() {
   const logMap = new Map(logCounts.map((l) => [l.deviceId, l._count._all]));
   const errorMap = new Map(errorCounts.map((e) => [e.deviceId, e._count._all]));
 
+  const rows = devices.map((device) => ({
+    ...device,
+    ebio: Boolean((device.config as { ebioserver?: boolean } | null)?.ebioserver),
+  }));
   const now = Date.now();
-  const healthy = devices.filter((d) => ["online", "idle"].includes(deviceHealthState(d.status, d.lastSeenAt, now))).length;
-  const offline = devices.filter((d) => ["offline", "stale"].includes(deviceHealthState(d.status, d.lastSeenAt, now))).length;
+  const healthOf = (device: typeof rows[number]) => device.ebio
+    ? ebioDeviceHealthState(device.status, device.lastSeenAt, now)
+    : deviceHealthState(device.status, device.lastSeenAt, now);
+  const healthy = rows.filter((device) => ["online", "idle"].includes(healthOf(device))).length;
+  const offline = rows.filter((device) => ["offline", "stale"].includes(healthOf(device))).length;
   const todayPunches = [...punchMap.values()].reduce((s, n) => s + n, 0);
 
   return (
@@ -81,7 +89,7 @@ export default async function AdminDeviceHealthPage() {
       <Card>
         <CardContent className="p-0">
           <DeviceHealthGrid
-            devices={devices}
+            devices={rows}
             punchMap={Object.fromEntries(punchMap)}
             logMap={Object.fromEntries(logMap)}
             errorMap={Object.fromEntries(errorMap)}

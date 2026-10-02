@@ -150,6 +150,12 @@ The device sync endpoint runs on a schedule from the host:
 */5 * * * * curl -fsS -X POST -H "x-cron-secret: <CRON_SECRET>" https://peoplenexa.in/api/cron/ebioserver-pull
 ```
 
+Device Health separately polls eBio's documented `GetDeviceLastPing` endpoint
+every 30 seconds while an admin has that page open. It does not ingest punches.
+The status becomes offline when eBio reports no ping within five minutes; this
+is polling, not a vendor push event. Keep the five-minute cron for unattended
+health refresh and attendance ingestion.
+
 ## Day-2 operations
 
 ```bash

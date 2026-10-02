@@ -355,6 +355,48 @@ function parseDevicePing(result: string): Date | null {
   return timestamp ? parseIST(timestamp) : null;
 }
 
+export type EbioHealthDevice = { id: string; serialNumber: string; status: string };
+
+/**
+ * Refresh health only. A missing/malformed result or SOAP failure deliberately
+ * leaves the stored state alone: an eBioServer outage is not proof a device is offline.
+ */
+export async function refreshEbioDeviceHealth(
+  profile: EbioserverProfile,
+  devices: EbioHealthDevice[]
+): Promise<{ refreshed: number; unavailable: number }> {
+  const summary = { refreshed: 0, unavailable: 0 };
+  if (devices.length === 0) return summary;
+  const client = await createClient(profile);
+
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, devices.length) }, async () => {
+    while (next < devices.length) {
+      const device = devices[next++];
+      try {
+        const pingResult = await call<unknown>(client, "GetDeviceLastPing", {
+          ...authArgs(profile),
+          DeviceSerialNumber: device.serialNumber,
+        });
+        const heartbeat = ebioHeartbeatPatch(parseDevicePing(resultString(pingResult)));
+        if (!heartbeat) {
+          summary.unavailable++;
+          continue;
+        }
+        await prisma.device.update({ where: { id: device.id }, data: { lastSeenAt: heartbeat.lastSeenAt } });
+        await prisma.device.updateMany({
+          where: { id: device.id, status: { in: ["active", "offline"] } },
+          data: { status: heartbeat.status },
+        });
+        summary.refreshed++;
+      } catch {
+        summary.unavailable++;
+      }
+    }
+  }));
+  return summary;
+}
+
 // ── Employee master import ─────────────────────────────────────────────────
 //
 // GetEmployeeCodesResult: "HO009,HO115,..." (comma-separated codes)
@@ -642,29 +684,13 @@ export async function pullTenant(
       return summary;
     }
 
-    // Machine pings are independent of attendance activity. Refresh these on
-    // every pull so Device Health reflects a live machine, not just a device
-    // that happened to receive a punch recently.
-    for (const device of deviceBySerial.values()) {
-      try {
-        const pingResult = await call<unknown>(client, "GetDeviceLastPing", {
-          ...authArgs(profile),
-          DeviceSerialNumber: device.serialNumber,
-        });
-        const heartbeat = ebioHeartbeatPatch(parseDevicePing(resultString(pingResult)));
-        if (heartbeat) {
-          await prisma.device.update({ where: { id: device.id }, data: { lastSeenAt: heartbeat.lastSeenAt } });
-          if (heartbeat.status) {
-            await prisma.device.updateMany({
-              where: { id: device.id, status: { in: ["active", "offline"] } },
-              data: { status: heartbeat.status },
-            });
-          }
-        }
-      } catch {
-        // A ping error must not block attendance ingestion for other machines.
-      }
-    }
+    // Machine pings are independent of attendance activity. This status-only
+    // refresh is also used by the live Device Health endpoint.
+    await refreshEbioDeviceHealth(profile, [...deviceBySerial.values()].map((device) => ({
+      id: device.id,
+      serialNumber: device.serialNumber,
+      status: device.status,
+    })));
 
     // 2. Pull. A fresh cursor bootstraps: probe the head of the transaction
     // log (so we don't walk another company's full history), then backfill the
