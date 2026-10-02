@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link2, Loader2, Plug, Save, ShieldCheck, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
 
@@ -25,7 +25,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   const [username, setUsername] = useState(initial.username);
   const [password, setPassword] = useState("");
   const [enabled, setEnabled] = useState(initial.enabled);
-  const [interval, setInterval] = useState(initial.pollIntervalMinutes);
+  const [interval, setInterval] = useState<number | null>(initial.pollIntervalMinutes);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -157,12 +157,11 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
           </div>
 
           <Field label="Polling interval" hint="How often punches are pulled (minutes)">
-            <Input
-              type="number"
+            <NumberInput
               min={1}
               max={1440}
               value={interval}
-              onChange={(e) => setInterval(Number(e.target.value))}
+              onValueChange={setInterval}
               className="h-11 w-40"
             />
           </Field>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Save, ScanFace } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
 export function FaceSettingsPanel({
@@ -13,8 +13,8 @@ export function FaceSettingsPanel({
 }) {
   const toast = useToast();
   const [enabled, setEnabled] = useState(initial.enabled);
-  const [matchThreshold, setMatchThreshold] = useState(initial.matchThreshold);
-  const [reviewThreshold, setReviewThreshold] = useState(initial.reviewThreshold);
+  const [matchThreshold, setMatchThreshold] = useState<number | null>(initial.matchThreshold);
+  const [reviewThreshold, setReviewThreshold] = useState<number | null>(initial.reviewThreshold);
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -54,24 +54,22 @@ export function FaceSettingsPanel({
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Match threshold" hint="Accept at or above this score (default 0.62)">
-              <Input
-                type="number"
+              <NumberInput
                 min={0}
                 max={1}
                 step={0.01}
                 value={matchThreshold}
-                onChange={(e) => setMatchThreshold(Number(e.target.value))}
+                onValueChange={setMatchThreshold}
                 className="h-11 w-40 font-mono"
               />
             </Field>
             <Field label="Review threshold" hint="Scores below this auto-reject; gray zone goes to review (default 0.50)">
-              <Input
-                type="number"
+              <NumberInput
                 min={0}
                 max={1}
                 step={0.01}
                 value={reviewThreshold}
-                onChange={(e) => setReviewThreshold(Number(e.target.value))}
+                onValueChange={setReviewThreshold}
                 className="h-11 w-40 font-mono"
               />
             </Field>

@@ -9,6 +9,25 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
 );
 Input.displayName = "Input";
 
+type NumberInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "onChange"> & {
+  value: number | null | undefined;
+  onValueChange: (value: number | null) => void;
+};
+
+/** Keeps an empty numeric field empty instead of coercing it to zero. */
+export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
+  ({ onValueChange, ...props }, ref) => (
+    <Input
+      ref={ref}
+      {...props}
+      type="number"
+      value={props.value ?? ""}
+      onChange={(event) => onValueChange(event.currentTarget.value === "" || !Number.isFinite(event.currentTarget.valueAsNumber) ? null : event.currentTarget.valueAsNumber)}
+    />
+  )
+);
+NumberInput.displayName = "NumberInput";
+
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => <textarea ref={ref} className={cn(base, "min-h-[90px] py-2.5", className)} {...props} />
 );
