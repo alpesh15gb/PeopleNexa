@@ -215,12 +215,12 @@ function DailyDirect({ apiUrl }: { apiUrl: string }) {
   return <DailyTable output={data} />;
 }
 
-const TH = "border border-neutral-300 bg-neutral-100 px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-black";
-const TD = "border border-neutral-300 px-2 py-1.5 text-[12px] text-black";
+const TH = "border border-input bg-card-2 px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-foreground";
+const TD = "border border-input px-2 py-1.5 text-[12px] text-foreground";
 
 function ReportHeader({ left, center, right }: { left: string; center: string; right: string }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-4 bg-white px-1 py-2 text-black">
+    <div className="mb-3 flex items-center justify-between gap-4 bg-card px-1 py-2 text-foreground">
       <p className="text-[13px] font-semibold">{left}</p>
       <p className="text-[15px] font-bold">{center}</p>
       <p className="text-[13px] font-semibold">{right}</p>
@@ -245,10 +245,10 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
     );
   }
   return (
-    <div className="print-report bg-white p-4 text-black">
+    <div className="print-report bg-card p-4 text-foreground">
       <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
       <div className="overflow-x-auto">
-        <table id="report-table" className="w-full border-collapse bg-white">
+        <table id="report-table" className="w-full border-collapse bg-card">
           <thead>
             <tr>
               {columns.map((c) => (
@@ -265,13 +265,13 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
                 <td className={TD}>{r.name}</td>
                 <td className={TD}>{r.designation}</td>
                 <td className={TD}>{r.shift}</td>
-                <td className={`${TD} font-mono`}>{r.inTime}</td>
-                <td className={`${TD} font-mono`}>{r.outTime}</td>
-                <td className={`${TD} font-mono`}>{r.late}</td>
-                <td className={`${TD} font-mono`}>{r.early}</td>
-                <td className={`${TD} font-mono`}>{r.duration}</td>
-                <td className={`${TD} font-mono`}>{r.overtime}</td>
-                <td className={`${TD} font-mono text-[11px]`}>{r.punches}</td>
+                <td className={`${TD} tabular-nums`}>{r.inTime}</td>
+                <td className={`${TD} tabular-nums`}>{r.outTime}</td>
+                <td className={`${TD} tabular-nums`}>{r.late}</td>
+                <td className={`${TD} tabular-nums`}>{r.early}</td>
+                <td className={`${TD} tabular-nums`}>{r.duration}</td>
+                <td className={`${TD} tabular-nums`}>{r.overtime}</td>
+                <td className={`${TD} tabular-nums text-[11px]`}>{r.punches}</td>
                 <td className={`${TD} text-center font-bold`}>{r.status}</td>
               </tr>
             ))}
@@ -301,16 +301,16 @@ function MonthlyTables({ baseUrl }: { baseUrl: string }) {
   return (
     <div className="space-y-4">
       <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
-    <div className="print-report space-y-8 bg-white p-4 text-black">
+    <div className="print-report space-y-8 bg-card p-4 text-foreground">
       {visible.map((block) => (
         <div key={block.code}>
           <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
-          <p className="mb-1 bg-white text-[13px] font-semibold text-black">
+          <p className="mb-1 bg-card text-[13px] font-semibold text-foreground">
             Code | {block.code} | Name | {block.name} | Designation | {block.designation}
           </p>
-          <p className="mb-2 bg-white text-[12px] text-black">{block.summaryLine}</p>
+          <p className="mb-2 bg-card text-[12px] text-foreground">{block.summaryLine}</p>
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse bg-white">
+            <table className="w-full border-collapse bg-card">
               <thead>
                 <tr>
                   {output.columns.map((c) => (
@@ -326,12 +326,12 @@ function MonthlyTables({ baseUrl }: { baseUrl: string }) {
                     <td className={`${TD} text-center`}>{d.day}</td>
                     <td className={`${TD} text-center font-bold`}>{d.status}</td>
                     <td className={TD}>{d.shift}</td>
-                    <td className={`${TD} font-mono`}>{d.inTime}</td>
-                    <td className={`${TD} font-mono`}>{d.outTime}</td>
-                    <td className={`${TD} font-mono`}>{d.lateBy}</td>
-                    <td className={`${TD} font-mono`}>{d.earlyBy}</td>
-                    <td className={`${TD} font-mono`}>{d.duration}</td>
-                    <td className={`${TD} font-mono`}>{d.overTime}</td>
+                    <td className={`${TD} tabular-nums`}>{d.inTime}</td>
+                    <td className={`${TD} tabular-nums`}>{d.outTime}</td>
+                    <td className={`${TD} tabular-nums`}>{d.lateBy}</td>
+                    <td className={`${TD} tabular-nums`}>{d.earlyBy}</td>
+                    <td className={`${TD} tabular-nums`}>{d.duration}</td>
+                    <td className={`${TD} tabular-nums`}>{d.overTime}</td>
                   </tr>
                 ))}
               </tbody>
@@ -345,10 +345,10 @@ function MonthlyTables({ baseUrl }: { baseUrl: string }) {
 }
 
 function statusCellClass(status: string): string {
-  if (status === "P" || status === "½P") return `${TD} bg-green-50 text-center font-bold text-green-700`;
-  if (status === "A") return `${TD} bg-red-50 text-center font-bold text-red-700`;
-  if (status === "L") return `${TD} bg-blue-50 text-center font-bold text-blue-700`;
-  return `${TD} text-center font-bold text-neutral-700`;
+  if (status === "P" || status === "½P") return `${TD} bg-green-50 text-center font-bold text-green-700 dark:bg-emerald-500/10 dark:text-emerald-300`;
+  if (status === "A") return `${TD} bg-red-50 text-center font-bold text-red-700 dark:bg-red-500/10 dark:text-rose-300`;
+  if (status === "L") return `${TD} bg-primary/10 text-center font-bold text-primary`;
+  return `${TD} text-center font-bold text-foreground`;
 }
 
 function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
@@ -370,15 +370,15 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
   return (
     <div className="space-y-4">
       <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
-      <div className="print-report space-y-8 bg-white p-4 text-black">
+      <div className="print-report space-y-8 bg-card p-4 text-foreground">
         <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
         {output.department && (
-          <p className="bg-white text-[13px] font-semibold text-black">Department | {output.department}</p>
+          <p className="bg-card text-[13px] font-semibold text-foreground">Department | {output.department}</p>
         )}
         {visible.map((block) => (
           <div key={block.code}>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white">
+              <table className="w-full border-collapse bg-card">
                 <thead>
                   <tr>
                     <th className={TH}>Sl No</th><th className={TH}>Employee Id</th><th className={TH}>Employee Name</th><th className={TH}>Applied Leave</th><th className={TH}></th>
@@ -394,14 +394,14 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
                   <tr>
                     <td className={TD} rowSpan={3}>{block.serial}</td><td className={TD} rowSpan={3}>{block.code}</td><td className={TD} rowSpan={3}>{block.name}</td><td className={TD} rowSpan={3}>{block.appliedLeave}</td><td className={`${TD} font-bold whitespace-nowrap`}>CHECK IN</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.inTime}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.inTime}</td>
                     ))}
                     <td className={TD} colSpan={5}></td>
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold whitespace-nowrap`}>CHECK OUT</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.outTime}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.outTime}</td>
                     ))}
                     <td className={TD} colSpan={5}></td>
                   </tr>
@@ -443,18 +443,18 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
   return (
     <div className="space-y-4">
       <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
-      <div className="print-report space-y-8 bg-white p-4 text-black">
+      <div className="print-report space-y-8 bg-card p-4 text-foreground">
         <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
-        <p className="bg-white text-[12px] text-black">
+        <p className="bg-card text-[12px] text-foreground">
           Run by {output.header.runBy} | Date/Time {output.header.generatedAt}
         </p>
         {visible.map((block) => (
           <div key={block.code}>
-            <p className="mb-1 bg-white text-[13px] font-semibold text-black">
+            <p className="mb-1 bg-card text-[13px] font-semibold text-foreground">
               {block.code} - {block.name}
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white">
+              <table className="w-full border-collapse bg-card">
                 <thead>
                   <tr>
                     {WORK_SUMMARY_COLUMNS.map((c) => (
@@ -467,15 +467,15 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
                 <tbody>
                   {block.rows.map((r) => (
                     <tr key={r.dayKey}>
-                      <td className={`${TD} font-mono`}>{r.date}</td>
+                      <td className={`${TD} tabular-nums`}>{r.date}</td>
                       <td className={TD}>{r.shift}</td>
-                      <td className={`${TD} font-mono`}>{r.firstIn}</td>
-                      <td className={`${TD} font-mono`}>{r.lastOut}</td>
-                      <td className={`${TD} font-mono`}>{r.gross}</td>
-                      <td className={`${TD} font-mono`}>{r.work}</td>
-                      <td className={`${TD} font-mono`}>{r.late}</td>
-                      <td className={`${TD} font-mono`}>{r.overtime}</td>
-                      <td className={`${TD} font-mono`}>{r.early}</td>
+                      <td className={`${TD} tabular-nums`}>{r.firstIn}</td>
+                      <td className={`${TD} tabular-nums`}>{r.lastOut}</td>
+                      <td className={`${TD} tabular-nums`}>{r.gross}</td>
+                      <td className={`${TD} tabular-nums`}>{r.work}</td>
+                      <td className={`${TD} tabular-nums`}>{r.late}</td>
+                      <td className={`${TD} tabular-nums`}>{r.overtime}</td>
+                      <td className={`${TD} tabular-nums`}>{r.early}</td>
                     </tr>
                   ))}
                   <tr>
@@ -483,11 +483,11 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
                     <td className={TD}></td>
                     <td className={TD}></td>
                     <td className={TD}></td>
-                    <td className={`${TD} font-mono font-bold`}>{block.totals.gross}</td>
-                    <td className={`${TD} font-mono font-bold`}>{block.totals.work}</td>
-                    <td className={`${TD} font-mono font-bold`}>{block.totals.late}</td>
-                    <td className={`${TD} font-mono font-bold`}>{block.totals.overtime}</td>
-                    <td className={`${TD} font-mono font-bold`}>{block.totals.early}</td>
+                    <td className={`${TD} tabular-nums font-bold`}>{block.totals.gross}</td>
+                    <td className={`${TD} tabular-nums font-bold`}>{block.totals.work}</td>
+                    <td className={`${TD} tabular-nums font-bold`}>{block.totals.late}</td>
+                    <td className={`${TD} tabular-nums font-bold`}>{block.totals.overtime}</td>
+                    <td className={`${TD} tabular-nums font-bold`}>{block.totals.early}</td>
                   </tr>
                 </tbody>
               </table>
@@ -518,17 +518,17 @@ function PerformanceTables({ baseUrl }: { baseUrl: string }) {
   return (
     <div className="space-y-4">
       <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
-      <div className="print-report space-y-8 bg-white p-4 text-black">
+      <div className="print-report space-y-8 bg-card p-4 text-foreground">
         {visible.map((block, i) => (
           <div key={block.code}>
             {i === 0 && (
               <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
             )}
-            <p className="mb-1 bg-white text-[13px] font-semibold text-black">
+            <p className="mb-1 bg-card text-[13px] font-semibold text-foreground">
               Dep | {block.department} | Name | {block.name} | E.Code | {block.code} | Desig | {block.designation} | Shift | {block.shiftHours}
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white">
+              <table className="w-full border-collapse bg-card">
                 <thead>
                   <tr>
                     <th className={TH}></th>
@@ -549,13 +549,13 @@ function PerformanceTables({ baseUrl }: { baseUrl: string }) {
                   <tr>
                     <td className={`${TD} font-bold`}>IN</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.inTime}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.inTime}</td>
                     ))}
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold`}>OUT</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.outTime}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.outTime}</td>
                     ))}
                   </tr>
                   <tr>
@@ -567,25 +567,25 @@ function PerformanceTables({ baseUrl }: { baseUrl: string }) {
                   <tr>
                     <td className={`${TD} font-bold`}>Late</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.late}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.late}</td>
                     ))}
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold`}>OT</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.ot}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.ot}</td>
                     ))}
                   </tr>
                   <tr>
                     <td className={`${TD} font-bold`}>Early</td>
                     {block.days.map((d) => (
-                      <td key={d.day} className={`${TD} text-center font-mono`}>{d.early}</td>
+                      <td key={d.day} className={`${TD} text-center tabular-nums`}>{d.early}</td>
                     ))}
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p className="mt-1 bg-white text-[12px] text-black">
+            <p className="mt-1 bg-card text-[12px] text-foreground">
               Total Working Hrs: {block.totals.work} | Total OT Hrs: {block.totals.ot} | Present: {block.totals.present} Absent: {block.totals.absent} | Paid Day: {block.totals.paidDay} | WO: {block.totals.wo} HLD: {block.totals.hld} Leave: {block.totals.leave}
             </p>
           </div>

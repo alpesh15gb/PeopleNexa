@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-inter-ui), ui-sans-serif, system-ui, sans-serif;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -14,6 +14,11 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-destructive: var(--danger);
+  --color-success-action: var(--success-action);
+  --color-success-action-foreground: var(--success-action-foreground);
+  --color-danger-action: var(--danger-action);
+  --color-danger-action-foreground: var(--danger-action-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-accent: var(--accent);
@@ -43,10 +48,11 @@
 
 /* ── Light theme (default) ─────────────────────────────────────────────── */
 :root {
-  --font-jakarta: ui-sans-serif;
+  --font-jakarta: var(--font-inter-ui), ui-sans-serif;
+  --font-id-card: var(--font-inter-ui);
   color-scheme: light;
 
-  /* Compat aliases: single Jakarta family backs both legacy variable names
+  /* Compat aliases: Inter backs both legacy variable names
      so existing markup referencing --font-inter / --font-space-grotesk keeps working. */
   --font-inter: var(--font-jakarta);
   --font-space-grotesk: var(--font-jakarta);
@@ -61,31 +67,35 @@
   --border-strong: #CBD5E1;
   --tint: rgba(37, 99, 235, 0.04);
   --tint-strong: rgba(37, 99, 235, 0.08);
-  --input: #CBD5E1;
-  --primary: #2563EB;
+  --input: #7c8da6;
+  --success-action: #047857;
+  --success-action-foreground: #ffffff;
+  --danger-action: #be123c;
+  --danger-action-foreground: #ffffff;
+  --primary: #1d4ed8;
   --primary-foreground: #FFFFFF;
   /* CTA accent: #C2410C (not #EA580C) so white text clears 4.5:1 AA. */
   --accent: #C2410C;
   --accent-foreground: #FFFFFF;
   --accent-hover: #9A3412;
-  --ring: rgba(37, 99, 235, 0.35);
+  --ring: #2563eb;
   --sidebar: #FFFFFF;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #f43f5e;
+  --success: #047857;
+  --warning: #854d0e;
+  --danger: #be123c;
 
   /* Light-theme accent shades: blue family unified to the brand scale for
      4.5:1+ contrast on light surfaces; emerald/rose/amber stay semantic. */
   --indigo-200: #1D4ED8;
   --indigo-300: #2563EB;
-   /* Semantic foregrounds stay at AA contrast on light surfaces, including
-      translucent status badges and compact dashboard statistics. */
-   --emerald-300: #047857;
-   --emerald-400: #047857;
-   --rose-300: #be123c;
-   --rose-400: #be123c;
-   --amber-300: #a16207;
-   --amber-400: #a16207;
+  /* Semantic foregrounds stay at AA contrast on light surfaces, including
+     translucent status badges and compact dashboard statistics. */
+  --emerald-300: #047857;
+  --emerald-400: #047857;
+  --rose-300: #be123c;
+  --rose-400: #be123c;
+  --amber-300: #854d0e;
+  --amber-400: #854d0e;
   --sky-300: #1D4ED8;
   --sky-400: #2563EB;
   --violet-200: #1E40AF;
@@ -108,19 +118,23 @@
   --card: #141a24;
   --card-2: #1a2230;
   --muted: #202a39;
-  --muted-foreground: #98a2b3;
+  --muted-foreground: #b0bac9;
   --border: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.16);
   --tint: rgba(255, 255, 255, 0.045);
   --tint-strong: rgba(255, 255, 255, 0.075);
-  --input: rgba(255, 255, 255, 0.11);
+  --input: #65748c;
+  --success-action: #6ee7b7;
+  --success-action-foreground: #052e24;
+  --danger-action: #fda4af;
+  --danger-action-foreground: #4c0519;
   --primary: #60A5FA;
   --primary-foreground: #0B1220;
   /* Dark CTA: lighter orange keeps 4.5:1 with dark text on dark surfaces. */
   --accent: #FB923C;
   --accent-foreground: #431407;
   --accent-hover: #FDBA74;
-  --ring: rgba(96, 165, 250, 0.45);
+  --ring: #93c5fd;
   --sidebar: #101721;
   --success: #34d399;
   --warning: #fbbf24;
@@ -142,10 +156,12 @@
   --scrollbar-thumb: rgba(96, 165, 250, 0.32);
 }
 
-*,
-::before,
-::after {
-  border-color: var(--border);
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
 }
 
 /* Explicit transparent borders must stay transparent (e.g. tab underlines). */
@@ -163,16 +179,17 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.25);
-  color: #fff;
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 .dark ::selection {
-  background: rgba(96, 165, 250, 0.4);
-  color: #0B1220;
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 
 /* Global keyboard focus ring: 2px ring color offset from background. */
@@ -200,13 +217,17 @@ body {
 
 /* Native <option> popups ignore inherited theme colors in dark mode
    (white-on-white text). Pin explicit pairs per theme. */
-select option {
-  background-color: #ffffff;
-  color: #1e293b;
+select { color-scheme: inherit; }
+select option, select optgroup {
+  background-color: var(--card-2);
+  color: var(--foreground);
 }
-.dark select option {
-  background-color: #1a2230;
-  color: #f4f6fb;
+select option:disabled { color: var(--muted-foreground); }
+input, textarea, select { accent-color: var(--primary); }
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+  -webkit-box-shadow: 0 0 0 1000px var(--card) inset;
 }
 
 /* ── Theme-aware edge & tint utilities ─────────────────────────────────── */
@@ -248,7 +269,14 @@ select option {
 }
 
 .bg-gradient-brand {
-  background: linear-gradient(135deg, #2563EB 0%, #3B82F6 100%);
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+}
+
+/* Reports follow the UI theme on screen, and stay ink-friendly when printed. */
+@media print {
+  .print-report { background: white !important; color: black !important; color-scheme: light; }
+  .print-report * { color: black !important; background-color: transparent !important; border-color: #a3a3a3 !important; }
+  .print-report th { background-color: #f5f5f5 !important; }
 }
 
 .bg-grid {

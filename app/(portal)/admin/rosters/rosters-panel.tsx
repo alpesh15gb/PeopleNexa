@@ -384,7 +384,7 @@ function BulkAssignModal({
           Overwrite existing assignments in range
         </label>
 
-        <div className="flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-500/5 px-3.5 py-2.5 text-[12.5px] text-amber-200/90">
+        <div className="flex items-start gap-2 rounded-xl border border-amber-400/20 bg-amber-500/5 px-3.5 py-2.5 text-[12.5px] text-warning/90">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           Existing assignments are skipped (reported as clashes) unless overwrite is on. Roster shifts drive
           auto punch-out and shift-wise reports.

@@ -148,7 +148,7 @@ function cn(...parts: Array<string | false | null | undefined>) {
 
 /* CTA accent: --accent token (AA 4.5:1). Primary blue: --primary token. */
 const CTA_PRIMARY =
-  "bg-accent text-white shadow-[0_8px_24px_-10px_rgba(194,65,12,0.75)] hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none";
+  "bg-accent text-accent-foreground shadow-[0_8px_24px_-10px_rgba(194,65,12,0.75)] hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none";
 const CTA_SECONDARY =
   "border-primary/40 text-primary hover:bg-primary/5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none";
 const EYEBROW = "text-primary dark:text-[#93C5FD]";
@@ -174,16 +174,9 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
   return (
     <div
       className="min-h-screen bg-background text-foreground selection:bg-primary/20"
-      style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif" }}
     >
-      {/* Jakarta + static reduced-motion fallback (hero has no parallax; animations collapse to final state). */}
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-        rel="stylesheet"
-      />
-      <style>{`.font-display{font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif !important}.text-gradient{background:linear-gradient(135deg,#2563EB 0%,#3B82F6 60%,#60A5FA 100%)}@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
+      {/* Reduced-motion fallback for the public page. Typography and colors use the shared theme. */}
+      <style>{`@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
 
       {/* ── Nav (sticky CTA) ──────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-edge bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
@@ -204,7 +197,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             </Link>
             <Link
               href="/register"
-              className="rounded-lg bg-accent px-4 py-2 text-[13.5px] font-semibold text-white shadow-[0_4px_14px_-8px_rgba(194,65,12,0.7)] transition-all duration-200 hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none"
+              className="rounded-lg bg-accent px-4 py-2 text-[13.5px] font-semibold text-accent-foreground shadow-[0_4px_14px_-8px_rgba(194,65,12,0.7)] transition-all duration-200 hover:bg-accent-hover active:translate-y-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none motion-reduce:transform-none"
             >
               Start free trial
             </Link>
@@ -246,7 +239,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                 </Link>
                 <Link
                   href="/register"
-                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-center text-[14px] font-semibold text-white transition-colors duration-200 hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none"
+                  className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-center text-[14px] font-semibold text-accent-foreground transition-colors duration-200 hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none"
                 >
                   Start free trial
                 </Link>
@@ -321,7 +314,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
               <div className="flex items-center justify-between border-b border-edge pb-4">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-bold text-white">PN</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-bold text-primary-foreground">PN</span>
                   <span className="truncate text-[13px] font-semibold">Apex Integrations</span>
                   <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-300">live</span>
                 </div>
@@ -374,7 +367,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
                   <div className="mt-3 flex h-32 items-center justify-center rounded-lg bg-grid">
                     <div className="relative flex h-24 w-24 items-center justify-center rounded-full border border-primary/40 bg-primary/10">
                       <div className="absolute -inset-3 rounded-full border border-primary/20" />
-                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-white">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground">
                         <MapPin className="h-4 w-4" aria-hidden="true" />
                       </span>
                     </div>
@@ -417,7 +410,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
               key={f.title}
               className="card-surface group rounded-2xl border-white/20 bg-white/70 p-5 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_12px_40px_-16px_rgba(37,99,235,0.35)] motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5"
             >
-              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-[0_6px_20px_-6px_rgba(37,99,235,0.6)]", ICON_TILE)}>
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-primary-foreground shadow-[0_6px_20px_-6px_rgba(37,99,235,0.6)]", ICON_TILE)}>
                 <f.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15.5px] font-bold tracking-tight">{f.title}</h3>
@@ -460,7 +453,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
             <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5">
               <div className="flex items-center justify-between border-b border-edge pb-3.5">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white", ICON_TILE)}>
+                  <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-primary-foreground", ICON_TILE)}>
                     <Route className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                   <span className="truncate text-[13px] font-semibold">Journey · Rahul S.</span>
@@ -517,7 +510,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
               {/* Chat mockup */}
               <div className="card-surface rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5">
                 <div className="flex items-center gap-2.5 border-b border-edge pb-3.5">
-                  <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+                  <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-primary-foreground", ICON_TILE)}>
                     <Bot className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
@@ -581,7 +574,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         <div className="mt-12 grid gap-5 md:grid-cols-3">
           {PERSONAS.map((p) => (
             <div key={p.title} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5">
-              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-primary-foreground", ICON_TILE)}>
                 <p.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15.5px] font-bold tracking-tight">{p.title}</h3>
@@ -675,7 +668,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {SECURITY.map((s) => (
             <div key={s.title} className="card-surface rounded-2xl border-white/20 bg-white/70 p-5 backdrop-blur-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 motion-reduce:transition-none motion-reduce:transform-none dark:bg-white/5">
-              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", ICON_TILE)}>
+              <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-primary-foreground", ICON_TILE)}>
                 <s.icon className="h-4.5 w-4.5" aria-hidden="true" />
               </span>
               <h3 className="mt-4 font-display text-[15px] font-bold tracking-tight">{s.title}</h3>
@@ -809,7 +802,7 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
               )}
             >
               {isFeatured && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-white shadow-lg">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-[10.5px] font-bold uppercase tracking-wider text-accent-foreground shadow-lg">
                   Most popular
                 </span>
               )}
@@ -882,7 +875,7 @@ function Pricing({ plans }: { plans: PlanDef[] }) {
                     className={cn(
                       "flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-[13.5px] font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none",
                       isFeatured
-                        ? "bg-accent text-white shadow-[0_8px_28px_-8px_rgba(194,65,12,0.7)] hover:bg-accent-hover"
+                        ? "bg-accent text-accent-foreground shadow-[0_8px_28px_-8px_rgba(194,65,12,0.7)] hover:bg-accent-hover"
                         : "border border-edge-strong hover:bg-tint"
                     )}
                   >

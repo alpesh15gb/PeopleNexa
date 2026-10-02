@@ -27,7 +27,7 @@ export default async function EmployeeDocumentsPage() {
       <PageHeader title={t(lang, "documents.title")} description={t(lang, "documents.description")} />
 
       {alerts.length > 0 && (
-        <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-200">
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-[13px] text-warning">
           <AlertTriangle className="mr-2 inline h-4 w-4" />
           {alerts.map((d) => `"${d.name}" ${expiryStatus(d.expiryDate) === "expired" ? "has expired" : `expires ${formatDate(d.expiryDate!)}`}`).join(" · ")}
         </div>

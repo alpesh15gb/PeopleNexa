@@ -287,7 +287,7 @@ export default async function AdminDashboardPage({
           </span>
         ) : (
           <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
-        )}<Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white">Punch Details</Link></div>
+        )}<Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground">Punch Details</Link></div>
       </div>
 
       {/* Stats */}

@@ -3,16 +3,20 @@ import type { ReactNode } from "react";
 import localFont from "next/font/local";
 import { getLang } from "@/lib/i18n-server";
 import { PWARegister } from "@/components/pwa-register";
+import { ThemeProvider } from "@/components/theme-provider";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 // Kept local so ID-card previews never depend on a browser font fetch and PDFKit
 // embeds the matching TTF files from the same package.
 const inter = localFont({
-  variable: "--font-id-card",
+  variable: "--font-inter-ui",
   display: "swap",
   src: [
     { path: "../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf", weight: "400", style: "normal" },
+    { path: "../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf", weight: "500", style: "normal" },
     { path: "../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "../node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf", weight: "700", style: "normal" },
   ],
 });
 
@@ -44,9 +48,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const lang = await getLang().catch(() => "en" as const);
   return (
     <html lang={lang} suppressHydrationWarning className={`${inter.variable} h-full antialiased`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full">
-        <PWARegister />
-        {children}
+        <ThemeProvider>
+          <PWARegister />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

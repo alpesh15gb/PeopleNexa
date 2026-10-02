@@ -23,6 +23,7 @@
     "test:payroll-configuration": "tsx scripts/test-payroll-configuration.ts",
     "test:policy-workspace": "tsx scripts/test-policy-workspace.ts",
     "test:payroll-leave-audit": "tsx scripts/test-payroll-leave-audit.ts",
+    "test:theme": "tsx scripts/test-theme.ts",
     "test:payroll-field-mapping": "tsx scripts/test-payroll-field-mapping.ts",
     "test:payroll-workspace": "tsx scripts/test-payroll-workspace.ts",
     "test:payroll-selected-members": "tsx scripts/test-payroll-selected-members.ts",

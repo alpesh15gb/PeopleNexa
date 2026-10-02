@@ -8,9 +8,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
       <select
         ref={ref}
         className={cn(
-          "h-11 min-h-[44px] w-full cursor-pointer appearance-none rounded-xl border border-input bg-tint px-3.5 pr-9 text-sm text-foreground transition-all duration-150",
+          "h-11 min-h-[44px] w-full cursor-pointer appearance-none rounded-xl border border-input bg-card px-3.5 pr-9 text-base sm:text-sm text-foreground transition-all duration-150",
           "focus:border-primary/60 focus:outline-none focus:ring-4 focus:ring-ring/15",
-          "aria-[invalid=true]:border-destructive/60 aria-[invalid=true]:ring-destructive/15",
+          "aria-[invalid=true]:border-destructive aria-[invalid=true]:ring-destructive/15",
           "disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}

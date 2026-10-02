@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const navItems = [
   { href: "/superadmin", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
@@ -133,6 +134,7 @@ export function SuperadminShell({ name, children }: { name: string; children: Re
               {navItems.find((n) => (n.exact ? pathname === n.href : pathname.startsWith(n.href)))?.label ?? "Console"}
             </p>
           </div>
+          <ThemeToggle />
           <span className="hidden items-center gap-1.5 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] font-medium text-muted-foreground backdrop-blur sm:flex">
             <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5 text-primary" /> Platform console
           </span>

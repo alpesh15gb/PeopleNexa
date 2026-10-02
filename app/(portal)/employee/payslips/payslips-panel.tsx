@@ -110,11 +110,11 @@ export function PayslipsPanel({
           <TBody>
             {visible.map((p) => (
               <TR key={p.id}>
-                <TD className="font-mono text-[13px] font-medium">{p.month}</TD>
-                <TD className="text-right font-mono text-[13px]">
+                <TD className="tabular-nums text-[13px] font-medium">{p.month}</TD>
+                <TD className="text-right tabular-nums text-[13px]">
                   {formatMoney(p.document.totals.gross)}
                 </TD>
-                <TD className="text-right font-mono text-[13px] font-semibold">
+                <TD className="text-right tabular-nums text-[13px] font-semibold">
                   {formatMoney(p.document.totals.net)}
                 </TD>
                 <TD>
@@ -224,7 +224,7 @@ export function PayslipsPanel({
                   className="flex items-center justify-between py-2.5 text-[13.5px]"
                 >
                   <span className="text-muted-foreground">{r.label}</span>
-                  <span className="font-mono font-medium">
+                  <span className="tabular-nums font-medium">
                     {formatMoney(r.earned)}
                   </span>
                 </div>
@@ -247,7 +247,7 @@ export function PayslipsPanel({
                     className="flex items-center justify-between py-2.5 text-[13.5px]"
                   >
                     <span className="text-muted-foreground">{r.label}</span>
-                    <span className="font-mono font-medium">
+                    <span className="tabular-nums font-medium">
                       − {formatMoney(r.earned)}
                     </span>
                   </div>

@@ -178,7 +178,7 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
         </>
       ) : (
         <>
-          <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-[12.5px] text-amber-200/90">
+          <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-[12.5px] text-warning/90">
             {roots.length} top-level {roots.length === 1 ? "manager" : "managers"} · {employees.length - roots.length} direct reports ·
             {orphanCount > 0 ? ` ${orphanCount} employees have a manager that isn't active — they appear as top-level` : " structure complete"}
           </div>

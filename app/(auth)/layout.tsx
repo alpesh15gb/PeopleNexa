@@ -12,11 +12,8 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div
       className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1.05fr]"
-      style={{ fontFamily: "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif" }}
     >
-      {/* The application shell uses its local system-font stack — no Google
-          <link> here (a second copy caused unused-preload warnings). */}
-      <style>{`.font-display{font-family:'Plus Jakarta Sans',ui-sans-serif,system-ui,sans-serif !important}@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
+      <style>{`@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
       <aside className="relative hidden overflow-hidden border-r border-edge bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-10 xl:p-14">
         <div className="pointer-events-none absolute -left-32 -top-32 h-[440px] w-[440px] rounded-full bg-primary/10 blur-3xl" aria-hidden />
         <div className="pointer-events-none absolute -bottom-48 -right-24 h-[520px] w-[520px] rounded-full bg-[#3B82F6]/10 blur-3xl" aria-hidden />

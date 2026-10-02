@@ -1213,7 +1213,7 @@ function Editor({
                 <p className="text-sm font-semibold">Step {stepIndex + 1} of {employeeMasterWizardSteps.length}</p>
                 <ol aria-label="Master detail progress" className="flex gap-2 lg:block lg:space-y-2">
                   {employeeMasterWizardSteps.map((step, index) => (
-                    <li key={step.key} aria-current={active === step.key ? "step" : undefined} className={`min-w-0 rounded-lg px-3 py-2 text-xs font-medium ${active === step.key ? "bg-primary text-white" : index < stepIndex ? "bg-tint text-foreground" : "text-muted-foreground"}`}>
+                    <li key={step.key} aria-current={active === step.key ? "step" : undefined} className={`min-w-0 rounded-lg px-3 py-2 text-xs font-medium ${active === step.key ? "bg-primary text-primary-foreground" : index < stepIndex ? "bg-tint text-foreground" : "text-muted-foreground"}`}>
                       <span className="mr-1.5">{index + 1}.</span>{step.label}
                     </li>
                   ))}
@@ -1233,7 +1233,7 @@ function Editor({
                     type="button"
                     onClick={() => setActive(key)}
                     aria-current={active === key ? "step" : undefined}
-                    className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-white" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}
+                    className={`flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:w-full ${active === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-tint hover:text-foreground"}`}
                   >
                     <Icon className="h-4 w-4" aria-hidden="true" />
                     {label}

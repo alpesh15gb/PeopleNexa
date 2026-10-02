@@ -980,7 +980,7 @@ export function LeavesAdmin({
                   </label>
                 )}
               {reviewedExceptions && (
-                <label className="flex min-h-11 items-start gap-2 text-amber-200">
+                <label className="flex min-h-11 items-start gap-2 text-warning">
                   <input
                     type="checkbox"
                     checked={exceptionsAcknowledged}
@@ -1447,7 +1447,7 @@ function EmployeeBalances() {
       {data?.summary.fixedEarnedLeaveWarnings ? (
         <div
           role="alert"
-          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100"
+          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-warning"
         >
           {data.summary.fixedEarnedLeaveWarnings} Earned Leave row(s) resolve to
           an active fixed entitlement, not attendance accrual. This is a

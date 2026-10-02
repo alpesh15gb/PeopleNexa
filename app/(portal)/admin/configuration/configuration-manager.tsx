@@ -285,7 +285,7 @@ export function ConfigurationManager({
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex gap-3 rounded-xl border border-sky-400/20 bg-sky-500/5 p-3 text-[13px] text-muted-foreground">
-            <ShieldAlert className="h-5 w-5 shrink-0 text-sky-600" />
+            <ShieldAlert className="h-5 w-5 shrink-0 text-primary" />
             Drafts and preview never affect users. Only an explicitly activated
             valid layout is used; a location layout overrides the tenant layout,
             otherwise the dashboard remains unchanged.
@@ -545,10 +545,10 @@ function ConfigurationList({
               <p className="text-sm font-medium">
                 {record.location?.name ?? "Tenant-wide"} v{record.version}{" "}
                 {policy ? (
-                  <span className="text-amber-600">DRAFT / NOT APPLIED</span>
+                  <span className="text-warning">DRAFT / NOT APPLIED</span>
                 ) : (
                   record.active && (
-                    <span className="text-emerald-600">Active</span>
+                    <span className="text-success">Active</span>
                   )
                 )}
               </p>

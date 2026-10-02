@@ -105,7 +105,7 @@ export function LoginForm() {
         type="submit"
         size="lg"
         loading={loading}
-        className="mt-6 w-full bg-accent text-white shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
+        className="mt-6 w-full bg-accent text-accent-foreground shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
       >
         <LogIn className="h-4 w-4" aria-hidden="true" />
         Sign in
