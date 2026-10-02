@@ -8,11 +8,21 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminTaxPage() {
   const session = await requireSession();
+  if (session.role !== "admin") return null;
   const fy = fyFromMonth(new Date().toISOString().slice(0, 7));
   const [declarations, fys] = await Promise.all([
     prisma.taxDeclaration.findMany({
       where: { tenantId: session.tenantId },
-      include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeNumber: true,
+          },
+        },
+      },
       orderBy: [{ fy: "desc" }, { updatedAt: "desc" }],
     }),
     prisma.taxDeclaration.findMany({
@@ -27,7 +37,7 @@ export default async function AdminTaxPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Tax declarations"
-        description="Verify employee investment proofs — verified totals reduce TDS on payslips"
+        description="Review employee declarations and return incomplete details for correction."
       />
       <Card>
         <CardContent className="p-6">
@@ -41,7 +51,7 @@ export default async function AdminTaxPage() {
               note: d.note,
               employee: d.employee,
             }))}
-            fys={fys.map((f) => f.fy)}
+            fys={[...new Set([fy, ...fys.map((f) => f.fy)])]}
           />
         </CardContent>
       </Card>

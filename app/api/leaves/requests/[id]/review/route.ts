@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee } from "@/lib/notifications";
@@ -7,13 +8,25 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { appendAudit } from "@/lib/audit";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
-import { calculateLeaveBalance, canClaimLeave, policyHasUnlimitedEntitlement } from "@/lib/leave-balance";
+import {
+  calculateLeaveBalance,
+  canClaimLeave,
+  policyHasUnlimitedEntitlement,
+} from "@/lib/leave-balance";
 import { canReviewLeaveRequest } from "@/lib/leave-lifecycle";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
-export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "branch_manager" && session.role !== "location_manager")) {
+  if (
+    !session ||
+    (session.role !== "admin" &&
+      session.role !== "branch_manager" &&
+      session.role !== "location_manager")
+  ) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
@@ -26,16 +39,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const request = await prisma.leaveRequest.findFirst({
     where: { id, tenantId: session.tenantId },
   });
-  if (!request) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!request)
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!canReviewLeaveRequest(request, session.sub)) {
-    return NextResponse.json({ error: "You cannot review a leave request you submitted or that belongs to you." }, { status: 403 });
+    return NextResponse.json(
+      {
+        error:
+          "You cannot review a leave request you submitted or that belongs to you.",
+      },
+      { status: 403 },
+    );
   }
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
       select: { branchId: true },
     });
-    if (!manager?.branchId) return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (!manager?.branchId)
+      return NextResponse.json({ error: "not found" }, { status: 404 });
     const target = await prisma.employee.findFirst({
       where: { id: request.employeeId, tenantId: session.tenantId },
       select: { branchId: true },
@@ -46,11 +67,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
   if (session.role === "location_manager") {
     const locationId = await managerLocationId(session);
-    const target = locationId ? await prisma.employee.findFirst({ where: { id: request.employeeId, tenantId: session.tenantId, ...employeeLocationScope(locationId) }, select: { id: true } }) : null;
-    if (!target) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const target = locationId
+      ? await prisma.employee.findFirst({
+          where: {
+            id: request.employeeId,
+            tenantId: session.tenantId,
+            ...employeeLocationScope(locationId),
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!target)
+      return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (request.status !== "pending") {
-    return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });
+    return NextResponse.json(
+      { error: "This request has already been reviewed." },
+      { status: 409 },
+    );
   }
 
   const reviewNote = body.note || null;
@@ -60,16 +94,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     // Atomic claim: only a pending row can transition to rejected.
     const claimed = await prisma.leaveRequest.updateMany({
       where: { id, tenantId: session.tenantId, status: "pending" },
-      data: { status: "rejected", reviewedBy: session.sub, reviewedAt, reviewNote },
+      data: {
+        status: "rejected",
+        reviewedBy: session.sub,
+        reviewedAt,
+        reviewNote,
+      },
     });
     if (claimed.count === 0) {
-      return NextResponse.json({ error: "This request has already been reviewed." }, { status: 409 });
+      return NextResponse.json(
+        { error: "This request has already been reviewed." },
+        { status: 409 },
+      );
     }
     const updated = await prisma.leaveRequest.findUnique({
       where: { id },
       include: { leaveType: true },
     });
-    if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+    if (!updated)
+      return NextResponse.json({ error: "not found" }, { status: 404 });
 
     await appendAudit({
       tenantId: session.tenantId,
@@ -88,14 +131,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       request.employeeId,
       "danger",
       "Leave rejected",
-      `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was rejected.`
+      `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was rejected.`,
     );
 
     const employee = await prisma.employee.findUnique({
       where: { id: request.employeeId },
       select: { phone: true, firstName: true },
     });
-    const admin = await prisma.employee.findUnique({ where: { id: session.sub }, select: { firstName: true } });
+    const admin = await prisma.employee.findUnique({
+      where: { id: session.sub },
+      select: { firstName: true },
+    });
     await sendWhatsApp(session.tenantId, employee?.phone, "leave.rejected", {
       from: formatDate(updated.fromDate),
       to: formatDate(updated.toDate),
@@ -110,50 +156,134 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // won → 409), then re-check the balance including this request. Throwing
   // on over-balance rolls the claim back so the request stays pending.
   try {
-    await prisma.$transaction(async (tx) => {
-      const claimed = await tx.leaveRequest.updateMany({
-        where: { id, tenantId: session.tenantId, status: "pending" },
-        data: { status: "approved", reviewedBy: session.sub, reviewedAt, reviewNote },
-      });
-      if (claimed.count === 0) {
-        const err = new Error("This request has already been reviewed.") as Error & { code?: string };
-        err.code = "CLAIM_CONFLICT";
-        throw err;
-      }
-      const [approvedRows, leaveType] = await Promise.all([
-        tx.leaveRequest.findMany({
-          where: {
-            tenantId: session.tenantId,
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
+    await prisma.$transaction(
+      async (tx) => {
+        await refreshEarnedLeaveBalances(tx, session.tenantId, [
+          request.employeeId,
+        ]);
+        const claimed = await tx.leaveRequest.updateMany({
+          where: { id, tenantId: session.tenantId, status: "pending" },
+          data: {
             status: "approved",
+            reviewedBy: session.sub,
+            reviewedAt,
+            reviewNote,
           },
+        });
+        if (claimed.count === 0) {
+          const err = new Error(
+            "This request has already been reviewed.",
+          ) as Error & { code?: string };
+          err.code = "CLAIM_CONFLICT";
+          throw err;
+        }
+        const [approvedRows, leaveType] = await Promise.all([
+          tx.leaveRequest.findMany({
+            where: {
+              tenantId: session.tenantId,
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              status: "approved",
+            },
             select: { days: true, fromDate: true, leavePolicySnapshot: true },
-        }),
-        tx.leaveType.findUnique({ where: { id: request.leaveTypeId } }),
-      ]);
-      const periodId = request.leavePolicySnapshot && typeof request.leavePolicySnapshot === "object" ? (request.leavePolicySnapshot as Record<string, unknown>).policyPeriodId : null;
-      const allocation = typeof periodId === "string" ? await tx.leavePolicyBalance.findFirst({ where: { tenantId: session.tenantId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, policyPeriodId: periodId } }) : null;
-      const imported = allocation ? null : await tx.leaveBalanceImportEntry.findFirst({ where: { tenantId: session.tenantId, employeeId: request.employeeId, leaveTypeId: request.leaveTypeId, periodEnd: { lte: request.fromDate } }, orderBy: { periodEnd: "desc" } });
-      const total = allocation ? approvedRows.filter((row) => row.leavePolicySnapshot && typeof row.leavePolicySnapshot === "object" && (row.leavePolicySnapshot as Record<string, unknown>).policyPeriodId === periodId).reduce((sum, row) => sum + row.days, 0) : approvedRows.filter((row) => !imported || row.fromDate >= imported.periodEnd).reduce((sum, row) => sum + row.days, 0);
-      const cap = allocation ? (allocation.entitlement ?? 0) + allocation.carryForward : imported ? 0 : leaveRequestEntitlement(request.leavePolicySnapshot) ?? leaveType?.maxDays;
-      const unlimitedEntitlement = allocation ? policyHasUnlimitedEntitlement(allocation.policySnapshot) : !imported && Boolean((request.leavePolicySnapshot as Record<string, unknown> | null)?.rules && policyHasUnlimitedEntitlement(request.leavePolicySnapshot) || leaveType?.unlimitedEntitlement);
-      const allowed = calculateLeaveBalance({ cap: cap ?? null, opening: imported ? imported.available : 0, credited: 0, used: 0, pending: 0, unlimitedEntitlement }).available;
-      if (leaveType && !canClaimLeave(allowed, total)) {
-        const err = new Error(
-          `Approving this would exceed the ${leaveType.name} balance — ${allowed} day(s) allowed, ${total} day(s) would be approved.`
-        ) as Error & { code?: string };
-        err.code = "OVER_BALANCE";
-        throw err;
-      }
-    });
+          }),
+          tx.leaveType.findUnique({ where: { id: request.leaveTypeId } }),
+        ]);
+        const periodId =
+          request.leavePolicySnapshot &&
+          typeof request.leavePolicySnapshot === "object"
+            ? (request.leavePolicySnapshot as Record<string, unknown>)
+                .policyPeriodId
+            : null;
+        const allocation =
+          typeof periodId === "string"
+            ? await tx.leavePolicyBalance.findFirst({
+                where: {
+                  tenantId: session.tenantId,
+                  employeeId: request.employeeId,
+                  leaveTypeId: request.leaveTypeId,
+                  policyPeriodId: periodId,
+                },
+              })
+            : null;
+        const imported = allocation
+          ? null
+          : await tx.leaveBalanceImportEntry.findFirst({
+              where: {
+                tenantId: session.tenantId,
+                employeeId: request.employeeId,
+                leaveTypeId: request.leaveTypeId,
+                periodEnd: { lte: request.fromDate },
+              },
+              orderBy: { periodEnd: "desc" },
+            });
+        const total = allocation
+          ? approvedRows
+              .filter(
+                (row) =>
+                  row.leavePolicySnapshot &&
+                  typeof row.leavePolicySnapshot === "object" &&
+                  (row.leavePolicySnapshot as Record<string, unknown>)
+                    .policyPeriodId === periodId,
+              )
+              .reduce((sum, row) => sum + row.days, 0)
+          : approvedRows
+              .filter((row) => !imported || row.fromDate >= imported.periodEnd)
+              .reduce((sum, row) => sum + row.days, 0);
+        const cap = allocation
+          ? (allocation.entitlement ?? 0) + allocation.carryForward
+          : imported
+            ? 0
+            : (leaveRequestEntitlement(request.leavePolicySnapshot) ??
+              leaveType?.maxDays);
+        const unlimitedEntitlement = allocation
+          ? policyHasUnlimitedEntitlement(allocation.policySnapshot)
+          : !imported &&
+            Boolean(
+              ((request.leavePolicySnapshot as Record<string, unknown> | null)
+                ?.rules &&
+                policyHasUnlimitedEntitlement(request.leavePolicySnapshot)) ||
+              leaveType?.unlimitedEntitlement,
+            );
+        const allowed = calculateLeaveBalance({
+          cap: cap ?? null,
+          opening: imported ? imported.available : 0,
+          credited: 0,
+          used: 0,
+          pending: 0,
+          unlimitedEntitlement,
+        }).available;
+        if (leaveType && !canClaimLeave(allowed, total)) {
+          const err = new Error(
+            `Approving this would exceed the ${leaveType.name} balance — ${allowed} day(s) allowed, ${total} day(s) would be approved.`,
+          ) as Error & { code?: string };
+          err.code = "OVER_BALANCE";
+          throw err;
+        }
+      },
+      { isolationLevel: "Serializable" },
+    );
   } catch (e) {
     const code = (e as { code?: string })?.code;
+    if (code === "P2034")
+      return NextResponse.json(
+        {
+          error:
+            "Leave balances changed during approval. Refresh and try again.",
+        },
+        { status: 409 },
+      );
     if (code === "CLAIM_CONFLICT") {
-      return NextResponse.json({ error: (e as Error).message }, { status: 409 });
+      return NextResponse.json(
+        { error: (e as Error).message },
+        { status: 409 },
+      );
     }
     if (code === "OVER_BALANCE") {
-      return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+      return NextResponse.json(
+        { error: (e as Error).message },
+        { status: 400 },
+      );
     }
     throw e;
   }
@@ -162,7 +292,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id },
     include: { leaveType: true },
   });
-  if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!updated)
+    return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await appendAudit({
     tenantId: session.tenantId,
@@ -181,7 +312,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     request.employeeId,
     "success",
     "Leave approved",
-    `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was approved.`
+    `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was approved.`,
   );
 
   await dispatchWebhook(session.tenantId, "leave.approved", {
@@ -197,7 +328,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { id: request.employeeId },
     select: { phone: true, firstName: true },
   });
-  const admin = await prisma.employee.findUnique({ where: { id: session.sub }, select: { firstName: true } });
+  const admin = await prisma.employee.findUnique({
+    where: { id: session.sub },
+    select: { firstName: true },
+  });
   await sendWhatsApp(session.tenantId, employee?.phone, "leave.approved", {
     from: formatDate(updated.fromDate),
     to: formatDate(updated.toDate),

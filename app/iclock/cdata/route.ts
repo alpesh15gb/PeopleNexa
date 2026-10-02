@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
 import { handleDevicePunch } from "@/lib/iclock";
 
-export function parseIClockPunchLine(line: string): { userId: string; dateTimeStr: string; verifyMode: string; inOutMode: string } | null {
+function parseIClockPunchLine(line: string): { userId: string; dateTimeStr: string; verifyMode: string; inOutMode: string } | null {
   const tabParts = line.split("\t").map((part) => part.trim());
   const isTabbed = tabParts.length >= 4;
   const parts = isTabbed ? tabParts : line.trim().split(/\s+/).filter(Boolean);

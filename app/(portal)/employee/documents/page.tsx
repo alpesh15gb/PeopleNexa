@@ -6,7 +6,7 @@ import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { FileText, AlertTriangle } from "lucide-react";
-import { expiryStatus } from "@/app/api/documents/route";
+import { expiryStatus } from "@/lib/document-expiry";
 import { formatDate } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";

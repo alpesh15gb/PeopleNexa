@@ -8,7 +8,7 @@ export interface FaceMatchSettings {
   reviewThreshold: number;
 }
 
-export const DEFAULT_FACE_MATCH_SETTINGS: FaceMatchSettings = {
+const DEFAULT_FACE_MATCH_SETTINGS: FaceMatchSettings = {
   enabled: true,
   matchThreshold: 0.62,
   reviewThreshold: 0.5,

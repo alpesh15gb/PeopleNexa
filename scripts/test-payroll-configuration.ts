@@ -60,15 +60,15 @@ assert.deepEqual(payrollScheduleExample(30_000, 2, 26, true), { deduction: 2307.
 assert.deepEqual(payrollScheduleExample(30_000, 2, 26, false), { deduction: 0, salaryAfterLop: 30000 }, "schedule example reflects the LOP switch");
 
 const hub = readFileSync(new URL("../app/(portal)/admin/payroll/configuration/payroll-configuration-hub.tsx", import.meta.url), "utf8");
-for (const section of ["Pay Schedule", "Statutory Components", "Salary Components", "Tax Details", "Advanced"]) assert.match(hub, new RegExp(section), `${section} navigation is present`);
+for (const section of ["Pay schedule", "Salary structure", "Deductions & contributions", "Company & tax", "Review & history"]) assert.match(hub, new RegExp(section), `${section} navigation is present`);
 assert.match(hub, /useSearchParams/, "policy navigation is URL-addressable");
 assert.match(hub, /aria-current=\{active \? "page"/, "policy navigation exposes a clear active state");
 assert.match(hub, /Preview changes/, "preview action remains available across policy sections");
-assert.match(hub, /Save draft/, "single-draft save action remains available across policy sections");
+assert.match(hub, /Save progress/, "single-draft save action remains available across policy sections");
 assert.match(hub, /Saving updates the current/, "saving explains that it updates the working draft");
-assert.match(hub, /Current Policy/, "HR sees the current policy rather than every intermediate version");
-assert.match(hub, /Publish policy/, "publishing remains an explicit current-policy action");
-assert.match(hub, /Deactivate/, "published versions can still be deactivated");
+assert.match(hub, /Change history/, "HR sees the current policy rather than every intermediate version");
+assert.match(hub, /Review & apply/, "publishing remains an explicit current-policy action");
+assert.doesNotMatch(hub, /Publish policy v|Deactivate policy v/, "manual policy version controls are removed");
 assert.match(hub, /Actual calendar days/, "calendar-day salary calculation is exposed");
 assert.match(hub, /No-shift attendance window/, "no-shift attendance finalization is configurable per policy");
 assert.match(hub, /Round each component, then sum/, "component-level earned-salary aggregation is exposed");
@@ -77,5 +77,5 @@ assert.match(hub, /Selected employees/, "component assignment applicability is e
 assert.doesNotMatch(hub, /work[- ]week/i, "unsupported work-week controls are not exposed");
 const configurationApi = readFileSync(new URL("../app/api/configuration/route.ts", import.meta.url), "utf8");
 assert.match(configurationApi, /configuration\.update_draft/, "payroll saves audit updates to the working draft");
-assert.match(configurationApi, /version: \{ gt: currentPublished\.version \}/, "only drafts newer than the published policy are reused");
+assert.match(configurationApi, /policySavePlan/, "both policy kinds use the tested single-working-copy save plan");
 console.log("payroll configuration tests passed");

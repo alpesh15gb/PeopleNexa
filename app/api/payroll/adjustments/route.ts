@@ -7,19 +7,43 @@ import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 /** GET — adjustments for a month (admin). */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
+  if (
+    !session ||
+    (session.role !== "admin" && session.role !== "location_manager")
+  ) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const rawMonth = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
+  if (session.role === "location_manager" && !locationId)
+    return NextResponse.json(
+      { error: "no location assigned" },
+      { status: 403 },
+    );
+  const rawMonth =
+    req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(rawMonth)) {
-    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+    return NextResponse.json(
+      { error: "month must use YYYY-MM format." },
+      { status: 400 },
+    );
   }
   const month = rawMonth;
   const adjustments = await prisma.payrollAdjustment.findMany({
-    where: { tenantId: session.tenantId, month, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
-    include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
+    where: {
+      tenantId: session.tenantId,
+      month,
+      ...(locationId ? { employee: employeeLocationScope(locationId) } : {}),
+    },
+    include: {
+      employee: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          employeeNumber: true,
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ adjustments });
@@ -31,54 +55,140 @@ export async function POST(req: NextRequest) {
   if (session?.role === "branch_manager") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
+  if (
+    !session ||
+    (session.role !== "admin" && session.role !== "location_manager")
+  ) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  if (session.role === "location_manager" && !locationId)
+    return NextResponse.json(
+      { error: "no location assigned" },
+      { status: 403 },
+    );
   const body = await req.json().catch(() => ({}));
   const month = String(body.month ?? monthKeyIST(new Date()));
   if (!isMonthKey(month)) {
-    return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
+    return NextResponse.json(
+      { error: "month must use YYYY-MM format." },
+      { status: 400 },
+    );
   }
   const employeeId = String(body.employeeId ?? "");
   const label = String(body.label ?? "").trim();
   const amount = Number(body.amount);
-  const type = ["arrears", "bonus", "deduction", "other"].includes(String(body.type ?? "")) ? String(body.type) : "other";
+  const type = ["arrears", "bonus", "deduction", "other"].includes(
+    String(body.type ?? ""),
+  )
+    ? String(body.type)
+    : "other";
 
-  if (!label) return NextResponse.json({ error: "Label is required." }, { status: 400 });
+  if (!label)
+    return NextResponse.json({ error: "Label is required." }, { status: 400 });
   if (!Number.isFinite(amount) || amount === 0) {
-    return NextResponse.json({ error: "Amount must be a non-zero number (positive = earning, negative = deduction)." }, { status: 400 });
+    return NextResponse.json(
+      {
+        error:
+          "Amount must be a non-zero number (positive = earning, negative = deduction).",
+      },
+      { status: 400 },
+    );
   }
   // Sign-vs-type enforcement: arrears/bonus add to earnings (>0),
   // deductions add to deductions (<0), other accepts any nonzero.
   if ((type === "arrears" || type === "bonus") && amount <= 0) {
-    return NextResponse.json({ error: "Arrears and bonus adjustments must be a positive amount." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Arrears and bonus adjustments must be a positive amount." },
+      { status: 400 },
+    );
   }
   if (type === "deduction" && amount >= 0) {
-    return NextResponse.json({ error: "Deduction adjustments must be a negative amount." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Deduction adjustments must be a negative amount." },
+      { status: 400 },
+    );
   }
   const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
-    select: { id: true, branch: { select: { locationId: true } }, locationId: true },
-  });
-  if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 400 });
-  const employeeLocationId = employee.branch?.locationId ?? employee.locationId;
-  const lockedRun = await prisma.payrollRun.findFirst({ where: { tenantId: session.tenantId, month, ...(employeeLocationId ? { locationId: employeeLocationId } : {}), status: { not: "draft" } }, select: { id: true, status: true } });
-  if (lockedRun) return NextResponse.json({ error: `Adjustments cannot change a ${lockedRun.status} payroll run. Create a reviewed next-period adjustment instead.` }, { status: 409 });
-
-  const adjustment = await prisma.payrollAdjustment.create({
-    data: {
+    where: {
+      id: employeeId,
       tenantId: session.tenantId,
-      employeeId,
-      month,
-      type,
-      label,
-      amount,
-      note: body.note ? String(body.note) : null,
-      createdBy: session.sub,
+      ...(locationId ? employeeLocationScope(locationId) : {}),
     },
-    include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
+    select: {
+      id: true,
+      branch: { select: { locationId: true } },
+      locationId: true,
+    },
   });
-  return NextResponse.json({ adjustment }, { status: 201 });
+  if (!employee)
+    return NextResponse.json({ error: "Employee not found." }, { status: 400 });
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const employeeLocationId =
+          employee.branch?.locationId ?? employee.locationId;
+        await tx.payrollRun.updateMany({
+          where: {
+            tenantId: session.tenantId,
+            month: month,
+            ...(employeeLocationId ? { locationId: employeeLocationId } : {}),
+            status: "draft",
+          },
+          data: { status: "draft" },
+        });
+        const lockedRun = await tx.payrollRun.findFirst({
+          where: {
+            tenantId: session.tenantId,
+            month,
+            ...(employeeLocationId ? { locationId: employeeLocationId } : {}),
+            status: { in: ["reviewed", "approved", "finalized", "paid"] },
+          },
+          select: { id: true, status: true },
+        });
+        if (lockedRun)
+          return NextResponse.json(
+            {
+              error: `Adjustments cannot change a ${lockedRun.status} payroll run. Create a reviewed next-period adjustment instead.`,
+            },
+            { status: 409 },
+          );
+
+        const adjustment = await tx.payrollAdjustment.create({
+          data: {
+            tenantId: session.tenantId,
+            employeeId,
+            month,
+            type,
+            label,
+            amount,
+            note: body.note ? String(body.note) : null,
+            createdBy: session.sub,
+          },
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                employeeNumber: true,
+              },
+            },
+          },
+        });
+        return NextResponse.json({ adjustment }, { status: 201 });
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2034")
+      return NextResponse.json(
+        {
+          error:
+            "Payroll changed during this adjustment. Refresh and try again.",
+        },
+        { status: 409 },
+      );
+    throw error;
+  }
 }

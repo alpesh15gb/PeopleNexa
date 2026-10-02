@@ -5,13 +5,7 @@ import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 const DOC_TYPES = ["passport", "visa", "aadhaar", "pan", "license", "other"];
 
-export function expiryStatus(expiryDate: Date | null): "none" | "expired" | "expiring" | "ok" {
-  if (!expiryDate) return "none";
-  const days = Math.round((expiryDate.getTime() - Date.now()) / 86400000);
-  if (days < 0) return "expired";
-  if (days <= 60) return "expiring";
-  return "ok";
-}
+import { expiryStatus } from "@/lib/document-expiry";
 
 /** POST — admin records a document for an employee. */
 export async function POST(req: NextRequest) {

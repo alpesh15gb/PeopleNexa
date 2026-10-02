@@ -2,7 +2,7 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { DocumentsPanel } from "./documents-panel";
-import { expiryStatus } from "@/app/api/documents/route";
+import { expiryStatus } from "@/lib/document-expiry";
 
 export const dynamic = "force-dynamic";
 

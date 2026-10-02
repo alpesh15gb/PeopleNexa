@@ -20,8 +20,8 @@ assert.match(generation, /existingRun && selectionMode !== "selected"/);
 assert.match(generation, /alreadyIncluded/);
 assert.match(generation, /payroll_run\.members_added/);
 assert.match(generation, /employeeIds: selectedEmployeeIds/);
-assert.match(generation, /selectionMode, selectedEmployeeCount/);
-assert.match(engine, /where: \{ id: payrollRunId, status: "draft" \}/, "member creation rechecks and locks the Draft lifecycle state");
+assert.match(generation, /selectionMode,\s+selectedEmployeeCount/);
+assert.match(engine, /where: \{\s*id: payrollRunId,\s*status: "draft",?\s*\}/, "member creation rechecks and locks the Draft lifecycle state");
 
 // The location-manager scope is applied again to the bounded picker endpoint.
 assert.match(picker, /payrollOperationLocationId\(session/);

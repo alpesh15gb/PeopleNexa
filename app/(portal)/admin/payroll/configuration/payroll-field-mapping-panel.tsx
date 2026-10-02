@@ -18,7 +18,7 @@ export function PayrollFieldMappingPanel({ locations, payrollRecords, leaveRecor
   const payroll = payrollPolicyDraft(payrollRecord?.payload) ?? null;
   const hasLeavePolicy = Boolean(leavePolicyDraft(leaveRecord?.payload));
   const scope = locationId ? locations.find((location) => location.id === locationId)?.name ?? "Selected location" : "Tenant default";
-  const policyStatus = payroll ? `${scope} policy v${payrollRecord?.version} is effective` : `No effective payroll policy for ${scope}`;
+  const policyStatus = payroll ? `${scope} payroll settings are effective` : `No effective payroll settings for ${scope}`;
 
   return <section aria-labelledby="payroll-field-mapping-title" className="space-y-4">
     <div className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-end sm:justify-between">

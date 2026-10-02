@@ -43,9 +43,13 @@ export function TaxDeclarationPanel({
     other: initial.other ?? 0,
   });
 
-  const total = sections["80c"] + sections["80d"] + sections.hra + sections.lta + sections.other;
+  const total =
+    sections["80c"] +
+    sections["80d"] +
+    sections.hra +
+    sections.lta +
+    sections.other;
   const annualGross = monthlySalary * 12;
-  const reduced = Math.max(annualGross - 75000 - Math.min(total, 500000), 0);
 
   const set = (key: keyof typeof sections, v: string) => {
     setSections((s) => ({ ...s, [key]: Math.max(0, Number(v) || 0) }));
@@ -61,7 +65,12 @@ export function TaxDeclarationPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to submit");
-      toast("success", existing ? "Declaration updated — pending HR verification" : "Declaration submitted for verification");
+      toast(
+        "success",
+        existing
+          ? "Declaration updated — pending HR verification"
+          : "Declaration submitted for verification",
+      );
       router.refresh();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to submit");
@@ -74,49 +83,95 @@ export function TaxDeclarationPanel({
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="lg:col-span-2">
         <div className="mb-4 flex items-center gap-2">
-          <Badge tone="info" className="font-mono">{currentFy}</Badge>
+          <Badge tone="info" className="font-mono">
+            {currentFy}
+          </Badge>
           {existing && (
-            <Badge tone={existing.status === "verified" ? "success" : existing.status === "rejected" ? "danger" : "warning"}>
+            <Badge
+              tone={
+                existing.status === "verified"
+                  ? "success"
+                  : existing.status === "rejected"
+                    ? "danger"
+                    : "warning"
+              }
+            >
               {existing.status}
             </Badge>
           )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="80C — PF, PPF, ELSS, LIC, tuition (max ₹1.5L)" hint="Total across all 80C instruments">
-            <Input type="number" min={0} value={sections["80c"]} onChange={(e) => set("80c", e.target.value)} />
+          <Field
+            label="80C — investments and contributions"
+            hint="PF, PPF, ELSS, LIC and tuition payments"
+          >
+            <Input
+              type="number"
+              min={0}
+              value={sections["80c"]}
+              onChange={(e) => set("80c", e.target.value)}
+            />
           </Field>
-          <Field label="80D — Health insurance premiums (max ₹25K/₹50K)">
-            <Input type="number" min={0} value={sections["80d"]} onChange={(e) => set("80d", e.target.value)} />
+          <Field label="80D — health insurance premiums">
+            <Input
+              type="number"
+              min={0}
+              value={sections["80d"]}
+              onChange={(e) => set("80d", e.target.value)}
+            />
           </Field>
           <Field label="HRA — rent paid (if not covered by allowance)">
-            <Input type="number" min={0} value={sections.hra} onChange={(e) => set("hra", e.target.value)} />
+            <Input
+              type="number"
+              min={0}
+              value={sections.hra}
+              onChange={(e) => set("hra", e.target.value)}
+            />
           </Field>
           <Field label="LTA — leave travel allowance">
-            <Input type="number" min={0} value={sections.lta} onChange={(e) => set("lta", e.target.value)} />
+            <Input
+              type="number"
+              min={0}
+              value={sections.lta}
+              onChange={(e) => set("lta", e.target.value)}
+            />
           </Field>
-          <Field label="Other deductions (80G, 80E, NPS 80CCD…)" className="sm:col-span-2">
-            <Input type="number" min={0} value={sections.other} onChange={(e) => set("other", e.target.value)} />
+          <Field
+            label="Other deductions (80G, 80E, NPS 80CCD…)"
+            className="sm:col-span-2"
+          >
+            <Input
+              type="number"
+              min={0}
+              value={sections.other}
+              onChange={(e) => set("other", e.target.value)}
+            />
           </Field>
         </div>
 
         <div className="mt-4 flex items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3">
           <span className="text-[13px] font-medium">Total declared</span>
-          <span className="font-display text-lg font-bold text-indigo-300">{formatMoney(total)}</span>
+          <span className="font-display text-lg font-bold text-indigo-300">
+            {formatMoney(total)}
+          </span>
         </div>
 
         <Button onClick={submit} loading={saving} className="mt-4">
-          <Save className="h-4 w-4" /> {existing ? "Update declaration" : "Submit declaration"}
+          <Save className="h-4 w-4" />{" "}
+          {existing ? "Update declaration" : "Submit declaration"}
         </Button>
         <p className="mt-2 text-[12px] text-muted-foreground">
-          {name} — your declaration is reviewed by HR before it reduces TDS on upcoming payslips.
+          {name} — HR reviews your declaration before payroll uses verified
+          amounts under the applicable tax settings.
         </p>
       </div>
 
       <div className="space-y-4">
         <div className="card-surface rounded-2xl p-5">
           <div className="flex items-center gap-2 text-[13px] font-semibold">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" /> TDS estimate
+            <ShieldCheck className="h-4 w-4 text-emerald-400" /> Declaration
+            summary
           </div>
           <dl className="mt-3 space-y-2.5 text-[12.5px]">
             <div className="flex justify-between">
@@ -125,15 +180,14 @@ export function TaxDeclarationPanel({
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Declared investments</dt>
-              <dd className="font-mono text-emerald-300">{formatMoney(total)}</dd>
-            </div>
-            <div className="flex justify-between border-t border-edge pt-2">
-              <dt className="text-muted-foreground">Taxable (new regime, est.)</dt>
-              <dd className="font-mono font-medium">{formatMoney(reduced)}</dd>
+              <dd className="font-mono text-emerald-300">
+                {formatMoney(total)}
+              </dd>
             </div>
           </dl>
           <p className="mt-3 rounded-xl border border-edge bg-tint px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-            The verified total reduces taxable income in the TDS calculation. Keep your investment proofs ready — HR may ask to verify.
+            Payroll calculates TDS using its configured tax regime and verified
+            amounts. Keep your investment proofs ready for HR review.
           </p>
         </div>
 
@@ -142,13 +196,27 @@ export function TaxDeclarationPanel({
             <BadgeCheck className="h-4 w-4 text-brand" /> Previous years
           </div>
           {declarations.length === 0 ? (
-            <p className="mt-3 text-[12.5px] text-muted-foreground">No declarations yet.</p>
+            <p className="mt-3 text-[12.5px] text-muted-foreground">
+              No declarations yet.
+            </p>
           ) : (
             <div className="mt-3 divide-y divide-[color:var(--border)]">
               {declarations.map((d) => (
-                <div key={d.id} className="flex items-center justify-between py-2">
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between py-2"
+                >
                   <span className="font-mono text-[12.5px]">{d.fy}</span>
-                  <Badge tone={d.status === "verified" ? "success" : d.status === "rejected" ? "danger" : "warning"} className="capitalize">
+                  <Badge
+                    tone={
+                      d.status === "verified"
+                        ? "success"
+                        : d.status === "rejected"
+                          ? "danger"
+                          : "warning"
+                    }
+                    className="capitalize"
+                  >
                     {d.status}
                   </Badge>
                 </div>

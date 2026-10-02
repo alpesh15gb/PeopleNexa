@@ -95,4 +95,3 @@ export async function POST(req: NextRequest) {
 }
 
 /** Template helper for the UI. */
-export { DEFAULT_TASKS };
