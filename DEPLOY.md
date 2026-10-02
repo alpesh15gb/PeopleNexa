@@ -151,7 +151,7 @@ The device sync endpoint runs on a schedule from the host:
 ```
 
 Device Health separately polls eBio's documented `GetDeviceLastPing` endpoint
-every 30 seconds while an admin has that page open. It does not ingest punches.
+every minute while an admin has that page open. It does not ingest punches.
 The status becomes offline when eBio reports no ping within five minutes; this
 is polling, not a vendor push event. Keep the five-minute cron for unattended
 health refresh and attendance ingestion.

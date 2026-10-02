@@ -61,7 +61,7 @@ export function DeviceHealthGrid({
       }
     }
     void refresh();
-    const timer = window.setInterval(refresh, 30_000);
+    const timer = window.setInterval(refresh, 60_000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, []);
 
