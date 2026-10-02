@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { DEVICE_IDLE_MS, DEVICE_STALE_MS, EBIO_ONLINE_WINDOW_MS, REALTIME_ONLINE_WINDOW_MS, deviceHealthState, deviceStatusMetadata, ebioDeviceHealthState, ebioHeartbeatPatch, realtimeDeviceHealthState } from "../lib/device-health";
 
 const now = Date.parse("2026-09-25T12:00:00.000Z");
-const recent = new Date(now - 60 * 1000);
+const recent = new Date(now - 15 * 1000);
 const stale = new Date(now - DEVICE_STALE_MS - 1);
 
 // A persisted offline connection state must not override a recent heartbeat.
@@ -30,7 +30,7 @@ assert.equal(realtimeDeviceHealthState("active", null, now), "offline");
 assert.equal(realtimeDeviceHealthState("inactive", recent, now), "disabled");
 assert.equal(realtimeDeviceHealthState("inactive", null, now), "disabled");
 
-// eBio's documented GetDeviceLastPing is a five-minute, source-specific window.
+// eBio health uses the configured under-one-minute last-ping window.
 assert.equal(ebioDeviceHealthState("active", new Date(now - EBIO_ONLINE_WINDOW_MS + 1), now), "online");
 assert.equal(ebioDeviceHealthState("active", new Date(now - EBIO_ONLINE_WINDOW_MS), now), "offline");
 assert.deepEqual(ebioHeartbeatPatch(new Date(now - EBIO_ONLINE_WINDOW_MS), now), { lastSeenAt: new Date(now - EBIO_ONLINE_WINDOW_MS), status: "offline" });

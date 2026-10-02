@@ -1,7 +1,11 @@
 export const DEVICE_STALE_MS = 24 * 60 * 60 * 1000;
 export const DEVICE_IDLE_MS = 2 * 60 * 60 * 1000;
 export const REALTIME_ONLINE_WINDOW_MS = 5 * 60 * 1000;
-export const EBIO_ONLINE_WINDOW_MS = 5 * 60 * 1000;
+// eBio Device Health is a live operational indicator. The page polls every
+// 15 seconds, so a 45-second vendor last-ping window detects a reported
+// disconnect in under one minute when eBio's device heartbeat is configured
+// at 30 seconds or faster.
+export const EBIO_ONLINE_WINDOW_MS = 45 * 1000;
 
 export type DeviceHealthState = "disabled" | "offline" | "stale" | "idle" | "online";
 
