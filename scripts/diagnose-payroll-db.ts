@@ -24,15 +24,17 @@ async function main() {
     SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()
     AND tablename = 'Payslip'
   `;
-  console.log("Run-scoped payslip index:", indexes.some((index) => index.indexname === "Payslip_payrollRunId_employeeId_key") ? "present" : "MISSING");
-  console.log("Obsolete employee/month payslip index:", indexes.some((index) => index.indexname === "Payslip_employeeId_month_key") ? "PRESENT — check payroll-run migration" : "absent");
+  const runIndex = indexes.some((index) => index.indexname === "Payslip_payrollRunId_employeeId_key");
+  const obsoleteIndex = indexes.some((index) => index.indexname === "Payslip_employeeId_month_key");
+  console.log("Run-scoped payslip index:", runIndex ? "present" : "MISSING");
+  console.log("Obsolete employee/month payslip index:", obsoleteIndex ? "PRESENT — apply 20261003000000_remove_obsolete_payslip_month_index" : "absent");
   const migrations = await prisma.$queryRaw<Array<{ migration_name: string; finished: boolean; rolled_back: boolean }>>`
     SELECT migration_name, finished_at IS NOT NULL AS finished,
     rolled_back_at IS NOT NULL AS rolled_back FROM "_prisma_migrations"
     ORDER BY started_at DESC LIMIT 12
   `;
   console.log("Recent migration status:", JSON.stringify(migrations));
-  if (missing.length) {
+  if (missing.length || !runIndex || obsoleteIndex) {
     process.exitCode = 1;
     return;
   }
