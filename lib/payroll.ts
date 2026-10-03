@@ -393,7 +393,14 @@ export function professionalTax(
     if (mm === "02") return 300;
     return 200;
   }
-  if (s === "karnataka" || s === "tamil nadu" || s === "telangana") {
+  // Telangana First Schedule, salary/wage earners:
+  // https://ptax.tgct.gov.in/tgportal/AllActs/APPT/APPTSchedule.aspx
+  if (s === "telangana") {
+    if (monthlyGross <= 15000) return 0;
+    if (monthlyGross <= 20000) return 150;
+    return 200;
+  }
+  if (s === "karnataka" || s === "tamil nadu") {
     if (monthlyGross <= 15000) return 0;
     return 200;
   }
