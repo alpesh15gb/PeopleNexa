@@ -1,9 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/card";
 import { DeviceHealthGrid } from "./device-health-grid";
 import { istStartOfDay } from "@/lib/ist";
-import { deviceHealthState, ebioDeviceHealthState } from "@/lib/device-health";
 
 export const dynamic = "force-dynamic";
 
@@ -52,12 +51,6 @@ export default async function AdminDeviceHealthPage() {
     ...device,
     ebio: Boolean((device.config as { ebioserver?: boolean } | null)?.ebioserver),
   }));
-  const now = Date.now();
-  const healthOf = (device: typeof rows[number]) => device.ebio
-    ? ebioDeviceHealthState(device.status, device.lastSeenAt, now)
-    : deviceHealthState(device.status, device.lastSeenAt, now);
-  const healthy = rows.filter((device) => ["online", "idle"].includes(healthOf(device))).length;
-  const offline = rows.filter((device) => ["offline", "stale"].includes(healthOf(device))).length;
   const todayPunches = [...punchMap.values()].reduce((s, n) => s + n, 0);
 
   return (
@@ -66,36 +59,13 @@ export default async function AdminDeviceHealthPage() {
         title="Device Health"
         description="Heartbeat health for ESSL and eBioserver devices. Last seen times are shown in IST."
       />
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-emerald-300">{healthy}</p>
-            <p className="text-[12px] text-muted-foreground">Online or idle (seen in 24h)</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-rose-300">{offline}</p>
-            <p className="text-[12px] text-muted-foreground">Offline / stale</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold">{todayPunches}</p>
-            <p className="text-[12px] text-muted-foreground">Punches today</p>
-          </CardContent>
-        </Card>
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          <DeviceHealthGrid
-            devices={rows}
-            punchMap={Object.fromEntries(punchMap)}
-            logMap={Object.fromEntries(logMap)}
-            errorMap={Object.fromEntries(errorMap)}
-          />
-        </CardContent>
-      </Card>
+      <DeviceHealthGrid
+        devices={rows}
+        punchMap={Object.fromEntries(punchMap)}
+        logMap={Object.fromEntries(logMap)}
+        errorMap={Object.fromEntries(errorMap)}
+        todayPunches={todayPunches}
+      />
     </div>
   );
 }

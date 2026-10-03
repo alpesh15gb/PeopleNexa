@@ -29,13 +29,13 @@ export function DeviceStatusBadge({ state, className }: { state: DeviceHealthSta
   );
 }
 
-export function DeviceStatusLegend({ realtime = false }: { realtime?: boolean }) {
+export function DeviceStatusLegend({ realtime = false, ebio = false }: { realtime?: boolean; ebio?: boolean }) {
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
       <span className="font-medium text-foreground">Status guide:</span>
-      <span><b className={statusDetails.online.legendClassName}>Online</b> {realtime ? "source report within 5 min" : "heartbeat within 2h"}</span>
-      {!realtime && <span><b className={statusDetails.idle.legendClassName}>Idle</b> 2-24h</span>}
-      {!realtime && <span><b className={statusDetails.stale.legendClassName}>Stale</b> over 24h</span>}
+      <span><b className={statusDetails.online.legendClassName}>Online</b> {realtime ? "source report within 5 min" : ebio ? "eBio heartbeat within 45 sec" : "heartbeat within 2h; eBio within 45 sec"}</span>
+      {!realtime && !ebio && <span><b className={statusDetails.idle.legendClassName}>Idle</b> 2-24h (ESSL)</span>}
+      {!realtime && !ebio && <span><b className={statusDetails.stale.legendClassName}>Stale</b> over 24h (ESSL)</span>}
       <span><b className={statusDetails.offline.legendClassName}>Offline</b> no heartbeat or outside online window</span>
       <span><b className={statusDetails.disabled.legendClassName}>Admin disabled</b> not evaluated</span>
     </p>
