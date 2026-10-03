@@ -146,6 +146,16 @@ export function PayrollPanel({
   }, [month, locationId]);
   const blockers = [
     ...rows
+      .filter(({ payslip }) => payslip && (
+        ![payslip.grossEarnings, payslip.deductions, payslip.netSalary].every(globalThis.Number.isFinite) ||
+        payslip.deductions < 0 || payslip.deductions > payslip.grossEarnings ||
+        Math.abs(payslip.grossEarnings - payslip.deductions - payslip.netSalary) > 0.005
+      ))
+      .map(({ employee }) => ({
+        employeeId: employee.id,
+        message: "Payroll amounts do not reconcile. Check deductions and regenerate the draft.",
+      })),
+    ...rows
       .filter(({ payslip }) => payslip && payslip.netSalary < 0)
       .map(({ employee }) => ({
         employeeId: employee.id,

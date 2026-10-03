@@ -13,10 +13,20 @@ export function documentSnapshotForResponse(snapshot: unknown): PayslipDocumentS
   return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as PayslipDocumentSnapshot : null;
 }
 export function payslipReconciliation(snapshot: Pick<PayslipDocumentSnapshot, "components" | "totals">): string[] {
+  const amounts = [snapshot.totals.gross, snapshot.totals.deductions, snapshot.totals.net,
+    ...(snapshot.totals.earnedGross === undefined ? [] : [snapshot.totals.earnedGross]),
+    ...snapshot.components.flatMap((row) => [row.earned, ...(row.contractual === null ? [] : [row.contractual])])];
+  if (amounts.some((amount) => typeof amount !== "number" || !Number.isFinite(amount))) {
+    return ["Payslip contains invalid monetary amounts. Regenerate the affected draft before approval."];
+  }
   const round = (n: number) => Math.round(n * 100) / 100;
   const earnings = snapshot.components.filter((r) => r.category === "earning" && r.visibleOnPayslip && r.includeInGross && !r.nonCash);
   const gross = round(earnings.reduce((s, r) => s + (snapshot.totals.earnedGross === undefined ? r.earned : r.contractual ?? r.earned), 0));
   const earnedGross = round(earnings.reduce((s, r) => s + r.earned, 0));
   const deductions = round(snapshot.components.filter((r) => r.category === "deduction" && r.visibleOnPayslip).reduce((s, r) => s + r.earned, 0));
-  return [gross !== round(snapshot.totals.gross) ? `Visible contractual earnings ${gross.toFixed(2)} do not reconcile to gross ${round(snapshot.totals.gross).toFixed(2)}.` : null, snapshot.totals.earnedGross !== undefined && earnedGross !== round(snapshot.totals.earnedGross) ? `Visible earned earnings ${earnedGross.toFixed(2)} do not reconcile to earned gross ${round(snapshot.totals.earnedGross).toFixed(2)}.` : null, deductions !== round(snapshot.totals.deductions) ? `Visible deductions ${deductions.toFixed(2)} do not reconcile to total deductions ${round(snapshot.totals.deductions).toFixed(2)}.` : null].filter((v): v is string => Boolean(v));
+  return [gross !== round(snapshot.totals.gross) ? `Visible contractual earnings ${gross.toFixed(2)} do not reconcile to gross ${round(snapshot.totals.gross).toFixed(2)}.` : null, snapshot.totals.earnedGross !== undefined && earnedGross !== round(snapshot.totals.earnedGross) ? `Visible earned earnings ${earnedGross.toFixed(2)} do not reconcile to earned gross ${round(snapshot.totals.earnedGross).toFixed(2)}.` : null, deductions !== round(snapshot.totals.deductions) ? `Visible deductions ${deductions.toFixed(2)} do not reconcile to total deductions ${round(snapshot.totals.deductions).toFixed(2)}.` : null,
+    snapshot.totals.deductions > snapshot.totals.gross ? "Deductions exceed gross pay. Resolve unrecovered deductions before approval." : null,
+    round(round(snapshot.totals.gross) - round(snapshot.totals.deductions)) !== round(snapshot.totals.net) ? "Gross pay minus deductions does not reconcile to net pay. Resolve the affected draft before approval." : null,
+    snapshot.totals.net < 0 ? "Negative net pay must be resolved before approval." : null,
+  ].filter((v): v is string => Boolean(v));
 }

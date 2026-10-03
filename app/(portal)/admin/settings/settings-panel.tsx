@@ -1,5 +1,7 @@
 "use client";
 
+import { Switch } from "@/components/ui/switch";
+
 import { useState } from "react";
 import { Link2, Loader2, Plug, Save, ShieldCheck, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -173,25 +175,11 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
                 The polling job will pull punches from this server on schedule.
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
+            <Switch
+              checked={enabled}
               aria-labelledby="ebio-auto-pull-label"
-              onClick={() => setEnabled((v) => !v)}
-              className={cn(
-                "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-                enabled ? "bg-gradient-brand" : "bg-muted"
-              )}
-            >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
-                  enabled ? "left-[22px]" : "left-0.5"
-                )}
-              />
-            </button>
+              onCheckedChange={setEnabled}
+            />
           </div>
         </div>
 

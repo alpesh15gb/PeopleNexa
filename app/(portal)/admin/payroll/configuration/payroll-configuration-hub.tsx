@@ -1,5 +1,7 @@
 "use client";
 
+import { Switch } from "@/components/ui/switch";
+
 import Link from "next/link";
 import { PayrollNavigation } from "@/components/payroll-navigation";
 import {
@@ -3644,22 +3646,11 @@ function SwitchRow({
           {description}
         </p>
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
+      <Switch
+        checked={checked}
         aria-label={label}
-        onClick={() => onChange(!checked)}
-        className="flex h-11 w-12 shrink-0 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span
-          className={`relative h-6 w-11 rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted"}`}
-        >
-          <span
-            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`}
-          />
-        </span>
-      </button>
+        onCheckedChange={onChange}
+      />
     </div>
   );
 }

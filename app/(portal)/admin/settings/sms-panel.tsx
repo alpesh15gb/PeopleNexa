@@ -1,5 +1,7 @@
 "use client";
 
+import { Switch } from "@/components/ui/switch";
+
 import { useState } from "react";
 import { MessageSquareText, Save, ShieldCheck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -86,16 +88,11 @@ export function SmsPanel({
                 Indian numbers auto-prefixed with 91).
               </p>
             </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={enabled}
+            <Switch
+              checked={enabled}
               aria-labelledby="sms-enable-label"
-              onClick={() => setEnabled((v) => !v)}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${enabled ? "bg-gradient-brand" : "bg-muted"}`}
-            >
-              <span aria-hidden="true" className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${enabled ? "left-[22px]" : "left-0.5"}`} />
-            </button>
+              onCheckedChange={setEnabled}
+            />
           </div>
 
           <Button onClick={save} loading={saving}>

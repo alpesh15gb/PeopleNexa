@@ -136,6 +136,18 @@ assert.equal(JSON.stringify(selectedConfig), configBefore, "calculation does not
 
 const document = { version: 2 as const, generatedAt: new Date(0).toISOString(), period: "2026-07", policy: { id: null, version: null, source: "test" }, branding: { legalName: "Test", displayName: "Test", address: null, contact: null, logoUrl: null }, employee: { name: "Test", employeeNumber: "TEST", designation: null, department: null, joiningDate: null, bankName: null, accountMasked: null, panMasked: null, uan: null, esiIpNumber: null }, days: { payable: first.payableDays, paid: 23, lop: 7 }, components: documentComponents(first), totals: { gross: first.grossEarnings, earnedGross: first.earnedGross, deductions: first.deductions, net: first.netSalary } };
 assert.deepEqual(payslipReconciliation(document), [], "contractual and earned snapshot totals reconcile independently");
+assert.ok(payslipReconciliation({ ...document, totals: { ...document.totals, net: document.totals.net + 1 } }).some((error) => error.includes("net pay")), "a wrong net amount is rejected even when all component sums match");
+const zeroPayDocument = {
+  components: [
+    { code: "BASIC", label: "Basic", category: "earning" as const, contractual: 20_000, earned: 0, includeInGross: true, visibleOnPayslip: true, nonCash: false },
+    { code: "LOP", label: "LOP", category: "deduction" as const, contractual: null, earned: 20_000, includeInGross: false, visibleOnPayslip: true, nonCash: false },
+  ],
+  totals: { gross: 20_000, earnedGross: 0, deductions: 20_000, net: 0 },
+};
+assert.deepEqual(payslipReconciliation(zeroPayDocument), [], "a fully absent employee's legitimate zero-pay statement reconciles");
+const overDeducted = { ...zeroPayDocument, components: [...zeroPayDocument.components, { ...zeroPayDocument.components[1], code: "SW", label: "Staff Welfare", earned: 250 }], totals: { ...zeroPayDocument.totals, deductions: 20_250 } };
+assert.ok(payslipReconciliation(overDeducted).some((error) => error.includes("exceed gross")), "fixed welfare after full LOP cannot silently pass with net floored to zero");
+assert.ok(payslipReconciliation({ ...document, totals: { ...document.totals, net: Number.NaN } }).some((error) => error.includes("invalid monetary")), "non-finite money is rejected");
 
 const assignment = (overrides: Partial<PayrollComponentAssignmentRecord> = {}): PayrollComponentAssignmentRecord => ({ id: "a", tenantId: "tenant-a", locationId: "location-a", employeeId: "employee-a", componentCode: "ATTENDANCE_SERVICE", effectiveFrom: new Date("2026-01-01T12:00:00.000Z"), effectiveTo: null, active: true, ...overrides });
 const assignmentRecords = [assignment(), assignment({ id: "wrong-location", locationId: "location-b", componentCode: "OTHER" }), assignment({ id: "wrong-tenant", tenantId: "tenant-b", componentCode: "OTHER_2" })];

@@ -50,6 +50,8 @@ export async function PATCH(
             payslips: {
               select: {
                 id: true,
+                grossEarnings: true,
+                deductions: true,
                 netSalary: true,
                 loanDeduction: true,
                 inputSnapshot: true,
@@ -85,14 +87,17 @@ export async function PATCH(
             { error: "A run with no payslips cannot be reviewed." },
             { status: 409 },
           );
-        if (target === "finalized" && run.payslips.some((p) => p.netSalary < 0))
+        if (["approved", "finalized", "paid"].includes(target) && run.payslips.some((p) =>
+          ![p.grossEarnings, p.deductions, p.netSalary].every(Number.isFinite) ||
+          p.netSalary < 0 || p.deductions < 0 || p.deductions > p.grossEarnings ||
+          Math.abs(p.grossEarnings - p.deductions - p.netSalary) > 0.005))
           return NextResponse.json(
             {
-              error: "Resolve negative net-pay exceptions before finalization.",
+              error: "Resolve invalid or unreconciled payroll amounts before approval, finalization or payment.",
             },
             { status: 409 },
           );
-        if (target === "finalized") {
+        if (["approved", "finalized", "paid"].includes(target)) {
           const errors = payrollRunPreflight(run.payslips);
           if (errors.length)
             return NextResponse.json(

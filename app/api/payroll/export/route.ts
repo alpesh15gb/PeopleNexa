@@ -58,6 +58,24 @@ export async function GET(req: NextRequest) {
     }));
 
   const missing = payslips.length - rows.length;
+  if (missing > 0) {
+    return NextResponse.json(
+      {
+        error: `${missing} payslip(s) have missing bank details in their saved payroll snapshot. A partial bank file cannot be exported.`,
+        affectedEmployeeIds: payslips.filter((p) => {
+          const details = (p.inputSnapshot as { bank?: { accountNumber?: string; ifscCode?: string } } | null)?.bank;
+          return !details?.accountNumber || !details?.ifscCode;
+        }).map((p) => p.employeeId),
+      },
+      { status: 409 },
+    );
+  }
+  if (payslips.some((p) => !Number.isFinite(p.netSalary) || p.netSalary < 0 ||
+    !Number.isFinite(p.grossEarnings) || !Number.isFinite(p.deductions) ||
+    p.deductions < 0 || p.deductions > p.grossEarnings ||
+    Math.abs(p.grossEarnings - p.deductions - p.netSalary) > 0.005)) {
+    return NextResponse.json({ error: "Payroll amounts do not reconcile. Bank export is blocked." }, { status: 409 });
+  }
   if (rows.length === 0) {
     return NextResponse.json(
       { error: `No payslips with bank details for ${month}. Add account number + IFSC on employee profiles first.` },
@@ -76,6 +94,5 @@ export async function GET(req: NextRequest) {
       "Content-Disposition": `attachment; filename="${bankFileName(bank, month)}"`,
     },
   });
-  if (missing > 0) res.headers.set("X-Skipped-Rows", String(missing));
   return res;
 }
