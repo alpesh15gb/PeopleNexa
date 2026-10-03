@@ -360,13 +360,13 @@ export function PayrollPanel({
     ? null
     : !payroll
       ? { label: `Create preview`, onClick: () => create(), busy: "create" }
-      : payroll.status === "draft" && !blockers.length
+      : payroll.status === "draft"
         ? {
             label: "Complete review",
             onClick: () => transition("reviewed"),
             busy: "reviewed",
           }
-        : payroll.status === "reviewed" && !blockers.length
+        : payroll.status === "reviewed"
           ? {
               label: "Approve payroll",
               onClick: () => transition("approved"),
@@ -566,7 +566,8 @@ export function PayrollPanel({
             </div>
             {action && (
               <Button
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || (blockers.length > 0 && ["reviewed", "approved"].includes(action.busy))}
+                aria-describedby={blockers.length > 0 && ["reviewed", "approved"].includes(action.busy) ? "payroll-action-blockers" : undefined}
                 loading={busy === action.busy}
                 onClick={action.onClick}
               >
@@ -575,6 +576,19 @@ export function PayrollPanel({
               </Button>
             )}
           </div>
+          {action && blockers.length > 0 && ["reviewed", "approved"].includes(action.busy) && (
+            <p id="payroll-action-blockers" className="mt-4 text-sm text-muted-foreground">
+              {action.label} is unavailable until the employee issues are resolved.{" "}
+              <a href="#payroll-issues" className="font-medium text-primary underline underline-offset-4">
+                View issues and how to resolve them
+              </a>
+            </p>
+          )}
+          {payroll?.status === "reviewed" && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Approval requires a different administrator from the person who created this payroll.
+            </p>
+          )}
           {locationId && !payroll && (
             <fieldset className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-primary/15 pt-4">
               <legend className="sr-only">Employees to include</legend>
@@ -664,6 +678,7 @@ export function PayrollPanel({
         </section>
         {blockers.length > 0 && (
           <section
+            id="payroll-issues"
             aria-label="Payroll issues"
             className="rounded-2xl border border-amber-400/30 bg-amber-500/5 p-5"
           >
@@ -691,7 +706,14 @@ export function PayrollPanel({
                       </strong>{" "}
                       · {issue.message}
                     </span>
-                    {row && (
+                    {row && issue.message === "Bank details are missing." ? (
+                      <a
+                        href={`/admin/employee-master?employee=${row.employee.id}`}
+                        className="text-sm font-medium text-primary underline underline-offset-4"
+                      >
+                        Edit employee bank details
+                      </a>
+                    ) : row && (
                       <Button
                         variant="outline"
                         size="sm"
