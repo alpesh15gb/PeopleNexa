@@ -23,6 +23,7 @@ import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import type { PayslipDocumentSnapshot } from "@/lib/payslip-document";
+import { payrollGenerationReason, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
 
 type Employee = {
   id: string;
@@ -126,6 +127,7 @@ export function PayrollPanel({
   >("all_eligible");
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [generationIssues, setGenerationIssues] = useState<PayrollGenerationResult[]>([]);
   const [recovery, setRecovery] = useState<
     "mess_backdate" | "attendance_reprocess" | null
   >(null);
@@ -136,6 +138,7 @@ export function PayrollPanel({
     setSelectedEmployeeIds([]);
     setSelectionMode("all_eligible");
     setPickerOpen(false);
+    setGenerationIssues([]);
     setDetails(null);
     setConfirmation(null);
     setSearch("");
@@ -175,6 +178,7 @@ export function PayrollPanel({
     if (selectionMode === "selected" && !selectedEmployeeIds.length)
       return toast("error", "Select at least one eligible employee.");
     setBusy("create");
+    setGenerationIssues([]);
     try {
       const response = await fetch("/api/payroll/generate", {
         method: "POST",
@@ -194,11 +198,15 @@ export function PayrollPanel({
           data.error ?? "Could not create monthly payroll.",
         );
       setPickerOpen(false);
+      const issues: PayrollGenerationResult[] = (data.results ?? []).filter(
+        (result: PayrollGenerationResult) => !result.created,
+      );
+      setGenerationIssues(issues);
       if (data.cancelled || !data.created) {
         toast(
           "error",
           data.cancelled
-            ? "No payslips were created. The empty run was cancelled; no payroll is ready for review."
+            ? "No payslips were created. The empty run was cancelled. See the employee reasons below."
             : "No payslips were created. The current draft was not advanced.",
         );
         router.refresh();
@@ -214,6 +222,8 @@ export function PayrollPanel({
       router.push(
         `/admin/payroll?${new URLSearchParams({ period: month, location: locationId ?? "", run: data.runId })}`,
       );
+    } catch {
+      toast("error", "Could not confirm payroll generation. Refresh and check the run before retrying.");
     } finally {
       setBusy(null);
     }
@@ -480,6 +490,24 @@ export function PayrollPanel({
             {payroll?.status ?? "Not started"}
           </Badge>
         </section>
+        {generationIssues.length > 0 && (
+          <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
+            <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Resolve these reasons before retrying the affected employees. Payslips that were created remain in the draft.</p>
+            <div className="mt-4 overflow-x-auto">
+              <Table>
+                <THead><TR><TH>Employee</TH><TH>Result</TH><TH>Reason</TH></TR></THead>
+                <TBody>{generationIssues.map((result) => (
+                  <TR key={result.employeeId}>
+                    <TD>{result.employeeName}</TD>
+                    <TD><Badge tone={result.error ? "danger" : "warning"}>{result.error ? "Failed" : "Skipped"}</Badge></TD>
+                    <TD className="min-w-64 whitespace-normal break-words">{payrollGenerationReason(result)}</TD>
+                  </TR>
+                ))}</TBody>
+              </Table>
+            </div>
+          </section>
+        )}
         <ol
           aria-label="Payroll progress"
           className="grid grid-cols-5 gap-1 rounded-2xl border border-edge bg-card p-3 sm:gap-4 sm:p-5"

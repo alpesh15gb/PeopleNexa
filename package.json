@@ -27,6 +27,8 @@
     "test:payroll-field-mapping": "tsx scripts/test-payroll-field-mapping.ts",
     "test:payroll-workspace": "tsx scripts/test-payroll-workspace.ts",
     "test:payroll-selected-members": "tsx scripts/test-payroll-selected-members.ts",
+    "test:payroll-generation-results": "tsx scripts/test-payroll-generation-results.ts",
+    "diagnose:payroll-db": "tsx scripts/diagnose-payroll-db.ts",
     "test:payroll-revamp": "tsx scripts/test-payroll-revamp.ts",
     "test:payroll-reporting": "tsx scripts/test-payroll-reporting.ts",
     "test:payroll-register": "tsx scripts/test-payroll-register.ts",

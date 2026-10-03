@@ -10,6 +10,7 @@ import {
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { resolveSalaryRevision } from "@/lib/salary-revisions";
 import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
+import { payrollGenerationTotals, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -388,14 +389,12 @@ export async function POST(req: NextRequest) {
   let created = 0;
   let totalLoanApplied = 0;
 
-  type GenResult = {
-    employeeId: string;
-    employeeName: string;
-    created: boolean;
-    netSalary?: number;
-    error?: string;
-  };
-  const results: GenResult[] = [];
+  const results: PayrollGenerationResult[] = missingSalary.map((employee) => ({
+    employeeId: employee.id,
+    employeeName: `${employee.firstName} ${employee.lastName}`.trim(),
+    created: false,
+    skipped: "missing-salary",
+  }));
 
   for (const emp of withSalary) {
     try {
@@ -425,6 +424,7 @@ export async function POST(req: NextRequest) {
           ? `${source.firstName} ${source.lastName}`.trim()
           : emp.id,
         created: res.created,
+        ...(res.skipped ? { skipped: res.skipped } : {}),
         ...(res.netSalary != null ? { netSalary: res.netSalary } : {}),
       });
     } catch (e) {
@@ -440,7 +440,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const failed = results.filter((r) => r.error).length;
+  const totals = payrollGenerationTotals(results);
+  const failed = totals.failed;
   const completion = await prisma.$transaction(async (tx) => {
     const locked = await tx.payrollRun.updateMany({
       where: { id: run.id, tenantId: session.tenantId, status: "draft" },
@@ -493,6 +494,7 @@ export async function POST(req: NextRequest) {
           createdEmployeeCount: created,
           memberCount: membershipCount,
           failed,
+          generationIssues: results.filter((result) => !result.created),
           ...(selectionMode === "selected"
             ? { employeeIds: selectedEmployeeIds }
             : {}),
@@ -506,15 +508,10 @@ export async function POST(req: NextRequest) {
     month,
     runId: run.id,
     created,
-    skipped: employees.length - withSalary.length,
+    skipped: totals.skipped,
     loanApplied: totalLoanApplied,
     results,
-    totals: {
-      created,
-      skipped: employees.length - withSalary.length,
-      failed,
-      total: employees.length,
-    },
+    totals,
     cancelled: completion.cancelled,
   });
 }

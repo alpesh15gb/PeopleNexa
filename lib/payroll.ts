@@ -1386,6 +1386,7 @@ export async function generatePayslipForEmployee(
       if (existing)
         return {
           created: false,
+          skipped: "already-included",
           netSalary: existing.netSalary,
           loanApplied: 0,
         };
