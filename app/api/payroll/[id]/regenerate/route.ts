@@ -176,7 +176,7 @@ export async function POST(
           session.tenantId,
           {
             id: employee.id,
-            shiftId: employee.shiftId,
+            shiftId: Object.hasOwn(savedEmployee, "shiftId") ? (typeof savedEmployee.shiftId === "string" ? savedEmployee.shiftId : null) : employee.shiftId,
             joiningDate,
           },
           existing.month,

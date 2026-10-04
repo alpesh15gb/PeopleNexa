@@ -1,8 +1,8 @@
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { istDateKey } from "@/lib/ist";
-import { appendAudit } from "@/lib/audit";
 
 const ALLOWED = ["present", "late", "permission", "absent", "half_day"];
 
@@ -119,16 +119,19 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   if (body.note !== undefined) data.note = body.note ? String(body.note).trim() : null;
 
-  const updated = await prisma.attendance.update({ where: { id }, data });
-  await appendAudit({
-    tenantId: session.tenantId,
-    actorId: session.sub,
-    actorRole: session.role,
-    action: "attendance.override",
-    entity: "Attendance",
-    entityId: id,
-    before: { status: record.status },
-    after: { status: updated.status },
-  });
+  if (record.employeeId === session.sub) return NextResponse.json({ error: "Use a reviewed attendance correction for your own record." }, { status: 403 });
+  if (body.status && (!String(body.note ?? "").trim() || String(body.note).length > 2000)) return NextResponse.json({ error: "A reason of at most 2,000 characters is required for an attendance override." }, { status: 400 });
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      await assertLeavePayrollOpen(tx, session.tenantId, record.employeeId, record.date, record.date);
+      const next = await tx.attendance.update({ where: { id }, data });
+      await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "attendance.override", entity: "Attendance", entityId: id, summary: String(body.note ?? ""), before: { status: record.status, note: record.note }, after: { status: next.status, note: next.note } } });
+      return next;
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (["PAYROLL_LOCKED", "P2034"].includes((error as { code?: string }).code ?? "")) return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    throw error;
+  }
   return NextResponse.json({ record: updated });
 }

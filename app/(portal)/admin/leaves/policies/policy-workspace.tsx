@@ -472,6 +472,23 @@ function LeavePolicyEditor({
                       />
                     </Field>
                   )}
+                  <Field label="Days deducted from balance" hint="Weekly offs use this policy's selected days. Holidays use the company holiday calendar.">
+                    <Select value={rule.dayCounting ?? "legacy"} onChange={(event) => update(index, { dayCounting: event.target.value === "legacy" ? undefined : event.target.value as Rule["dayCounting"] })}>
+                      <option value="legacy">Keep existing calendar-day behavior</option>
+                      <option value="calendar_days">Every calendar day</option>
+                      <option value="working_days">Working days only</option>
+                      <option value="sandwich">Working days + enclosed holidays / offs</option>
+                    </Select>
+                  </Field>
+                  <Field label="Advance notice (days)">
+                    <NumberInput min={0} max={3660} step={1} value={rule.noticeDays ?? 0} onValueChange={(value) => update(index, { noticeDays: value ?? 0 })} />
+                  </Field>
+                  <Field label="Minimum service (days)">
+                    <NumberInput min={0} max={3660} step={1} value={rule.minServiceDays ?? 0} onValueChange={(value) => update(index, { minServiceDays: value ?? 0 })} />
+                  </Field>
+                  <Field label="Maximum days per request" hint="Leave blank for no additional request limit.">
+                    <NumberInput min={1} max={366} step={0.5} value={rule.maxConsecutiveDays ?? null} onValueChange={(maxConsecutiveDays) => update(index, { maxConsecutiveDays })} />
+                  </Field>
                   <Field label="Payroll treatment">
                     <Select
                       value={rule.paid ? "paid" : "unpaid"}
@@ -537,6 +554,19 @@ function LeavePolicyEditor({
                   />
                   Allow half-day requests
                 </label>
+                <label className="mt-2 flex min-h-11 items-center gap-2 text-sm">
+                  <input type="checkbox" checked={rule.requiresReason ?? false} onChange={(event) => update(index, { requiresReason: event.target.checked })} />
+                  Require a reason
+                </label>
+                {rule.dayCounting && rule.dayCounting !== "calendar_days" && (
+                  <fieldset className="mt-4 rounded-xl border border-edge p-3">
+                    <legend className="px-1 text-sm font-medium">Weekly offs for leave counting</legend>
+                    <div className="flex flex-wrap gap-3">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, number) => (
+                      <label key={day} className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={(rule.weeklyOffDays ?? []).includes(number)} onChange={(event) => update(index, { weeklyOffDays: event.target.checked ? [...(rule.weeklyOffDays ?? []), number].sort() : (rule.weeklyOffDays ?? []).filter((value) => value !== number) })} />{day}</label>
+                    ))}</div>
+                    <p className="text-xs text-muted-foreground">Choose the actual weekly-off pattern for this policy. No days are assumed automatically.</p>
+                  </fieldset>
+                )}
                 {rule.workedDayAccrual && (
                   <div className="mt-3 space-y-3 rounded-xl border border-edge bg-tint p-4">
                     <h3 className="text-sm font-semibold">
@@ -760,6 +790,7 @@ function LeavePolicyEditor({
                     ? `Carry forward up to ${rule.carryForwardLimit} days`
                     : "No carry forward"}
                 </p>
+                <p className="mt-2 text-sm text-muted-foreground">Counting: {rule.dayCounting === "working_days" ? "Working days only" : rule.dayCounting === "sandwich" ? "Working days plus enclosed offs / holidays" : rule.dayCounting === "calendar_days" ? "Every calendar day" : "Existing calendar-day behavior"}. Weekly offs: {(rule.weeklyOffDays ?? []).map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ") || "None configured"}. Notice: {rule.noticeDays ?? 0} days. Minimum service: {rule.minServiceDays ?? 0} days. Maximum per request: {rule.maxConsecutiveDays ?? "No additional limit"}. {rule.requiresReason ? "Reason required." : "Reason optional."}</p>
               </div>
             ))}
           </div>

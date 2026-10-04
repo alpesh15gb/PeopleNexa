@@ -1,3 +1,5 @@
+import { leaveCalendar, leaveEligibilityError } from "@/lib/leave-calendar";
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +12,6 @@ import {
   canApplyLeaveOnBehalf,
   leaveSubmissionAttribution,
 } from "@/lib/leave-on-behalf";
-import { appendAudit } from "@/lib/audit";
 import {
   calculateLeaveBalance,
   canClaimLeave,
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
       string
     >;
     const halfDay = body.halfDay === true;
+    if (![leaveTypeId, fromDate, toDate].every((value) => typeof value === "string") || (reason !== undefined && reason !== null && (typeof reason !== "string" || reason.length > 2000))) return NextResponse.json({ error: "Invalid leave fields. Reasons must be text of at most 2,000 characters." }, { status: 400 });
     if (!leaveTypeId || !fromDate || !toDate) {
       return NextResponse.json(
         { error: "Leave type and dates are required." },
@@ -199,6 +201,7 @@ export async function POST(req: NextRequest) {
         id: true,
         status: true,
         loginOnly: true,
+        joiningDate: true,
         locationId: true,
         branch: { select: { locationId: true } },
       },
@@ -232,6 +235,7 @@ export async function POST(req: NextRequest) {
         try {
           request = await prisma.$transaction(
             async (tx) => {
+              await assertLeavePayrollOpen(tx, session.tenantId, employeeId, from, to);
               await refreshEarnedLeaveBalances(tx, session.tenantId, [
                 employeeId,
               ]);
@@ -378,7 +382,15 @@ export async function POST(req: NextRequest) {
                 err.code = "HALF_DAY";
                 throw err;
               }
-              if (halfDay) days = 0.5;
+              let calendar: ReturnType<typeof leaveCalendar> | undefined;
+              if (policy?.rules.dayCounting) {
+                const holidays = await tx.holiday.findMany({ where: { tenantId: session.tenantId }, select: { date: true, isRecurring: true, isHalfDay: true } });
+                calendar = leaveCalendar(fromDate, toDate, policy.rules, holidays, halfDay);
+                days = calendar.days;
+              } else days = halfDay ? 0.5 : daysBetween(from, to);
+              if (days <= 0) throw Object.assign(new Error("These dates contain no chargeable leave days. Choose working dates."), { code: "BALANCE" });
+              const eligibility = leaveEligibilityError(policy?.rules ?? {}, fromDate, days, applicant.joiningDate, String(reason ?? ""));
+              if (eligibility) throw Object.assign(new Error(eligibility), { code: "BALANCE" });
               const usedDays = allocated
                 ? usedRows
                     .filter(
@@ -418,7 +430,7 @@ export async function POST(req: NextRequest) {
                 throw err;
               }
 
-              return tx.leaveRequest.create({
+              const created = await tx.leaveRequest.create({
                 data: {
                   tenantId: session.tenantId,
                   employeeId,
@@ -438,6 +450,7 @@ export async function POST(req: NextRequest) {
                     policy && allocated
                       ? ({
                           ...policy,
+                          ...(calendar ? { calendar } : {}),
                           policyPeriodId: allocated.policyPeriod.id,
                           ...(accrual ? { accrual } : {}),
                         } as Prisma.InputJsonValue)
@@ -448,6 +461,8 @@ export async function POST(req: NextRequest) {
                   employee: { select: { firstName: true, lastName: true } },
                 },
               });
+              await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: attribution.onBehalf ? "leave.create_on_behalf" : "leave.create", entity: "LeaveRequest", entityId: created.id, summary: `Submitted ${created.days} days of ${created.leaveType.name}`, after: { employeeId, createdBy: attribution.createdBy, source: attribution.source, status: created.status, days: created.days } } });
+              return created;
             },
             { isolationLevel: "Serializable" },
           );
@@ -459,6 +474,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       const code = (e as { code?: string })?.code;
+      if (code === "PAYROLL_LOCKED") return NextResponse.json({ error: (e as Error).message }, { status: 409 });
       if (
         code === "OVERLAP" ||
         code === "BALANCE" ||
@@ -490,22 +506,6 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
-
-    await appendAudit({
-      tenantId: session.tenantId,
-      actorId: session.sub,
-      actorRole: session.role,
-      action: attribution.onBehalf ? "leave.create_on_behalf" : "leave.create",
-      entity: "LeaveRequest",
-      entityId: request.id,
-      summary: `${attribution.onBehalf ? "recorded for employee" : "submitted"} ${request.days}d ${request.leaveType.name}`,
-      after: {
-        employeeId,
-        createdBy: attribution.createdBy,
-        source: attribution.source,
-        status: request.status,
-      },
-    });
 
     // Notify admins about the new request (or the employee when auto-approved).
     if (attribution.onBehalf) {

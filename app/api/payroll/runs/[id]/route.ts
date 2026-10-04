@@ -1,3 +1,4 @@
+import { payrollSourceReview } from "@/lib/payroll-source-review";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -50,6 +51,8 @@ export async function PATCH(
             payslips: {
               select: {
                 id: true,
+                employeeId: true,
+                employee: { select: { id: true, shiftId: true, joiningDate: true, firstName: true, lastName: true } },
                 grossEarnings: true,
                 deductions: true,
                 netSalary: true,
@@ -87,6 +90,10 @@ export async function PATCH(
             { error: "A run with no payslips cannot be reviewed." },
             { status: 409 },
           );
+        if (["reviewed", "approved", "finalized"].includes(target)) {
+          const errors = await payrollSourceReview(tx, session.tenantId, run.month, run.payslips);
+          if (errors.length) return NextResponse.json({ error: errors.slice(0, 10).join(" "), preflight: errors }, { status: 409 });
+        }
         if (["approved", "finalized", "paid"].includes(target) && run.payslips.some((p) =>
           ![p.grossEarnings, p.deductions, p.netSalary].every(Number.isFinite) ||
           p.netSalary < 0 || p.deductions < 0 || p.deductions > p.grossEarnings ||
@@ -106,14 +113,14 @@ export async function PATCH(
             );
         }
         const cancellationReason =
-          target === "cancelled" ? String(body.reason ?? "").trim() : "";
+          ["cancelled", "draft"].includes(target) ? String(body.reason ?? "").trim() : "";
         if (
-          target === "cancelled" &&
+          ["cancelled", "draft"].includes(target) &&
           (!cancellationReason || cancellationReason.length > 500)
         )
           return NextResponse.json(
             {
-              error: "A cancellation reason is required (max 500 characters).",
+              error: "A cancellation or return-to-draft reason is required (max 500 characters).",
             },
             { status: 400 },
           );
@@ -258,7 +265,7 @@ export async function PATCH(
               run.status,
               target,
             ),
-            ...(target === "paid" || target === "cancelled"
+            ...(target === "paid" || target === "cancelled" || target === "draft"
               ? {
                   after: {
                     status: target,
@@ -272,7 +279,7 @@ export async function PATCH(
         });
         return NextResponse.json({ run: next });
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "Serializable", timeout: 60000 },
     );
   } catch (error) {
     if (

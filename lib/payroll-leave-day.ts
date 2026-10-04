@@ -4,9 +4,11 @@ export function payrollLeaveDay(
   sameDay: boolean,
   paid: boolean,
   attendanceStatus?: string,
+  snapshottedFraction?: number,
+  nonWorkingFraction = 0,
 ) {
-  const fraction = sameDay && days === 0.5 ? 0.5 : 1;
-  const remaining = 1 - fraction;
+  const fraction = snapshottedFraction ?? (sameDay && days === 0.5 ? 0.5 : 1);
+  const remaining = Math.max(0, 1 - fraction - nonWorkingFraction);
   const attended = ["present", "late", "permission", "half_day"].includes(
     attendanceStatus ?? "",
   );

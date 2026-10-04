@@ -1,4 +1,5 @@
 import { parseMediaUrl } from "@/lib/media-url";
+import type { LeaveCalendarRules } from "./leave-calendar";
 import { istDateKey } from "@/lib/ist";
 
 export const CONFIGURATION_KINDS = ["dashboard", "id_card", "leave_policy", "payroll_policy"] as const;
@@ -7,7 +8,7 @@ export type ConfigurationKind = (typeof CONFIGURATION_KINDS)[number];
 export type IdCardTemplate = { frontBackgroundUrl: string; backBackgroundUrl: string; frontContentPanel: "clean" | "preserve" };
 
 export type WorkedDayAccrual = { source: "attendance_status"; tiers: Array<{ minDays: number; maxDays: number; daysEarned: number }>; joiningMonthClaimDeferral: "none" | "next_month" };
-export type LeavePolicyDraft = { leaveTypes: Array<{ name: string; code: string; annualEntitlement: number | null; unlimitedEntitlement: boolean; paid: boolean; allowsHalfDay: boolean; requiresApproval: boolean; carryForward: boolean; carryForwardLimit: number | null; workedDayAccrual?: WorkedDayAccrual }> };
+export type LeavePolicyDraft = { leaveTypes: Array<LeaveCalendarRules & { name: string; code: string; annualEntitlement: number | null; unlimitedEntitlement: boolean; paid: boolean; allowsHalfDay: boolean; requiresApproval: boolean; carryForward: boolean; carryForwardLimit: number | null; workedDayAccrual?: WorkedDayAccrual }> };
 export const PAYROLL_ROUNDING_MODES = ["two_decimals", "floor_rupee", "nearest_rupee"] as const;
 export type PayrollRoundingMode = (typeof PAYROLL_ROUNDING_MODES)[number];
 export type SalaryDivisorMethod = "fixed_divisor" | "calendar_days";
@@ -80,8 +81,27 @@ export function leavePolicyDraft(payload: unknown): LeavePolicyDraft | null {
     const unlimitedEntitlement = value.unlimitedEntitlement === true;
     const workedDayAccrual = parseWorkedDayAccrual(value.workedDayAccrual);
     if (!name || name.length > 80 || !/^[A-Z0-9_-]{1,20}$/.test(code) || codes.has(code) || (annualEntitlement !== null && (typeof annualEntitlement !== "number" || !Number.isInteger(annualEntitlement) || annualEntitlement < 0 || annualEntitlement > 366)) || typeof value.paid !== "boolean" || typeof value.allowsHalfDay !== "boolean" || typeof value.requiresApproval !== "boolean" || typeof value.carryForward !== "boolean" || (value.carryForward ? (typeof carryForwardLimit !== "number" || !Number.isInteger(carryForwardLimit) || carryForwardLimit < 0 || carryForwardLimit > 366) : carryForwardLimit !== null) || (value.workedDayAccrual !== undefined && !workedDayAccrual)) return null;
+    const calendar: LeaveCalendarRules = {};
+    if (value.dayCounting !== undefined) {
+      if (!["calendar_days", "working_days", "sandwich"].includes(String(value.dayCounting))) return null;
+      calendar.dayCounting = value.dayCounting as LeaveCalendarRules["dayCounting"];
+    }
+    if (value.weeklyOffDays !== undefined) {
+      if (!Array.isArray(value.weeklyOffDays) || value.weeklyOffDays.length > 7 || value.weeklyOffDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6) || new Set(value.weeklyOffDays).size !== value.weeklyOffDays.length) return null;
+      calendar.weeklyOffDays = value.weeklyOffDays as number[];
+    }
+    for (const key of ["noticeDays", "minServiceDays", "maxConsecutiveDays"] as const) {
+      if (value[key] === undefined) continue;
+      if (key === "maxConsecutiveDays" && value[key] === null) { calendar[key] = null; continue; }
+      if (typeof value[key] !== "number" || !(key === "maxConsecutiveDays" ? Number.isFinite(value[key]) && (value[key] as number) * 2 === Math.floor((value[key] as number) * 2) : Number.isInteger(value[key])) || value[key] < (key === "maxConsecutiveDays" ? 0.5 : 0) || value[key] > (key === "maxConsecutiveDays" ? 366 : 3660)) return null;
+      calendar[key] = value[key] as number;
+    }
+    if (value.requiresReason !== undefined) {
+      if (typeof value.requiresReason !== "boolean") return null;
+      calendar.requiresReason = value.requiresReason;
+    }
     codes.add(code);
-    parsed.push({ name, code, annualEntitlement: annualEntitlement as number | null, unlimitedEntitlement, paid: value.paid, allowsHalfDay: value.allowsHalfDay, requiresApproval: value.requiresApproval, carryForward: value.carryForward, carryForwardLimit: carryForwardLimit as number | null, ...(workedDayAccrual ? { workedDayAccrual } : {}) });
+    parsed.push({ ...calendar, name, code, annualEntitlement: annualEntitlement as number | null, unlimitedEntitlement, paid: value.paid, allowsHalfDay: value.allowsHalfDay, requiresApproval: value.requiresApproval, carryForward: value.carryForward, carryForwardLimit: carryForwardLimit as number | null, ...(workedDayAccrual ? { workedDayAccrual } : {}) });
   }
   return { leaveTypes: parsed };
 }

@@ -1,5 +1,7 @@
 import { leavePolicyDraft, resolveConfiguration } from "@/lib/configuration";
 
+import type { LeaveCalendarRules } from "./leave-calendar";
+
 type LeavePolicyRecord = {
   id: string;
   locationId: string | null;
@@ -14,7 +16,7 @@ export type LeavePolicySnapshot = {
   configurationId: string;
   version: number;
   scope: "tenant" | "location";
-  rules: {
+  rules: LeaveCalendarRules & {
     name: string;
     code: string;
     annualEntitlement: number | null;
@@ -39,6 +41,7 @@ export function resolveLeavePolicy(records: LeavePolicyRecord[], locationId: str
     version: record.version,
     scope: record.locationId ? "location" : "tenant",
     rules: {
+      ...rules,
       name: rules.name,
       code: rules.code,
       annualEntitlement: rules.annualEntitlement,

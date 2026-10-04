@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
         maxDays: body.maxDays === null || body.maxDays === "" || body.maxDays === undefined || Number(body.maxDays) === 0 ? null : Number(body.maxDays),
         unlimitedEntitlement: body.unlimitedEntitlement === true,
         isCarryForward: Boolean(body.isCarryForward),
+        encashable: body.encashable === true && body.paid === true && body.unlimitedEntitlement !== true,
         requiresApproval: body.requiresApproval !== false,
         paid: body.paid,
         color: body.color || "#3b82f6",

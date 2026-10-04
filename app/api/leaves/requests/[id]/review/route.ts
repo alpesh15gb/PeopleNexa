@@ -1,3 +1,5 @@
+import { reviewLeaveCancellation } from "@/lib/leave-cancellation";
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
 import { requireActiveSession } from "@/lib/session";
@@ -6,7 +8,6 @@ import { notifyEmployee } from "@/lib/notifications";
 import { formatDate } from "@/lib/dates";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
-import { appendAudit } from "@/lib/audit";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
 import {
   calculateLeaveBalance,
@@ -30,9 +31,10 @@ export async function POST(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 2000))) return NextResponse.json({ error: "Invalid review data. Notes must be text of at most 2,000 characters." }, { status: 400 });
   const decision = String(body.status ?? "");
-  if (!["approved", "rejected"].includes(decision)) {
+  if (!["approved", "rejected", "cancellation_approved", "cancellation_rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision." }, { status: 400 });
   }
 
@@ -80,6 +82,17 @@ export async function POST(
     if (!target)
       return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  if (decision.startsWith("cancellation_")) {
+    try {
+      await prisma.$transaction((tx) => reviewLeaveCancellation(tx, { tenantId: session.tenantId, id, actorId: session.sub, actorRole: session.role, approve: decision === "cancellation_approved", note: String(body.note ?? "").slice(0, 2000) }), { isolationLevel: "Serializable" });
+      await notifyEmployee(session.tenantId, request.employeeId, "info", "Leave cancellation reviewed", decision === "cancellation_approved" ? "Your leave was cancelled and its balance restored. Regenerate any affected draft payroll before review." : "Your cancellation was rejected. The approved leave remains in effect.");
+      return NextResponse.json({ success: true });
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (["PAYROLL_LOCKED", "CLAIM_CONFLICT", "SELF_REVIEW", "P2034"].includes(code ?? "")) return NextResponse.json({ error: code === "P2034" ? "Leave changed concurrently. Refresh and try again." : (error as Error).message }, { status: code === "SELF_REVIEW" ? 403 : 409 });
+      throw error;
+    }
+  }
   if (request.status !== "pending") {
     return NextResponse.json(
       { error: "This request has already been reviewed." },
@@ -92,7 +105,8 @@ export async function POST(
 
   if (decision === "rejected") {
     // Atomic claim: only a pending row can transition to rejected.
-    const claimed = await prisma.leaveRequest.updateMany({
+    const claimed = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.leaveRequest.updateMany({
       where: { id, tenantId: session.tenantId, status: "pending" },
       data: {
         status: "rejected",
@@ -100,6 +114,9 @@ export async function POST(
         reviewedAt,
         reviewNote,
       },
+    });
+      if (claimed.count) await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "leave.review", entity: "LeaveRequest", entityId: id, summary: reviewNote ?? "Leave rejected", before: { status: "pending" }, after: { status: "rejected" } } });
+      return claimed;
     });
     if (claimed.count === 0) {
       return NextResponse.json(
@@ -113,18 +130,6 @@ export async function POST(
     });
     if (!updated)
       return NextResponse.json({ error: "not found" }, { status: 404 });
-
-    await appendAudit({
-      tenantId: session.tenantId,
-      actorId: session.sub,
-      actorRole: session.role,
-      action: "leave.review",
-      entity: "LeaveRequest",
-      entityId: id,
-      summary: `rejected ${updated.days}d ${updated.leaveType.name}`,
-      before: { status: "pending" },
-      after: { status: "rejected" },
-    });
 
     await notifyEmployee(
       session.tenantId,
@@ -158,6 +163,7 @@ export async function POST(
   try {
     await prisma.$transaction(
       async (tx) => {
+        await assertLeavePayrollOpen(tx, session.tenantId, request.employeeId, request.fromDate, request.toDate);
         await refreshEarnedLeaveBalances(tx, session.tenantId, [
           request.employeeId,
         ]);
@@ -260,6 +266,7 @@ export async function POST(
           err.code = "OVER_BALANCE";
           throw err;
         }
+        await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "leave.review", entity: "LeaveRequest", entityId: id, summary: reviewNote ?? "Leave approved", before: { status: "pending" }, after: { status: "approved", days: request.days } } });
       },
       { isolationLevel: "Serializable" },
     );
@@ -273,7 +280,7 @@ export async function POST(
         },
         { status: 409 },
       );
-    if (code === "CLAIM_CONFLICT") {
+    if (code === "PAYROLL_LOCKED" || code === "CLAIM_CONFLICT") {
       return NextResponse.json(
         { error: (e as Error).message },
         { status: 409 },
@@ -294,18 +301,6 @@ export async function POST(
   });
   if (!updated)
     return NextResponse.json({ error: "not found" }, { status: 404 });
-
-  await appendAudit({
-    tenantId: session.tenantId,
-    actorId: session.sub,
-    actorRole: session.role,
-    action: "leave.review",
-    entity: "LeaveRequest",
-    entityId: id,
-    summary: `approved ${updated.days}d ${updated.leaveType.name}`,
-    before: { status: "pending" },
-    after: { status: "approved" },
-  });
 
   await notifyEmployee(
     session.tenantId,

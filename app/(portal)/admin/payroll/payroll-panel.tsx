@@ -115,7 +115,7 @@ export function PayrollPanel({
   const [search, setSearch] = useState("");
   const [onlyIssues, setOnlyIssues] = useState(false);
   const [confirmation, setConfirmation] = useState<
-    "paid" | "cancelled" | "finalized" | null
+    "paid" | "cancelled" | "finalized" | "draft" | null
   >(null);
   const router = useRouter();
   const toast = useToast();
@@ -127,6 +127,7 @@ export function PayrollPanel({
   >("all_eligible");
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [sourceIssues, setSourceIssues] = useState<string[]>([]);
   const [generationIssues, setGenerationIssues] = useState<PayrollGenerationResult[]>([]);
   const [recovery, setRecovery] = useState<
     "mess_backdate" | "attendance_reprocess" | null
@@ -138,6 +139,7 @@ export function PayrollPanel({
     setSelectedEmployeeIds([]);
     setSelectionMode("all_eligible");
     setPickerOpen(false);
+    setSourceIssues([]);
     setGenerationIssues([]);
     setDetails(null);
     setConfirmation(null);
@@ -251,11 +253,11 @@ export function PayrollPanel({
         body: JSON.stringify({ status, locationId, ...evidence }),
       });
       const data = await response.json();
-      if (!response.ok)
-        return toast(
-          "error",
-          data.error ?? "Could not update monthly payroll.",
-        );
+      if (!response.ok) {
+        setSourceIssues(Array.isArray(data.preflight) ? data.preflight : [data.error ?? "Could not update monthly payroll."]);
+        return toast("error", "Payroll needs attention. Review the issues shown on this page.");
+      }
+      setSourceIssues([]);
       setConfirmation(null);
       toast("success", "Monthly payroll updated.");
       router.refresh();
@@ -500,6 +502,7 @@ export function PayrollPanel({
             {payroll?.status ?? "Not started"}
           </Badge>
         </section>
+        {sourceIssues.length > 0 && <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5"><h2 className="font-semibold">Resolve before continuing</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul><p className="mt-3 text-sm text-muted-foreground">For reviewed or approved runs, use Advanced tools to return to draft. Correct the inputs and regenerate affected payslips.</p></section>}
         {generationIssues.length > 0 && (
           <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
             <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>
@@ -1042,6 +1045,9 @@ export function PayrollPanel({
                   Add employees to draft payroll
                 </Button>
               )}
+              {payroll && ["reviewed", "approved"].includes(payroll.status) && (
+                <Button variant="outline" disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>
+              )}
               {payroll &&
                 ["draft", "reviewed", "approved"].includes(payroll.status) && (
                   <Button
@@ -1066,7 +1072,7 @@ export function PayrollPanel({
             ? "Record salary payment"
             : confirmation === "finalized"
               ? "Finalize payroll?"
-              : "Cancel this payroll?"
+              : confirmation === "draft" ? "Return payroll to draft?" : "Cancel this payroll?"
         }
         size="sm"
       >
@@ -1087,7 +1093,7 @@ export function PayrollPanel({
                     confirmedCount: generated,
                     confirmedNet: totals.net,
                   }
-                : confirmation === "cancelled"
+                : ["cancelled", "draft"].includes(confirmation ?? "")
                   ? { reason: form.get("reason") }
                   : {},
             );
@@ -1132,9 +1138,10 @@ export function PayrollPanel({
                 {formatMoney(totals.net)}.
               </label>
             </>
-          ) : confirmation === "cancelled" ? (
-            <Field label="Reason for cancellation">
-              <Textarea name="reason" required minLength={3} />
+          ) : confirmation === "cancelled" || confirmation === "draft" ? (
+            <Field label={confirmation === "draft" ? "Reason for returning to draft" : "Reason for cancellation"}>
+              {confirmation === "draft" && <p className="mb-2 text-sm text-muted-foreground">Returning to draft clears review and approval. Correct the inputs, regenerate affected payslips and send the run through review again.</p>}
+              <Textarea name="reason" required minLength={3} maxLength={500} />
             </Field>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -1160,7 +1167,7 @@ export function PayrollPanel({
                 ? "Confirm payment"
                 : confirmation === "finalized"
                   ? "Finalize payroll"
-                  : "Cancel payroll"}
+                  : confirmation === "draft" ? "Return to draft" : "Cancel payroll"}
             </Button>
           </div>
         </form>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { encashableLeaveAt } from "@/lib/leave-encashment";
 import { computeFandF } from "@/lib/exit";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { formatDateIST, startOfDay } from "@/lib/dates";
@@ -66,34 +67,26 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         ? Math.floor(rawNoticeDays)
         : 30;
 
-    // Encashable leave balance: remaining days of leave types flagged encashable.
-    const [leaveTypes, leaveRequests] = await Promise.all([
-      prisma.leaveType.findMany({ where: { tenantId: session.tenantId, encashable: true } }),
-      prisma.leaveRequest.findMany({
-        where: { tenantId: session.tenantId, employeeId: request.employee.id, status: "approved" },
-        select: { leaveTypeId: true, days: true },
-      }),
-    ]);
-    const usedByType = new Map<string, number>();
-    for (const r of leaveRequests) usedByType.set(r.leaveTypeId, (usedByType.get(r.leaveTypeId) ?? 0) + r.days);
-    const encashableDays = leaveTypes.reduce(
-      (sum, t) => sum + (t.maxDays === null ? 0 : Math.max(t.maxDays - (usedByType.get(t.id) ?? 0), 0)),
-      0
-    );
+    const { claimed, fAndF } = await prisma.$transaction(async (tx) => {
+      const encashment = await encashableLeaveAt(tx, session.tenantId, request.employee.id, request.lastWorkingDay);
 
-    const fAndF = computeFandF({
-      grossMonthly,
-      resignationDate: request.resignationDate,
-      lastWorkingDay: request.lastWorkingDay,
-      noticeDays,
-      loanOutstanding: loans._sum.outstanding ?? 0,
-      encashmentDays: encashableDays,
-    });
+      const fAndF = computeFandF({
+        grossMonthly,
+        resignationDate: request.resignationDate,
+        lastWorkingDay: request.lastWorkingDay,
+        noticeDays,
+        loanOutstanding: loans._sum.outstanding ?? 0,
+        encashmentDays: encashment.days,
+      });
 
-    const claimed = await prisma.exitRequest.updateMany({
-      where: { id, tenantId: session.tenantId, status: "pending" },
-      data: { status: "approved", note, reviewedBy: session.sub, reviewedAt: new Date(), fAndF: JSON.parse(JSON.stringify(fAndF)) },
-    });
+      const settlementSnapshot = { ...fAndF, encashmentLedger: encashment.ledger, encashmentAsOf: request.lastWorkingDay.toISOString() };
+      const claimed = await tx.exitRequest.updateMany({
+        where: { id, tenantId: session.tenantId, status: "pending" },
+        data: { status: "approved", note, reviewedBy: session.sub, reviewedAt: new Date(), fAndF: JSON.parse(JSON.stringify(settlementSnapshot)) },
+      });
+      if (claimed.count) await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "exit.approve", entity: "ExitRequest", entityId: id, summary: "Approved exit with period-scoped leave encashment", before: { status: "pending" }, after: JSON.parse(JSON.stringify(settlementSnapshot)) } });
+      return { claimed, fAndF };
+    }, { isolationLevel: "Serializable" });
     if (claimed.count === 0) {
       const latest = await prisma.exitRequest.findFirst({
         where: { id, tenantId: session.tenantId },
@@ -105,18 +98,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const updated = await prisma.exitRequest.findFirstOrThrow({
       where: { id, tenantId: session.tenantId },
       include: { employee: { select: { firstName: true, lastName: true } } },
-    });
-
-    await appendAudit({
-      tenantId: session.tenantId,
-      actorId: session.sub,
-      actorRole: session.role,
-      action: "exit.approve",
-      entity: "ExitRequest",
-      entityId: id,
-      summary: `${request.employee.firstName} ${request.employee.lastName} exit approved`,
-      before: { status: "pending" },
-      after: { status: "approved" },
     });
 
     await notifyEmployee(

@@ -19,6 +19,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       name: body.name ?? type.name,
       maxDays: body.maxDays === undefined ? type.maxDays : body.maxDays === null || body.maxDays === "" || Number(body.maxDays) === 0 ? null : Number(body.maxDays),
       unlimitedEntitlement: body.unlimitedEntitlement === undefined ? type.unlimitedEntitlement : body.unlimitedEntitlement === true,
+      encashable: body.encashable === undefined ? type.encashable : body.encashable === true && (body.paid ?? type.paid) === true && (body.unlimitedEntitlement ?? type.unlimitedEntitlement) !== true,
       isCarryForward: body.isCarryForward != null ? Boolean(body.isCarryForward) : type.isCarryForward,
       requiresApproval: body.requiresApproval != null ? Boolean(body.requiresApproval) : type.requiresApproval,
       paid: typeof body.paid === "boolean" ? body.paid : type.paid,

@@ -917,6 +917,9 @@ model LeaveRequest {
   // Null for requests created before policy activation. New policy-governed
   // requests retain the selected version and applicable rules permanently.
   leavePolicySnapshot Json?
+  cancellationRequestedBy String?
+  cancellationRequestedAt DateTime?
+  cancellationReason      String?
 }
 
 // Explicit opt-in balance period. Policy drafts and activation never create one.

@@ -1,3 +1,4 @@
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -118,6 +119,8 @@ export async function POST(req: NextRequest) {
   const status = String(body.status ?? "").trim();
   const note = body.note ? String(body.note).trim() : null;
 
+  if (employeeId === session.sub) return NextResponse.json({ error: "Use an attendance correction request for your own attendance; an independent reviewer must approve it." }, { status: 403 });
+  if (!note || note.length > 2000) return NextResponse.json({ error: "A reason of at most 2,000 characters is required for manual attendance." }, { status: 400 });
   if (!employeeId) return NextResponse.json({ error: "employeeId is required." }, { status: 400 });
   if (!MANUAL_STATUSES.includes(status)) {
     return NextResponse.json({ error: "Invalid status." }, { status: 400 });
@@ -176,7 +179,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const record = await prisma.attendance.create({
+    const record = await prisma.$transaction(async (tx) => {
+      await assertLeavePayrollOpen(tx, session.tenantId, employeeId, dayStart!, dayStart!);
+      const record = await tx.attendance.create({
       data: {
         tenantId: session.tenantId,
         employeeId,
@@ -189,8 +194,12 @@ export async function POST(req: NextRequest) {
         reviewStatus: "manual_override",
       },
     });
+      await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "attendance.create_manual", entity: "Attendance", entityId: record.id, summary: note, after: { employeeId, date: dayStart!.toISOString(), status, source: "manual_override" } } });
+      return record;
+    }, { isolationLevel: "Serializable" });
     return NextResponse.json({ record }, { status: 201 });
   } catch (e) {
+    if ((e as { code?: string })?.code === "PAYROLL_LOCKED" || (e as { code?: string })?.code === "P2034") return NextResponse.json({ error: (e as Error).message }, { status: 409 });
     if ((e as { code?: string })?.code === "P2002") {
       return NextResponse.json({ error: "An attendance record already exists for this day." }, { status: 409 });
     }

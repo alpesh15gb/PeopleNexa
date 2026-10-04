@@ -3,8 +3,8 @@ export type PayrollRunStatus = (typeof PAYROLL_RUN_STATUSES)[number];
 
 const transitions: Record<PayrollRunStatus, PayrollRunStatus[]> = {
   draft: ["reviewed", "cancelled"],
-  reviewed: ["approved", "cancelled"],
-  approved: ["finalized", "cancelled"],
+  reviewed: ["draft", "approved", "cancelled"],
+  approved: ["draft", "finalized", "cancelled"],
   finalized: ["paid"],
   paid: ["reversed"],
   cancelled: [],
@@ -17,6 +17,7 @@ export function canTransitionPayrollRun(from: string, to: string): boolean {
 
 export function payrollRunTransitionData(status: PayrollRunStatus, actorId: string) {
   const at = new Date();
+  if (status === "draft") return { status, reviewedBy: null, reviewedAt: null, approvedBy: null, approvedAt: null };
   if (status === "reviewed") return { status, reviewedBy: actorId, reviewedAt: at };
   if (status === "approved") return { status, approvedBy: actorId, approvedAt: at };
   if (status === "finalized") return { status, finalizedBy: actorId, finalizedAt: at };

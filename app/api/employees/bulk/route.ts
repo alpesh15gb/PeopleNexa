@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
 import { optionalEmployeeEmail, optionalEmployeePosition } from "@/lib/employee-input";
 import { ensureDesignations, normalizeDesignationName } from "@/lib/designation";
+import { employeeImportStatus, assertEmployeeImportStatusChange } from "@/lib/employee-import-status";
+import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_ROWS = 2500;
@@ -180,6 +182,8 @@ export async function POST(req: NextRequest) {
   ]);
   const seats = tenant?.seats ?? 0;
   let created = 0;
+  const inactiveEmployeeIds = new Set<string>();
+  const warnings: string[] = [];
   let updated = 0;
   const failed: { email: string; error: string }[] = [];
   const createdEmployees: Array<{ id: string; employeeNumber: string; name: string }> = [];
@@ -295,8 +299,8 @@ export async function POST(req: NextRequest) {
       if (!PAY_MODES.has(payMode)) {
         throw new Error("Pay mode must be one of monthly, daily, weekly, hourly, work_basis.");
       }
-      const status = raw?.status ? String(raw.status).trim().toLowerCase() : "active";
-      if (status !== "active" && status !== "inactive") throw new Error("Status must be active or inactive.");
+      const selectedStatus = employeeImportStatus(raw?.status);
+      const status = selectedStatus ?? "active";
       const employeeNumber = employeeNumberInput || deviceCodeInput || `EMP-${String(count + i + 1).padStart(3, "0")}`;
       if (!employeeNumber || employeeNumber.length > 100) throw new Error("Employee number must be 1–100 characters.");
       const deviceCode = deviceCodeInput || null;
@@ -305,6 +309,8 @@ export async function POST(req: NextRequest) {
       const outcome = await prisma.$transaction(async (tx) => {
         await ensureDesignations(tx, session.tenantId, position ? [position] : []);
         if (existingForRow) {
+          const current = await tx.employee.findUniqueOrThrow({ where: { id: existingForRow.id } });
+          assertEmployeeImportStatusChange(session, current, selectedStatus);
           const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
             ? existingForRow.salaryStructure as Record<string, unknown>
             : {};
@@ -321,11 +327,14 @@ export async function POST(req: NextRequest) {
               ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
               ...(joiningDate ? { joiningDate } : {}),
               ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
-              ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(raw?.status ? { status } : {}),
+              ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(selectedStatus ? { status } : {}),
               ...(bankName ? { bankName } : {}), ...(bulkPan ? { pan: bulkPan } : {}), ...(bulkUan ? { uan: bulkUan } : {}), ...(bulkIfsc ? { ifscCode: bulkIfsc } : {}), ...(bulkAccount ? { accountNumber: bulkAccount } : {}),
               ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
             },
           });
+          if (selectedStatus && selectedStatus !== current.status) {
+            await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: `employee.status.${status}`, entity: "Employee", entityId: current.id, summary: "Employee status changed through CSV import", before: { status: current.status }, after: { status, source: "employee_upload" } } });
+          }
           return { action: "updated" as const, id: existingForRow.id, employeeNumber: employeeNumberInput || existingForRow.employeeNumber, name: `${firstName || existingForRow.firstName} ${bulkLastName || existingForRow.lastName}`.trim() };
         }
         if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
@@ -362,6 +371,7 @@ export async function POST(req: NextRequest) {
       });
       if (outcome.action === "created") { created++; createdEmployees.push(outcome); }
       else { updated++; updatedEmployees.push(outcome); }
+      if (selectedStatus === "inactive") inactiveEmployeeIds.add(outcome.id);
     } catch (err: unknown) {
       if (
         typeof err === "object" &&
@@ -386,6 +396,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  for (const employeeId of inactiveEmployeeIds) {
+    try {
+      const results = await enforceEbioEmployeeAccess(session.tenantId, employeeId, false);
+      if (results.some((result) => result.status === "failed")) warnings.push(`Employee ${employeeId} is inactive, but some device access blocks failed. Retry from Employee Master.`);
+    } catch {
+      warnings.push(`Employee ${employeeId} is inactive, but device access could not be blocked. Retry from Employee Master.`);
+    }
+  }
   await appendAudit({
     tenantId: session.tenantId,
     actorId: session.sub,
@@ -394,7 +412,7 @@ export async function POST(req: NextRequest) {
     entity: "Employee",
     entityId: `bulk:${new Date().toISOString()}`,
     summary: `Bulk employee import: ${created} created, ${updated} updated, ${failed.length} failed`,
-    after: { createdEmployees, updatedEmployees, failed },
+    after: { createdEmployees, updatedEmployees, failed, warnings },
   });
-  return NextResponse.json({ created, updated, failed, createdEmployees, updatedEmployees });
+  return NextResponse.json({ created, updated, failed, createdEmployees, updatedEmployees, warnings });
 }

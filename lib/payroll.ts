@@ -1,3 +1,4 @@
+import { snapshottedLeaveFraction } from "./leave-calendar";
 import { payrollLeaveDay } from "./payroll-leave-day";
 import { prisma } from "./prisma";
 import type { Prisma } from "../generated/prisma/client";
@@ -297,16 +298,16 @@ export async function attendanceSummary(
     const key = istDayStartKey(d);
     if (employee.joiningDate && key < istDayStartKey(employee.joiningDate))
       continue;
-    if (holidaySet.has(key) || recurringHolidaySet.has(key.slice(5))) {
-      accumulateHours(key, recordByDay.get(key));
-      continue;
-    }
-
     const leave = leaves.find(
       (l) =>
         istStartOfDay(l.fromDate).getTime() <= d.getTime() &&
         istStartOfDay(l.toDate).getTime() >= d.getTime(),
     );
+    const fraction = leave ? snapshottedLeaveFraction(leave.leavePolicySnapshot, key) : undefined;
+    if (fraction === 0 || (fraction === undefined && (holidaySet.has(key) || recurringHolidaySet.has(key.slice(5))))) {
+      accumulateHours(key, recordByDay.get(key));
+      continue;
+    }
     if (leave) {
       const snapshotPaid = (
         leave.leavePolicySnapshot as { rules?: { paid?: unknown } } | null
@@ -318,6 +319,8 @@ export async function attendanceSummary(
         istDayStartKey(leave.fromDate) === istDayStartKey(leave.toDate),
         paid !== false,
         recordByDay.get(key)?.status,
+        fraction,
+        (leave.leavePolicySnapshot as { calendar?: { nonWorkingFractions?: Record<string, number> } } | null)?.calendar?.nonWorkingFractions?.[key] ?? 0,
       );
       for (const field of [
         "onLeaveDays",
@@ -1584,6 +1587,7 @@ export async function generatePayslipForEmployee(
                 lastName: employee.lastName,
                 position: employee.position ?? null,
                 joiningDate: employee.joiningDate ?? null,
+                shiftId: employee.shiftId,
                 branchId: employee.branchId,
                 branchName: employee.branchName ?? null,
                 locationId: employee.locationId,

@@ -51,7 +51,7 @@ export function computeFandF(input: {
   const noticeShortfallDays = Math.max(0, input.noticeDays - noticeDaysGiven);
   const noticeDeduction = round2(perDay * noticeShortfallDays);
 
-  const encashmentDays = Math.max(0, Math.floor(input.encashmentDays ?? 0));
+  const encashmentDays = Math.max(0, round2(input.encashmentDays ?? 0));
   const encashmentAmount = round2(perDay * encashmentDays);
 
   const finalAmount = Math.max(0, round2(earnedSalary + encashmentAmount - noticeDeduction - input.loanOutstanding));

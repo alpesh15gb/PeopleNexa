@@ -42,6 +42,8 @@ export async function POST(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (session?.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const confirm = request.nextUrl.searchParams.get("confirm") === "true";
+  const newEmployeeStatus = request.nextUrl.searchParams.get("newEmployeeStatus") ?? "active";
+  if (newEmployeeStatus !== "active" && newEmployeeStatus !== "inactive") return NextResponse.json({ error: "New employee status must be active or inactive." }, { status: 400 });
   const effectiveMonth = request.nextUrl.searchParams.get("effectiveMonth") ?? "";
   let effectiveFrom: Date;
   try { effectiveFrom = effectiveMonth ? payrollMonthAnchor(effectiveMonth) : new Date(); effectiveFrom.setUTCHours(12, 0, 0, 0); }
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest) {
         const current = byCode.get(employeeCodeKey(row.employeeCode));
         const name = splitName(row.name);
         const data = { firstName: name.firstName, lastName: name.lastName, position: normalizeDesignationName(row.designation), joiningDate: row.joiningDate ? new Date(`${row.joiningDate}T12:00:00.000Z`) : current?.joiningDate ?? null, salary: row.grossSalary, branchId: branch.id, departmentId };
-        const employee = current ? await tx.employee.update({ where: { id: current.id }, data }) : await tx.employee.create({ data: { tenantId: session.tenantId, employeeNumber: row.employeeCode, deviceCode: row.employeeCode, ...data, email: null, password: null, role: "employee", status: "active", payMode: "monthly" } });
+        const employee = current ? await tx.employee.update({ where: { id: current.id }, data }) : await tx.employee.create({ data: { tenantId: session.tenantId, employeeNumber: row.employeeCode, deviceCode: row.employeeCode, ...data, email: null, password: null, role: "employee", status: newEmployeeStatus, payMode: "monthly" } });
         (current ? updated : created).push(row.employeeCode);
         if (!row.messPlan) continue;
         const componentCode = messComponents.get(row.messPlan);

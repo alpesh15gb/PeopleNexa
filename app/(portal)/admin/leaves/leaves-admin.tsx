@@ -28,6 +28,8 @@ import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
 
 interface Request {
+  cancellationRequestedBy?: string | null;
+  cancellationReason?: string | null;
   id: string;
   days: number;
   reason: string | null;
@@ -48,6 +50,7 @@ interface Type {
   unlimitedEntitlement: boolean;
   color: string;
   isCarryForward: boolean;
+  encashable?: boolean;
   requiresApproval: boolean;
   paid: boolean | null;
 }
@@ -203,7 +206,7 @@ export function LeavesAdmin({
       }
       toast(
         "success",
-        status === "approved" ? "Leave approved" : "Leave rejected",
+        status === "cancellation_approved" ? "Cancellation approved; regenerate affected draft payroll" : status === "cancellation_rejected" ? "Cancellation rejected; leave remains approved" : status === "approved" ? "Leave approved" : "Leave rejected",
       );
       router.refresh();
     } finally {
@@ -224,9 +227,9 @@ export function LeavesAdmin({
       maxDays: form.get("maxDays"),
       unlimitedEntitlement: form.get("unlimitedEntitlement") === "on",
       isCarryForward: form.get("isCarryForward") === "on",
+      encashable: form.get("encashable") === "on",
       requiresApproval:
-        form.get("requiresApproval") === "on" ||
-        form.get("requiresApproval") === null,
+        form.get("requiresApproval") === "on",
       ...(paid === "paid"
         ? { paid: true }
         : paid === "unpaid"
@@ -275,13 +278,13 @@ export function LeavesAdmin({
     }
   }
 
-  const pending = requests.filter((r) => r.status === "pending").length;
+  const pending = requests.filter((r) => r.status === "pending" || r.cancellationRequestedBy).length;
   const statusFilter = searchParams.get("status") ?? "all";
   const filteredRequests = requests
     .filter((request) => {
       const query = requestSearch.trim().toLowerCase();
       return (
-        (statusFilter === "all" || request.status === statusFilter) &&
+        (statusFilter === "all" || (statusFilter === "cancellation_pending" ? Boolean(request.cancellationRequestedBy) : statusFilter === "pending" ? request.status === "pending" || Boolean(request.cancellationRequestedBy) : request.status === statusFilter)) &&
         (!query ||
           `${request.employee.firstName} ${request.employee.lastName} ${request.employee.employeeNumber} ${request.leaveType.name}`
             .toLowerCase()
@@ -289,7 +292,7 @@ export function LeavesAdmin({
       );
     })
     .sort(
-      (a, b) => Number(b.status === "pending") - Number(a.status === "pending"),
+      (a, b) => Number(b.status === "pending" || Boolean(b.cancellationRequestedBy)) - Number(a.status === "pending" || Boolean(a.cancellationRequestedBy)),
     );
   const todayKey = istDateKey(new Date());
   const awayToday = new Set(
@@ -486,7 +489,8 @@ export function LeavesAdmin({
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
-            <option value="cancelled">Withdrawn</option>
+            <option value="cancellation_pending">Cancellation awaiting review</option>
+            <option value="cancelled">Cancelled / withdrawn</option>
           </Select>
           <span aria-live="polite" className="text-xs text-muted-foreground">
             {filteredRequests.length} requests
@@ -530,33 +534,34 @@ export function LeavesAdmin({
                   <p className="mt-1 text-xs text-muted-foreground">
                     {formatDate(r.fromDate)} → {formatDate(r.toDate)}
                   </p>
+                  {r.cancellationRequestedBy && <p className="mt-2 text-sm text-amber-500">Cancellation requested: {r.cancellationReason}</p>}
                   {r.reason && (
                     <p className="mt-2 text-xs text-muted-foreground">
                       {r.reason}
                     </p>
                   )}
                 </div>
-                {r.status === "pending" && (
+                {(r.status === "pending" || r.cancellationRequestedBy) && (
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       size="sm"
                       variant="success"
                       loading={busy === r.id}
                       aria-label={`Approve leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                      onClick={() => review(r.id, "approved")}
+                      onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_approved" : "approved")}
                     >
                       <Check aria-hidden="true" className="h-3.5 w-3.5" />
-                      Approve
+                      {r.cancellationRequestedBy ? "Approve cancellation" : "Approve"}
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={busy === r.id}
                       aria-label={`Reject leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                      onClick={() => review(r.id, "rejected")}
+                      onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_rejected" : "rejected")}
                     >
                       <X aria-hidden="true" className="h-3.5 w-3.5" />
-                      Reject
+                      {r.cancellationRequestedBy ? "Keep leave" : "Reject"}
                     </Button>
                   </div>
                 )}
@@ -650,30 +655,30 @@ export function LeavesAdmin({
                         <StatusPill status={r.status} />
                       </TD>
                       <TD>
-                        {r.status === "pending" ? (
+                        {(r.status === "pending" || r.cancellationRequestedBy) ? (
                           <div className="flex items-center gap-1.5">
                             <Button
                               size="sm"
                               variant="success"
                               aria-label={`Approve leave for ${r.employee.firstName} ${r.employee.lastName}`}
                               loading={busy === r.id}
-                              onClick={() => review(r.id, "approved")}
+                              onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_approved" : "approved")}
                             >
                               <Check
                                 aria-hidden="true"
                                 className="h-3.5 w-3.5"
                               />
-                              <span className="hidden sm:inline">Approve</span>
+                              <span>{r.cancellationRequestedBy ? "Approve cancellation" : "Approve"}</span>
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
                               aria-label={`Reject leave for ${r.employee.firstName} ${r.employee.lastName}`}
                               disabled={busy === r.id}
-                              onClick={() => review(r.id, "rejected")}
+                              onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_rejected" : "rejected")}
                             >
                               <X aria-hidden="true" className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">Reject</span>
+                              <span>{r.cancellationRequestedBy ? "Keep leave" : "Reject"}</span>
                             </Button>
                           </div>
                         ) : (
@@ -1287,6 +1292,8 @@ export function LeavesAdmin({
             />
             Requires admin approval
           </label>
+          <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="encashable" defaultChecked={typeModal !== null && typeof typeModal === "object" ? typeModal.encashable ?? false : false} />Eligible for exit leave encashment</label>
+          <p className="text-xs text-muted-foreground">Enable only for paid leave with a confirmed encashment policy. Exit review records the current eligible balance; unlimited leave is not encashed.</p>
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"

@@ -1,9 +1,9 @@
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { parseIST } from "@/lib/ist";
 import { reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
-import { appendAudit } from "@/lib/audit";
 
 async function loadOwned(id: string, tenantId: string) {
   return prisma.attendance.findFirst({ where: { id, tenantId } });
@@ -18,6 +18,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   const attendance = await loadOwned(id, session.tenantId);
   if (!attendance) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+  if (attendance.employeeId === session.sub) return NextResponse.json({ error: "Use an independently reviewed correction for your own punches." }, { status: 403 });
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -74,7 +75,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "Time is outside this day's window." }, { status: 400 });
   }
 
-  const createdPunch = await prisma.punch.create({
+  let createdPunch;
+  try {
+    createdPunch = await prisma.$transaction(async (tx) => {
+      await assertLeavePayrollOpen(tx, session.tenantId, attendance.employeeId, attendance.date, attendance.date);
+      const created = await tx.punch.create({
     data: {
       tenantId: session.tenantId,
       employeeId: attendance.employeeId,
@@ -83,16 +88,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       inOutHint: "unknown",
     },
   });
-  await appendAudit({
-    tenantId: session.tenantId,
-    actorId: session.sub,
-    actorRole: session.role,
-    action: "punch.add",
-    entity: "Punch",
-    entityId: createdPunch.id,
-    summary: `Added punch ${punchTime.toISOString()} for ${attendance.employeeId}`,
-    after: { punchTime: punchTime.toISOString(), employeeId: attendance.employeeId },
-  });
+      await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "punch.add", entity: "Punch", entityId: created.id, summary: "Manually added punch", after: { punchTime: punchTime.toISOString(), employeeId: attendance.employeeId } } });
+      return created;
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (["PAYROLL_LOCKED", "P2034"].includes((error as { code?: string }).code ?? "")) return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    throw error;
+  }
   if (attendance.finalized) {
     await prisma.attendance.update({
       where: { id: attendance.id },
@@ -119,6 +121,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const { id } = await ctx.params;
   const attendance = await loadOwned(id, session.tenantId);
   if (!attendance) return NextResponse.json({ error: "Attendance not found" }, { status: 404 });
+  if (attendance.employeeId === session.sub) return NextResponse.json({ error: "Use an independently reviewed correction for your own punches." }, { status: 403 });
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -170,17 +173,16 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
     return NextResponse.json({ error: "Punch does not belong to this day." }, { status: 404 });
   }
 
-  await prisma.punch.delete({ where: { id: punchId } });
-  await appendAudit({
-    tenantId: session.tenantId,
-    actorId: session.sub,
-    actorRole: session.role,
-    action: "punch.delete",
-    entity: "Attendance",
-    entityId: attendance.id,
-    summary: `Deleted punch ${punch.punchTime.toISOString()} for ${attendance.employeeId}`,
-    before: { punchId, punchTime: punch.punchTime.toISOString(), employeeId: attendance.employeeId },
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await assertLeavePayrollOpen(tx, session.tenantId, attendance.employeeId, attendance.date, attendance.date);
+      await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "punch.delete", entity: "Attendance", entityId: attendance.id, summary: "Removed punch from attendance ledger", before: { punchId, punchTime: punch.punchTime.toISOString(), employeeId: attendance.employeeId, source: punch.source } } });
+      await tx.punch.delete({ where: { id: punchId } });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (["PAYROLL_LOCKED", "P2034"].includes((error as { code?: string }).code ?? "")) return NextResponse.json({ error: (error as Error).message }, { status: 409 });
+    throw error;
+  }
   if (attendance.finalized) {
     await prisma.attendance.update({
       where: { id: attendance.id },

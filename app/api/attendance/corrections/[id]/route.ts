@@ -1,3 +1,4 @@
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -24,6 +25,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     where: { id, tenantId: session.tenantId },
   });
   if (!correction) return NextResponse.json({ error: "Correction not found" }, { status: 404 });
+  if (correction.employeeId === session.sub) return NextResponse.json({ error: "An independent reviewer must review your attendance correction." }, { status: 403 });
   if (session.role === "branch_manager") {
     const manager = await prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -163,6 +165,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const reviewedAt = new Date();
   try {
     await prisma.$transaction(async (tx) => {
+      await assertLeavePayrollOpen(tx, session.tenantId, correction.employeeId, correction.date, correction.date);
       const claimed = await tx.punchCorrection.updateMany({
         where: { id, tenantId: session.tenantId, status: "pending" },
         data: { status: "approved", reviewNote, reviewedBy: session.sub, reviewedAt },
@@ -273,10 +276,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       err.code = "INVALID_SPAN";
       throw err;
     }
-    });
+    }, { isolationLevel: "Serializable" });
   } catch (e) {
     const code = (e as { code?: string })?.code;
     const message = e instanceof Error ? e.message : "";
+    if (code === "PAYROLL_LOCKED" || code === "P2034") return NextResponse.json({ error: code === "P2034" ? "Payroll or attendance changed. Refresh and try again." : (e as Error).message }, { status: 409 });
     if (code === "CLAIM_CONFLICT" || message === "CLAIM_CONFLICT") {
       return NextResponse.json({ error: "This correction was already reviewed." }, { status: 409 });
     }

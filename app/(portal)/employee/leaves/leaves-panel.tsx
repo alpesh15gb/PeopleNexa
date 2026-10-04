@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,8 @@ interface BalanceItem {
 }
 
 interface Req {
+  cancellationRequestedBy?: string | null;
+  cancellationReason?: string | null;
   id: string;
   days: number;
   reason: string | null;
@@ -56,6 +58,11 @@ export function LeavesPanel({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [estimate, setEstimate] = useState<{ days: number; requiresReason: boolean } | null>(null);
+  const [estimateError, setEstimateError] = useState("");
+  const [estimating, setEstimating] = useState(false);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTypeId, setSelectedTypeId] = useState(balance[0]?.id ?? "");
@@ -67,15 +74,20 @@ export function LeavesPanel({
     (request) => requestFilter === "all" || request.status === requestFilter,
   );
   const selectedBalance = balance.find((item) => item.id === selectedTypeId);
-  const requestedDays = halfDay
-    ? 0.5
-    : fromDate && toDate && toDate >= fromDate
-      ? Math.round(
-          (new Date(`${toDate}T12:00:00`).getTime() -
-            new Date(`${fromDate}T12:00:00`).getTime()) /
-            86400000,
-        ) + 1
-      : 0;
+  useEffect(() => {
+    setEstimate(null); setEstimateError("");
+    if (!open || !fromDate || !toDate || !selectedTypeId || toDate < fromDate) { setEstimating(false); return; }
+    const controller = new AbortController();
+    setEstimating(true);
+    const query = new URLSearchParams({ from: fromDate, to: toDate, type: selectedTypeId, halfDay: String(halfDay) });
+    fetch(`/api/leaves/preview?${query}`, { signal: controller.signal }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not estimate leave days.");
+      if (!controller.signal.aborted) setEstimate(data);
+    }).catch((error) => { if (!controller.signal.aborted) setEstimateError(error instanceof Error ? error.message : "Could not estimate leave days."); }).finally(() => { if (!controller.signal.aborted) setEstimating(false); });
+    return () => controller.abort();
+  }, [open, fromDate, toDate, selectedTypeId, halfDay]);
+  const requestedDays = estimate?.days ?? 0;
   const dateError =
     Boolean(fromDate && toDate && toDate < fromDate) ||
     Boolean(halfDay && fromDate && toDate && fromDate !== toDate);
@@ -119,18 +131,21 @@ export function LeavesPanel({
     }
   }
 
-  async function withdraw(id: string) {
+  async function withdraw(id: string, reason?: string) {
     setLoading(true);
     try {
       const response = await fetch(`/api/leaves/requests/${id}/cancel`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
       });
       const data = await response.json();
       if (!response.ok) {
         toast("error", data.error ?? "Could not withdraw leave request.");
         return;
       }
-      toast("success", "Leave request withdrawn.");
+      toast("success", data.status === "cancellation_pending" ? "Cancellation sent for independent approval. Your leave remains approved until review." : "Leave request withdrawn.");
+      setCancelId(null); setCancelReason("");
       router.refresh();
     } finally {
       setLoading(false);
@@ -280,6 +295,8 @@ export function LeavesPanel({
                     </p>
                   </div>
                   <StatusPill status={r.status} lang={lang} />
+                  {r.cancellationRequestedBy && <span className="text-xs text-amber-500">Cancellation awaiting review</span>}
+                  {r.status === "approved" && !r.cancellationRequestedBy && <Button size="sm" variant="outline" disabled={loading} onClick={() => { setCancelId(r.id); setCancelReason(""); }}>Request cancellation</Button>}
                   {r.status === "pending" && (
                     <Button
                       size="sm"
@@ -297,12 +314,20 @@ export function LeavesPanel({
         </CardContent>
       </Card>
 
+      <Modal open={cancelId !== null} onClose={() => setCancelId(null)} title="Request leave cancellation">
+        <div className="space-y-4"><p className="text-sm text-muted-foreground">Approved leave remains in effect until an independent reviewer approves this cancellation. Closed payroll must be handled separately.</p>
+          <Field label="Cancellation reason"><Textarea value={cancelReason} maxLength={2000} onChange={(event) => setCancelReason(event.target.value)} /></Field>
+          <Button loading={loading} disabled={!cancelReason.trim()} onClick={() => cancelId && withdraw(cancelId, cancelReason)}>Send for review</Button>
+        </div>
+      </Modal>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title={t(lang, "leaves.apply")}
         size="sm"
       >
+        {estimateError && <p role="alert" className="mb-3 text-sm text-rose-500">{estimateError}</p>}
+        {estimating && <p className="mb-3 text-sm text-muted-foreground">Calculating days from your leave policy…</p>}
         <form onSubmit={onSubmit} className="space-y-4">
           <Field label={t(lang, "leaves.leaveType")}>
             <Select
@@ -378,6 +403,8 @@ export function LeavesPanel({
             )}
           <Field label={t(lang, "leaves.reason")}>
             <Textarea
+              required={estimate?.requiresReason}
+              maxLength={2000}
               name="reason"
               placeholder={t(lang, "leaves.reasonPlaceholder")}
             />
@@ -393,7 +420,7 @@ export function LeavesPanel({
             <Button
               type="submit"
               loading={loading}
-              disabled={dateError || balanceError}
+              disabled={estimating || !estimate || requestedDays <= 0 || Boolean(estimateError) || dateError || balanceError}
             >
               {t(lang, "leaves.submit")}
             </Button>

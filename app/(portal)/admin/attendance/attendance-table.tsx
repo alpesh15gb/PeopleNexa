@@ -56,6 +56,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [correction, setCorrection] = useState<Row["record"] | null>(null);
@@ -69,7 +70,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
       const res = await fetch(`/api/attendance/${recordId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, note: overrideReason }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -205,13 +206,14 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                       On leave · {row.leave.type}
                     </Badge>
                   ) : row.record && editing === row.employeeId ? (
-                    <Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 w-32 text-xs">
+                    <div className="space-y-2"><Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 w-32 text-xs">
                       {["present", "late", "permission", "absent", "half_day"].map((s) => (
                         <option key={s} value={s}>
                           {s.replace("_", " ")}
                         </option>
                       ))}
                     </Select>
+                    <Input aria-label="Reason for attendance override" placeholder="Reason required" maxLength={2000} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></div>
                   ) : (
                     <div className="flex items-center gap-2">
                       <StatusPill status={statusNow} />
@@ -224,7 +226,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                 <TD>
                   {editing === row.employeeId ? (
                     <div className="flex items-center gap-1.5">
-                      <Button size="icon" variant="success" loading={saving} aria-label={`Save status for ${row.name}`} onClick={() => save(row.record!.id)}>
+                      <Button size="icon" variant="success" loading={saving} disabled={!overrideReason.trim()} aria-label={`Save status for ${row.name}`} onClick={() => save(row.record!.id)}>
                         <Save className="h-3.5 w-3.5" />
                       </Button>
                       <Button size="icon" variant="ghost" aria-label={`Cancel editing ${row.name}`} onClick={() => setEditing(null)}>
@@ -238,7 +240,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                           <Button size="icon" variant="ghost" title="View / correct punches" aria-label={`View punches for ${row.name ?? row.employeeId}`} onClick={() => setCorrection(row.record!)}>
                             <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="icon" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); }}>
+                          <Button size="icon" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); setOverrideReason(""); }}>
                             <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
                           </Button>
                         </>
