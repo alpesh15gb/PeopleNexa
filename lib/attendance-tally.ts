@@ -2,6 +2,7 @@ export type AttendanceTally = {
   total: number;
   marked: number;
   livePresent: number;
+  liveAbsent: number;
   present: number;
   late: number;
   halfDay: number;
@@ -35,12 +36,13 @@ export function tallyDailyAttendance(
     if (population.has(record.employeeId)) recordByEmployee.set(record.employeeId, record);
   }
   const onLeaveEmployeeIds = new Set(approvedLeaveEmployeeIds);
-  const tally: AttendanceTally = { total: population.size, marked: 0, livePresent: 0, present: 0, late: 0, halfDay: 0, permission: 0, onLeave: 0, absent: 0, noRecord: 0 };
+  const tally: AttendanceTally = { total: population.size, marked: 0, livePresent: 0, liveAbsent: 0, present: 0, late: 0, halfDay: 0, permission: 0, onLeave: 0, absent: 0, noRecord: 0 };
 
   for (const employeeId of population) {
     const record = recordByEmployee.get(employeeId);
     const status = record?.status;
     if (livePresentEmployeeIds.has(employeeId)) tally.livePresent++;
+    else if (!onLeaveEmployeeIds.has(employeeId)) tally.liveAbsent++;
     if (status === "present") { tally.present++; tally.marked++; }
     else if (status === "late") { tally.late++; tally.marked++; }
     else if (status === "half_day") { tally.halfDay++; tally.marked++; }

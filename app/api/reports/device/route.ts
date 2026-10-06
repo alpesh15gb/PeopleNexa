@@ -4,6 +4,7 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { istDateKey, istStartOfDay, parseIST } from "@/lib/ist";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
 import {
   buildDeviceDaily,
   buildDeviceMonthly,
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
   // crossed the proxy timeout. Excel exports omit `page` and get everything.
   const PAGE_SIZE = 25;
   const pageParam = params.get("page");
-  const page = pageParam !== null ? Math.max(0, parseInt(pageParam, 10) || 0) : null;
+  const page = format !== "xlsx" && pageParam !== null ? Math.max(0, parseInt(pageParam, 10) || 0) : null;
   const q = (params.get("q") || "").trim().slice(0, 60);
 
   let rangeStart: Date;
@@ -126,7 +127,7 @@ export async function GET(req: NextRequest) {
       {
         OR: [
           { status: "active" },
-          { attendance: { some: { tenantId: session.tenantId, date: { gte: rangeStart, lt: rangeEnd } } } },
+          ...(kind === "daily" ? [] : [{ attendance: { some: { tenantId: session.tenantId, date: { gte: rangeStart, lt: rangeEnd } } } }]),
         ],
       },
       ...(q
@@ -216,6 +217,7 @@ export async function GET(req: NextRequest) {
         tenantId: session.tenantId,
         employeeId: { in: pageIds },
         punchTime: { gte: rangeStart, lt: rangeEnd },
+        ...(kind === "daily" ? authorizedPunchDayFilter(rangeStart, rangeEnd) : {}),
       },
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
@@ -408,9 +410,10 @@ function dailyXlsx(output: DeviceDailyOutput, dayKey: string) {
         r.overtime,
         r.punches,
         r.status,
+        r.attendanceStatus,
       ]);
     }
-    const widths = [14, 22, 18, 26, 9, 9, 9, 9, 10, 10, 30, 9];
+    const widths = [14, 22, 18, 26, 9, 9, 9, 9, 10, 10, 30, 9, 22];
     widths.forEach((w, i) => {
       ws.getColumn(i + 1).width = w;
     });

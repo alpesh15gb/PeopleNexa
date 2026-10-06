@@ -238,6 +238,7 @@ export interface DeviceDailyRow extends Omit<DayCells, "earlyMinutes" | "duratio
   designation: string;
   shift: string;
   status: string; // P | ½P | L | A
+  attendanceStatus: string;
 }
 
 export interface DeviceDailyOutput {
@@ -262,6 +263,7 @@ export const DEVICE_DAILY_COLUMNS = [
   "Overtime",
   "Punches",
   "Status",
+  "Finalized Attendance",
 ];
 
 export function buildDeviceDaily(args: {
@@ -281,10 +283,18 @@ export function buildDeviceDaily(args: {
   const byEmployee = new Map(records.map((r) => [r.employeeId, r]));
   const rows: DeviceDailyRow[] = employees.map((emp) => {
     const record = byEmployee.get(emp.id);
-    const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${day}`));
-    let status = "A";
-    if (record && PRESENT_STATUSES.has(record.status)) status = record.status === "half_day" ? "½P" : "P";
-    else if (leaves.has(emp.id)) status = "L";
+    const rawPunches = punchesByDay.get(`${emp.id}|${day}`) ?? [];
+    const cells = buildDayCells(record, emp.shift, rawPunches);
+    // Daily presence follows the dashboard's authorized raw punches, including
+    // employees whose Attendance row has not yet been reconciled.
+    if (rawPunches.length) {
+      cells.punches = punchesText(null, rawPunches);
+      if (!cells.inTime) cells.inTime = formatClockIST(rawPunches[0].time);
+      const last = rawPunches[rawPunches.length - 1];
+      if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatClockIST(last.time);
+    }
+    const status = rawPunches.length ? "P" : leaves.has(emp.id) ? "L" : "A";
+    const attendanceStatus = record?.status ?? "Pending";
     const { earlyMinutes: _e, durationMinutes: _d, ...rest } = cells;
     return {
       ...rest,
@@ -293,6 +303,7 @@ export function buildDeviceDaily(args: {
       designation: emp.position ?? "—",
       shift: shiftLabel(record?.shift ?? emp.shift),
       status,
+      attendanceStatus,
     };
   });
   return {

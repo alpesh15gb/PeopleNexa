@@ -273,6 +273,7 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
                 <td className={`${TD} tabular-nums`}>{r.overtime}</td>
                 <td className={`${TD} tabular-nums text-[11px]`}>{r.punches}</td>
                 <td className={`${TD} text-center font-bold`}>{r.status}</td>
+                <td className={TD}>{r.attendanceStatus}</td>
               </tr>
             ))}
           </tbody>
