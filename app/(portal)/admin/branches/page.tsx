@@ -3,6 +3,8 @@ import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
 import { BranchesManager } from "./branches-manager";
+import { AutomaticShiftsPanel } from "./automatic-shifts-panel";
+import { AUTOMATIC_SHIFT_KIND } from "@/lib/automatic-shifts";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +13,7 @@ export default async function AdminBranchesPage() {
   const ownLocationId = session.role === "location_manager"
     ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? "__none__"
     : null;
-  const [branches, employees, locations] = await Promise.all([
+  const [branches, employees, locations, shifts, automaticConfigs] = await Promise.all([
     prisma.branch.findMany({
       where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       include: { _count: { select: { employees: true } } },
@@ -27,6 +29,8 @@ export default async function AdminBranchesPage() {
       select: { id: true, name: true, code: true },
       orderBy: { createdAt: "asc" },
     }),
+    prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true, startTime: true, endTime: true, isNightShift: true }, orderBy: { startTime: "asc" } }),
+    prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: AUTOMATIC_SHIFT_KIND, active: true }, select: { scopeKey: true, payload: true } }),
   ]);
 
   return (
@@ -44,6 +48,7 @@ export default async function AdminBranchesPage() {
           )}
         </CardContent>
       </Card>
+      {session.role === "admin" && <AutomaticShiftsPanel branches={branches.map((branch) => ({ id: branch.id, name: branch.name, policy: automaticConfigs.find((config) => config.scopeKey === `branch:${branch.id}`)?.payload ?? null }))} shifts={shifts} />}
     </div>
   );
 }
