@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { automaticShiftPolicy, DEFAULT_AUTOMATIC_SHIFT_POLICY, automaticShiftWindow, detectAutomaticShift } from "../lib/automatic-shifts";
 import { parseIST } from "../lib/ist";
 import { prisma } from "../lib/prisma";
+import { applyAutomaticShiftsToday } from "../lib/apply-automatic-shifts";
 import { attendanceDayForPunch, shiftForEmployeeDay, reconcileEmployeeDay } from "../lib/reconcile";
 
 async function main() {
@@ -77,6 +78,24 @@ current = { id: "attendance", shiftId: evening.id, punchInTime: punches[0].punch
 saved = null;
 await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day);
 assert.equal(saved, null, "ingestion preserves finalized attendance");
+current = null;
+let updateFilter: any;
+let updateData: any;
+(prisma.attendance as any).findMany = async (args: any) => {
+  assert.equal(args.where.tenantId, "tenant");
+  assert.equal(args.where.employee.branchId, "configured");
+  assert.equal(args.where.finalized, false);
+  assert.equal(args.where.shiftId, null);
+  assert.equal(args.where.date.getTime(), day.getTime());
+  return [{ id: "attendance", employee: employee() }];
+};
+(prisma.attendance as any).updateMany = async (args: any) => { updateFilter = args.where; updateData = args.data; return { count: 1 }; };
+assert.equal(await applyAutomaticShiftsToday("tenant", "configured", { ...policy, enabled: false }, day), 0);
+assert.equal(await applyAutomaticShiftsToday("tenant", "configured", policy, day), 1, "saving can fill a missing shift using existing IN punches");
+assert.deepEqual(updateData, { shiftId: evening.id }, "backfill changes only shift, preserving status and payroll inputs");
+assert.equal(updateFilter.finalized, false, "concurrent finalization remains protected at write time");
+assert.equal(updateFilter.shiftId, null, "an existing selected shift cannot be overwritten");
+assert.equal(updateFilter.employee.branchId, "configured");
 console.log("automatic shift tests passed");
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

@@ -92,7 +92,7 @@ export default async function AdminAttendancePage({
 
   const employeeIds = employees.map((employee) => employee.id);
   const [records, leaves] = await Promise.all([
-    prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } } } }),
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } }, shift: { select: { name: true } } } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, }, include: { employee: { select: { id: true } }, leaveType: true } }),
   ]);
 
@@ -108,7 +108,7 @@ export default async function AdminAttendancePage({
       name: `${emp.firstName} ${emp.lastName}`.trim(),
       department: emp.department?.name ?? "Unassigned",
       branch: emp.branch?.name ?? "Unassigned",
-      shift: emp.shift?.name ?? "—",
+      shift: record?.shift?.name ?? emp.shift?.name ?? "—",
       record: record
         ? {
             id: record.id,

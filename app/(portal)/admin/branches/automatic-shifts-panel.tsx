@@ -17,14 +17,14 @@ export function AutomaticShiftsPanel({ branches, shifts }: { branches: { id: str
       const response = await fetch(`/api/branches/${branchId}/automatic-shifts`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(policy) });
       const result = await response.json();
       if (!response.ok) { toast("error", result.error ?? "Unable to save automatic shifts."); return; }
-      toast("success", "Automatic shift settings saved. Applies to subsequent reconciliation.");
+      toast("success", `Automatic shift settings saved. Updated ${result.updatedAttendance ?? 0} unfinished attendance records for today.`);
       router.refresh();
     } catch { toast("error", "Unable to save automatic shifts."); }
     finally { setSaving(false); }
   }
   return <section className="card-surface space-y-4 rounded-xl p-5">
     <h2 className="font-display text-lg font-semibold">Automatic shift selection</h2>
-    <p className="text-sm text-muted-foreground">Employees can work any selected shift. Their first authorized IN punch selects the closest configured shift start. Explicit rosters override this setting. Existing finalized attendance is preserved.</p>
+    <p className="text-sm text-muted-foreground">Employees can work any selected shift. Their first authorized IN punch selects the closest configured shift start. Explicit rosters override this setting. Saving also fills missing shifts on today's unfinished attendance records. Existing finalized attendance is preserved.</p>
     <label className="block text-sm">Branch<select aria-label="Automatic shift branch" className="ml-3 rounded-lg border border-edge bg-card p-2" value={branchId} onChange={(e) => { setBranchId(e.target.value); setPolicy(automaticShiftPolicy(branches.find((b) => b.id === e.target.value)?.policy) ?? { ...DEFAULT_AUTOMATIC_SHIFT_POLICY }); }}>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label>
     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={policy.enabled} onChange={(e) => setPolicy({ ...policy, enabled: e.target.checked })} />Enable automatic shift selection for this branch</label>
     <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">Allowed shifts (select at least two)</legend>{shifts.map((s) => <label key={s.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={policy.shiftIds.includes(s.id)} onChange={(e) => setPolicy({ ...policy, shiftIds: e.target.checked ? [...policy.shiftIds, s.id] : policy.shiftIds.filter((id) => id !== s.id) })} />{s.name} · {s.startTime}–{s.endTime}{s.isNightShift ? " · Overnight" : ""}</label>)}</fieldset>

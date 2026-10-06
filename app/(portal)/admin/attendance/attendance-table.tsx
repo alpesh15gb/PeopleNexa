@@ -185,6 +185,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                     <div className="min-w-0">
                       <p className="text-[13.5px] font-medium">{row.name}</p>
                       <p className="text-[11.5px] text-muted-foreground">{row.employeeNumber}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground lg:hidden">Shift: {row.shift}</p>
                       <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{row.branch} · {row.department}</p>
                     </div>
                   </div>

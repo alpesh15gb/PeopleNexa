@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { automaticShiftPolicy, AUTOMATIC_SHIFT_KIND } from "@/lib/automatic-shifts";
+import { applyAutomaticShiftsToday } from "@/lib/apply-automatic-shifts";
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -15,5 +16,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (count !== policy.shiftIds.length) return NextResponse.json({ error: "Selected shifts must belong to this workspace." }, { status: 400 });
   const now = new Date();
   await prisma.configurationRecord.upsert({ where: { tenantId_scopeKey_kind_version: { tenantId: session.tenantId, scopeKey: `branch:${id}`, kind: AUTOMATIC_SHIFT_KIND, version: 1 } }, create: { tenantId: session.tenantId, scopeKey: `branch:${id}`, kind: AUTOMATIC_SHIFT_KIND, version: 1, effectiveFrom: now, active: true, payload: policy, createdBy: session.sub, activatedBy: session.sub, activatedAt: now }, update: { active: true, payload: policy, activatedBy: session.sub, activatedAt: now } });
-  return NextResponse.json({ policy });
+  const updatedAttendance = await applyAutomaticShiftsToday(session.tenantId, id, policy, now);
+  return NextResponse.json({ policy, updatedAttendance });
 }

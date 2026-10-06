@@ -60,6 +60,7 @@ export async function GET(req: NextRequest) {
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch: { select: { name: true } },
+        shift: { select: { name: true } },
       },
     }),
     prisma.leaveRequest.findMany({
