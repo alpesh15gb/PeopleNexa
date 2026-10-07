@@ -9,6 +9,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   }
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
+  if (body.sundayWeeklyOff !== undefined && typeof body.sundayWeeklyOff !== "boolean") return NextResponse.json({ error: "Sunday weekly off must be true or false." }, { status: 400 });
   const shift = await prisma.shift.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!shift) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -47,6 +48,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         endTime,
         graceMinutes,
         isNightShift: resolvedNightShift,
+        sundayWeeklyOff: body.sundayWeeklyOff ?? shift.sundayWeeklyOff,
       },
     });
     return NextResponse.json({ shift: updated });

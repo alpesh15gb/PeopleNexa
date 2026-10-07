@@ -17,7 +17,7 @@ const matrix = buildStatusMatrix({
   branch: { name: "Fixture Branch" },
   department: null,
   month: "2026-02",
-  employees: [{ id: "employee-1", employeeNumber: "EMP-001", firstName: "Asha", lastName: "Das", position: "Analyst", shift: null }],
+  employees: [{ id: "employee-1", employeeNumber: "EMP-001", firstName: "Asha", lastName: "Das", position: "Analyst", shift: { name: "Office", startTime: "09:00", endTime: "18:00", sundayWeeklyOff: true } }],
   records: [{ employeeId: "employee-1", date: parseIST("2026-02-02 00:00:00")!, status: "present", lateMinutes: 0, overtimeMinutes: 0, punchInTime: parseIST("2026-02-02 09:00:00"), punchOutTime: parseIST("2026-02-02 18:00:00"), punches: [], shift: null }],
   punchesByDay: new Map(),
   leaves: new Set(["employee-1|2026-02-03"]),
@@ -35,6 +35,18 @@ assert.deepEqual(block.totals, { present: 1, absent: 21, leave: 1, holiday: 1, w
 assert.equal(block.days[1].inTime, "09:00");
 assert.equal(block.days[1].outTime, "18:00");
 assert.equal(block.days[0].inTime, "", "no punch stays blank");
+
+const offShift = { name: "Sunday off", startTime: "09:00", endTime: "18:00", sundayWeeklyOff: true };
+const workingShift = { ...offShift, name: "Seven days", sundayWeeklyOff: false };
+const base = { tenant: { name: "Company" }, branch: null, department: null, month,
+  employees: [{ id: "e", employeeNumber: "E", firstName: "Test", lastName: "Employee", position: null, shift: workingShift }],
+  records: [], punchesByDay: new Map(), leaves: new Set<string>(), holidays: new Set<string>() };
+assert.equal(buildStatusMatrix(base).blocks[0].days[0].status, "A", "Sunday is not automatically a weekly off");
+assert.equal(buildStatusMatrix({ ...base, employees: [{ ...base.employees[0], shift: null }] }).blocks[0].totals.weekOff, 0, "unassigned employees have no assumed weekly off");
+assert.equal(buildStatusMatrix({ ...base, rosterShifts: new Map([["e|2026-02-01", offShift]]) }).blocks[0].days[0].status, "WO", "Sunday roster uses its own weekly-off setting");
+const sundayRecord = { employeeId: "e", date: start, status: "absent", lateMinutes: 0, overtimeMinutes: 0, punchInTime: null, punchOutTime: null, punches: [], shift: offShift };
+assert.equal(buildStatusMatrix({ ...base, records: [sundayRecord] }).blocks[0].days[0].status, "WO", "saved daily shift overrides employee default");
+assert.equal(buildStatusMatrix({ ...base, records: [sundayRecord], rosterShifts: new Map([["e|2026-02-01", workingShift]]) }).blocks[0].days[0].status, "A", "working roster overrides weekly-off daily shift");
 
 const nonWorkingDayPresentMatrix = buildStatusMatrix({
   tenant: { name: "Fixture Company" },

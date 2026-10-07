@@ -6,6 +6,7 @@ import { istDateKey, istWallClock } from "./ist";
 import { minutesOfDay } from "./dates";
 
 export interface DeviceShift {
+  sundayWeeklyOff?: boolean;
   name: string;
   startTime: string; // "09:00"
   endTime: string; // "18:00"
@@ -577,6 +578,8 @@ export interface DeviceStatusMatrixOutput {
 }
 
 export function buildStatusMatrix(args: {
+  /** Explicit employee/day rosters override the saved day shift and default. */
+  rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
   department: { name: string } | null;
@@ -612,7 +615,7 @@ export function buildStatusMatrix(args: {
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         totals.leave++;
-      } else if (isSunday) {
+      } else if (isSunday && (args.rosterShifts?.get(`${emp.id}|${dayKey}`) ?? record?.shift ?? emp.shift)?.sundayWeeklyOff === true) {
         status = "WO";
         totals.weekOff++;
       } else {

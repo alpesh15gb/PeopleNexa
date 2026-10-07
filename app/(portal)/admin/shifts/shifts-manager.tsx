@@ -17,6 +17,7 @@ interface Shift {
   endTime: string;
   graceMinutes: number;
   isNightShift: boolean;
+  sundayWeeklyOff: boolean;
   isDefault: boolean;
   _count: { employees: number };
 }
@@ -38,6 +39,7 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
       endTime: form.get("endTime"),
       graceMinutes: form.get("graceMinutes"),
       isNightShift: form.get("isNightShift") === "on",
+      sundayWeeklyOff: form.get("sundayWeeklyOff") === "on",
     };
     try {
       const res = await fetch(editing && typeof editing === "object" ? `/api/shifts/${editing.id}` : "/api/shifts", {
@@ -107,6 +109,7 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
             <div className="mt-2 flex items-center justify-between">
               <p className="text-[11.5px] text-muted-foreground">
                 {s.graceMinutes} min grace for late marking
+                {s.sundayWeeklyOff && <span className="block">Sunday weekly off</span>}
               </p>
               <div className="flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
                 <Button size="sm" variant="outline" onClick={() => setEditing(s)}>
@@ -155,6 +158,11 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
               Night shift
             </label>
           </div>
+          <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <input type="checkbox" name="sundayWeeklyOff" defaultChecked={editing && typeof editing === "object" ? editing.sundayWeeklyOff : false} className="h-4 w-4 rounded border-input accent-indigo-500" />
+            Sunday is a weekly off
+          </label>
+          <p className="text-xs text-muted-foreground">The monthly attendance matrix marks Sunday as WO only for this shift. Attendance, holidays and approved leave take priority.</p>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
             <Button type="submit" loading={loading}>Save</Button>

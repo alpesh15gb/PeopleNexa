@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
       firstName: true,
       lastName: true,
       position: true,
-      shift: { select: { name: true, startTime: true, endTime: true } },
+      shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } },
       department: { select: { name: true } },
     },
     orderBy: { employeeNumber: "asc" },
@@ -171,7 +171,7 @@ export async function GET(req: NextRequest) {
   // touches ~25 staff, not the whole company.
   const pageIds = employees.map((e) => e.id);
 
-  const [department, runByEmployee, records, leaves, holidays, punches] = await Promise.all([
+  const [department, runByEmployee, records, leaves, holidays, punches, rosters] = await Promise.all([
     departmentId
       ? prisma.department.findFirst({ where: { id: departmentId, tenantId: session.tenantId }, select: { name: true } })
       : Promise.resolve(null),
@@ -191,7 +191,7 @@ export async function GET(req: NextRequest) {
         punchInTime: true,
         punchOutTime: true,
         punches: true,
-        shift: { select: { name: true, startTime: true, endTime: true } },
+        shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } },
       },
       orderBy: { date: "asc" },
     }),
@@ -222,6 +222,10 @@ export async function GET(req: NextRequest) {
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
     }),
+    kind === "status-matrix" ? prisma.rosterAssignment.findMany({
+      where: { tenantId: session.tenantId, employeeId: { in: pageIds }, date: { gte: rangeStart, lt: rangeEnd } },
+      select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } } },
+    }) : Promise.resolve([]),
   ]);
 
   // Tenant-holiday IST day keys (recurring holidays match on MM-DD).
@@ -300,6 +304,7 @@ export async function GET(req: NextRequest) {
 
   if (kind === "status-matrix") {
     const output: DeviceStatusMatrixOutput = buildStatusMatrix({
+      rosterShifts: new Map(rosters.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r.shift])),
       tenant: tenantInfo,
       branch: branchInfo,
       department: departmentInfo,

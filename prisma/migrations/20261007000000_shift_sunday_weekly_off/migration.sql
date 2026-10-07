@@ -1,0 +1,1 @@
+ALTER TABLE "Shift" ADD COLUMN "sundayWeeklyOff" BOOLEAN NOT NULL DEFAULT false;
