@@ -1,3 +1,6 @@
+import { crossDayRepairPlan } from "../lib/cross-day-repair-plan";
+import { unassignedSinglePunchHalfDay } from "../lib/unassigned-shift-policy";
+import type { PunchMode } from "../lib/reconcile";
 import { prisma } from "../lib/prisma";
 import { assertLeavePayrollOpen } from "../lib/leave-payroll-lock";
 import { istDateKey, parseIST, IST_OFFSET_MS } from "../lib/ist";
@@ -12,7 +15,7 @@ const lastMonth = lastOrMode && lastOrMode !== "--apply" ? lastOrMode : month;
 const mode = lastOrMode === "--apply" || applyArg === "--apply" ? "--apply" : undefined;
   if (identity === "--list-tenants") { console.log(JSON.stringify(await prisma.tenant.findMany({ select: { id: true, name: true, slug: true } }), null, 2)); return; }
   if (!identity || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month ?? "") || (!/^\d{4}-(0[1-9]|1[0-2])$/.test(lastMonth ?? "") || lastMonth < month || (applyArg && applyArg !== "--apply"))) throw new Error("Usage: npx tsx scripts/repair-cross-day-attendance.ts TENANT_ID_OR_NAME START_MONTH [END_MONTH] [--apply]");
-  const matches = await prisma.tenant.findMany({ where: { OR: [{ id: identity }, { name: identity }, { slug: identity }] }, select: { id: true } });
+  const matches = await prisma.tenant.findMany({ where: { OR: [{ id: identity }, { name: identity }, { slug: identity }] }, select: { id: true, config: true } });
   if (matches.length !== 1) throw new Error("Tenant must match exactly one workspace. Use --list-tenants to find its ID.");
   const tenantId = matches[0].id;
   let locationId: string | undefined;
@@ -22,24 +25,34 @@ const mode = lastOrMode === "--apply" || applyArg === "--apply" ? "--apply" : un
     locationId = locations[0].id;
     console.log(JSON.stringify({ mode: mode === "--apply" ? "apply" : "preview", location: locations[0], scope: "Attendance record branch's current location assignment" }));
   }
-  const totals = { candidates: 0, updated: 0, locked: 0, skippedShift: 0 };
+  const totals = { candidates: 0, updated: 0, locked: 0, skippedShift: 0, unresolved: 0 };
   const start = parseIST(`${month}-01 00:00:00`)!;
   const end = new Date(Date.UTC(Number(lastMonth.slice(0, 4)), Number(lastMonth.slice(5, 7)), 1) - IST_OFFSET_MS);
-  const rows = await prisma.attendance.findMany({ where: { tenantId, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}), date: { gte: start, lt: end }, shiftId: null, punchInTime: { not: null }, punchOutTime: { not: null } }, include: { employee: { select: { employeeNumber: true } } } });
+  const rows = await prisma.attendance.findMany({ where: { tenantId, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}), date: { gte: start, lt: end }, shiftId: null, punchInTime: { not: null }, punchOutTime: { not: null } }, include: { employee: { select: { employeeNumber: true, shiftId: true } } } });
   let changed = 0;
   for (const row of rows) {
     if (istDateKey(row.punchInTime!) === istDateKey(row.punchOutTime!)) continue;
     const roster = await prisma.rosterAssignment.count({ where: { tenantId, employeeId: row.employeeId, date: row.date } });
     const config = row.branchId ? await prisma.configurationRecord.findFirst({ where: { tenantId, kind: AUTOMATIC_SHIFT_KIND, scopeKey: `branch:${row.branchId}`, active: true, effectiveFrom: { lte: row.date } } }) : null;
-    if (roster || automaticShiftPolicy(config?.payload)?.enabled) { totals.skippedShift++; continue; }
+    if (row.employee.shiftId || roster || automaticShiftPolicy(config?.payload)?.enabled) { totals.skippedShift++; continue; }
     totals.candidates++;
     console.log(JSON.stringify({ attendanceId: row.id, employee: row.employee.employeeNumber, date: istDateKey(row.date), invalidOut: row.punchOutTime, apply: mode === "--apply" }));
+    const rawPunches = await prisma.punch.findMany({ where: { tenantId, employeeId: row.employeeId, authStatus: { not: "pending" }, punchTime: { gte: row.date, lt: new Date(row.date.getTime() + 24 * 3600000) } }, orderBy: { punchTime: "asc" } });
+    const punchMode = (matches[0].config as { punches?: { mode?: PunchMode } } | null)?.punches?.mode ?? "first_last";
+    if (!["first_last", "strict", "alternating"].includes(punchMode)) throw new Error("Unknown configured punch mode; repair stopped.");
+    const plan = crossDayRepairPlan(rawPunches, punchMode, await unassignedSinglePunchHalfDay(tenantId));
+    console.log(JSON.stringify({ attendanceId: row.id, employee: row.employee.employeeNumber, date: istDateKey(row.date), reason: plan.reason, originalPunches: rawPunches.map(p => ({ id: p.id, time: p.punchTime, hint: p.inOutHint })), proposed: plan.eligible ? plan.data : null }));
+    if (!plan.eligible) { totals.unresolved++; continue; }
     try { await prisma.$transaction(async (tx) => {
       await assertLeavePayrollOpen(tx, tenantId, row.employeeId, row.date, row.date);
       if (mode !== "--apply") return;
       if (await tx.rosterAssignment.count({ where: { tenantId, employeeId: row.employeeId, date: row.date } })) return;
-      const result = await tx.attendance.updateMany({ where: { id: row.id, tenantId, updatedAt: row.updatedAt, shiftId: null, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}) }, data: { punchOutTime: null, overtimeMinutes: 0, reviewStatus: "missed_punch", note: "Missing OUT: invalid next-day pairing removed. Original punches preserved; regularization required.", punches: Array.isArray(row.punches) ? row.punches.filter((p: any) => p?.time && istDateKey(new Date(p.time)) === istDateKey(row.date)) : row.punches ?? [] } });
-      if (result.count) await tx.auditLog.create({ data: { tenantId, actorId: "maintenance:cross-day-repair", actorRole: "system", action: "attendance.cross_day_pairing_repair", entity: "Attendance", entityId: row.id, summary: `Removed invalid next-day OUT on ${istDateKey(row.date)}`, before: { punchOutTime: row.punchOutTime!.toISOString(), overtimeMinutes: row.overtimeMinutes, reviewStatus: row.reviewStatus, note: row.note, punches: row.punches }, after: { punchOutTime: null, overtimeMinutes: 0, reviewStatus: "missed_punch" } } });
+      const currentEmployee = await tx.employee.findUnique({ where: { id: row.employeeId }, select: { shiftId: true } });
+      if (!currentEmployee || currentEmployee.shiftId) throw new Error("Employee shift changed during repair; preview again.");
+      const currentPunches = await tx.punch.findMany({ where: { tenantId, employeeId: row.employeeId, authStatus: { not: "pending" }, punchTime: { gte: row.date, lt: new Date(row.date.getTime() + 24 * 3600000) } }, orderBy: { punchTime: "asc" } });
+      if (JSON.stringify(currentPunches) !== JSON.stringify(rawPunches)) throw new Error("Original punches changed during repair; preview again.");
+      const result = await tx.attendance.updateMany({ where: { id: row.id, tenantId, updatedAt: row.updatedAt, shiftId: null, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}) }, data: { ...plan.data, note: plan.reason + "; invalid cross-day pairing rebuilt from original same-day punches.", punches: plan.entries.map(entry => ({ ...entry })), finalized: true } });
+      if (result.count) await tx.auditLog.create({ data: { tenantId, actorId: "maintenance:cross-day-repair", actorRole: "system", action: "attendance.cross_day_pairing_repair", entity: "Attendance", entityId: row.id, summary: `Removed invalid next-day OUT on ${istDateKey(row.date)}`, before: { punchInTime: row.punchInTime, status: row.status, lateMinutes: row.lateMinutes, finalized: row.finalized, punchOutTime: row.punchOutTime!.toISOString(), overtimeMinutes: row.overtimeMinutes, reviewStatus: row.reviewStatus, note: row.note, punches: row.punches }, after: { ...plan.data, punches: plan.entries.map(entry => ({ ...entry })), finalized: true } } });
       changed += result.count;
     }, { isolationLevel: "Serializable" }); } catch (error: any) {
       if (error.code !== "PAYROLL_LOCKED") throw error;
