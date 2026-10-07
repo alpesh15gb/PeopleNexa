@@ -3,6 +3,7 @@
 // through lib/ist + lib/dates helpers so output stays IST-consistent.
 
 import { istDateKey, istWallClock } from "./ist";
+import { attendanceRequiresReview } from "./attendance-validation";
 import { minutesOfDay } from "./dates";
 
 export interface DeviceShift {
@@ -31,6 +32,7 @@ export interface DeviceEmployee {
 }
 
 export interface DeviceRecord {
+  reviewStatus?: string | null;
   employeeId: string;
   date: Date;
   status: string; // present | late | permission | half_day | absent
@@ -197,6 +199,7 @@ function buildDayCells(
     durationMinutes: 0,
   };
   if (!record) return empty;
+  if (attendanceRequiresReview(record)) return { ...empty, inTime: formatClockIST(record.punchInTime), outTime: formatClockIST(record.punchOutTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
   const inTime = formatClockIST(record.punchInTime);
   const outTime = formatClockIST(record.punchOutTime);
   const late = record.lateMinutes > 0 ? formatHM(record.lateMinutes) : "";
@@ -432,7 +435,7 @@ export function buildDeviceMonthly(args: {
         lateSum += Math.max(0, record.lateMinutes);
         earlySum += cells.earlyMinutes;
         durationSum += cells.durationMinutes;
-        otSum += Math.max(0, record.overtimeMinutes);
+        if (!attendanceRequiresReview(record)) otSum += Math.max(0, record.overtimeMinutes);
       } else if (holidays.has(dayKey)) {
         status = "H";
         holidayCount++;
@@ -744,9 +747,11 @@ export function buildWorkSummary(args: {
       let lastOut = "";
       let grossMin = 0;
       let gross = "";
+      let requiresReview = record ? attendanceRequiresReview(record) : false;
       if (record) {
         const { first, last } = firstLastInstants(record.punches, punchesByDay.get(`${emp.id}|${dayKey}`));
         if (first && last) {
+          requiresReview ||= attendanceRequiresReview({ punchInTime: first, punchOutTime: last });
           firstIn = formatClockIST(first);
           lastOut = formatClockIST(last);
           const diff = Math.round((last.getTime() - first.getTime()) / 60000);
@@ -772,7 +777,7 @@ export function buildWorkSummary(args: {
       const late = present ? cells.late : "";
       const overtime = present ? cells.overtime : "";
       const early = present ? cells.early : "";
-      if (present) {
+      if (present && !requiresReview) {
         grossSum += grossMin;
         lateSum += Math.max(0, record?.lateMinutes ?? 0);
         otSum += Math.max(0, record?.overtimeMinutes ?? 0);
@@ -785,7 +790,7 @@ export function buildWorkSummary(args: {
         firstIn,
         lastOut,
         gross,
-        work: gross,
+        work: requiresReview ? "Review" : gross,
         late,
         overtime,
         early,
@@ -900,7 +905,7 @@ export function buildPerformance(args: {
         if (record.status === "half_day") half++;
         else fullPresent++;
         workMin += cells.durationMinutes;
-        otMin += Math.max(0, record.overtimeMinutes);
+        if (!attendanceRequiresReview(record)) otMin += Math.max(0, record.overtimeMinutes);
       } else if (holidays.has(dayKey)) {
         status = "H";
         hld++;

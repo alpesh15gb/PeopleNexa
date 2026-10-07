@@ -186,6 +186,7 @@ export async function GET(req: NextRequest) {
         employeeId: true,
         date: true,
         status: true,
+        reviewStatus: true,
         lateMinutes: true,
         overtimeMinutes: true,
         punchInTime: true,

@@ -18,7 +18,8 @@ export const EARLY_WINDOW_MINUTES = 60;
 
 // A single in→out span longer than this is implausible for a normal shift and
 // flags the day for review (the mispunch guard).
-export const MAX_SPAN_HOURS = 14;
+import { MAX_SPAN_HOURS } from "./attendance-validation";
+export { MAX_SPAN_HOURS } from "./attendance-validation";
 
 // Total presence below this marks the day as a half day (only when finalized
 // and at least one punch exists).

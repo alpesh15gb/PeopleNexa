@@ -1,4 +1,5 @@
 import { snapshottedLeaveFraction } from "./leave-calendar";
+import { attendanceRequiresReview } from "./attendance-validation";
 import { payrollLeaveDay } from "./payroll-leave-day";
 import { prisma } from "./prisma";
 import type { Prisma } from "../generated/prisma/client";
@@ -205,6 +206,7 @@ export async function attendanceSummary(
         status: true,
         punchInTime: true,
         punchOutTime: true,
+        reviewStatus: true,
       },
     }),
     db.leaveRequest.findMany({
@@ -268,6 +270,9 @@ export async function attendanceSummary(
   const rosterByDay = new Map(
     rosters.map((r) => [istDayStartKey(r.date), r.shift]),
   );
+
+  const unresolved = records.filter(attendanceRequiresReview);
+  if (unresolved.length) throw new Error(`Payroll blocked for employee ${employee.id}: resolve attendance requiring review on ${unresolved.map((r) => new Date(r.date.getTime() + 5.5 * 3600000).toISOString().slice(0, 10)).join(", ")} before calculating pay.`);
 
   // Paid-hours (worked/overtime) are tracked separately from the
   // workingDays denominator: punched hours count on holidays and on-leave
