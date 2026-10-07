@@ -113,6 +113,17 @@ roster = { shift: { ...morning, singlePunchHalfDay: false }, shiftId: morning.id
 punches = [punch("2026-10-06 08:00:00")];
 await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
 assert.equal(saved.reviewStatus, "missed_punch", "unchecked rule retains existing treatment");
+branch = "other";
+roster = null;
+(prisma.configurationRecord as any).findFirst = async (args: any) => args.where.kind === "unassigned_shift_attendance" && args.where.tenantId === "tenant" ? { payload: { singlePunchHalfDay: true } } : null;
+await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
+assert.equal(saved.status, "half_day", "workspace checkbox covers employees without any shift");
+assert.equal(saved.shiftId, null, "unassigned policy does not invent a shift");
+assert.equal(saved.reviewStatus, null);
+assert.equal(saved.punchOutTime, null);
+roster = { shift: { ...morning, singlePunchHalfDay: false }, shiftId: morning.id };
+await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
+assert.equal(saved.reviewStatus, "missed_punch", "unassigned fallback cannot override an assigned shift's unchecked rule");
 console.log("automatic shift tests passed");
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

@@ -23,11 +23,24 @@ interface Shift {
   _count: { employees: number };
 }
 
-export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
+export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }: { shifts: Shift[]; unassignedHalfDay: boolean; canManageUnassigned: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unassignedRule, setUnassignedRule] = useState(unassignedHalfDay);
+  const [savingUnassigned, setSavingUnassigned] = useState(false);
+  async function saveUnassigned() {
+    setSavingUnassigned(true);
+    try {
+      const response = await fetch("/api/shifts/unassigned-policy", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ singlePunchHalfDay: unassignedRule }) });
+      const result = await response.json();
+      if (!response.ok) { toast("error", result.error ?? "Unable to save rule."); return; }
+      toast("success", "Rule for employees without a shift saved.");
+      router.refresh();
+    } catch { toast("error", "Unable to save rule."); }
+    finally { setSavingUnassigned(false); }
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -82,6 +95,12 @@ export function ShiftsManager({ shifts }: { shifts: Shift[] }) {
 
   return (
     <>
+      {canManageUnassigned && <section className="space-y-3 border-b border-edge p-5">
+        <h2 className="font-display font-semibold">Employees without a shift</h2>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={unassignedRule} onChange={(e) => setUnassignedRule(e.target.checked)} />Single punch = half day absent for employees without a shift</label>
+        <p className="text-xs text-muted-foreground">After the attendance day closes, one punch means half day present and half day absent, without a missing-punch review flag. The missing time stays empty. Assigned, rostered and automatically selected shifts use their own rules. Finalized historical attendance is preserved.</p>
+        <Button loading={savingUnassigned} onClick={saveUnassigned}>Save unassigned employee rule</Button>
+      </section>}
       <div id="shifts-manager" className="flex scroll-mt-4 items-center justify-between border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">{shifts.length} shifts</p>
         <Button size="sm" onClick={() => setEditing("new")}>

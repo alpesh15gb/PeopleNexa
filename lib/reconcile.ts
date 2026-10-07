@@ -6,6 +6,7 @@ import { configurationEffectiveAtISTDay, DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOUR
 import type { Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
 import { automaticShiftsForEmployee, automaticShiftForDay } from "./automatic-shift-resolution";
 import { automaticShiftWindow, detectAutomaticShift } from "./automatic-shifts";
+import { unassignedSinglePunchHalfDay } from "./unassigned-shift-policy";
 
 // A day is finalizable once its IST window has closed plus a grace period,
 // so late-arriving punches can't keep mutating a finalized day.
@@ -301,6 +302,7 @@ export async function reconcileEmployeeDay(
     ? await prisma.punch.findMany({ where: { employeeId: employee.id, authStatus: { not: "pending" }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
     : initialPunches;
   const missingOutTreatment = policy?.attendanceTreatment.missingOutPunch ?? "review";
+  const singlePunchHalfDay = shift ? shift.singlePunchHalfDay : !automatic && await unassignedSinglePunchHalfDay(employee.tenantId);
 
   const devices = await prisma.device.findMany({
     where: { id: { in: punches.map((p) => p.deviceId).filter(Boolean) as string[] } },
@@ -414,7 +416,7 @@ export async function reconcileEmployeeDay(
   }
   if (automatic && !shift && punches.length > 0) reviewStatus = "needs_review";
   if (punches.length > 0 && (!inAt || !outAt)) reviewStatus = "missed_punch";
-  if (shift?.singlePunchHalfDay && punches.length === 1) {
+  if (singlePunchHalfDay && punches.length === 1) {
     reviewStatus = null;
     if (finalize) { status = "half_day"; lateMinutes = 0; }
   }
@@ -469,7 +471,7 @@ export async function reconcileEmployeeDay(
     finalized: finalize,
     reviewStatus,
     note: automatic && !shift ? "Automatic shift could not be matched; review the IN punch and branch shift windows." : finalize ? null : "pending finalization",
-    ...(shift?.singlePunchHalfDay && punches.length === 1 ? { overtimeMinutes: 0 } : {}),
+    ...(singlePunchHalfDay && punches.length === 1 ? { overtimeMinutes: 0 } : {}),
   };
 
   let attendance: Attendance;

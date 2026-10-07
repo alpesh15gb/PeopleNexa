@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
 import { ShiftsManager } from "./shifts-manager";
+import { unassignedSinglePunchHalfDay } from "@/lib/unassigned-shift-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default async function AdminShiftsPage() {
     include: { _count: { select: { employees: true } } },
     orderBy: { createdAt: "asc" },
   });
+  const unassignedHalfDay = await unassignedSinglePunchHalfDay(session.tenantId);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -38,7 +40,7 @@ export default async function AdminShiftsPage() {
               />
             </div>
           )}
-          <ShiftsManager shifts={shifts} />
+          <ShiftsManager shifts={shifts} unassignedHalfDay={unassignedHalfDay} canManageUnassigned={session.role === "admin"} />
         </CardContent>
       </Card>
     </div>
