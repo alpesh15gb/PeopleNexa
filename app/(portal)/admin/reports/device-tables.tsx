@@ -138,12 +138,14 @@ function ReportPager({
   page,
   setPage,
   total,
+  loading = false,
 }: {
   query: string;
   setQuery: (s: string) => void;
   page: number;
   setPage: (n: number) => void;
   total: number;
+  loading?: boolean;
 }) {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
@@ -161,7 +163,7 @@ function ReportPager({
         {Math.min(total, safePage * PAGE_SIZE + PAGE_SIZE)} of {total}
       </span>
       <div className="ml-auto flex items-center gap-2">
-        <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+        <Button variant="outline" size="sm" disabled={loading || safePage === 0} onClick={() => setPage(safePage - 1)}>
           Prev
         </Button>
         <span className="text-[12px] text-muted-foreground">
@@ -170,7 +172,7 @@ function ReportPager({
         <Button
           variant="outline"
           size="sm"
-          disabled={safePage >= pageCount - 1}
+          disabled={loading || safePage >= pageCount - 1}
           onClick={() => setPage(safePage + 1)}
         >
           Next
@@ -285,23 +287,24 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
 
 function MonthlyTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
+  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceMonthlyOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
   if (blocks.length === 0) {
     return (
-      <Card>
+      <div className="space-y-4">{pager}<Card>
         <CardContent>
           <EmptyState title="No employees" description="No active employees match this filter for the selected month." />
         </CardContent>
-      </Card>
+      </Card></div>
     );
   }
   return (
     <div className="space-y-4">
-      <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
+      {pager}
     <div className="print-report space-y-8 bg-card p-4 text-foreground">
       {visible.map((block) => (
         <div key={block.code}>
@@ -354,23 +357,24 @@ function statusCellClass(status: string): string {
 
 function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
+  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceStatusMatrixOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
   if (blocks.length === 0) {
     return (
-      <Card>
+      <div className="space-y-4">{pager}<Card>
         <CardContent>
           <EmptyState title="No employees" description="No active employees match this filter for the selected month." />
         </CardContent>
-      </Card>
+      </Card></div>
     );
   }
   return (
     <div className="space-y-4">
-      <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
+      {pager}
       <div className="print-report space-y-8 bg-card p-4 text-foreground">
         <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
         {output.department && (
@@ -427,23 +431,24 @@ const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", 
 
 function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
+  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceWorkSummaryOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
   if (blocks.length === 0) {
     return (
-      <Card>
+      <div className="space-y-4">{pager}<Card>
         <CardContent>
           <EmptyState title="No employees" description="No active employees match this filter for the selected month." />
         </CardContent>
-      </Card>
+      </Card></div>
     );
   }
   return (
     <div className="space-y-4">
-      <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
+      {pager}
       <div className="print-report space-y-8 bg-card p-4 text-foreground">
         <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
         <p className="bg-card text-[12px] text-foreground">
@@ -502,23 +507,24 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
 
 function PerformanceTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
+  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DevicePerformanceOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
   if (blocks.length === 0) {
     return (
-      <Card>
+      <div className="space-y-4">{pager}<Card>
         <CardContent>
           <EmptyState title="No employees" description="No active employees match this filter for the selected month." />
         </CardContent>
-      </Card>
+      </Card></div>
     );
   }
   return (
     <div className="space-y-4">
-      <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? blocks.length} />
+      {pager}
       <div className="print-report space-y-8 bg-card p-4 text-foreground">
         {visible.map((block, i) => (
           <div key={block.code}>
