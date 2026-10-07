@@ -3,7 +3,11 @@ import { assertLeavePayrollOpen } from "../lib/leave-payroll-lock";
 import { istDateKey, parseIST, IST_OFFSET_MS } from "../lib/ist";
 import { automaticShiftPolicy, AUTOMATIC_SHIFT_KIND } from "../lib/automatic-shifts";
 export async function repairCrossDayAttendance(args = process.argv.slice(2)) {
-const [identity, month, lastOrMode, applyArg] = args;
+const locationIndex = args.indexOf("--location");
+const locationIdentity = locationIndex >= 0 ? args[locationIndex + 1] : undefined;
+if (locationIndex >= 0 && (!locationIdentity || locationIdentity.startsWith("--"))) throw new Error("--location requires a location ID, code, or name.");
+const positional = locationIndex >= 0 ? args.filter((_, index) => index !== locationIndex && index !== locationIndex + 1) : args;
+const [identity, month, lastOrMode, applyArg] = positional;
 const lastMonth = lastOrMode && lastOrMode !== "--apply" ? lastOrMode : month;
 const mode = lastOrMode === "--apply" || applyArg === "--apply" ? "--apply" : undefined;
   if (identity === "--list-tenants") { console.log(JSON.stringify(await prisma.tenant.findMany({ select: { id: true, name: true, slug: true } }), null, 2)); return; }
@@ -11,10 +15,17 @@ const mode = lastOrMode === "--apply" || applyArg === "--apply" ? "--apply" : un
   const matches = await prisma.tenant.findMany({ where: { OR: [{ id: identity }, { name: identity }, { slug: identity }] }, select: { id: true } });
   if (matches.length !== 1) throw new Error("Tenant must match exactly one workspace. Use --list-tenants to find its ID.");
   const tenantId = matches[0].id;
+  let locationId: string | undefined;
+  if (locationIdentity) {
+    const locations = await prisma.location.findMany({ where: { tenantId, OR: [{ id: locationIdentity }, { code: locationIdentity }, { name: locationIdentity }] }, select: { id: true, name: true, code: true } });
+    if (locations.length !== 1) throw new Error("Location must match exactly one location in this workspace; no records were changed.");
+    locationId = locations[0].id;
+    console.log(JSON.stringify({ mode: mode === "--apply" ? "apply" : "preview", location: locations[0], scope: "Attendance record branch's current location assignment" }));
+  }
   const totals = { candidates: 0, updated: 0, locked: 0, skippedShift: 0 };
   const start = parseIST(`${month}-01 00:00:00`)!;
   const end = new Date(Date.UTC(Number(lastMonth.slice(0, 4)), Number(lastMonth.slice(5, 7)), 1) - IST_OFFSET_MS);
-  const rows = await prisma.attendance.findMany({ where: { tenantId, date: { gte: start, lt: end }, shiftId: null, punchInTime: { not: null }, punchOutTime: { not: null } }, include: { employee: { select: { employeeNumber: true } } } });
+  const rows = await prisma.attendance.findMany({ where: { tenantId, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}), date: { gte: start, lt: end }, shiftId: null, punchInTime: { not: null }, punchOutTime: { not: null } }, include: { employee: { select: { employeeNumber: true } } } });
   let changed = 0;
   for (const row of rows) {
     if (istDateKey(row.punchInTime!) === istDateKey(row.punchOutTime!)) continue;
@@ -27,7 +38,7 @@ const mode = lastOrMode === "--apply" || applyArg === "--apply" ? "--apply" : un
       await assertLeavePayrollOpen(tx, tenantId, row.employeeId, row.date, row.date);
       if (mode !== "--apply") return;
       if (await tx.rosterAssignment.count({ where: { tenantId, employeeId: row.employeeId, date: row.date } })) return;
-      const result = await tx.attendance.updateMany({ where: { id: row.id, tenantId, updatedAt: row.updatedAt, shiftId: null }, data: { punchOutTime: null, overtimeMinutes: 0, reviewStatus: "missed_punch", note: "Missing OUT: invalid next-day pairing removed. Original punches preserved; regularization required.", punches: Array.isArray(row.punches) ? row.punches.filter((p: any) => p?.time && istDateKey(new Date(p.time)) === istDateKey(row.date)) : row.punches ?? [] } });
+      const result = await tx.attendance.updateMany({ where: { id: row.id, tenantId, updatedAt: row.updatedAt, shiftId: null, ...(locationId ? { branch: { is: { tenantId, locationId } } } : {}) }, data: { punchOutTime: null, overtimeMinutes: 0, reviewStatus: "missed_punch", note: "Missing OUT: invalid next-day pairing removed. Original punches preserved; regularization required.", punches: Array.isArray(row.punches) ? row.punches.filter((p: any) => p?.time && istDateKey(new Date(p.time)) === istDateKey(row.date)) : row.punches ?? [] } });
       if (result.count) await tx.auditLog.create({ data: { tenantId, actorId: "maintenance:cross-day-repair", actorRole: "system", action: "attendance.cross_day_pairing_repair", entity: "Attendance", entityId: row.id, summary: `Removed invalid next-day OUT on ${istDateKey(row.date)}`, before: { punchOutTime: row.punchOutTime!.toISOString(), overtimeMinutes: row.overtimeMinutes, reviewStatus: row.reviewStatus, note: row.note, punches: row.punches }, after: { punchOutTime: null, overtimeMinutes: 0, reviewStatus: "missed_punch" } } });
       changed += result.count;
     }, { isolationLevel: "Serializable" }); } catch (error: any) {
