@@ -12,6 +12,14 @@ export interface DeviceShift {
   endTime: string; // "18:00"
 }
 
+function reportShift(rosters: Map<string, DeviceShift> | undefined, employee: DeviceEmployee, day: string, record: DeviceRecord | undefined) {
+  return rosters?.get(`${employee.id}|${day}`) ?? record?.shift ?? employee.shift;
+}
+
+function isWeeklyOff(day: string, shift: DeviceShift | null) {
+  return shift?.sundayWeeklyOff === true && new Date(`${day}T12:00:00Z`).getUTCDay() === 0;
+}
+
 export interface DeviceEmployee {
   id: string;
   employeeNumber: string;
@@ -268,6 +276,7 @@ export const DEVICE_DAILY_COLUMNS = [
 ];
 
 export function buildDeviceDaily(args: {
+  rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
   day: string; // YYYY-MM-DD
@@ -285,7 +294,8 @@ export function buildDeviceDaily(args: {
   const rows: DeviceDailyRow[] = employees.map((emp) => {
     const record = byEmployee.get(emp.id);
     const rawPunches = punchesByDay.get(`${emp.id}|${day}`) ?? [];
-    const cells = buildDayCells(record, emp.shift, rawPunches);
+    const shift = reportShift(args.rosterShifts, emp, day, record);
+    const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, rawPunches);
     // Daily presence follows the dashboard's authorized raw punches, including
     // employees whose Attendance row has not yet been reconciled.
     if (rawPunches.length) {
@@ -294,7 +304,7 @@ export function buildDeviceDaily(args: {
       const last = rawPunches[rawPunches.length - 1];
       if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatClockIST(last.time);
     }
-    const status = rawPunches.length ? "P" : leaves.has(emp.id) ? "L" : "A";
+    const status = rawPunches.length ? "P" : args.holidays.has(day) ? "H" : leaves.has(emp.id) ? "L" : isWeeklyOff(day, shift) ? "WO" : "A";
     const attendanceStatus = record?.status ?? "Pending";
     const { earlyMinutes: _e, durationMinutes: _d, ...rest } = cells;
     return {
@@ -302,7 +312,7 @@ export function buildDeviceDaily(args: {
       code: emp.employeeNumber,
       name: fullName(emp),
       designation: emp.position ?? "—",
-      shift: shiftLabel(record?.shift ?? emp.shift),
+      shift: shiftLabel(shift),
       status,
       attendanceStatus,
     };
@@ -384,6 +394,7 @@ export const DEVICE_MONTHLY_COLUMNS = [
 const PRESENT_STATUSES = new Set(["present", "late", "permission", "half_day"]);
 
 export function buildDeviceMonthly(args: {
+  rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
   month: string; // YYYY-MM
@@ -412,21 +423,25 @@ export function buildDeviceMonthly(args: {
 
     const rows: DeviceMonthlyDayRow[] = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
-      const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const shift = reportShift(args.rosterShifts, emp, dayKey, record);
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       let status: string;
-      if (holidays.has(dayKey)) {
-        status = "H";
-        holidayCount++;
-      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
-        status = "L";
-        leaveCount++;
-      } else if (record && PRESENT_STATUSES.has(record.status)) {
+      if (record && PRESENT_STATUSES.has(record.status)) {
         status = record.status === "half_day" ? "½P" : "P";
         present++;
         lateSum += Math.max(0, record.lateMinutes);
         earlySum += cells.earlyMinutes;
         durationSum += cells.durationMinutes;
         otSum += Math.max(0, record.overtimeMinutes);
+      } else if (holidays.has(dayKey)) {
+        status = "H";
+        holidayCount++;
+      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+        status = "L";
+        leaveCount++;
+      } else if (isWeeklyOff(dayKey, shift)) {
+        status = "WO";
+        weeklyOffs++;
       } else {
         status = "A";
       }
@@ -434,7 +449,7 @@ export function buildDeviceMonthly(args: {
         day: idx + 1,
         dayKey,
         status,
-        shift: shiftLabel(record?.shift ?? emp.shift),
+        shift: shiftLabel(shift),
         inTime: status === "P" || status === "½P" ? cells.inTime : "",
         outTime: status === "P" || status === "½P" ? cells.outTime : "",
         lateBy: status === "P" || status === "½P" ? cells.late : "",
@@ -602,7 +617,8 @@ export function buildStatusMatrix(args: {
     const totals = { present: 0, absent: 0, leave: 0, holiday: 0, weekOff: 0 };
     const matrixDays = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
-      const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const shift = reportShift(args.rosterShifts, emp, dayKey, record);
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       const present = !!record && PRESENT_STATUSES.has(record.status);
       const isSunday = new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
       let status: string;
@@ -615,7 +631,7 @@ export function buildStatusMatrix(args: {
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         totals.leave++;
-      } else if (isSunday && (args.rosterShifts?.get(`${emp.id}|${dayKey}`) ?? record?.shift ?? emp.shift)?.sundayWeeklyOff === true) {
+      } else if (isWeeklyOff(dayKey, shift)) {
         status = "WO";
         totals.weekOff++;
       } else {
@@ -694,6 +710,7 @@ export interface DeviceWorkSummaryOutput {
 }
 
 export function buildWorkSummary(args: {
+  rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
   month: string; // YYYY-MM
@@ -720,7 +737,8 @@ export function buildWorkSummary(args: {
     let earlySum = 0;
     const rows: DeviceWorkSummaryRow[] = days.map((dayKey) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
-      const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const shift = reportShift(args.rosterShifts, emp, dayKey, record);
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       const present = !!record && PRESENT_STATUSES.has(record.status);
       let firstIn = "";
       let lastOut = "";
@@ -763,7 +781,7 @@ export function buildWorkSummary(args: {
       return {
         date: formatDDMMYYYY(dayKey),
         dayKey,
-        shift: shiftLabel(record?.shift ?? emp.shift),
+        shift: shiftLabel(shift),
         firstIn,
         lastOut,
         gross,
@@ -846,6 +864,7 @@ export interface DevicePerformanceOutput {
 }
 
 export function buildPerformance(args: {
+  rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
   month: string; // YYYY-MM
@@ -872,21 +891,25 @@ export function buildPerformance(args: {
     let otMin = 0;
     const rows: DevicePerformanceDay[] = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
-      const cells = buildDayCells(record, emp.shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const shift = reportShift(args.rosterShifts, emp, dayKey, record);
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       let status: string;
-      if (holidays.has(dayKey)) {
-        status = "H";
-        hld++;
-      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
-        status = "L";
-        leaveCount++;
-      } else if (record && PRESENT_STATUSES.has(record.status)) {
+      if (record && PRESENT_STATUSES.has(record.status)) {
         status = record.status === "half_day" ? "½P" : "P";
         present++;
         if (record.status === "half_day") half++;
         else fullPresent++;
         workMin += cells.durationMinutes;
         otMin += Math.max(0, record.overtimeMinutes);
+      } else if (holidays.has(dayKey)) {
+        status = "H";
+        hld++;
+      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+        status = "L";
+        leaveCount++;
+      } else if (isWeeklyOff(dayKey, shift)) {
+        status = "WO";
+        wo++;
       } else {
         status = "A";
       }
@@ -896,7 +919,7 @@ export function buildPerformance(args: {
         status,
         inTime: isP ? cells.inTime : "",
         outTime: isP ? cells.outTime : "",
-        shift: shiftHoursLabel(record?.shift ?? emp.shift),
+        shift: shiftHoursLabel(shift),
         late: isP ? cells.late : "",
         ot: isP ? cells.overtime : "",
         early: isP ? cells.early : "",

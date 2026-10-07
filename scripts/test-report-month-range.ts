@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseIST } from "../lib/ist";
 import { istDateKey } from "../lib/ist";
-import { buildStatusMatrix } from "../lib/device-report";
+import { buildStatusMatrix, buildDeviceMonthly, buildPerformance, buildDeviceDaily, buildWorkSummary } from "../lib/device-report";
 
 const month = "2026-02";
 const start = parseIST(`${month}-01 00:00:00`)!;
@@ -47,6 +47,22 @@ assert.equal(buildStatusMatrix({ ...base, rosterShifts: new Map([["e|2026-02-01"
 const sundayRecord = { employeeId: "e", date: start, status: "absent", lateMinutes: 0, overtimeMinutes: 0, punchInTime: null, punchOutTime: null, punches: [], shift: offShift };
 assert.equal(buildStatusMatrix({ ...base, records: [sundayRecord] }).blocks[0].days[0].status, "WO", "saved daily shift overrides employee default");
 assert.equal(buildStatusMatrix({ ...base, records: [sundayRecord], rosterShifts: new Map([["e|2026-02-01", workingShift]]) }).blocks[0].days[0].status, "A", "working roster overrides weekly-off daily shift");
+const scheduled = { ...base, rosterShifts: new Map([["e|2026-02-01", offShift]]) };
+const monthly = buildDeviceMonthly(scheduled).blocks[0];
+assert.equal(monthly.days[0].status, "WO");
+assert.equal(monthly.summary.weeklyOffs, 1);
+assert.equal(monthly.summary.absent, 27);
+const performance = buildPerformance(scheduled).blocks[0];
+assert.equal(performance.days[0].status, "WO");
+assert.equal(performance.totals.wo, 1);
+assert.equal(performance.totals.absent, 27);
+assert.equal(buildDeviceDaily({ ...scheduled, day: "2026-02-01" }).rows[0].status, "WO");
+assert.equal(buildDeviceDaily({ ...base, day: "2026-02-01" }).rows[0].status, "A");
+assert.match(buildWorkSummary({ ...scheduled, runBy: "Admin", generatedAt: "Test" }).blocks[0].rows[0].shift, /Sunday off/);
+const workedSunday = { ...scheduled, records: [{ ...sundayRecord, status: "present", punchInTime: parseIST("2026-02-01 09:00:00"), punchOutTime: parseIST("2026-02-01 18:00:00") }], holidays: new Set(["2026-02-01"]) };
+assert.equal(buildDeviceMonthly(workedSunday).blocks[0].days[0].status, "P", "worked holidays remain present in monthly attendance");
+assert.equal(buildPerformance(workedSunday).blocks[0].days[0].status, "P", "worked holidays remain present in performance");
+assert.equal(buildDeviceMonthly({ ...scheduled, leaves: new Set(["e|2026-02-01"]) }).blocks[0].days[0].status, "L");
 
 const nonWorkingDayPresentMatrix = buildStatusMatrix({
   tenant: { name: "Fixture Company" },

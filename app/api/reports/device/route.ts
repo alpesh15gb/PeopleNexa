@@ -222,10 +222,10 @@ export async function GET(req: NextRequest) {
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
     }),
-    kind === "status-matrix" ? prisma.rosterAssignment.findMany({
+    prisma.rosterAssignment.findMany({
       where: { tenantId: session.tenantId, employeeId: { in: pageIds }, date: { gte: rangeStart, lt: rangeEnd } },
       select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } } },
-    }) : Promise.resolve([]),
+    }),
   ]);
 
   // Tenant-holiday IST day keys (recurring holidays match on MM-DD).
@@ -264,6 +264,7 @@ export async function GET(req: NextRequest) {
     punchesByDay.get(key)!.push({ time: p.punchTime, type: p.inOutHint });
   }
 
+  const rosterShifts = new Map(rosters.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r.shift]));
   const tenantInfo = { name: tenant?.name ?? "Company" };
   const branchInfo = branch ? { name: branch.name } : location ? { name: location.name } : null;
   const departmentInfo = department ? { name: department.name } : null;
@@ -274,6 +275,7 @@ export async function GET(req: NextRequest) {
       if (key.endsWith(`|${dayKey}`)) dailyLeaves.add(key.slice(0, -(dayKey.length + 1)));
     }
     const output: DeviceDailyOutput = buildDeviceDaily({
+      rosterShifts,
       tenant: tenantInfo,
       branch: branchInfo,
       day: dayKey,
@@ -289,6 +291,7 @@ export async function GET(req: NextRequest) {
 
   if (kind === "monthly") {
     const output: DeviceMonthlyOutput = buildDeviceMonthly({
+      rosterShifts,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -304,7 +307,7 @@ export async function GET(req: NextRequest) {
 
   if (kind === "status-matrix") {
     const output: DeviceStatusMatrixOutput = buildStatusMatrix({
-      rosterShifts: new Map(rosters.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r.shift])),
+      rosterShifts,
       tenant: tenantInfo,
       branch: branchInfo,
       department: departmentInfo,
@@ -332,6 +335,7 @@ export async function GET(req: NextRequest) {
       timeZone: "Asia/Kolkata",
     }).format(new Date());
     const output: DeviceWorkSummaryOutput = buildWorkSummary({
+      rosterShifts,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -348,6 +352,7 @@ export async function GET(req: NextRequest) {
   }
 
   const output: DevicePerformanceOutput = buildPerformance({
+      rosterShifts,
     tenant: tenantInfo,
     branch: branchInfo,
     month: monthKey,
