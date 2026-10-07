@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name, start time and end time are required." }, { status: 400 });
     }
     const name = String(body.name).trim();
+    if (body.singlePunchHalfDay !== undefined && typeof body.singlePunchHalfDay !== "boolean") return NextResponse.json({ error: "Single-punch half day must be true or false." }, { status: 400 });
     if (body.sundayWeeklyOff !== undefined && typeof body.sundayWeeklyOff !== "boolean") return NextResponse.json({ error: "Sunday weekly off must be true or false." }, { status: 400 });
     const exists = await prisma.shift.findFirst({ where: { tenantId: session.tenantId, name } });
     if (exists) return NextResponse.json({ error: "A shift with this name already exists." }, { status: 400 });
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
         graceMinutes,
         isNightShift: Boolean(body.isNightShift),
         sundayWeeklyOff: body.sundayWeeklyOff ?? false,
+        singlePunchHalfDay: body.singlePunchHalfDay ?? false,
       },
     });
     return NextResponse.json({ shift }, { status: 201 });

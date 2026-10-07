@@ -414,6 +414,10 @@ export async function reconcileEmployeeDay(
   }
   if (automatic && !shift && punches.length > 0) reviewStatus = "needs_review";
   if (punches.length > 0 && (!inAt || !outAt)) reviewStatus = "missed_punch";
+  if (shift?.singlePunchHalfDay && punches.length === 1) {
+    reviewStatus = null;
+    if (finalize) { status = "half_day"; lateMinutes = 0; }
+  }
 
   const existing = await prisma.attendance.findUnique({
     where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },
@@ -465,6 +469,7 @@ export async function reconcileEmployeeDay(
     finalized: finalize,
     reviewStatus,
     note: automatic && !shift ? "Automatic shift could not be matched; review the IN punch and branch shift windows." : finalize ? null : "pending finalization",
+    ...(shift?.singlePunchHalfDay && punches.length === 1 ? { overtimeMinutes: 0 } : {}),
   };
 
   let attendance: Attendance;

@@ -96,6 +96,23 @@ assert.deepEqual(updateData, { shiftId: evening.id }, "backfill changes only shi
 assert.equal(updateFilter.finalized, false, "concurrent finalization remains protected at write time");
 assert.equal(updateFilter.shiftId, null, "an existing selected shift cannot be overwritten");
 assert.equal(updateFilter.employee.branchId, "configured");
+roster = { shift: { ...morning, singlePunchHalfDay: true }, shiftId: morning.id };
+saved = {};
+punches = [punch("2026-10-06 08:00:00")];
+await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
+assert.equal(saved.status, "half_day", "saved shift rule applies half-day absence to one punch");
+assert.equal(saved.reviewStatus, null, "configured single-punch treatment does not require review");
+assert.equal(saved.punchOutTime, null, "half-day treatment never fabricates OUT");
+assert.equal(saved.overtimeMinutes, 0);
+punches = [punch("2026-10-06 18:00:00", "out")];
+await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
+assert.equal(saved.status, "half_day", "OUT-only single punch follows the same rule");
+assert.equal(saved.punchInTime, null, "OUT-only attendance never fabricates IN");
+assert.equal(saved.reviewStatus, null);
+roster = { shift: { ...morning, singlePunchHalfDay: false }, shiftId: morning.id };
+punches = [punch("2026-10-06 08:00:00")];
+await reconcileEmployeeDay({ id: "tenant", config: null }, employee(), day, { finalize: true });
+assert.equal(saved.reviewStatus, "missed_punch", "unchecked rule retains existing treatment");
 console.log("automatic shift tests passed");
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

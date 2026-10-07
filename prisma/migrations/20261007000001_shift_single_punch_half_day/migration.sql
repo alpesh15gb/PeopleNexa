@@ -1,0 +1,1 @@
+ALTER TABLE "Shift" ADD COLUMN "singlePunchHalfDay" BOOLEAN NOT NULL DEFAULT false;
