@@ -96,7 +96,7 @@ export function pairPunches(
       id: p.id,
       time: p.punchTime.toISOString(),
       source: p.source,
-      type: isFirst ? "in" : isLast ? "out" : "auto",
+      type: p.inOutHint === "in" ? "in" : p.inOutHint === "out" ? "out" : isFirst ? "in" : isLast ? "out" : "auto",
       deviceSn: deviceSerialByPunch.get(p.id) ?? null,
     });
   });
@@ -137,7 +137,8 @@ export function attendanceWindow(
 ): { start: Date; end: Date } {
   if (shift) return shiftWindow(istDay, shift);
   const start = noShiftStartedAt ?? istStartOfDay(istDay);
-  return { start, end: new Date(start.getTime() + noShiftAttendanceWindowHours * 3600 * 1000) };
+  const midnightEnd = istStartOfDay(istDay).getTime() + 86400000;
+  return { start, end: new Date(Math.min(start.getTime() + noShiftAttendanceWindowHours * 3600 * 1000, midnightEnd)) };
 }
 
 /**
@@ -232,14 +233,7 @@ export async function attendanceDayForPunch(
     if (instant >= previousWindow.start && instant < previousWindow.end) return previousDay;
   }
   if (previousRoster) return today;
-  if (!previousShift) {
-    const policy = await payrollPolicyForEmployeeDay(employee.tenantId, employee, previousDay);
-    const priorAttendance = await prisma.attendance.findUnique({ where: { employeeId_date: { employeeId: employee.id, date: previousDay } }, select: { punchInTime: true } });
-    const previousWindow = attendanceWindow(previousDay, null, policy?.attendanceTreatment.noShiftAttendanceWindowHours, priorAttendance?.punchInTime);
-    // Only carry a next-day punch back when the prior workday already has a
-    // punch. A new day's first IN must never be claimed by yesterday.
-    if (priorAttendance?.punchInTime && instant >= previousWindow.start && instant < previousWindow.end) return previousDay;
-  }
+  // Without a configured overnight shift, next-day punches belong to today.
   return punchDayForShift(instant, todayRoster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null));
 }
 
@@ -419,6 +413,7 @@ export async function reconcileEmployeeDay(
     }
   }
   if (automatic && !shift && punches.length > 0) reviewStatus = "needs_review";
+  if (punches.length > 0 && (!inAt || !outAt)) reviewStatus = "missed_punch";
 
   const existing = await prisma.attendance.findUnique({
     where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },

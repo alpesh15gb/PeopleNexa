@@ -199,6 +199,7 @@ function buildDayCells(
     durationMinutes: 0,
   };
   if (!record) return empty;
+  if (!record.shift && !employeeShift && record.punchInTime && record.punchOutTime && istDateKey(record.punchInTime) !== istDateKey(record.punchOutTime)) return { ...empty, inTime: formatClockIST(record.punchInTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
   if (attendanceRequiresReview(record)) return { ...empty, inTime: formatClockIST(record.punchInTime), outTime: formatClockIST(record.punchOutTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
   const inTime = formatClockIST(record.punchInTime);
   const outTime = formatClockIST(record.punchOutTime);
@@ -749,7 +750,11 @@ export function buildWorkSummary(args: {
       let gross = "";
       let requiresReview = record ? attendanceRequiresReview(record) : false;
       if (record) {
-        const { first, last } = firstLastInstants(record.punches, punchesByDay.get(`${emp.id}|${dayKey}`));
+        // Use the reconciled pair, never infer an OUT from the final raw punch.
+        const first = record.punchInTime;
+        const crossDayWithoutShift = !shift && first && record.punchOutTime && istDateKey(first) !== istDateKey(record.punchOutTime);
+        const last = crossDayWithoutShift ? null : record.punchOutTime;
+        requiresReview ||= Boolean(crossDayWithoutShift);
         if (first && last) {
           requiresReview ||= attendanceRequiresReview({ punchInTime: first, punchOutTime: last });
           firstIn = formatClockIST(first);

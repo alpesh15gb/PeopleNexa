@@ -20,7 +20,7 @@ assert.equal(missingOutAttendanceStatus(false, new Date(), null, "half_day"), nu
 
 const noShiftIn = ist("2026-08-12 09:00:00");
 const noShiftWindow = attendanceWindow(nightDay, null, 18, noShiftIn);
-assert.equal(noShiftWindow.end.toISOString(), ist("2026-08-13 03:00:00").toISOString(), "no-shift window closes after the configured duration from the first punch");
+assert.equal(noShiftWindow.end.toISOString(), ist("2026-08-13 00:00:00").toISOString(), "without an overnight shift the window stops at IST midnight");
 assert.equal(isFinalizable(nightDay, ist("2026-08-13 05:01:00"), null, 18, noShiftIn), true, "no-shift IN-only days finalize after their window and normal grace");
 assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, "half_day"), "half_day", "a finalized no-shift IN-only day follows the location half-day policy");
 assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, "full_day"), "absent", "a finalized no-shift IN-only day follows the location full-day policy");
@@ -28,8 +28,14 @@ assert.equal(missingOutAttendanceStatus(true, ist("2026-08-12 09:00:00"), null, 
 const pairedNoShiftPunches = pairPunches([
   { id: "in", punchTime: ist("2026-08-12 09:00:00"), source: "device", inOutHint: "unknown", deviceId: null },
   { id: "out", punchTime: ist("2026-08-13 02:00:00"), source: "device", inOutHint: "unknown", deviceId: null },
-] as never, "first_last", new Map());
-assert.deepEqual(pairedNoShiftPunches.map((p) => p.type), ["in", "out"], "a next-day punch within the no-shift window pairs with the original workday");
+] .filter((p) => p.punchTime < attendanceWindow(nightDay, null, 24, noShiftIn).end) as never, "first_last", new Map());
+assert.deepEqual(pairedNoShiftPunches.map((p) => p.type), ["in"], "a missing OUT stays missing; the next-day punch is outside this day");
 assert.deepEqual(attendanceWindow(nightDay, dayShift, 18), shiftWindow(nightDay, dayShift), "configured no-shift windows do not change shift attendance windows");
 
 console.log("attendance day-key tests passed");
+const repeatedIns = pairPunches([
+  { id: "one", punchTime: ist("2026-08-12 09:00:00"), source: "device", inOutHint: "in", deviceId: null },
+  { id: "two", punchTime: ist("2026-08-12 10:00:00"), source: "device", inOutHint: "in", deviceId: null },
+] as never, "first_last", new Map());
+assert.equal(repeatedIns.some((p) => p.type === "out"), false, "repeated IN punches cannot become OUT");
+assert.equal(ist("2026-08-13 08:00:00") < attendanceWindow(nightDay, null, 24, noShiftIn).end, false, "next morning is excluded from an unassigned day");
