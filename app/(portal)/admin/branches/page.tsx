@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
+import { BulkShiftPanel } from "./bulk-shift-panel";
 import { BranchesManager } from "./branches-manager";
 import { AutomaticShiftsPanel } from "./automatic-shifts-panel";
 import { AUTOMATIC_SHIFT_KIND } from "@/lib/automatic-shifts";
@@ -39,6 +40,7 @@ export default async function AdminBranchesPage() {
         title="Branches"
         description="Manage office branches and their GPS geofences. Assign branches to a location from Locations."
       />
+      {session.role === "admin" && <BulkShiftPanel branches={branches} shifts={shifts} />}
       <Card>
         <CardContent className="p-0">
           {branches.length === 0 ? (
