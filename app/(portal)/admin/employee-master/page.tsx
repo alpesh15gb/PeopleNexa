@@ -12,6 +12,7 @@ import { EmployeeDeviceAccess } from "./employee-device-access";
 import { EmployeeTransfer } from "./employee-transfer";
 import { EmployeeStatusAction } from "./employee-status-action";
 import { EmployeeMasterImportExport } from "./employee-master-import-export";
+import { EmployeeMasterList } from "./employee-master-list";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +62,7 @@ function DetailGrid({ fields }: { fields: Field[] }) {
 export default async function EmployeeMasterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ employee?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ employee?: string; q?: string; page?: string; status?: string }>;
 }) {
   const session = await requireActiveSession();
   const isAdmin = session.role === "admin";
@@ -75,9 +76,10 @@ export default async function EmployeeMasterPage({
   const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : isBranchManager ? { branchId: branchId ?? "__unassigned_branch__" } : {};
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
+  const status = params.status === "active" || params.status === "inactive" ? params.status : "all";
   const pageSize = 50;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
-  const where = {
+  const baseWhere = {
     tenantId: session.tenantId,
     loginOnly: false,
     ...locationScope,
@@ -90,11 +92,12 @@ export default async function EmployeeMasterPage({
       ],
     } : {}),
   };
-  const [total, employees, branches, departments, shifts, managers, positions, subdepartments] = await Promise.all([
+  const where = { ...baseWhere, ...(status !== "all" ? { status } : {}) };
+  const [total, employees, branches, departments, shifts, managers, positions, subdepartments, statusGroups] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({
       where,
-      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, branch: { select: { name: true } } },
+      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, branch: { select: { name: true } } },
       orderBy: { employeeNumber: "asc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -105,11 +108,12 @@ export default async function EmployeeMasterPage({
     prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, status: "active", ...locationScope }, select: { id: true, firstName: true, lastName: true, employeeNumber: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
     prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, position: { not: null }, ...locationScope }, distinct: ["position"], select: { position: true }, orderBy: { position: "asc" } }),
     prisma.employeeEmploymentProfile.findMany({ where: { subDepartment: { not: null }, employee: { tenantId: session.tenantId, loginOnly: false, ...locationScope } }, distinct: ["subDepartment"], select: { subDepartment: true }, orderBy: { subDepartment: "asc" } }),
+    prisma.employee.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
   ]);
   const selectedId = params.employee ?? employees[0]?.id;
   const employee = selectedId
     ? await prisma.employee.findFirst({
-        where: { id: selectedId, tenantId: session.tenantId, loginOnly: false, ...locationScope },
+        where: { id: selectedId, ...where },
         include: {
           branch: true,
           department: true,
@@ -130,7 +134,12 @@ export default async function EmployeeMasterPage({
     : {};
   const scheduledTransfer = employee?.transfers[0];
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const listHref = (nextPage: number) => `/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(nextPage) })}`;
+  if (page > pageCount) redirect(`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), status, page: String(pageCount) })}`);
+  const counts = {
+    all: statusGroups.reduce((sum, group) => sum + group._count._all, 0),
+    active: statusGroups.find((group) => group.status === "active")?._count._all ?? 0,
+    inactive: statusGroups.find((group) => group.status === "inactive")?._count._all ?? 0,
+  };
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -151,27 +160,15 @@ export default async function EmployeeMasterPage({
         <Card className="h-fit xl:sticky xl:top-6">
           <CardHeader>
             <CardTitle>Employees</CardTitle>
-            <CardDescription>{total} employee{total === 1 ? "" : "s"} in the master</CardDescription>
+            <CardDescription>{total} {status === "all" ? "" : `${status} `}employee{total === 1 ? "" : "s"}{query ? " matching your search" : " in the master"}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <form action="/admin/employee-master" className="flex gap-2">
+              <input type="hidden" name="status" value={status} />
               <input name="q" defaultValue={query} placeholder="Name, code, device ID" className="min-w-0 flex-1 rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
               <button className="rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint" type="submit">Find</button>
             </form>
-            <div className="max-h-[60vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">
-              {employees.map((item) => (
-                <div key={item.id} className={`flex items-center gap-1 px-3 py-3 transition-colors hover:bg-tint ${item.id === employee?.id ? "bg-primary/[0.08]" : ""}`}>
-                  <Link href={`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), page: String(page), employee: item.id })}`} className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
-                    <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber} · {item.deviceCode ?? "No device ID"}</p>
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
-                  </Link>
-                  {(isAdmin || isLocationManager) && <EmployeeStatusAction compact employeeId={item.id} employeeName={`${item.firstName} ${item.lastName}`} status={item.status} />}
-                </div>
-              ))}
-              {!employees.length && <p className="p-5 text-center text-sm text-muted-foreground">No employees found.</p>}
-            </div>
-            {pageCount > 1 && <div className="flex items-center justify-between text-xs"><Link href={listHref(Math.max(1, page - 1))} aria-disabled={page === 1} className={page === 1 ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Previous</Link><span className="text-muted-foreground">Page {page} of {pageCount}</span><Link href={listHref(Math.min(pageCount, page + 1))} aria-disabled={page === pageCount} className={page === pageCount ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Next</Link></div>}
+            <EmployeeMasterList key={`${query}:${status}:${page}`} employees={employees} selectedId={employee?.id} query={query} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} />
           </CardContent>
         </Card>
 

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { istDateKey } from "@/lib/ist";
 import { monthKeyIST } from "@/lib/dates";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import { ReportControls } from "./report-controls";
 import { DeviceTables } from "./device-tables";
 import Link from "next/link";
 import { Download } from "lucide-react";
+import { inactiveEmployeeReportSelect, inactiveEmployeeReportWhere } from "@/lib/inactive-employee-report";
 
 export const dynamic = "force-dynamic";
 
@@ -32,9 +33,9 @@ const DEVICE_KIND_BY_TYPE: Record<string, "daily" | "monthly" | "status-matrix" 
 export default async function AdminReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; departmentId?: string; date?: string; month?: string; branchId?: string }>;
+  searchParams: Promise<{ type?: string; departmentId?: string; date?: string; month?: string; branchId?: string; q?: string }>;
 }) {
-  const session = await requireSession();
+  const session = await requireActiveSession();
   const params = await searchParams;
   const type = KNOWN_TYPES.has(params.type ?? "") ? params.type! : "device-daily";
 
@@ -66,8 +67,8 @@ export default async function AdminReportsPage({
   const deviceDepartmentId = params.departmentId ?? "";
   const kind = DEVICE_KIND_BY_TYPE[type];
   const inactiveEmployees = type === "inactive-employees" ? await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "inactive", ...(forcedBranchId ? { branchId: forcedBranchId } : forcedLocationId ? { branch: { locationId: forcedLocationId } } : {}), ...(params.branchId ? { branchId: params.branchId } : {}), ...(params.departmentId ? { departmentId: params.departmentId } : {}) },
-    select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, branch: { select: { name: true } }, department: { select: { name: true } } },
+    where: inactiveEmployeeReportWhere({ tenantId: session.tenantId, role: session.role, manager, branchId: params.branchId, departmentId: params.departmentId, query: params.q }),
+    select: inactiveEmployeeReportSelect,
     orderBy: { employeeNumber: "asc" },
   }) : null;
   const qs = new URLSearchParams({ kind });
@@ -76,6 +77,10 @@ export default async function AdminReportsPage({
   if (deviceBranchId) qs.set("branchId", deviceBranchId);
   if (deviceDepartmentId) qs.set("departmentId", deviceDepartmentId);
   const apiUrl = `/api/reports/device?${qs.toString()}`;
+  const inactiveExportParams = new URLSearchParams();
+  if (params.branchId) inactiveExportParams.set("branchId", params.branchId);
+  if (params.departmentId) inactiveExportParams.set("departmentId", params.departmentId);
+  if (params.q?.trim()) inactiveExportParams.set("q", params.q.trim());
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -106,6 +111,18 @@ export default async function AdminReportsPage({
           />
         </CardContent>
       </Card>
+      {inactiveEmployees && <div className="flex flex-wrap items-center justify-between gap-3">
+        <form action="/admin/reports" className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="type" value="inactive-employees" />
+          {params.branchId && <input type="hidden" name="branchId" value={params.branchId} />}
+          {params.departmentId && <input type="hidden" name="departmentId" value={params.departmentId} />}
+          <input key={params.q ?? ""} type="search" name="q" defaultValue={params.q ?? ""} aria-label="Search inactive employees" placeholder="Name, employee code or device code" className="h-11 w-full rounded-lg border border-edge bg-card px-3 text-sm sm:w-80" />
+          <button type="submit" className="h-11 rounded-lg border border-edge px-4 text-sm font-medium hover:bg-tint">Search</button>
+          <span className="text-sm text-muted-foreground">{inactiveEmployees.length} inactive employee{inactiveEmployees.length === 1 ? "" : "s"}</span>
+        </form>
+        <a href={`/api/reports/inactive-employees?${inactiveExportParams}`} className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground"><Download aria-hidden="true" className="h-4 w-4" /> Export Excel</a>
+        {(session.role === "admin" || session.role === "location_manager") && <a href={`/api/reports/master-data?status=inactive&${inactiveExportParams}`} className="inline-flex h-11 items-center gap-2 rounded-lg border border-edge bg-card px-4 text-sm font-medium hover:bg-tint"><Download aria-hidden="true" className="h-4 w-4" /> Export all details</a>}
+      </div>}
       {/* key remounts per URL: without it a kind switch renders one frame with
           the previous kind's data shape (e.g. daily {rows} into a monthly
           table expecting {blocks}) and crashes before the refetch clears it. */}

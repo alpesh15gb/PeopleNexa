@@ -34,6 +34,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     select: { id: true, firstName: true, lastName: true, role: true, status: true },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (body.bulkSelection === true && ["admin", "branch_manager", "location_manager"].includes(employee.role)) {
+    return NextResponse.json({ error: "Use individual status controls for privileged accounts." }, { status: 400 });
+  }
+  if (body.bulkSelection === true && employee.status === status) {
+    return NextResponse.json({ unchanged: true, deviceFailures: [] });
+  }
   if (session.role === "location_manager" && ["admin", "branch_manager", "location_manager"].includes(employee.role)) {
     return NextResponse.json({ error: "Location managers cannot change privileged account status." }, { status: 403 });
   }

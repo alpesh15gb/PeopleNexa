@@ -1,8 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { formatDateIST as formatIstDate } from "@/lib/dates";
+import { inactiveEmployeeReportWhere } from "@/lib/inactive-employee-report";
+import { employeeExportSourceFields } from "@/lib/employee-export-source";
 
 type Cell = string | number | boolean | null | undefined;
 
@@ -48,7 +50,7 @@ function addSheet(workbook: ExcelJS.Workbook, name: string, headers: string[], r
   return sheet;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -57,13 +59,18 @@ export async function GET() {
     ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
     : null;
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const params = req.nextUrl.searchParams;
+  const inactiveOnly = params.get("status") === "inactive";
 
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
+    where: inactiveOnly
+      ? inactiveEmployeeReportWhere({ tenantId: session.tenantId, role: session.role, manager: { locationId: locationId ?? null, branchId: null }, branchId: params.get("branchId") ?? "", departmentId: params.get("departmentId") ?? "", query: params.get("q") ?? "" })
+      : { tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
     select: {
       employeeNumber: true, deviceCode: true, firstName: true, lastName: true, email: true, phone: true, status: true, position: true, joiningDate: true,
-      salary: true, payMode: true, workBasisRate: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, aadhaarNumber: true,
+      salary: true, salaryStructure: true, payMode: true, workBasisRate: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, aadhaarNumber: true,
       drivingLicenseNumber: true, drivingLicenseType: true, drivingLicenseExpiresAt: true,
+      esiIpNumber: true, drivingLicenseClassification: true, drivingLicenseIssuedAt: true, idCardIssuedAt: true, idCardValidUntil: true, legacyImportData: true,
       branch: { select: { name: true, location: { select: { name: true } } } }, department: { select: { name: true } }, shift: { select: { name: true } }, manager: { select: { employeeNumber: true, firstName: true, lastName: true } },
       profile: true, employmentProfile: true, dependents: true, references: true, bankAccounts: true,
       education: true, workExperience: true,
@@ -80,12 +87,16 @@ export async function GET() {
     "PAN", "UAN", "Aadhaar Number", "Driving Licence Number", "Driving Licence Type", "Driving Licence Expiry",
     "Middle Name", "Name as on Aadhaar", "Nickname", "Gender", "Birth Date (Certificate)", "Actual Birth Date", "Celebration Preference", "Marital Status", "Spouse Name", "Spouse Contact Number", "Marriage Date", "Blood Group", "WhatsApp Number", "Other Mobile", "Personal Email", "Place of Birth", "Nationality", "Citizenship", "Father Name", "Mother Name", "Emergency Contact Name", "Emergency Contact Number", "Emergency Contact Relation", "Current Address", "Permanent Address",
     "Rejoining Date", "Employment Mode", "Nature of Employment", "Probation Period", "Total Experience", "Salary Group", "CTC", "Salary Payment Mode", "Pay Salary From", "TDS Allowed", "PF Allowed", "ESIC Allowed", "PT Location", "Auto Credit Leave", "Sub Department", "Grade", "Vehicle Category", "Vehicle Class", "Vehicle Subclass", "Licence Required", "Extension Number", "Second Manager Code", "HR Manager Code",
+    "Bank Name", "Bank Account Number", "IFSC Code", "Salary Components",
+    "ESI / IP Number", "Driving Licence Classification", "Driving Licence Issue Date", "ID Card Issue Date", "ID Card Valid Until",
   ], employees.map((employee) => {
     const profile = employee.profile; const employment = employee.employmentProfile;
     return [employee.employeeNumber, employee.deviceCode, employee.firstName, employee.lastName, employee.email, employee.phone, employee.status, employee.position, formatDateIST(employee.joiningDate), employee.branch?.location?.name, employee.branch?.name, employee.department?.name, employee.shift?.name, employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "", employee.payMode, employee.salary, employee.workBasisRate,
       employee.pan, employee.uan, employee.aadhaarNumber, employee.drivingLicenseNumber, employee.drivingLicenseType, formatDateIST(employee.drivingLicenseExpiresAt),
        profile?.middleName, profile?.nameAsOnAadhaar, profile?.nickName, profile?.gender, formatDateIST(profile?.dateOfBirthCertificate), formatDateIST(profile?.actualDateOfBirth), profile?.celebrateDatePreference, profile?.maritalStatus, profile?.maritalStatus === "Married" ? profile.spouseName : "", profile?.maritalStatus === "Married" ? profile.spouseContactNumber : "", formatDateIST(profile?.marriageDate), profile?.bloodGroup, profile?.whatsappNumber, profile?.otherMobile, profile?.personalEmail, profile?.placeOfBirth, profile?.nationality, profile?.citizenship, profile?.fatherName, profile?.motherName, profile?.emergencyContactName, profile?.emergencyContactNumber, profile?.emergencyContactRelation, address(profile?.currentAddress), address(profile?.permanentAddress),
-      formatDateIST(employment?.rejoiningDate), employment?.employmentMode, employment?.natureOfEmployment, employment?.probationPeriod, employment?.totalExperience, employment?.salaryGroup, employment?.ctc, employment?.salaryPaymentMode, employment?.paySalaryFrom, yesNo(employment?.tdsAllowed), yesNo(employment?.pfAllowed), yesNo(employment?.esicAllowed), employment?.ptLocation, yesNo(employment?.autoCreditLeave), employment?.subDepartment, employment?.grade, employment?.vehicleCategory, employment?.vehicleClass, employment?.vehicleSubClass, yesNo(employment?.licenseRequired), employment?.extensionNumber, employment?.secondManagerCode, employment?.hrManagerCode];
+      formatDateIST(employment?.rejoiningDate), employment?.employmentMode, employment?.natureOfEmployment, employment?.probationPeriod, employment?.totalExperience, employment?.salaryGroup, employment?.ctc, employment?.salaryPaymentMode, employment?.paySalaryFrom, yesNo(employment?.tdsAllowed), yesNo(employment?.pfAllowed), yesNo(employment?.esicAllowed), employment?.ptLocation, yesNo(employment?.autoCreditLeave), employment?.subDepartment, employment?.grade, employment?.vehicleCategory, employment?.vehicleClass, employment?.vehicleSubClass, yesNo(employment?.licenseRequired), employment?.extensionNumber, employment?.secondManagerCode, employment?.hrManagerCode,
+      employee.bankName, employee.accountNumber, employee.ifscCode, employee.salaryStructure == null ? "" : JSON.stringify(employee.salaryStructure),
+      employee.esiIpNumber, employee.drivingLicenseClassification, formatDateIST(employee.drivingLicenseIssuedAt), formatDateIST(employee.idCardIssuedAt), formatDateIST(employee.idCardValidUntil)];
   }));
   addSheet(workbook, "Bank Accounts", ["Employee Number", "Account Holder", "Account Number", "IFSC Code", "Bank Name", "Bank Branch", "Account Type", "Status", "Primary Account"], employees.flatMap((employee) => employee.bankAccounts.map((account) => [employee.employeeNumber, account.accountHolder, account.accountNumber, account.ifscCode, account.bankName, account.bankBranch, account.accountType, account.status, yesNo(account.isPrimary)])));
   addSheet(workbook, "Education", ["Employee Number", "Qualification", "Specialization", "Institution", "Board", "Completion Year", "Grade", "Course Type", "Education Mode", "Start Date"], employees.flatMap((employee) => employee.education.map((entry) => [employee.employeeNumber, entry.qualification, entry.specialization, entry.institution, entry.board, entry.completionYear, entry.grade, entry.courseType, entry.educationMode, formatDateIST(entry.startDate)])));
@@ -93,7 +104,8 @@ export async function GET() {
   addSheet(workbook, "Dependents", ["Employee Number", "First Name", "Middle Name", "Last Name", "Relation", "Date of Birth", "Aadhaar Number", "Mobile", "Email", "Occupation", "Nominee Share (%)", "Address"], employees.flatMap((employee) => employee.dependents.map((entry) => [employee.employeeNumber, entry.firstName, entry.middleName, entry.lastName, entry.relation, formatDateIST(entry.dateOfBirth), entry.aadhaarNumber, entry.mobile, entry.email, entry.occupation, entry.nomineeShare, entry.address])));
   addSheet(workbook, "References", ["Employee Number", "Name", "Relation", "Mobile", "Email", "Occupation", "Address"], employees.flatMap((employee) => employee.references.map((entry) => [employee.employeeNumber, entry.name, entry.relation, entry.mobile, entry.email, entry.occupation, entry.address])));
   addSheet(workbook, "Documents", ["Employee Number", "Document Name", "Document Type", "Document Number", "Issue Date", "Expiry Date", "File URL", "Notes"], employees.flatMap((employee) => employee.documents.map((entry) => [employee.employeeNumber, entry.name, entry.docType, entry.number, formatDateIST(entry.issuedDate), formatDateIST(entry.expiryDate), entry.fileUrl, entry.notes])));
+  addSheet(workbook, "Imported HR Details", ["Employee Number", "Source Field", "Value"], employees.flatMap((employee) => employeeExportSourceFields(employee.legacyImportData).map(([field, value]) => [employee.employeeNumber, field, value])));
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return new NextResponse(Buffer.from(buffer), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": 'attachment; filename="peoplenexa-employee-master.xlsx"' } });
+  return new NextResponse(Buffer.from(buffer), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${inactiveOnly ? "inactive-employees-all-details" : "peoplenexa-employee-master"}.xlsx"`, "Cache-Control": "private, no-store" } });
 }
