@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ManualAttendancePanel } from "./manual-attendance-panel";
 import { PayrollNavigation } from "@/components/payroll-navigation";
 import { useRouter } from "next/navigation";
 import {
@@ -503,6 +504,7 @@ export function PayrollPanel({
           </Badge>
         </section>
         {sourceIssues.length > 0 && <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5"><h2 className="font-semibold">Resolve before continuing</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul><p className="mt-3 text-sm text-muted-foreground">For reviewed or approved runs, use Advanced tools to return to draft. Correct the inputs and regenerate affected payslips.</p></section>}
+        {locationId && <ManualAttendancePanel key={`${locationId}:${month}:${payroll?.id ?? "new"}`} month={month} locationId={locationId} runId={payroll?.id} includedEmployeeIds={rows.filter(row => row.payslip).map(row => row.employee.id)} editable={!payroll || payroll.status === "draft"} />}
         {generationIssues.length > 0 && (
           <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
             <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>

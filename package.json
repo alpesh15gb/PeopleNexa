@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test:payroll": "tsx scripts/test-payroll-lop.ts",
+    "test:payroll-attendance-import": "tsx scripts/test-payroll-attendance-import.ts",
     "test:payroll-configurable": "tsx scripts/test-payroll-configurable-proration.ts",
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
     "test:attendance-financial-safety": "tsx scripts/test-attendance-financial-safety.ts",

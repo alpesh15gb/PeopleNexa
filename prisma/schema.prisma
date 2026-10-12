@@ -11,6 +11,45 @@ datasource db {
   provider = "postgresql"
 }
 
+// Original client workbooks and immutable reviewed payroll inputs. Files are
+// private and accessible only through the scoped payroll API.
+model PayrollAttendanceImport {
+  id           String   @id @default(cuid())
+  tenantId     String
+  locationId   String
+  month        String
+  fileName     String
+  storageKey   String   @unique
+  sourceHash   String
+  sheet        String?
+  rows         Json?
+  reviewedRows Json?
+  uploadedBy   String
+  reviewedBy   String?
+  createdAt    DateTime @default(now())
+  reviewedAt   DateTime?
+
+  @@index([tenantId, locationId, month, createdAt])
+}
+
+// One credit per employee/source month; replacement runs cannot double-credit.
+model PayrollAttendanceCredit {
+  id             String   @id @default(cuid())
+  tenantId       String
+  employeeId     String
+  month          String
+  payrollRunId   String
+  uploadId       String
+  workedDays     Float
+  earnedDays     Float
+  availableOn    DateTime
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  @@unique([tenantId, employeeId, month])
+  @@index([tenantId, employeeId, availableOn])
+}
+
 // ─── Tenant (one client / company) ─────────────────────────────────────────
 
 model Tenant {

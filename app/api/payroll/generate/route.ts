@@ -11,6 +11,7 @@ import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { resolveSalaryRevision } from "@/lib/salary-revisions";
 import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
 import { payrollGenerationTotals, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
+import type { ReviewedAttendanceRow } from "@/lib/payroll-attendance-import";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -43,6 +44,14 @@ export async function POST(req: NextRequest) {
   const locationId = scope.locationId;
   const scopeKey = `location:${locationId}`;
   const periodAt = payrollMonthAnchor(month);
+  const manualUpload = typeof body.attendanceUploadId === "string" ? body.attendanceUploadId : undefined;
+  let manualRows: ReviewedAttendanceRow[] = [];
+  if (manualUpload) {
+    const upload = await prisma.payrollAttendanceImport.findFirst({ where: { id: manualUpload, tenantId: session.tenantId, locationId, month, reviewedAt: { not: null } } });
+    if (!upload?.reviewedRows) return NextResponse.json({ error: "Review this location/month attendance upload first." }, { status: 400 });
+    manualRows = (upload.reviewedRows as unknown as ReviewedAttendanceRow[]).filter(row => !row.excluded);
+    if (body.selectionMode !== "selected" || !Array.isArray(body.employeeIds) || body.employeeIds.some((id: unknown) => !manualRows.some(row => row.employeeId === id))) return NextResponse.json({ error: "Select only employees included in the reviewed upload." }, { status: 400 });
+  }
   const selectionMode =
     body.selectionMode === "selected" ? "selected" : "all_eligible";
   const submittedEmployeeIds: unknown[] = Array.isArray(body.employeeIds)
@@ -127,7 +136,7 @@ export async function POST(req: NextRequest) {
       prisma.employee.findMany({
         where: {
           tenantId: session.tenantId,
-          status: "active",
+          ...(manualUpload ? {} : { status: "active" }),
           loginOnly: false,
           ...employeeLocationScope(locationId),
           ...(selectionMode === "selected"
@@ -414,6 +423,7 @@ export async function POST(req: NextRequest) {
         componentAssignments.filter(
           (assignment) => assignment.employeeId === emp.id,
         ),
+        manualUpload,
       );
       if (res.created) created++;
       totalLoanApplied += res.loanApplied ?? 0;

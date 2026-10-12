@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveManualPayrollSource, manualUploadId } from "@/lib/payroll-manual-source";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
@@ -172,7 +173,9 @@ export async function POST(
             enabled: configured.tds.enabled && statutory.tdsAllowed !== false,
           },
         };
-        const summary = await attendanceSummary(
+        const uploadId = manualUploadId(savedInput);
+        const manualSource = uploadId ? await resolveManualPayrollSource(tx, session.tenantId, existing.payrollRunId ? (await tx.payrollRun.findUnique({ where: { id: existing.payrollRunId }, select: { locationId: true } }))?.locationId : null, existing.month, uploadId, employee.id) : null;
+        const summary = manualSource?.summary ?? await attendanceSummary(
           session.tenantId,
           {
             id: employee.id,

@@ -1,4 +1,5 @@
 import { snapshottedLeaveFraction } from "./leave-calendar";
+import { resolveManualPayrollSource, manualUploadId } from "./payroll-manual-source";
 import { attendanceRequiresReview } from "./attendance-validation";
 import { payrollLeaveDay } from "./payroll-leave-day";
 import { prisma } from "./prisma";
@@ -1334,6 +1335,7 @@ export async function generatePayslipForEmployee(
   policySnapshot?: PayrollPolicySnapshot,
   payrollRunId?: string,
   componentAssignments: readonly PayrollComponentAssignmentSnapshot[] = [],
+  manualUpload?: string,
 ): Promise<{
   created: boolean;
   netSalary?: number;
@@ -1406,7 +1408,16 @@ export async function generatePayslipForEmployee(
           loanApplied: 0,
         };
 
-      const summary = await attendanceSummary(
+      const manualSource = manualUpload
+        ? await resolveManualPayrollSource(tx, tenantId, employee.locationId, month, manualUpload, employee.id)
+        : null;
+      if (manualSource && employee.payMode === "hourly") throw new Error("Manual day marks cannot be used for hourly payroll.");
+      if (manualSource && !config.deductAbsentDays && (manualSource.summary.absentDays || manualSource.summary.unpaidLeaveDays)) throw new Error("Publish a payroll policy with unpaid-day deduction enabled before using L or blank unpaid days.");
+      if (payrollRunId) {
+        const first = await tx.payslip.findFirst({ where: { payrollRunId }, select: { inputSnapshot: true } });
+        if (first && manualUploadId(first.inputSnapshot) !== (manualUpload ?? null)) throw new Error("A payroll run must use one attendance source. Cancel the draft before replacing its source.");
+      }
+      const summary = manualSource?.summary ?? await attendanceSummary(
         tenantId,
         employee,
         month,
@@ -1585,6 +1596,7 @@ export async function generatePayslipForEmployee(
               Prisma.InputJsonValue | undefined,
             inputSnapshot: {
               version: 2,
+              ...(manualSource ? { manualAttendance: manualSource } : {}),
               employee: {
                 id: employee.id,
                 employeeNumber: employee.employeeNumber,

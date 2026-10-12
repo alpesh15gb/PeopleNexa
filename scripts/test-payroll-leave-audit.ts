@@ -227,6 +227,7 @@ async function main() {
     payrollRun: { updateMany: async () => ({ count: 1 }) },
     payslip: {
       findUnique: async () => stored,
+      findFirst: async () => stored,
       create: async ({ data }: any) => {
         stored = { id: "slip", ...data };
         return stored;

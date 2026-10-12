@@ -1,4 +1,6 @@
 import { payrollSourceReview } from "@/lib/payroll-source-review";
+import { finalizeManualAttendanceCredits } from "@/lib/payroll-attendance-credit";
+import { ManualPayrollError } from "@/lib/payroll-manual-source";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -250,6 +252,8 @@ export async function PATCH(
               paymentRef: evidence!.value.paymentReference,
             },
           });
+        if (target === "reversed") await tx.payrollAttendanceCredit.updateMany({ where: { tenantId: session.tenantId, payrollRunId: id }, data: { active: false } });
+        if (target === "finalized") await finalizeManualAttendanceCredits(tx, run);
         if (target === "finalized")
           await tx.payslip.updateMany({
             where: { payrollRunId: id },
@@ -282,6 +286,7 @@ export async function PATCH(
       { isolationLevel: "Serializable", timeout: 60000 },
     );
   } catch (error) {
+    if (error instanceof ManualPayrollError) return NextResponse.json({ error: error.message, sourceIssues: [error.message] }, { status: 409 });
     if (
       (error as { code?: string })?.code === "P2034" ||
       (error instanceof Error && error.message === "PAYROLL_RUN_CONFLICT")
