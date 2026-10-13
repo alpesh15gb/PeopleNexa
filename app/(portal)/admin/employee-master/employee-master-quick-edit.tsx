@@ -1059,7 +1059,7 @@ function Editor({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!master) return;
+    if (!master || saving) return;
     setSaving(true);
     try {
       const profile = { ...(master.profile ?? {}) };
@@ -1176,7 +1176,9 @@ function Editor({
     if (nextAction.type === "next") setActive(nextAction.step);
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
-    if (wizard && nextAction.type === "next") {
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const saveRequested = submitter instanceof HTMLButtonElement && submitter.value === "save";
+    if (wizard && nextAction.type === "next" && !saveRequested) {
       event.preventDefault();
       goToNextStep();
       return;
@@ -1912,6 +1914,9 @@ function Editor({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="ghost" onClick={onClose}>{canSkip ? "Skip for now" : "Cancel"}</Button>
+                    {!canSkip && nextAction.type === "next" && (
+                      <Button type="submit" name="intent" value="save" variant="outline" loading={saving}>Save changes</Button>
+                    )}
                     {nextAction.type === "next" ? (
                       <Button type="button" onClick={(event) => goToNextStep(event)}>Next</Button>
                     ) : (

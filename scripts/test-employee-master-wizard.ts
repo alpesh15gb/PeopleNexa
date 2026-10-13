@@ -35,7 +35,7 @@ assert.match(
 );
 assert.match(
   editorSource,
-  /const submit = \(event: FormEvent<HTMLFormElement>\) => \{[\s\S]*?if \(wizard && nextAction\.type === "next"\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?goToNextStep\(\);[\s\S]*?return;[\s\S]*?\}\s*void save\(event\);/,
+  /const submit = \(event: FormEvent<HTMLFormElement>\) => \{[\s\S]*?if \(wizard && nextAction\.type === "next" && !saveRequested\) \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?goToNextStep\(\);[\s\S]*?return;[\s\S]*?\}\s*void save\(event\);/,
 );
 assert.match(
   editorSource,
