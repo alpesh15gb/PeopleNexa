@@ -8,6 +8,7 @@ import {
   useGoogleMapsLoader,
 } from "@/components/maps/google-maps";
 import { formatTime } from "@/lib/dates";
+import "leaflet/dist/leaflet.css";
 
 export type MapPoint = { lat: number; lng: number; at?: string; accuracy?: number | null };
 
@@ -27,7 +28,7 @@ export type MarkerInput = { label: string; point: MapPoint };
  * Rendered client-side only (no SSR). The map initializes once and content
  * redraws whenever the routes/markers props change.
  *
- * Kept untouched as the fallback when no Google Maps key is configured.
+ * Fallback when no Google Maps key is configured or Google's loader fails.
  */
 function LeafletRouteMap({
   routes,
@@ -47,6 +48,8 @@ function LeafletRouteMap({
   // Init the map once leaflet is loaded.
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let frame = 0;
     loadLeaflet().then((mod) => {
       if (cancelled || !containerRef.current) return;
       const map = mod.map(containerRef.current, { zoomControl: true }).setView([20.5937, 78.9629], 5);
@@ -56,10 +59,21 @@ function LeafletRouteMap({
       }).addTo(map);
       layerRef.current = mod.layerGroup().addTo(map);
       mapRef.current = map;
+      const resize = () => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => { if (!cancelled) map.invalidateSize({ pan: false }); });
+      };
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(containerRef.current);
+      }
+      resize();
       setL(mod);
     });
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
+      cancelAnimationFrame(frame);
       mapRef.current?.remove();
       mapRef.current = null;
       layerRef.current = null;

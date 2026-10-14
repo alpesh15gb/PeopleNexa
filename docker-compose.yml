@@ -33,7 +33,12 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # NEXT_PUBLIC values must reach Next.js at build time. Runtime env_file
+        # alone cannot populate an already-built browser bundle.
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     restart: unless-stopped
     env_file: .env.production
     environment:
