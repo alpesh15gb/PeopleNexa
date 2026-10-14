@@ -3,7 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, MapPin, LocateFixed, X } from "lucide-react";
-import { Circle, GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+import { Circle, GoogleMap, Marker } from "@react-google-maps/api";
+import { GOOGLE_MAPS_API_KEY, useGoogleMapsLoader } from "@/components/maps/google-maps";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -42,7 +43,7 @@ interface Staff {
 
 // Tiny local loader for the geofence picker. Returns null (keeping the manual
 // inputs) when the API key is missing.
-const BRANCH_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const BRANCH_MAPS_API_KEY = GOOGLE_MAPS_API_KEY;
 const BRANCH_MAP_FALLBACK = { lat: 28.6139, lng: 77.209 };
 
 function BranchGeofenceMap({
@@ -56,11 +57,9 @@ function BranchGeofenceMap({
   radius: string;
   onPick: (lat: string, lng: string) => void;
 }) {
-  const { isLoaded } = useJsApiLoader({
-    id: "peoplenexa-branch-geofence",
-    googleMapsApiKey: BRANCH_MAPS_API_KEY,
-  });
+  const { isLoaded, loadError } = useGoogleMapsLoader();
   if (!BRANCH_MAPS_API_KEY) return null;
+  if (loadError) return <p className="text-sm text-muted-foreground">Map unavailable. You can still enter latitude and longitude manually.</p>;
   if (!isLoaded) {
     return <div className="h-[220px] w-full animate-pulse rounded-xl border border-edge bg-tint" aria-hidden="true" />;
   }

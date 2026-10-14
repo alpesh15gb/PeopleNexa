@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Clock3, FileQuestion } from "lucide-react";
-import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, Marker } from "@react-google-maps/api";
+import { GOOGLE_MAPS_API_KEY, useGoogleMapsLoader } from "@/components/maps/google-maps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
@@ -48,7 +49,7 @@ const fmt = (iso: string | null) => (iso ? formatTime(new Date(iso)) : "—");
 
 // Tiny local loader for the punch-location mini maps. Renders nothing when the
 // API key is missing (callers fall back to the link-only UI).
-const FACE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const FACE_MAPS_API_KEY = GOOGLE_MAPS_API_KEY;
 
 function PunchMiniMap({ lat, lng }: { lat: number; lng: number }) {
   return (
@@ -75,12 +76,9 @@ export function RegularizationPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [faceBusy, setFaceBusy] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
-  const { isLoaded: faceMapsLoaded } = useJsApiLoader({
-    id: "peoplenexa-face-review",
-    googleMapsApiKey: FACE_MAPS_API_KEY,
-  });
-  const showFaceMaps = FACE_MAPS_API_KEY.length > 0 && faceMapsLoaded;
-  const faceMapsPending = FACE_MAPS_API_KEY.length > 0 && !faceMapsLoaded;
+  const { isLoaded: faceMapsLoaded, loadError: faceMapsError } = useGoogleMapsLoader();
+  const showFaceMaps = FACE_MAPS_API_KEY.length > 0 && faceMapsLoaded && !faceMapsError;
+  const faceMapsPending = FACE_MAPS_API_KEY.length > 0 && !faceMapsLoaded && !faceMapsError;
 
   async function review(id: string, status: "approved" | "rejected") {
     setBusy(id);

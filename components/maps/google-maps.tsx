@@ -3,7 +3,7 @@
 import { useJsApiLoader } from "@react-google-maps/api";
 
 /**
- * Shared Google Maps loader for Journey Tracker (and future maps).
+ * Shared Google Maps loader for journeys, branch geofences and punch review.
  *
  * - API key is read directly in this client module so server components
  *   (e.g. app/(portal)/admin/journeys/page.tsx) don't need to pass anything.
@@ -14,12 +14,13 @@ import { useJsApiLoader } from "@react-google-maps/api";
  */
 
 export const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const GOOGLE_MAPS_LOADER_OPTIONS = {
+  id: "peoplenexa-google-maps",
+  googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+};
 
 export function useGoogleMapsLoader() {
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: "peoplenexa-google-maps",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-  });
+  const { isLoaded, loadError } = useJsApiLoader(GOOGLE_MAPS_LOADER_OPTIONS);
   return { isLoaded, loadError, enabled: GOOGLE_MAPS_API_KEY.length > 0 };
 }
 
