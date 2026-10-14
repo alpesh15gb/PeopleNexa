@@ -10,11 +10,11 @@ import { Field, Input } from "@/components/ui/input";
 import { runEmployeeStatusBatch, type EmployeeStatus, type StatusBatchResult } from "@/lib/employee-status-batch";
 import { EmployeeStatusAction } from "./employee-status-action";
 
-type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; status: string; role: string; branch: { name: string } | null };
+type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; status: string; role: string; branch: { name: string } | null; assignmentPending?: boolean };
 
 export function EmployeeMasterList({ employees, selectedId, query, status, page, pageCount, counts, canChangeStatus, actorId }: {
-  employees: Employee[]; selectedId?: string; query: string; status: "all" | EmployeeStatus;
-  page: number; pageCount: number; counts: { all: number; active: number; inactive: number }; canChangeStatus: boolean; actorId: string;
+  employees: Employee[]; selectedId?: string; query: string; status: "all" | EmployeeStatus | "assignment_pending";
+  page: number; pageCount: number; counts: { all: number; active: number; inactive: number; assignment_pending: number }; canChangeStatus: boolean; actorId: string;
 }) {
   const router = useRouter();
   const [selecting, setSelecting] = useState(false);
@@ -48,6 +48,7 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
       <nav aria-label="Employee status filter" className="flex flex-wrap gap-1">
         {(["all", "active", "inactive"] as const).map((value) => <Link key={value} href={href(1, value)} aria-current={status === value ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs font-medium ${status === value ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{value === "all" ? "All" : value === "active" ? "Active" : "Inactive"} ({counts[value]})</Link>)}
       </nav>
+      <Link href={href(1, "assignment_pending")} aria-current={status === "assignment_pending" ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs ${status === "assignment_pending" ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>Assignment Pending ({counts.assignment_pending})</Link>
       {canChangeStatus && !selecting && <Button size="sm" variant="ghost" disabled={!eligible.length} onClick={() => setSelecting(true)}>Select</Button>}
     </div>
     {selecting && <div className="space-y-2 rounded-lg border border-edge bg-muted/30 p-2">
@@ -65,7 +66,7 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
         <Link href={href(page, status, item.id)} className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber} · {item.deviceCode ?? "No device ID"}</p>
-          <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.assignmentPending ? "Assignment Pending" : item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
           <div className="mt-1"><Badge tone={item.status === "active" ? "success" : "neutral"}>{item.status === "active" ? "Active" : "Inactive"}</Badge></div>
         </Link>
         {canChangeStatus && !selecting && <EmployeeStatusAction compact employeeId={item.id} employeeName={`${item.firstName} ${item.lastName}`} status={item.status} />}

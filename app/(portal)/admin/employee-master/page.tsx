@@ -14,6 +14,7 @@ import { EmployeeStatusAction } from "./employee-status-action";
 import { EmployeeMasterImportExport } from "./employee-master-import-export";
 import { EmployeeMasterList } from "./employee-master-list";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
+import { assignmentPendingWhere, isAssignmentPending } from "@/lib/employee-assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export default async function EmployeeMasterPage({
   const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : isBranchManager ? { branchId: branchId ?? "__unassigned_branch__" } : {};
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
-  const status = params.status === "active" || params.status === "inactive" ? params.status : "all";
+  const status = params.status === "active" || params.status === "inactive" || params.status === "assignment_pending" ? params.status : "all";
   const pageSize = 50;
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const baseWhere = {
@@ -92,12 +93,12 @@ export default async function EmployeeMasterPage({
       ],
     } : {}),
   };
-  const where = { ...baseWhere, ...(status !== "all" ? { status } : {}) };
+  const where = { ...baseWhere, ...(status === "assignment_pending" ? { AND: [assignmentPendingWhere] } : status !== "all" ? { status } : {}) };
   const [total, employees, branches, departments, shifts, managers, positions, subdepartments, statusGroups] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({
       where,
-      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, branch: { select: { name: true } } },
+      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, email: true, legacyImportData: true, branch: { select: { name: true } } },
       orderBy: { employeeNumber: "asc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -139,6 +140,7 @@ export default async function EmployeeMasterPage({
     all: statusGroups.reduce((sum, group) => sum + group._count._all, 0),
     active: statusGroups.find((group) => group.status === "active")?._count._all ?? 0,
     inactive: statusGroups.find((group) => group.status === "inactive")?._count._all ?? 0,
+    assignment_pending: await prisma.employee.count({ where: { ...baseWhere, AND: [assignmentPendingWhere] } }),
   };
 
   return (
@@ -168,7 +170,7 @@ export default async function EmployeeMasterPage({
               <input name="q" defaultValue={query} placeholder="Name, code, device ID" className="min-w-0 flex-1 rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
               <button className="rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint" type="submit">Find</button>
             </form>
-            <EmployeeMasterList key={`${query}:${status}:${page}`} employees={employees} selectedId={employee?.id} query={query} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} />
+            <EmployeeMasterList key={`${query}:${status}:${page}`} employees={employees.map(({ email, legacyImportData, ...item }) => ({ ...item, assignmentPending: isAssignmentPending({ ...item, email, legacyImportData }) }))} selectedId={employee?.id} query={query} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} />
           </CardContent>
         </Card>
 

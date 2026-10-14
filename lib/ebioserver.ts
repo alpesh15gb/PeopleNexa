@@ -5,9 +5,7 @@ const soap = (soapNs as { default?: typeof soapNs }).default ?? soapNs;
 import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
 import { istDateKey, istStartOfDay, parseIST } from "./ist";
-import { hashPassword } from "./auth";
 import { ebioHeartbeatPatch } from "./device-health";
-import crypto from "node:crypto";
 import { handleDevicePunch, reprocessFailedLogs, type RawPunch } from "./iclock";
 import type { Tenant } from "@/generated/prisma/client";
 
@@ -449,16 +447,10 @@ export async function importEmployeesFromEbioserver(
     const known = new Set(existing.flatMap((employee) => [employee.deviceCode, employee.employeeNumber]).filter(Boolean));
     const newCodes = codes.filter((code) => !known.has(code));
     result.skipped = codes.length - newCodes.length;
-    // eBio is the source of the active workforce roster for this workspace.
-    // Re-importing also activates identities created by an earlier partial import.
-    const activated = await prisma.employee.updateMany({
-      where: { tenantId, deviceCode: { in: codes }, status: "inactive", loginOnly: false },
-      data: { status: "active" },
-    });
-    result.activated = activated.count;
-    // All imported accounts are inactive and have no usable shared password.
-    // One opaque hash is sufficient until each account is provisioned.
-    const inactivePassword = await hashPassword(crypto.randomBytes(32).toString("hex"));
+    // A device roster is not an employment-status authority. Existing accounts
+    // keep their status; only an explicit employee-master action may activate them.
+    // Assignment Pending is an onboarding state, separate from employment
+    // activation and optional portal access. Import never provisions a login.
     for (let offset = 0; offset < newCodes.length; offset += 250) {
       const batch = newCodes.slice(offset, offset + 250);
       const created = await prisma.employee.createMany({
@@ -468,10 +460,11 @@ export async function importEmployeesFromEbioserver(
           deviceCode: code,
           firstName: code,
           lastName: "",
-          email: `device-${Buffer.from(code).toString("hex")}@device.local`,
-          password: inactivePassword,
+          email: null,
+          password: null,
+          legacyImportData: { source: "ebioserver", assignmentPending: true },
           role: "employee",
-          status: "active",
+          status: "inactive",
         })),
         skipDuplicates: true,
       });

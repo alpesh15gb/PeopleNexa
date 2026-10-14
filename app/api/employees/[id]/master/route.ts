@@ -85,6 +85,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   // its password input and re-submits it on every save, which stores a hash of
   // the hash and silently locks the user out of their own account.
   employee.password = null;
+  if (employee.email?.endsWith("@device.local")) employee.email = null;
   if (session.role === "admin" || session.role === "location_manager" || session.role === "branch_manager") return NextResponse.json({ employee });
 
   const { salary: _salary, bankName: _bankName, accountNumber: _accountNumber, ifscCode: _ifscCode, pan: _pan, uan: _uan, aadhaarNumber: _aadhaarNumber, drivingLicenseNumber: _drivingLicenseNumber, drivingLicenseExpiresAt: _drivingLicenseExpiresAt, salaryStructure: _salaryStructure, workBasisRate: _workBasisRate, legacyImportData: _legacyImportData, deviceCode: _deviceCode, profile, employmentProfile: _employmentProfile, dependents: _dependents, references: _references, bankAccounts: _bankAccounts, documents, workExperience, ...safeEmployee } = employee;

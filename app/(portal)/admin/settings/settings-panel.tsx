@@ -76,7 +76,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         return;
       }
       setImportResult({ total: data.total, created: data.created, activated: data.activated ?? 0, skipped: data.skipped, failed: data.failed, reprocessed: data.reprocessed ?? 0 });
-      toast("success", `Imported ${data.created} · activated ${data.activated ?? 0} · ${data.reprocessed ?? 0} punches reconciled`);
+      toast("success", `Imported ${data.created} employee(s) to Assignment Pending · ${data.reprocessed ?? 0} punches reconciled. Existing employee statuses unchanged.`);
     } catch {
       toast("error", "Something went wrong.");
     } finally {
@@ -233,9 +233,8 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <UserPlus className="h-4 w-4 text-brand" /> Employees from eBioserver
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Pulls the employee master (codes + names) from this server so their punches flow into attendance
-            automatically. Idempotent — re-running only adds what's new. Imported employees get the default
-            login password <span className="font-mono text-foreground">123456</span>.
+            Imports missing employee codes into Assignment Pending for review in Employee Master.
+            Existing employee statuses stay unchanged. Portal login ID and password are optional.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button variant="outline" onClick={importEmployees} loading={importing}>
@@ -247,7 +246,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
                 <span className="font-semibold text-emerald-400">{importResult.created} created</span>
                 <span className="text-muted-foreground">
                   {" · "}
-                  {importResult.activated} activated · {importResult.skipped} already present · {importResult.failed} failed · of {importResult.total} codes
+                  Assignment Pending · {importResult.skipped} already present (status unchanged) · {importResult.failed} failed · of {importResult.total} codes
                   {importResult.reprocessed > 0 && ` · ${importResult.reprocessed} flagged punches reconciled`}
                 </span>
               </p>

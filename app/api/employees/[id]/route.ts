@@ -195,7 +195,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
 
-  const email = body.email !== undefined ? optionalEmployeeEmail(body.email) : employee.email;
+  const selectedEmail = body.email !== undefined ? optionalEmployeeEmail(body.email) : employee.email;
+  // Historical device imports used synthetic emails and opaque passwords.
+  // They are not employee portal credentials and must not be required to edit.
+  const email = selectedEmail?.endsWith("@device.local") ? null : selectedEmail;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   if (email && email !== employee.email) {
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email, NOT: { id } } });
@@ -245,10 +248,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         return NextResponse.json({ error: "Cannot demote the last active admin." }, { status: 400 });
       }
     }
-  }
-  const isUnprovisionedDeviceAccount = employee.email?.endsWith("@device.local") ?? false;
-  if (requestedStatus === "active" && employee.status !== "active" && isUnprovisionedDeviceAccount && (email?.endsWith("@device.local") || !password)) {
-    return NextResponse.json({ error: "Provision a real email and a new password before activating this imported account." }, { status: 400 });
   }
 
   // Numeric / date guards (reject NaN / Invalid with 400, not 500).
@@ -458,7 +457,9 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         drivingLicenseExpiresAt: nextDrivingLicenseClassification === "no_license" ? null : nextDrivingLicenseExpiresAt === undefined ? employee.drivingLicenseExpiresAt : nextDrivingLicenseExpiresAt,
         idCardIssuedAt: nextIdCardIssuedAt === undefined ? employee.idCardIssuedAt : nextIdCardIssuedAt,
         idCardValidUntil: nextIdCardValidUntil === undefined ? employee.idCardValidUntil : nextIdCardValidUntil,
-       legacyImportData: nextLegacyImportData === null ? Prisma.DbNull : nextLegacyImportData,
+       legacyImportData: employee.email?.endsWith("@device.local") && !employee.branchId
+         ? { ...(nextLegacyImportData && typeof nextLegacyImportData === "object" && !Array.isArray(nextLegacyImportData) ? nextLegacyImportData : {}), source: "ebioserver", assignmentPending: true }
+         : nextLegacyImportData === null ? Prisma.DbNull : nextLegacyImportData,
        ...(history ? {
          education: { deleteMany: {}, create: history.education },
          workExperience: { deleteMany: {}, create: history.experience },

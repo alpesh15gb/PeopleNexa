@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { isAssignmentPending } from "../lib/employee-assignment";
+
+const source = readFileSync("lib/ebioserver.ts", "utf8");
+const importer = source.slice(source.indexOf("export async function importEmployeesFromEbioserver("), source.indexOf("export async function backfillDays("));
+assert(importer.length > 0);
+assert.doesNotMatch(importer, /prisma\.employee\.(update|updateMany|upsert)\(/, "device import must never change existing employee status");
+assert.match(importer, /status: "inactive"/, "new device identities must require explicit activation");
+assert.doesNotMatch(importer, /status: "active"/);
+assert.match(importer, /email: null/);
+assert.match(importer, /password: null/);
+assert.match(importer, /assignmentPending: true/);
+assert.equal(isAssignmentPending({ branchId: null, legacyImportData: { source: "ebioserver" } }), true);
+assert.equal(isAssignmentPending({ branchId: "assigned-branch", legacyImportData: { source: "ebioserver" } }), false);
+assert.equal(isAssignmentPending({ branch: { name: "Assigned" }, email: "old@device.local" }), false);
+assert.equal(isAssignmentPending({ branchId: null, email: "old@device.local" }), true);
+assert.equal(isAssignmentPending({ branchId: null, email: "person@example.com" }), false);
+const editorApi = readFileSync("app/api/employees/[id]/route.ts", "utf8");
+assert.doesNotMatch(editorApi, /Provision a real email and a new password before activating/);
+assert.match(importer, /result\.skipped = codes\.length - newCodes\.length/);
+assert.match(importer, /reprocessFailedLogs\(tenantId, 5000\)/, "punch reconciliation remains available without activation");
+console.log("eBio import preserves existing statuses and creates inactive identities.");
