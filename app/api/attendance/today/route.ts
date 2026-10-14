@@ -4,9 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { addDays } from "@/lib/dates";
 import { istStartOfDay, istDateKey } from "@/lib/ist";
 import { formatTime } from "@/lib/dates";
+import { attendanceDayForPunch, shiftForEmployeeDay } from "@/lib/reconcile";
 
 export async function GET() {
-  const session = await getSession();
+  const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const employee = await prisma.employee.findFirst({
@@ -15,7 +16,7 @@ export async function GET() {
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const dayStart = istStartOfDay(new Date());
+  const dayStart = await attendanceDayForPunch(employee, new Date());
   const record = await prisma.attendance.findFirst({
     where: { employeeId: employee.id, tenantId: session.tenantId, date: { gte: dayStart, lt: addDays(dayStart, 1) } },
   });
@@ -23,7 +24,7 @@ export async function GET() {
   return NextResponse.json({
     date: istDateKey(dayStart),
     record,
-    shift: employee.shift,
+    shift: await shiftForEmployeeDay(employee, dayStart),
     branch: employee.branch,
     now: formatTime(new Date()),
   });

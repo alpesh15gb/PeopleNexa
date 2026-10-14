@@ -1,27 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { attendanceDayForPunch, reconcileEmployeeDay } from "@/lib/reconcile";
+import { attendanceDayForPunch, reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
+import { employeeLocationScope } from "@/lib/location-scope";
+import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 
 /**
  * POST — human review of a gray-zone / rejected face punch, or authorization
  * of a held unenrolled self-service punch (selfie + location reviewed).
  * Body: { punchId, decision: "accept" | "reject" }.
- * - admin or supervisor only.
+ * - authorized managers, scoped to their branch/location, never self-review.
  * - punch must belong to the tenant (404) and be faceStatus review|rejected
  *   or authStatus pending (409).
  * - accept → faceStatus "matched" (review) or "approved" (pending), then
  *   reconcile the day (pending punches were never reconciled).
- * - reject → DELETE the punch + reconcileEmployeeDay for its day.
- * - accepting one pending punch auto-declines its same-day pending
- *   siblings (prevents double in/out pairs from repeated submissions).
+ * - reject → retain evidence with declined authorization and reconcile its day.
+ * - each punch is reviewed independently; approving an IN never discards an OUT.
  */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || (session.role !== "admin" && session.role !== "supervisor")) {
+  if (!session || !["admin", "supervisor", "branch_manager", "location_manager"].includes(session.role)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -35,10 +36,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "decision must be accept or reject." }, { status: 400 });
   }
 
+  const manager = ["branch_manager", "location_manager"].includes(session.role) ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true, locationId: true } }) : null;
+  if ((session.role === "branch_manager" && !manager?.branchId) || (session.role === "location_manager" && !manager?.locationId)) return NextResponse.json({ error: "No assigned scope." }, { status: 403 });
   const punch = await prisma.punch.findFirst({
-    where: { id: punchId, tenantId: session.tenantId },
+    where: { id: punchId, tenantId: session.tenantId, ...(session.role === "branch_manager" ? { employee: { branchId: manager!.branchId } } : session.role === "location_manager" ? { employee: employeeLocationScope(manager!.locationId!) } : {}) },
   });
   if (!punch) return NextResponse.json({ error: "Punch not found" }, { status: 404 });
+  if (punch.employeeId === session.sub) return NextResponse.json({ error: "Another manager must review your punch." }, { status: 403 });
   const isPendingAuth = (punch as { authStatus?: string }).authStatus === "pending";
   if (!isPendingAuth && punch.faceStatus !== "review" && punch.faceStatus !== "rejected") {
     return NextResponse.json({ error: "Punch is not pending review." }, { status: 409 });
@@ -52,6 +56,21 @@ export async function POST(req: NextRequest) {
   // Capture narrowed values for the closure below (TS can't narrow across it).
   const tenantId = session.tenantId;
   const punchTimeValue = punch.punchTime;
+  const workDay = employee ? await attendanceDayForPunch(employee, punchTimeValue) : istStartOfDay(punchTimeValue);
+  async function saveDecision(data: { faceStatus: string; authStatus?: string }) {
+    try {
+      const count = await prisma.$transaction(async tx => {
+        await assertLeavePayrollOpen(tx, tenantId, punch!.employeeId, workDay, workDay);
+        const changed = await tx.punch.updateMany({ where: { id: punch!.id, tenantId, authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, data });
+        if (changed.count) await tx.auditLog.create({ data: { tenantId, actorId: session!.sub, actorRole: session!.role, action: "punch.authorization", entity: "Punch", entityId: punch!.id, summary: `Mobile punch ${decision}`, before: { authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, after: data } });
+        return changed.count;
+      }, { isolationLevel: "Serializable" });
+      return count === 1 ? null : "Punch changed during review. Refresh and try again.";
+    } catch (error) {
+      if (["PAYROLL_LOCKED", "P2034"].includes((error as { code?: string }).code ?? "")) return (error as Error).message;
+      throw error;
+    }
+  }
 
   async function reconcileDay() {
     if (!employee) return;
@@ -65,32 +84,15 @@ export async function POST(req: NextRequest) {
         branchId: employee.branchId,
       },
       await attendanceDayForPunch(employee, punchTimeValue),
-      { finalize: false }
+      { finalize: isFinalizable(workDay, undefined, await shiftForEmployeeDay(employee, workDay)) }
     );
   }
 
   if (decision === "accept") {
     if (isPendingAuth) {
-      // Authorize the held punch, then retire its same-day pending siblings
-      // so a double-submitted in-punch can't become a phantom in/out pair.
-      const dayStart = istStartOfDay(punch.punchTime);
-      await prisma.punch.update({
-        where: { id: punch.id },
-        data: { faceStatus: "approved", authStatus: "approved" },
-      });
-      const siblings = await prisma.punch.findMany({
-        where: {
-          tenantId: session.tenantId,
-          employeeId: punch.employeeId,
-          authStatus: "pending",
-          id: { not: punch.id },
-          punchTime: { gte: dayStart, lt: new Date(dayStart.getTime() + 86400000) },
-        },
-        select: { id: true },
-      });
-      if (siblings.length > 0) {
-        await prisma.punch.deleteMany({ where: { id: { in: siblings.map((s) => s.id) } } });
-      }
+      // Authorize this event only; another held event may be its valid OUT.
+      const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
+      if (error) return NextResponse.json({ error }, { status: 409 });
       await reconcileDay();
       await appendAudit({
         tenantId: session.tenantId,
@@ -99,7 +101,7 @@ export async function POST(req: NextRequest) {
         action: "face.review",
         entity: "Punch",
         entityId: punch.id,
-        summary: `authorized held punch for ${punch.employeeId} (${siblings.length} sibling(s) declined)`,
+        summary: `authorized held punch for ${punch.employeeId}; other punches retained for independent review`,
         before: { faceStatus: punch.faceStatus, authStatus: "pending" },
         after: { faceStatus: "approved", authStatus: "approved" },
       });
@@ -112,10 +114,9 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: true, faceStatus: "approved", authStatus: "approved" });
     }
-    await prisma.punch.update({
-      where: { id: punch.id },
-      data: { faceStatus: "matched" },
-    });
+    const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
+    if (error) return NextResponse.json({ error }, { status: 409 });
+    await reconcileDay();
     await appendAudit({
       tenantId: session.tenantId,
       actorId: session.sub,
@@ -125,15 +126,14 @@ export async function POST(req: NextRequest) {
       entityId: punch.id,
       summary: `accepted face review for ${punch.employeeId}`,
       before: { faceStatus: punch.faceStatus },
-      after: { faceStatus: "matched" },
+      after: { faceStatus: "approved", authStatus: "approved" },
     });
-    return NextResponse.json({ ok: true, faceStatus: "matched" });
+    return NextResponse.json({ ok: true, faceStatus: "approved", authStatus: "approved" });
   }
 
-  // Reject: the punch must not count toward attendance — remove it from the
-  // immutable ledger and re-derive the day. The "rejected" status is conveyed
-  // via the response + audit (the row itself is gone).
-  await prisma.punch.delete({ where: { id: punch.id } });
+  // Retain declined evidence for reports without counting it toward attendance.
+  const error = await saveDecision({ faceStatus: "declined", authStatus: "declined" });
+  if (error) return NextResponse.json({ error }, { status: 409 });
   await reconcileDay();
   if (isPendingAuth) {
     await notifyEmployee(
@@ -151,9 +151,9 @@ export async function POST(req: NextRequest) {
     action: "face.review",
     entity: "Punch",
     entityId: punch.id,
-    summary: `${isPendingAuth ? "declined held punch" : "rejected face review"} for ${punch.employeeId} — punch deleted`,
+    summary: `${isPendingAuth ? "declined held punch" : "rejected face review"} for ${punch.employeeId} — evidence retained`,
     before: { faceStatus: punch.faceStatus },
-    after: { faceStatus: "rejected" },
+    after: { faceStatus: "declined", authStatus: "declined" },
   });
-  return NextResponse.json({ ok: true, faceStatus: "rejected" });
+  return NextResponse.json({ ok: true, faceStatus: "declined", authStatus: "declined" });
 }

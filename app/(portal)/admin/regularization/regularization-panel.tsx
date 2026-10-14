@@ -31,6 +31,9 @@ type Correction = {
 type FaceReview = {
   id: string;
   punchTime: string;
+  inOutHint?: string;
+  locationAccuracy?: number | null;
+  locationStatus?: string | null;
   faceStatus: string;
   faceScore: number | null;
   selfie: string | null;
@@ -167,6 +170,7 @@ export function RegularizationPanel({
                       </p>
                       <span className="font-mono text-[12px] text-muted-foreground">
                         {formatDate(new Date(r.punchTime))} · {fmt(r.punchTime)}
+                        {r.inOutHint && r.inOutHint !== "unknown" ? ` · Clock ${r.inOutHint}` : ""}
                       </span>
                       <Badge tone={r.faceStatus === "rejected" && r.authStatus !== "pending" ? "danger" : "warning"}>
                         {r.authStatus === "pending"
@@ -174,12 +178,16 @@ export function RegularizationPanel({
                             ? "Outside geofence — needs approval"
                             : r.holdReason === "face_mismatch"
                               ? "Face mismatch — needs approval"
+                              : r.holdReason === "face_review" ? "Face uncertain — needs approval"
+                              : r.holdReason === "location_accuracy" ? "GPS accuracy insufficient — needs approval"
+                              : r.holdReason === "location_not_configured" ? "Geofence not configured — needs approval"
                               : "Awaiting approval — no Face ID"
                           : `Face ${score ?? "—"} — ${r.faceStatus}`}
                       </Badge>
                     </div>
                     {r.lat != null && r.lng != null && (
                       <div className="mt-1.5">
+                        <p className="text-xs text-muted-foreground">{r.locationStatus?.replaceAll("_", " ") ?? "Location check not recorded"}{r.locationAccuracy == null ? "" : ` · GPS ±${Math.round(r.locationAccuracy)}m`}</p>
                         {showFaceMaps ? (
                           <div className="mb-1.5 w-[208px] overflow-hidden rounded-lg border border-edge">
                             <PunchMiniMap lat={Number(r.lat)} lng={Number(r.lng)} />

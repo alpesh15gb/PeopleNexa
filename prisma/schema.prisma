@@ -831,15 +831,21 @@ model Punch {
   lat              Float?
   lng              Float?
   selfie           String?
+  selfieCapturedAt DateTime?
+  locationAccuracy Float?
+  locationStatus   String?
+  geofenceDistance Float?
+  geofenceRadius   Float?
   faceScore        Float?
-  faceStatus       String          @default("none") // none | matched | review | rejected | approved
+  faceStatus       String          @default("none") // none | matched | review | rejected | approved | declined
   // Attendance authorization for self-service (mobile) punches:
   // auto = reconciled normally; pending = held for admin accept/decline
   // (unenrolled employee while face-match is enabled); approved = admin-
   // authorized, reconciles normally. Device/eBioserver punches stay "auto".
-  authStatus       String          @default("auto") // auto | pending | approved
+  authStatus       String          @default("auto") // auto | pending | approved | declined
   // Why a punch is held (pending): no_enrollment | location_mismatch |
-  // face_mismatch. Null for auto/approved rows and legacy rows.
+  // face_mismatch | face_review | location_accuracy | location_not_configured.
+  // Retained after a review decision as source evidence.
   holdReason       String?
   createdAt        DateTime        @default(now())
 

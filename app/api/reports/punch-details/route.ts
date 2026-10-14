@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { dayRangeIST, formatDateIST, isDateKey } from "@/lib/dates";
+import { nearestReportSource } from "@/lib/punch-report-source";
 
 const ALLOWED_ROLES = ["admin", "supervisor", "branch_manager", "location_manager"] as const;
 
@@ -29,33 +30,17 @@ type AttendanceRow = {
 type DevicePunch = {
   employeeId: string;
   punchTime: Date;
+  source: string;
   device: { name: string; serialNumber: string } | null;
   realtimeDevice: { name: string; serialNumber: string } | null;
 };
-
-function nearestMachine(punches: DevicePunch[], at: Date | null): { name: string; serialNumber: string } | null {
-  if (!at) return null;
-  let nearest: DevicePunch | null = null;
-  let difference = Number.POSITIVE_INFINITY;
-  for (const punch of punches) {
-    const candidate = punch.device ?? punch.realtimeDevice;
-    const delta = Math.abs(punch.punchTime.getTime() - at.getTime());
-    if (candidate && delta < difference) {
-      nearest = punch;
-      difference = delta;
-    }
-  }
-  // Do not attach an unrelated device when a source event was not retained.
-  if (!nearest || difference > 12 * 60 * 60 * 1000) return null;
-  return nearest.device ?? nearest.realtimeDevice;
-}
 
 async function withMachines(rows: AttendanceRow[], tenantId: string, start: Date, end: Date) {
   const employeeIds = [...new Set(rows.map((row) => row.employeeId))];
   if (!employeeIds.length) return rows.map((row) => ({ ...row, deviceIn: null, deviceOut: null, workingMinutes: null }));
   const punches = await prisma.punch.findMany({
-    where: { tenantId, employeeId: { in: employeeIds }, punchTime: { gte: start, lt: end } },
-    select: { employeeId: true, punchTime: true, device: { select: { name: true, serialNumber: true } }, realtimeDevice: { select: { name: true, serialNumber: true } } },
+    where: { tenantId, employeeId: { in: employeeIds }, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: new Date(start.getTime() - 86400000), lt: new Date(end.getTime() + 86400000) } },
+    select: { employeeId: true, punchTime: true, source: true, device: { select: { name: true, serialNumber: true } }, realtimeDevice: { select: { name: true, serialNumber: true } } },
   });
   const byEmployee = new Map<string, DevicePunch[]>();
   for (const punch of punches) {
@@ -65,8 +50,8 @@ async function withMachines(rows: AttendanceRow[], tenantId: string, start: Date
   }
   return rows.map((row) => ({
     ...row,
-    deviceIn: nearestMachine(byEmployee.get(row.employeeId) ?? [], row.punchInTime),
-    deviceOut: nearestMachine(byEmployee.get(row.employeeId) ?? [], row.punchOutTime),
+    deviceIn: nearestReportSource(byEmployee.get(row.employeeId) ?? [], row.punchInTime),
+    deviceOut: nearestReportSource(byEmployee.get(row.employeeId) ?? [], row.punchOutTime),
     workingMinutes: row.punchInTime && row.punchOutTime ? Math.max(0, Math.round((row.punchOutTime.getTime() - row.punchInTime.getTime()) / 60_000)) : null,
   }));
 }

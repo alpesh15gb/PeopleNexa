@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/stat";
 import { CalendarClock } from "lucide-react";
 import { CorrectionsPanel } from "./corrections-panel";
 import { LocationPinger } from "./location-pinger";
+import { trackingState } from "@/lib/journey";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export default async function EmployeeAttendancePage() {
 
   const recordByDay = new Map(records.map((r) => [toDateKey(r.date), r]));
   const todayRecord = recordByDay.get(toDateKey(today));
-  const openSession = todayRecord ? Boolean(todayRecord.punchInTime && !todayRecord.punchOutTime) : false;
+  const openSession = (await trackingState(session.tenantId, session.sub)).active;
   const leaveByDay = new Map<string, { type: string; color: string }>();
   for (const l of leaves) {
     for (let d = l.fromDate; d <= l.toDate; d = addDays(d, 1)) {

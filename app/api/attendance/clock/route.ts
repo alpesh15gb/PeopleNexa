@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { isInsideGeofence, distanceMeters } from "@/lib/geofence";
@@ -8,15 +8,26 @@ import { notifyEmployee } from "@/lib/notifications";
 import { appendAudit } from "@/lib/audit";
 import { describeFace, verifyFace } from "@/lib/face";
 import { createPunchForEvent } from "@/lib/punch-idempotency";
+import { mobileLocation, mobileSelfieBytes, mobileHoldReason, mobileCaptureTime } from "@/lib/mobile-attendance";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const lat = body.lat != null && body.lat !== "" ? Number(body.lat) : null;
-  const lng = body.lng != null && body.lng !== "" ? Number(body.lng) : null;
-  const selfie = typeof body.selfie === "string" && body.selfie.length < 500_000 ? body.selfie : null;
+  const retryKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  const priorPunch = /^[A-Za-z0-9_-]{16,128}$/.test(retryKey) ? await prisma.punch.findUnique({ where: { eventKey: `mobile:${session.sub}:${retryKey}` } }) : null;
+  let lat: number, lng: number, accuracy: number, selfieBytes: Buffer;
+  const selfie = body.selfie;
+  try {
+    ({ lat, lng, accuracy } = mobileLocation(body));
+    selfieBytes = mobileSelfieBytes(selfie);
+  } catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
+  const actionHint = body.action;
+  if (actionHint !== "in" && actionHint !== "out") return NextResponse.json({ error: "Choose clock-in or clock-out." }, { status: 400 });
+  let selfieCapturedAt: Date;
+  try { selfieCapturedAt = mobileCaptureTime(body.selfieCapturedAt, Date.now(), Boolean(priorPunch)); }
+  catch (error) { return NextResponse.json({ error: (error as Error).message }, { status: 400 }); }
   const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey)) {
     return NextResponse.json({ error: "A valid punch request ID is required." }, { status: 400 });
@@ -36,6 +47,13 @@ export async function POST(req: NextRequest) {
   if ((employee as { loginOnly?: boolean }).loginOnly) {
     return NextResponse.json({ error: "Manager logins cannot punch in/out." }, { status: 403 });
   }
+  if (priorPunch) {
+    if (priorPunch.authStatus === "declined") return NextResponse.json({ error: "This punch was declined by a reviewer. Refresh attendance before submitting another attempt." }, { status: 409 });
+    if (priorPunch.authStatus === "pending") return NextResponse.json({ success: true, duplicate: true, pendingApproval: true, holdReason: priorPunch.holdReason });
+    const tenant = await prisma.tenant.findUnique({ where: { id: employee.tenantId } });
+    const result = await reconcileEmployeeDay(tenant ?? { id: employee.tenantId, config: null }, employee, await attendanceDayForPunch(employee, priorPunch.punchTime), { finalize: false });
+    return NextResponse.json({ success: true, duplicate: true, action: priorPunch.inOutHint === "unknown" ? result.action === "created" ? "in" : "out" : priorPunch.inOutHint });
+  }
 
   // Location is required when the branch has a geofence; otherwise an
   // employee without a branch could punch from anywhere with no coordinates.
@@ -43,7 +61,9 @@ export async function POST(req: NextRequest) {
     employee.branch?.latitude != null &&
     employee.branch?.longitude != null &&
     Number.isFinite(Number(employee.branch.latitude)) &&
-    Number.isFinite(Number(employee.branch.longitude));
+    Number.isFinite(Number(employee.branch.longitude)) &&
+    Math.abs(Number(employee.branch.latitude)) <= 90 &&
+    Math.abs(Number(employee.branch.longitude)) <= 180;
   if (branchHasCoords && (lat == null || lng == null)) {
     return NextResponse.json({ error: "Location is required to punch in/out." }, { status: 400 });
   }
@@ -68,7 +88,9 @@ export async function POST(req: NextRequest) {
   // authorization (selfie + location reviewed); with the kill-switch off the
   // legacy 403 stands so the bypass stays a true bypass.
   let locationMismatch = false;
+  let geofenceDistance: number | null = null;
   if (lat != null && lng != null && employee.branch && branchHasCoords) {
+    geofenceDistance = distanceMeters(employee.branch.latitude!, employee.branch.longitude!, lat, lng);
     const inside = isInsideGeofence(
       employee.branch.latitude,
       employee.branch.longitude,
@@ -89,18 +111,19 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date();
+  const locationStatus = !branchHasCoords || !employee.branch?.geofenceRadius || employee.branch.geofenceRadius <= 0
+    ? "not_configured" : locationMismatch ? "outside" : accuracy + (geofenceDistance ?? 0) > employee.branch.geofenceRadius ? "low_accuracy" : "inside";
 
-  // ── Face VERIFY (additive, never blocks pay on ML failure) ──────────────
+  // ── Face verification: uncertain results are held for human review ─────
   // Kill-switch (enabled===false) skips all face logic. No enrollment →
-  // held for approval ("none"). describeFace null → "review" (counted, as
-  // before — a camera/ML failure must not dock pay). verifyFace below the
+  // held for approval ("none"). describeFace null → "review", held for an
+  // independent manager decision. verifyFace below the
   // review floor → "rejected" HELD for admin approval (no longer a 400:
   // a wrong face must be seen by a human, not silently dropped).
   // Auto-approval needs face matched AND location matched; everything else
   // goes to the review queue. Geofence/dedupe below untouched.
   let faceStatus = "none";
   let faceScore: number | null = null;
-  let faceRejected = false;
   let hasEnrollment = false;
   {
     if (faceEnabled) {
@@ -112,9 +135,7 @@ export async function POST(req: NextRequest) {
         let probe: number[] | null = null;
         if (selfie) {
           try {
-            const commaIdx = selfie.indexOf(",");
-            const b64 = commaIdx >= 0 ? selfie.slice(commaIdx + 1) : selfie;
-            const buf = Buffer.from(b64, "base64");
+            const buf = selfieBytes;
             if (buf.length > 0) {
               probe = await describeFace(buf);
             }
@@ -123,7 +144,7 @@ export async function POST(req: NextRequest) {
           }
         }
         if (!probe) {
-          // ML failure / missing / undecodable selfie → human review, never block pay.
+          // ML failure or no usable descriptor requires independent review.
           faceStatus = "review";
           faceScore = null;
         } else {
@@ -137,7 +158,7 @@ export async function POST(req: NextRequest) {
               )
             : [];
           if (stored.length === 0) {
-            // Corrupt/empty enrollment → review, never block pay.
+            // Corrupt/empty enrollment requires independent review.
             faceStatus = "review";
             faceScore = null;
           } else {
@@ -156,7 +177,6 @@ export async function POST(req: NextRequest) {
               // silently dropping it would hide buddy-punching attempts.
               faceStatus = "rejected";
               faceScore = rounded;
-              faceRejected = true;
             }
           }
         }
@@ -168,14 +188,8 @@ export async function POST(req: NextRequest) {
   // Anything else (no enrollment, outside geofence, face mismatch) is held
   // for admin authorization with a reason the queue displays.
   // Precedence for the displayed reason: location > face > enrollment.
-  const needsApproval = faceEnabled && (!hasEnrollment || locationMismatch || faceRejected);
-  const holdReason = !needsApproval
-    ? null
-    : locationMismatch
-      ? "location_mismatch"
-      : faceRejected
-        ? "face_mismatch"
-        : "no_enrollment";
+  const holdReason = mobileHoldReason({ faceEnabled, enrolled: hasEnrollment, faceStatus, locationStatus });
+  const needsApproval = holdReason !== null;
 
   const created = await createPunchForEvent({
       tenantId: employee.tenantId,
@@ -183,10 +197,15 @@ export async function POST(req: NextRequest) {
       source: "mobile",
       eventKey: `mobile:${employee.id}:${idempotencyKey}`,
       punchTime: now,
-      inOutHint: "unknown",
+      inOutHint: actionHint,
       lat,
       lng,
       selfie,
+      selfieCapturedAt,
+      locationAccuracy: accuracy,
+      locationStatus,
+      geofenceDistance,
+      geofenceRadius: employee.branch?.geofenceRadius ?? null,
       faceScore,
       faceStatus,
       authStatus: needsApproval ? "pending" : "auto",
@@ -194,9 +213,9 @@ export async function POST(req: NextRequest) {
   });
   const punch = created.punch;
   if (!created.created) {
-    return NextResponse.json({ success: true, duplicate: true, punch: { id: punch.id, punchTime: punch.punchTime.toISOString() } });
+    if (punch.authStatus === "pending" || punch.authStatus === "declined") return NextResponse.json({ success: true, duplicate: true, pendingApproval: punch.authStatus === "pending", punch: { id: punch.id, punchTime: punch.punchTime.toISOString() } });
   }
-  await dispatchWebhook(employee.tenantId, "punch.created", {
+  if (created.created) await dispatchWebhook(employee.tenantId, "punch.created", {
     employeeId: employee.id,
     punchId: punch.id,
     time: punch.punchTime.toISOString(),
@@ -204,7 +223,7 @@ export async function POST(req: NextRequest) {
     lng,
   });
 
-  if (needsApproval) {
+  if (punch.authStatus === "pending") {
     await appendAudit({
       tenantId: employee.tenantId,
       actorId: employee.id,
@@ -232,12 +251,12 @@ export async function POST(req: NextRequest) {
   const result = await reconcileEmployeeDay(
     tenant ?? { id: employee.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: employee.tenantId, branchId: employee.branchId },
-    await attendanceDayForPunch(employee, now),
+    await attendanceDayForPunch(employee, punch.punchTime),
     { finalize: false }
   );
 
   // 3. Tell the client which transition happened.
-  const isIn = result.inAt !== null && Math.abs(result.inAt.getTime() - now.getTime()) < 120000;
+  const isIn = result.inAt !== null && Math.abs(result.inAt.getTime() - punch.punchTime.getTime()) < 120000;
   const action = result.action === "created" ? "in" : isIn ? "in" : "out";
 
   const record = result.attendanceId
@@ -270,5 +289,5 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ success: true, action, record, status: result.status }, { status: 201 });
+  return NextResponse.json({ success: true, action, record, status: result.status, duplicate: !created.created }, { status: created.created ? 201 : 200 });
 }

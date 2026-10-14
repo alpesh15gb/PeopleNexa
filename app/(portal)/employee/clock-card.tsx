@@ -30,6 +30,8 @@ export function ClockCard({
   employeeName,
   lang = "en",
   pendingApproval = false,
+  pendingIn = false,
+  pendingOut = false,
 }: {
   record: Record | null;
   shift: Shift | null;
@@ -38,6 +40,8 @@ export function ClockCard({
   lang?: Lang;
   /** A held (unenrolled) punch exists for today — attendance awaits admin. */
   pendingApproval?: boolean;
+  pendingIn?: boolean;
+  pendingOut?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -47,6 +51,10 @@ export function ClockCard({
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [selfie, setSelfie] = useState<string | null>(null);
+  const selfieCapturedAtRef = useRef<string | null>(null);
+  const requestPayloadRef = useRef<object | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const punchBusyRef = useRef(false);
   // On-device face gate (MediaPipe, lazy): Capture enabled only when exactly
   // 1 face ≥15% frame. Any load/detect failure → basic mode (capture allowed).
   const [faceOk, setFaceOk] = useState(false);
@@ -63,9 +71,15 @@ export function ClockCard({
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (!pendingApproval) return;
+    const timer = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 30000);
+    return () => clearInterval(timer);
+  }, [pendingApproval, router]);
 
   useEffect(() => {
     if (!cameraOpen) return;
+    setCameraReady(false);
     let cancelled = false;
     (async () => {
       try {
@@ -77,7 +91,8 @@ export function ClockCard({
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
+          await videoRef.current.play();
+          if (!cancelled) setCameraReady(true);
         }
       } catch {
         toast("error", t(lang, "clock.cameraUnavailable"));
@@ -89,7 +104,7 @@ export function ClockCard({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [cameraOpen, toast]);
+  }, [cameraOpen, toast, lang]);
 
   // On-device MediaPipe gate: dynamic import inside the capture-modal flow
   // only (never top-level, initial bundle unaffected). Single-shot VIDEO
@@ -200,56 +215,59 @@ export function ClockCard({
 
   const captureSelfie = () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !cameraReady || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    if (dataUrl.length > 500_000) { toast("error", "Photo is too large. Please capture it again."); return; }
+    selfieCapturedAtRef.current = new Date().toISOString();
+    punchRequestIdRef.current = null;
+    requestPayloadRef.current = null;
     setSelfie(dataUrl);
     setCameraOpen(false);
   };
 
   const punch = useCallback(
     async (action: "in" | "out") => {
+      if (punchBusyRef.current || submitting || locating) return;
+      if (!selfie) { setCameraOpen(true); toast("info", "Capture a fresh selfie before clocking in or out."); return; }
+      if (!requestPayloadRef.current && (!selfieCapturedAtRef.current || Date.now() - Date.parse(selfieCapturedAtRef.current) > 120_000)) { setSelfie(null); setCameraOpen(true); toast("info", "Selfie expired. Capture a fresh photo."); return; }
+      punchBusyRef.current = true;
       setLocating(true);
       try {
         if (!navigator.geolocation) {
           toast("error", t(lang, "clock.geoRequired"));
           return;
         }
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000 })
-        );
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
+        if (!requestPayloadRef.current) {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 })
+          );
+          requestPayloadRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, action, selfie, selfieCapturedAt: selfieCapturedAtRef.current, idempotencyKey: punchRequestIdRef.current ?? (punchRequestIdRef.current = crypto.randomUUID()) };
+        }
         setLocating(false);
         setSubmitting(true);
 
         const res = await fetch("/api/attendance/clock", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lat,
-            lng,
-            selfie,
-            idempotencyKey: punchRequestIdRef.current ?? (punchRequestIdRef.current = crypto.randomUUID()),
-          }),
+          body: JSON.stringify(requestPayloadRef.current),
         });
         const data = await res.json();
         if (!res.ok) {
           // A 5xx may have happened after persistence; retain the identity so
           // the next tap retries that event rather than creating another one.
-          if (res.status < 500) punchRequestIdRef.current = null;
+          if (res.status < 500) { punchRequestIdRef.current = null; requestPayloadRef.current = null; }
           toast("error", data.error ?? "Failed to clock " + action);
           return;
         }
         punchRequestIdRef.current = null;
-        if (data.duplicate) {
-          toast("info", "This punch was already recorded.");
-          router.refresh();
-          return;
-        }
+        requestPayloadRef.current = null;
         if (data.pendingApproval) {
           // Held for admin authorization (no Face ID enrolled): the punch is
           // recorded with selfie + location but counts only after approval.
@@ -263,19 +281,21 @@ export function ClockCard({
         router.refresh();
       } catch {
         setLocating(false);
-        toast("error", t(lang, "clock.locError"));
+        toast("error", requestPayloadRef.current ? "Punch could not be confirmed. Tap again to retry the same punch." : t(lang, "clock.locError"));
       } finally {
         setSubmitting(false);
+        setLocating(false);
+        punchBusyRef.current = false;
       }
     },
-    [selfie, router, toast, lang]
+    [selfie, router, toast, lang, submitting, locating]
   );
 
-  const punchedIn = Boolean(record?.punchInTime);
-  const punchedOut = Boolean(record?.punchOutTime);
+  const punchedIn = Boolean(record?.punchInTime) || pendingIn;
+  const punchedOut = Boolean(record?.punchOutTime) || pendingOut;
   // Held punch, no attendance yet: show the approval state instead of "not
   // clocked in" so the employee knows their punch wasn't lost.
-  const awaitingApproval = pendingApproval && !punchedIn;
+  const awaitingApproval = pendingApproval;
   const statusTone = awaitingApproval ? "warning" : punchedOut ? "neutral" : punchedIn ? "success" : "warning";
   const statusLabel = awaitingApproval
     ? t(lang, "clock.pendingApproval")
@@ -344,14 +364,14 @@ export function ClockCard({
               {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingOut") : t(lang, "clock.clockOut")}
             </Button>
           )}
-          {punchedOut && (
+          {punchedOut && !pendingApproval && (
             <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> {t(lang, "clock.allSet")}
             </span>
           )}
 
-          {!punchedIn && (
-            <Button variant="outline" size="lg" onClick={() => setCameraOpen(true)}>
+          {!punchedOut && (
+            <Button variant="outline" size="lg" disabled={submitting || locating} onClick={() => { if (requestPayloadRef.current) { toast("info", "Retry the unconfirmed punch before capturing another photo."); return; } setCameraOpen(true); }}>
               <Camera className="h-4 w-4" /> {selfie ? t(lang, "clock.retakeSelfie") : t(lang, "clock.addSelfie")}
             </Button>
           )}
@@ -386,7 +406,7 @@ export function ClockCard({
             ) : null}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">{t(lang, "common.cancel")}</Button>
-              <Button onClick={captureSelfie} disabled={!faceOk} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
+              <Button onClick={captureSelfie} disabled={!faceOk || !cameraReady} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
             </div>
           </div>
         </div>

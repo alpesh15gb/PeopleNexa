@@ -286,7 +286,7 @@ export async function reconcileEmployeeDay(
   const windowPunches = await prisma.punch.findMany({
     // Held-for-approval self-service punches must not leak into attendance
     // via another punch's reconcile pass — only auto/approved rows count.
-    where: { employeeId: employee.id, authStatus: { not: "pending" }, punchTime: { gte: initialWindow.start, lt: shift ? initialWindow.end : new Date(initialWindow.start.getTime() + 24 * 3600 * 1000) } },
+    where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: initialWindow.start, lt: shift ? initialWindow.end : new Date(initialWindow.start.getTime() + 24 * 3600 * 1000) } },
     orderBy: { punchTime: "asc" },
   });
   // Adjacent automatic windows can overlap. Route each punch to its workday
@@ -299,7 +299,7 @@ export async function reconcileEmployeeDay(
     : windowPunches;
   const { start: dayStart, end: dayEnd } = automatic && shift ? initialWindow : attendanceWindow(attendanceDate, shift, noShiftAttendanceWindowHours, shift ? null : initialPunches[0]?.punchTime);
   const punches = !shift && initialPunches[0]
-    ? await prisma.punch.findMany({ where: { employeeId: employee.id, authStatus: { not: "pending" }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
+    ? await prisma.punch.findMany({ where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
     : initialPunches;
   const missingOutTreatment = policy?.attendanceTreatment.missingOutPunch ?? "review";
   const singlePunchHalfDay = shift ? shift.singlePunchHalfDay : !automatic && await unassignedSinglePunchHalfDay(employee.tenantId);

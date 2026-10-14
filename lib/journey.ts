@@ -1,6 +1,10 @@
 import { prisma } from "./prisma";
-import { istStartOfDay } from "./ist";
-import { shiftWindow, FINALIZE_GRACE_HOURS } from "./reconcile";
+import { attendanceDayForPunch, shiftForEmployeeDay, shiftWindow, FINALIZE_GRACE_HOURS } from "./reconcile";
+import { minutesOfDay } from "./dates";
+
+export function dutyTrackingActive(record: { punchInTime: Date | null; punchOutTime: Date | null } | null, now: Date, window: { start: Date; end: Date }, pendingOut = false) {
+  return Boolean(record?.punchInTime && record.punchInTime <= now && !record.punchOutTime && !pendingOut && now >= window.start && now <= window.end);
+}
 
 /**
  * Journey tracking privacy guard.
@@ -19,22 +23,26 @@ export async function trackingState(tenantId: string, employeeId: string) {
     where: { id: employeeId },
     include: { shift: true },
   });
-  if (!employee || employee.tenantId !== tenantId) {
+  if (!employee || employee.tenantId !== tenantId || employee.status !== "active" || employee.loginOnly) {
     return { active: false, reason: "no_employee" as const, record: null, window: null };
   }
 
   const now = new Date();
-  const { start, end } = shiftWindow(istStartOfDay(now), employee.shift);
+  const workDay = await attendanceDayForPunch(employee, now);
+  const shift = await shiftForEmployeeDay(employee, workDay);
+  const { start, end: fallbackEnd } = shiftWindow(workDay, shift);
+  const end = shift ? new Date(workDay.getTime() + minutesOfDay(shift.endTime) * 60000 + (shift.isNightShift || minutesOfDay(shift.endTime) <= minutesOfDay(shift.startTime) ? 86400000 : 0)) : fallbackEnd;
   const graceMs = FINALIZE_GRACE_HOURS * 3600 * 1000;
   const inWindow = now.getTime() >= start.getTime() && now.getTime() <= end.getTime() + graceMs;
 
   const record = await prisma.attendance.findFirst({
-    where: { employeeId, date: { gte: start, lt: end } },
+    where: { tenantId, employeeId, date: workDay },
   });
-  const openSession = Boolean(record?.punchInTime && !record.punchOutTime);
+  const pendingOut = await prisma.punch.findFirst({ where: { tenantId, employeeId, source: "mobile", authStatus: "pending", inOutHint: "out", punchTime: { gte: start, lt: new Date(end.getTime() + graceMs) } }, select: { id: true } });
+  const openSession = Boolean(record?.punchInTime && record.punchInTime <= now && !record.punchOutTime && !pendingOut);
 
   return {
-    active: inWindow && openSession,
+    active: dutyTrackingActive(record, now, { start, end: new Date(end.getTime() + graceMs) }, Boolean(pendingOut)),
     reason: !inWindow ? ("outside_work_hours" as const) : !openSession ? ("not_clocked_in" as const) : ("ok" as const),
     record,
     window: { start, end },

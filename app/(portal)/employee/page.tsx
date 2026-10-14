@@ -9,6 +9,10 @@ import { StatCard } from "@/components/ui/stat";
 import { CalendarCheck2, TimerOff, Clock4, CalendarDays } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/badge";
+import { istStartOfDay } from "@/lib/ist";
+import { dayRangeIST, monthKeyIST } from "@/lib/dates";
+import { attendanceDayForPunch, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
+import { LocationPinger } from "./attendance/location-pinger";
 
 export const dynamic = "force-dynamic";
 
@@ -36,18 +40,21 @@ function StatsSkeleton() {
 export default async function EmployeeDashboardPage() {
   const session = await requireSession();
   const lang = await getLang();
-  const today = startOfDay(new Date());
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const today = istStartOfDay(new Date());
+  const monthStart = dayRangeIST(`${monthKeyIST()}-01`).start;
 
   const employee = await prisma.employee.findUnique({
     where: { id: session.sub },
     include: { shift: true, branch: true, department: true },
   });
   if (!employee) return null;
+  const workDay = await attendanceDayForPunch(employee, new Date());
+  const workShift = await shiftForEmployeeDay(employee, workDay);
+  const workWindow = shiftWindow(workDay, workShift);
 
   const [todayRecord, monthRecords, monthLeaves, pending, heldPunch] = await Promise.all([
     prisma.attendance.findFirst({
-      where: { employeeId: employee.id, date: { gte: today, lt: addDays(today, 1) } },
+      where: { tenantId: session.tenantId, employeeId: employee.id, date: workDay },
     }),
     prisma.attendance.findMany({
       where: { employeeId: employee.id, date: { gte: monthStart, lt: addDays(today, 1) } },
@@ -62,13 +69,14 @@ export default async function EmployeeDashboardPage() {
       take: 3,
     }),
     // Held unenrolled punch awaiting admin authorization (same day window).
-    prisma.punch.findFirst({
+    prisma.punch.findMany({
       where: {
         employeeId: employee.id,
+        tenantId: session.tenantId,
         authStatus: "pending",
-        punchTime: { gte: today, lt: addDays(today, 1) },
+        punchTime: { gte: workWindow.start, lt: workWindow.end },
       },
-      select: { id: true },
+      select: { id: true, inOutHint: true },
     }),
   ]);
 
@@ -92,12 +100,15 @@ export default async function EmployeeDashboardPage() {
         <div className="lg:col-span-2">
           <ClockCard
             record={todayRecord}
-            shift={employee.shift}
+            shift={workShift}
             branch={employee.branch}
             employeeName={`${employee.firstName} ${employee.lastName}`.trim()}
             lang={lang}
-            pendingApproval={Boolean(heldPunch)}
+            pendingApproval={heldPunch.length > 0}
+            pendingIn={heldPunch.some(punch => punch.inOutHint === "in" || punch.inOutHint === "unknown")}
+            pendingOut={heldPunch.some(punch => punch.inOutHint === "out")}
           />
+          <div className="mt-3"><LocationPinger active={Boolean(todayRecord?.punchInTime && !todayRecord.punchOutTime) && !heldPunch.some(punch => punch.inOutHint === "out")} /></div>
         </div>
 
         {/* Month stats */}

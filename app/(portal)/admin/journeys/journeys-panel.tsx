@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MapPin, Route, Users, Radar, Shield } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,12 @@ export function JourneysPanel({
   employees: Emp[];
 }) {
   const [tab, setTab] = useState<"replay" | "live">("replay");
+  const router = useRouter();
+  useEffect(() => {
+    if (tab !== "live") return;
+    const timer = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 30000);
+    return () => clearInterval(timer);
+  }, [tab, router]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selected = journeys.find((j) => j.employee.id === selectedId) ?? null;
@@ -55,6 +62,7 @@ export function JourneysPanel({
           <p className="text-[13px] text-muted-foreground">Field GPS — route replay & distance for {formatDateIST(date)}</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => router.refresh()} className="rounded-lg bg-tint px-3.5 py-2 text-[13px] font-medium text-muted-foreground">Refresh</button>
           <button
             onClick={() => setTab("replay")}
             className={`rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors ${tab === "replay" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}
