@@ -9,7 +9,7 @@ export function EssLoginAccess({ employeeId }: { employeeId: string }) {
   const [credentials, setCredentials] = useState<{ employeeNumber: string; temporaryPassword: string } | null>(null);
   async function create() {
     if (busy) return;
-    if (temporaryPassword && (temporaryPassword.length < 12 || new TextEncoder().encode(temporaryPassword).length > 72)) { setError("Use a temporary password of at least 12 characters and at most 72 bytes."); return; }
+    if (temporaryPassword && new TextEncoder().encode(temporaryPassword).length > 72) { setError("Use a temporary password of at most 72 bytes."); return; }
     if (!window.confirm("Create or reset this employee's ESS login? Existing sessions will be signed out and the employee must change the temporary password.")) return;
     setBusy(true); setError(""); setCredentials(null);
     try {
@@ -22,7 +22,7 @@ export function EssLoginAccess({ employeeId }: { employeeId: string }) {
   return <div className="space-y-2 rounded-lg border border-edge p-3">
     <p className="text-sm font-semibold">ESS login</p>
     <p className="text-xs text-muted-foreground">Employee ID sign-in. Real email is preserved; an internal address is generated if needed. The employee must change the temporary password.</p>
-    <Field label="Temporary password" hint="Enter your chosen password (minimum 12 characters), or leave blank to generate one automatically.">
+    <Field label="Temporary password" hint="Enter any temporary password, or leave blank to generate one automatically.">
       <div className="flex items-center gap-2">
         <Input type={showPassword ? "text" : "password"} value={temporaryPassword} onChange={event => { setTemporaryPassword(event.target.value); setCredentials(null); setError(""); }} autoComplete="new-password" autoCapitalize="none" spellCheck={false} maxLength={72} disabled={busy} placeholder="Choose a temporary password" />
         <Button type="button" variant="outline" disabled={busy} aria-label={showPassword ? "Hide temporary password" : "Show temporary password"} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)}>{showPassword ? "Hide" : "Show"}</Button>

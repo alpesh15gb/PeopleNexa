@@ -550,7 +550,7 @@ export function EmployeesTable({
             </Field>
             {!editing && (
               <Field label="Password" hint="Optional temporary password. An internal email is generated if needed; first-login change is required.">
-                <Input name="password" type="password" minLength={12} maxLength={72} placeholder="Min 12 characters" />
+                <Input name="password" type="password" minLength={1} maxLength={72} placeholder="Temporary password" />
               </Field>
             )}
             <Field label="Position">

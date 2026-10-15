@@ -866,7 +866,7 @@ function LicenseFields({
       >
         <Input
           type="password"
-          minLength={12} maxLength={72}
+          minLength={1} maxLength={72}
           value={stringValue(core.password)}
           onChange={(event) => updateCore("password", event.target.value)}
         />
@@ -2376,9 +2376,9 @@ function EmployeeMasterCreateContent({
           />
           <Field
             label="Initial password"
-            hint="Optional. Provide this with a work email to create portal login access; at least 12 characters."
+            hint="Optional temporary password. An internal email is generated if needed."
           >
-            <Input name="password" type="password" minLength={12} maxLength={72} />
+            <Input name="password" type="password" minLength={1} maxLength={72} />
           </Field>
           <Field label="Branch">
             <select

@@ -90,7 +90,7 @@ async function main() {
     assert.ok(await verifyPassword(issued.temporaryPassword, employee.password));
     assert.equal((await proxy(request("/api/attendance/clock", {}, oldEmployeeCookie))).status, 401);
     assert.ok(!JSON.stringify(audits).includes(issued.temporaryPassword), "temporary passwords never enter audit logs");
-    const customPassword = "Chosen-Temp-2026!";
+    const customPassword = "xy";
     response = await provision(request("/api/employees/employee1/ess-login", { temporaryPassword: customPassword }), { params: Promise.resolve({ id: employee.id }) });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).temporaryPassword, customPassword);
@@ -98,7 +98,7 @@ async function main() {
     assert.equal(employee.mustChangePassword, true);
     assert.ok(!JSON.stringify(audits).includes(customPassword));
     const versionBeforeInvalid = employee.sessionVersion, hashBeforeInvalid = employee.password;
-    for (const temporaryPassword of ["short", "x".repeat(73), "界".repeat(25), 123, null]) {
+    for (const temporaryPassword of ["x".repeat(73), "界".repeat(25), 123, null]) {
       assert.equal((await provision(request("/api/employees/employee1/ess-login", { temporaryPassword }), { params: Promise.resolve({ id: employee.id }) })).status, 400);
       assert.equal(employee.sessionVersion, versionBeforeInvalid);
       assert.equal(employee.password, hashBeforeInvalid, "invalid passwords do not reset credentials");
@@ -125,7 +125,7 @@ async function main() {
     assert.equal(internalEmployeeEmail("tenant1", "id"), internalEmployeeEmail("tenant1", "id"));
     assert.notEqual(internalEmployeeEmail("tenant1", "id"), internalEmployeeEmail("tenant2", "id"));
     assert.notEqual(temporaryEmployeePassword(), temporaryEmployeePassword());
-    assert.ok(passwordError("short")); assert.ok(passwordError("x".repeat(73))); assert.equal(passwordError("new-password-12345"), null);
+    assert.equal(passwordError("1"), null); assert.ok(passwordError("")); assert.ok(passwordError("x".repeat(73))); assert.equal(passwordError("new-password-12345"), null);
     const appManifest = manifest();
     assert.equal(appManifest.start_url, "/employee");
     for (const icon of appManifest.icons!) assert.ok(readFileSync(`public${icon.src}`).length > 0);
@@ -155,3 +155,4 @@ async function main() {
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
+

@@ -20,8 +20,8 @@ export function ChangePasswordForm() {
   }
   return <form onSubmit={submit} className="space-y-4">
     <Field label="Current or temporary password"><Input name="current" type="password" autoComplete="current-password" required maxLength={72} /></Field>
-    <Field label="New password" hint="Use at least 12 characters (maximum 72 bytes)."><Input name="password" type="password" autoComplete="new-password" minLength={12} maxLength={72} required /></Field>
-    <Field label="Confirm new password"><Input name="confirm" type="password" autoComplete="new-password" minLength={12} maxLength={72} required /></Field>
+    <Field label="New password" hint="Enter your new password (maximum 72 bytes)."><Input name="password" type="password" autoComplete="new-password" minLength={1} maxLength={72} required /></Field>
+    <Field label="Confirm new password"><Input name="confirm" type="password" autoComplete="new-password" minLength={1} maxLength={72} required /></Field>
     {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
     <Button type="submit" loading={busy}>Save password</Button>
     <Button type="button" variant="outline" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); router.refresh(); }}>Sign out</Button>

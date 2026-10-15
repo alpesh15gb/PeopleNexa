@@ -6,7 +6,7 @@ export function internalEmployeeEmail(tenantId: string, employeeId: string): str
 }
 export function temporaryEmployeePassword(): string { return randomBytes(18).toString("base64url"); }
 export function passwordError(password: string): string | null {
-  return password.length < 12 || password.length > 72 || Buffer.byteLength(password, "utf8") > 72 ? "Use a password of at least 12 characters and at most 72 UTF-8 bytes." : null;
+  return password.length < 1 || password.length > 72 || Buffer.byteLength(password, "utf8") > 72 ? "Enter a password of at most 72 UTF-8 bytes." : null;
 }
 export function portalHome(role: string): string {
   return ["admin", "branch_manager", "location_manager"].includes(role) ? "/admin" : role === "supervisor" ? "/admin/attendance" : "/employee";
