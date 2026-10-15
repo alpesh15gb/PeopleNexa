@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
       entity: "Punch",
       entityId: punch.id,
       summary: `held for admin approval (${holdReason})`,
-      after: { faceStatus, faceScore, holdReason },
+      after: { faceStatus, faceScore, holdReason, employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber } },
     });
     return NextResponse.json(
       {
@@ -285,7 +285,7 @@ export async function POST(req: NextRequest) {
       entity: "Punch",
       entityId: punch.id,
       summary: `auto-accepted (face ${faceScore ?? "—"}, location verified)`,
-      after: { faceStatus, faceScore },
+      after: { faceStatus, faceScore, employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber } },
     });
   }
 

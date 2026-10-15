@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { attendanceDayForPunch, reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
-import { appendAudit } from "@/lib/audit";
+import { auditEmployeeLabel } from "@/lib/audit-display";
 import { employeeLocationScope } from "@/lib/location-scope";
 import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       const count = await prisma.$transaction(async tx => {
         await assertLeavePayrollOpen(tx, tenantId, punch!.employeeId, workDay, workDay);
         const changed = await tx.punch.updateMany({ where: { id: punch!.id, tenantId, authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, data });
-        if (changed.count) await tx.auditLog.create({ data: { tenantId, actorId: session!.sub, actorRole: session!.role, action: "punch.authorization", entity: "Punch", entityId: punch!.id, summary: `Mobile punch ${decision}`, before: { authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, after: data } });
+        if (changed.count) await tx.auditLog.create({ data: { tenantId, actorId: session!.sub, actorRole: session!.role, action: "punch.authorization", entity: "Punch", entityId: punch!.id, summary: `Mobile punch ${decision === "accept" ? "approved" : "declined"} for ${employee ? auditEmployeeLabel(employee) : punch!.employeeId} — evidence retained`, before: { authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, after: { ...data, employeeId: punch!.employeeId, ...(employee ? { employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber } } : {}), punchTime: punchTimeValue.toISOString() } } });
         return changed.count;
       }, { isolationLevel: "Serializable" });
       return count === 1 ? null : "Punch changed during review. Refresh and try again.";
@@ -94,17 +94,6 @@ export async function POST(req: NextRequest) {
       const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
       if (error) return NextResponse.json({ error }, { status: 409 });
       await reconcileDay();
-      await appendAudit({
-        tenantId: session.tenantId,
-        actorId: session.sub,
-        actorRole: session.role,
-        action: "face.review",
-        entity: "Punch",
-        entityId: punch.id,
-        summary: `authorized held punch for ${punch.employeeId}; other punches retained for independent review`,
-        before: { faceStatus: punch.faceStatus, authStatus: "pending" },
-        after: { faceStatus: "approved", authStatus: "approved" },
-      });
       await notifyEmployee(
         session.tenantId,
         punch.employeeId,
@@ -117,17 +106,6 @@ export async function POST(req: NextRequest) {
     const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
     if (error) return NextResponse.json({ error }, { status: 409 });
     await reconcileDay();
-    await appendAudit({
-      tenantId: session.tenantId,
-      actorId: session.sub,
-      actorRole: session.role,
-      action: "face.review",
-      entity: "Punch",
-      entityId: punch.id,
-      summary: `accepted face review for ${punch.employeeId}`,
-      before: { faceStatus: punch.faceStatus },
-      after: { faceStatus: "approved", authStatus: "approved" },
-    });
     return NextResponse.json({ ok: true, faceStatus: "approved", authStatus: "approved" });
   }
 
@@ -144,16 +122,5 @@ export async function POST(req: NextRequest) {
       "Your held punch was declined by your admin and was not counted. Contact your admin if this is a mistake."
     );
   }
-  await appendAudit({
-    tenantId: session.tenantId,
-    actorId: session.sub,
-    actorRole: session.role,
-    action: "face.review",
-    entity: "Punch",
-    entityId: punch.id,
-    summary: `${isPendingAuth ? "declined held punch" : "rejected face review"} for ${punch.employeeId} — evidence retained`,
-    before: { faceStatus: punch.faceStatus },
-    after: { faceStatus: "declined", authStatus: "declined" },
-  });
   return NextResponse.json({ ok: true, faceStatus: "declined", authStatus: "declined" });
 }

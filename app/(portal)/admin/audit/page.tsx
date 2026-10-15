@@ -1,6 +1,6 @@
+import { enrichAuditEntries, auditTime } from "@/lib/audit-display";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { formatDateTime } from "@/lib/dates";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/stat";
@@ -47,16 +47,7 @@ export default async function AdminAuditPage({
     take: 50,
   });
 
-  const actorIds = [...new Set(rows.map((r) => r.actorId))];
-  const actors =
-    actorIds.length > 0
-      ? await prisma.employee.findMany({
-          where: { id: { in: actorIds } },
-          select: { id: true, firstName: true, lastName: true },
-        })
-      : [];
-  const nameById = new Map(actors.map((a) => [a.id, `${a.firstName} ${a.lastName}`.trim()]));
-  const entries = rows.map((r) => ({ ...r, actorName: nameById.get(r.actorId) ?? null }));
+  const entries = await enrichAuditEntries(rows, session.tenantId);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -80,10 +71,10 @@ export default async function AdminAuditPage({
             <Table>
               <THead>
                 <TR>
-                  <TH>Time</TH>
+                  <TH>Time (IST)</TH>
                   <TH>Actor</TH>
                   <TH>Action</TH>
-                  <TH>Entity</TH>
+                  <TH>Employee / Entity</TH>
                   <TH>Summary</TH>
                 </TR>
               </THead>
@@ -91,15 +82,22 @@ export default async function AdminAuditPage({
                 {entries.map((e) => (
                   <TR key={e.id}>
                     <TD className="whitespace-nowrap text-[12.5px] text-muted-foreground">
-                      {formatDateTime(e.createdAt)}
+                      {auditTime(e.createdAt)}
                     </TD>
                     <TD className="text-[13px]">
-                      {e.actorName ?? e.actorId}
-                      <span className="ml-1.5 text-[11px] text-muted-foreground">{e.actorRole}</span>
+                      {e.actorLabel}
+                      <span className="ml-1.5 text-[11px] text-muted-foreground">{e.actorRoleLabel}</span>
                     </TD>
-                    <TD className="whitespace-nowrap text-[13px]">{e.action}</TD>
-                    <TD className="whitespace-nowrap text-[13px]">{e.entity}</TD>
-                    <TD className="max-w-md truncate text-[13px] text-muted-foreground">{e.summary || "—"}</TD>
+                    <TD className="whitespace-nowrap text-[13px]">{e.actionLabel}</TD>
+                    <TD className="whitespace-nowrap text-[13px]">{e.employeeLabel ?? e.entity}</TD>
+                    <TD className="min-w-64 max-w-xl whitespace-normal text-[13px] text-muted-foreground">
+                      {e.readableSummary}
+                      {e.changes.map(change => <div key={change} className="mt-1 text-xs">{change}</div>)}
+                      <details className="mt-1 text-xs">
+                        <summary className="cursor-pointer">Audit references</summary>
+                        <div className="break-all">Audit ID: {e.id}<br />{e.entity} ID: {e.entityId}<br />Actor ID: {e.actorId}<br />Action: {e.action}<br />Original summary: {e.summary || "-"}</div>
+                      </details>
+                    </TD>
                   </TR>
                 ))}
               </TBody>

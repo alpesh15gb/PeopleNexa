@@ -1,3 +1,4 @@
+import { enrichAuditEntries } from "@/lib/audit-display";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -32,16 +33,7 @@ export async function GET(req: NextRequest) {
     take,
   });
 
-  const actorIds = [...new Set(rows.map((r) => r.actorId))];
-  const actors =
-    actorIds.length > 0
-      ? await prisma.employee.findMany({
-          where: { id: { in: actorIds } },
-          select: { id: true, firstName: true, lastName: true },
-        })
-      : [];
-  const nameById = new Map(actors.map((a) => [a.id, `${a.firstName} ${a.lastName}`.trim()]));
-  const entries = rows.map((r) => ({ ...r, actorName: nameById.get(r.actorId) ?? null }));
+  const entries = await enrichAuditEntries(rows, session.tenantId);
 
   return NextResponse.json({ entries });
 }
