@@ -1,5 +1,6 @@
 "use client";
 
+import { PunchPhoto } from "@/components/punch-evidence";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogIn, LogOut, MapPin, Camera, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
@@ -416,7 +417,7 @@ export function ClockCard({
       {/* Selfie preview */}
       {selfie && !cameraOpen && (
         <div className="absolute bottom-4 right-4 flex items-center gap-2">
-          <img src={selfie} alt="Selfie preview" className="h-16 w-16 rounded-xl border border-edge-strong object-cover" />
+          <PunchPhoto src={selfie} label="Your attendance selfie" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><img src={selfie} alt="Selfie preview" className="h-16 w-16 rounded-xl border border-edge-strong object-cover" /></PunchPhoto>
           <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">{t(lang, "clock.attached")}</span>
         </div>
       )}

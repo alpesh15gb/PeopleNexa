@@ -1,5 +1,6 @@
 "use client";
 
+import { PunchPhoto, PunchLocation } from "@/components/punch-evidence";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X, Clock3, FileQuestion } from "lucide-react";
@@ -109,7 +110,7 @@ export function RegularizationPanel({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to review face");
-      toast("success", decision === "accept" ? "Face accepted." : "Face rejected — punch removed.");
+      toast("success", decision === "accept" ? "Face accepted." : "Face rejected — evidence retained.");
       router.refresh();
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Failed to review face");
@@ -147,12 +148,14 @@ export function RegularizationPanel({
               return (
                 <div key={r.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
                   {r.selfie ? (
+                    <PunchPhoto src={r.selfie} label={`${r.employee.firstName} ${r.employee.lastName} (${r.employee.employeeNumber}) — punch selfie`} className="shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <img
                       src={r.selfie}
                       alt="Face capture needing review"
                       className="h-12 w-12 shrink-0 rounded-lg border border-edge object-cover"
                       loading="lazy"
                     />
+                    </PunchPhoto>
                   ) : (
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
                       {(r.employee.firstName[0] ?? "") + (r.employee.lastName[0] ?? "")}
@@ -188,21 +191,17 @@ export function RegularizationPanel({
                         <p className="text-xs text-muted-foreground">{r.locationStatus?.replaceAll("_", " ") ?? "Location check not recorded"}{r.locationAccuracy == null ? "" : ` · GPS ±${Math.round(r.locationAccuracy)}m`}</p>
                         {showFaceMaps ? (
                           <div className="mb-1.5 w-[208px] overflow-hidden rounded-lg border border-edge">
-                            <PunchMiniMap lat={Number(r.lat)} lng={Number(r.lng)} />
+                            <div className="relative">
+                              <PunchMiniMap lat={Number(r.lat)} lng={Number(r.lng)} />
+                              <PunchLocation lat={Number(r.lat)} lng={Number(r.lng)} accuracy={r.locationAccuracy} label={`${r.employee.firstName} ${r.employee.lastName} (${r.employee.employeeNumber}) — punch location`} className="absolute inset-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"><span className="sr-only">Open location map</span></PunchLocation>
+                            </div>
                           </div>
                         ) : faceMapsPending ? (
                           <div className="mb-1.5 h-[128px] w-[208px] animate-pulse rounded-lg border border-edge bg-tint" aria-hidden="true" />
                         ) : null}
                         <p className="text-[12px] text-muted-foreground">
                           Location {Number(r.lat).toFixed(5)}, {Number(r.lng).toFixed(5)} ·{" "}
-                          <a
-                            href={`https://www.google.com/maps?q=${r.lat},${r.lng}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium text-primary underline-offset-2 hover:underline"
-                          >
-                            Open map
-                          </a>
+                          <PunchLocation lat={Number(r.lat)} lng={Number(r.lng)} accuracy={r.locationAccuracy} label={`${r.employee.firstName} ${r.employee.lastName} (${r.employee.employeeNumber}) — punch location`} className="font-medium text-primary underline-offset-2 hover:underline">Open map</PunchLocation>
                         </p>
                       </div>
                     )}
