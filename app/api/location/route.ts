@@ -1,55 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { NextResponse } from "next/server";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { trackingState } from "@/lib/journey";
 import { istStartOfDay } from "@/lib/ist";
 
 /** POST — employee streams a location ping (only accepted while on duty). */
-export async function POST(req: NextRequest) {
+export async function POST() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  const body = await req.json().catch(() => ({}));
-  const lat = Number(body.lat);
-  const lng = Number(body.lng);
-  const accuracy = body.accuracy != null ? Number(body.accuracy) : null;
-  const at = body.at ? new Date(body.at) : new Date();
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return NextResponse.json({ error: "lat and lng are required." }, { status: 400 });
-  }
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return NextResponse.json({ error: "Coordinates out of range." }, { status: 400 });
-  }
-  if (isNaN(at.getTime())) {
-    return NextResponse.json({ error: "Invalid timestamp." }, { status: 400 });
-  }
-  if (at.getTime() > Date.now() + 5 * 60 * 1000) {
-    return NextResponse.json({ error: "Timestamp cannot be in the future." }, { status: 400 });
-  }
-  if (accuracy !== null && (!Number.isFinite(accuracy) || accuracy < 0)) {
-    return NextResponse.json({ error: "Invalid accuracy." }, { status: 400 });
-  }
-
-  // Privacy guard: pings are only stored while the employee is on duty
-  // (open attendance session inside the shift window + grace). Off-duty and
-  // after-hours locations are rejected and never stored.
-  const state = await trackingState(session.tenantId, session.sub);
-  if (!state.active) {
-    return NextResponse.json({ error: "not_tracking", reason: state.reason }, { status: 403 });
-  }
-
-  const ping = await prisma.locationPing.create({
-    data: {
-      tenantId: session.tenantId,
-      employeeId: session.sub,
-      lat,
-      lng,
-      accuracy,
-      at,
-    },
-  });
-  return NextResponse.json({ ping }, { status: 201 });
+  return NextResponse.json({ error: "Journey tracking is disabled. Location is captured only with attendance punches." }, { status: 410 });
 }
 
 /** GET — live map: only employees currently on duty (open session today). */

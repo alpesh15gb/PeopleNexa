@@ -8,7 +8,7 @@ export async function getSession(): Promise<SessionPayload | null> {
   if (!token) return null;
   const payload = verifyToken(token);
   if (!payload) return null;
-  return { sub: payload.sub, role: payload.role, tenantId: payload.tenantId };
+  return { sub: payload.sub, role: payload.role, tenantId: payload.tenantId, sessionVersion: payload.sessionVersion };
 }
 
 export async function requireSession(): Promise<SessionPayload> {
@@ -33,9 +33,9 @@ export async function requireActiveSession(): Promise<SessionPayload> {
   }
   const employee = await prisma.employee.findUnique({
     where: { id: session.sub },
-    select: { id: true, status: true, tenantId: true, role: true },
+    select: { id: true, status: true, tenantId: true, role: true, mustChangePassword: true, sessionVersion: true },
   });
-  if (!employee || employee.status !== "active" || employee.tenantId !== session.tenantId) {
+  if (!employee || employee.status !== "active" || employee.tenantId !== session.tenantId || employee.mustChangePassword || employee.sessionVersion !== (session.sessionVersion ?? 0)) {
     throw new Error("unauthorized");
   }
   // Prefer the DB role so demotions take effect immediately.

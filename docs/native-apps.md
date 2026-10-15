@@ -1,43 +1,26 @@
-# Native apps (TWA + iOS PWA)
+# PeopleNexa ESS PWA
 
-PWA is the ship vehicle. Play Store ships as a TWA wrapper; iOS uses Add-to-Home Screen until native is justified. No binary assets are checked in.
+ESS is distributed as a home-screen PWA, not an APK. Android browser Install app/Add to Home screen and Safari Share → Add to Home Screen are supported entry points. Installation requires HTTPS; browser controls vary. Admin/HR remain web interfaces. Manifest scope includes login to keep sign-in inside the installed window, but the app launches only `/employee` and installation is offered only in ESS.
 
-## 1. PWA icon gap (do this first)
+Journey tracking is disabled. Employee dashboard/attendance pages do not mount a GPS collector, and `/api/location` POST returns 410 even for stale clients. GPS and selfie evidence are collected only during clock-in/out. Historical journey records are retained.
 
-`app/manifest.ts` intentionally references only `/icon.svg` + `/icon-maskable.svg`.
-Maskable 192/512 PNGs don't exist yet — never add manifest entries for missing files.
+The service worker caches only public app icons. It purges earlier PeopleNexa caches and does not cache employee pages, APIs, payslips, or selfies. Offline launches show a reconnect screen; attendance is not submitted offline.
 
-Generate from `public/icon.svg` + `public/icon-maskable.svg` (any SVG→PNG tool):
+## Provisioning ESS
 
-- `public/icon-192.png` (192×192), `public/icon-512.png` (512×512, maskable padding)
-- Add both to `icons[]` in `app/manifest.ts`, then re-run Lighthouse PWA audit.
-- Screenshots (`screenshots[]`) stay omitted until real captures exist.
+Admin → Employee Master → Edit → Create/reset ESS login. Employee must be active, assigned a branch, and have an unambiguous employee code. A random temporary password is shown once; share it privately. This does not activate anyone or alter device codes. Real emails are preserved; missing/legacy device emails receive a stable internal `@employees.peoplenexa.invalid` identifier, not a mailbox.
 
-## 2. Play Store via TWA (Bubblewrap)
+Login accepts the employee code (case insensitive, workspace scoped) or existing email. No slash/zero aliasing is performed at login. Ambiguous employee codes are rejected. Initial temporary credentials and admin password resets require a new password before any portal/API access. Passwords are hashed; audit records never include passwords. Reset/change increments session version and invalidates old sessions.
 
-1. Deploy PWA to production HTTPS origin first; verify manifest + SW (`/manifest.webmanifest`, `/sw.js`).
-2. `npm i -g @bubblewrap/cli && bubblewrap init --manifest https://<prod>/manifest.webmanifest`
-3. Set package (e.g. `com.peoplenexa.app`), app name, theme colors; keep `startUrl /employee`.
-4. `bubblewrap build` → signs with a new keystore — back it up (loss = new listing).
-5. Host Digital Asset Links at `https://<prod>/.well-known/assetlinks.json` with the SHA-256 from step 4, then verify in Play Console → address bar must disappear.
-6. Upload the `.aab` to Play Console (internal track first), complete listing below.
+Existing accounts with no prior login and an existing password are marked for first-login password change by the migration. Existing established accounts retain access. Imported employees without a password remain unprovisioned until the admin explicitly creates ESS credentials. Assignment Pending and inactive employees cannot sign in.
 
-## 3. iOS notes
+## Deployment verification
 
-- No TWA on iOS: user installs via Share → Add to Home Screen (`appleWebApp` is set in `app/layout.tsx`).
-- Push on iOS: Web Push works only for installed Home-Screen PWAs on iOS 16.4+ with permission prompt; background sync/periodic sync unavailable.
-- Offline works via SW; test on real device (private mode disables SW persistence).
+Build and restart app; startup applies migration `20261015010000_ess_login`. Do not seed.
 
-## 4. What genuinely needs native later
-
-- Face-match attendance (liveness), background GPS tracking/geofence enforcement.
-- Reliable background uploads, biometric keystore auth, native push reliability/SLA.
-- Until then: PWA + TWA covers clock-in/out, payslips, leaves, approvals.
-
-## 5. Store listing checklist
-
-- [ ] 512 PNG icon, feature graphic (1024×500), ≥2 phone screenshots per track
-- [ ] Privacy policy URL + in-app link, data-safety form (location, employment data)
-- [ ] Package name frozen, signing key backed up, assetlinks verified (no URL bar)
-- [ ] Offline smoke test: airplane mode on `/employee`, `/admin`, `/superadmin/login`
-- [ ] Lighthouse PWA: installable, offline fallback, maskable icon, theme-color pass
+1. Provision an active test employee; confirm temporary credentials appear and real email/device code/status are unchanged.
+2. Log in by employee code on the correct tenant. Confirm password-change screen and API/portal restrictions before changing.
+3. Change password; old temporary password and old sessions must fail. Verify duplicate/cross-workspace codes do not authenticate.
+4. Install from an Android browser and iPhone Safari. Launch from icon; confirm ESS opens and notifications fit mobile screen.
+5. Clock in/out with fresh selfies and location; verify review/report evidence. No periodic location requests or new LocationPing rows should occur while browsing.
+6. Lock/reopen phone: ESS requires no continuous tracking. Offline launch must show reconnect, never another user's cached data.

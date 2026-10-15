@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { getSession, requireActiveSession } from "@/lib/session";
+import { internalEmployeeEmail, passwordError } from "@/lib/ess-login";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { appendAudit } from "@/lib/audit";
@@ -198,15 +199,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const selectedEmail = body.email !== undefined ? optionalEmployeeEmail(body.email) : employee.email;
   // Historical device imports used synthetic emails and opaque passwords.
   // They are not employee portal credentials and must not be required to edit.
-  const email = selectedEmail?.endsWith("@device.local") ? null : selectedEmail;
+  let email = selectedEmail?.endsWith("@device.local") ? null : selectedEmail;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   if (email && email !== employee.email) {
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, email, NOT: { id } } });
     if (duplicate) return NextResponse.json({ error: "An employee with this email already exists." }, { status: 400 });
   }
   const password = body.password !== undefined ? String(body.password).trim() : "";
-  if (shouldProvisionEmployeeLogin(email, password) && password.length < 12) {
-    return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
+  if (!email && (password || (employee.password && !employee.email?.endsWith("@device.local"))) && (body.role ?? employee.role) === "employee") email = internalEmployeeEmail(session.tenantId, employee.id);
+  if (shouldProvisionEmployeeLogin(email, password) && passwordError(password)) {
+    return NextResponse.json({ error: passwordError(password) }, { status: 400 });
   }
   if (body.status !== undefined && body.status !== "active" && body.status !== "inactive") {
     return NextResponse.json({ error: "Status must be active or inactive." }, { status: 400 });
@@ -428,6 +430,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
        firstName: nextFirstName,
       lastName: nextLastName,
       email,
+      ...(shouldProvisionEmployeeLogin(email, password) ? { mustChangePassword: true, sessionVersion: { increment: 1 } } : {}),
       password: email ? (shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : employee.password) : null,
       phone: nextPhone,
       position: nextPosition,

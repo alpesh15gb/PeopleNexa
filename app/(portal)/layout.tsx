@@ -10,7 +10,6 @@ import { getLang } from "@/lib/i18n-server";
 import { prisma } from "@/lib/prisma";
 import { Shell } from "@/components/shell";
 import { ToastProvider } from "@/components/ui/toast";
-import { PWARegister } from "@/components/pwa-register";
 
 export default async function PortalLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -28,6 +27,8 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   ]);
   // Inactive / deleted employees must not retain portal access (tokens live 30d).
   if (!employee || employee.status !== "active") redirect("/login");
+
+  if (employee.mustChangePassword) redirect("/change-password");
 
   // Location → branch tree for the left pane (oversight roles only; one
   // small indexed query, skipped for employees and branch managers).
@@ -50,7 +51,6 @@ export default async function PortalLayout({ children }: { children: ReactNode }
 
   return (
     <ToastProvider>
-      <PWARegister />
       <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules} locationTree={locationTree}>
         {children}
       </Shell>

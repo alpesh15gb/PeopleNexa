@@ -85,6 +85,11 @@ async function proxy(request: NextRequest) {
 
   // ── API routes: attach tenant context; each handler does its own auth. ───
   if (isApiRoute) {
+    if (payload && payload.role !== "superadmin" && !["/api/auth/login", "/api/auth/logout"].includes(pathname)) {
+      const employee = await prisma.employee.findFirst({ where: { id: payload.sub, tenantId: payload.tenantId }, select: { status: true, mustChangePassword: true, sessionVersion: true } }).catch(() => null);
+      if (!employee || employee.status !== "active" || employee.sessionVersion !== (payload.sessionVersion ?? 0)) return json("unauthorized", 401);
+      if (employee.mustChangePassword && pathname !== "/api/auth/change-password") return json("Change your temporary password before continuing.", 403);
+    }
     // License gate for authenticated tenant APIs (login/register/health/cron
     // run before a session exists and are exempt).
     if (payload && payload.role !== "superadmin" && payload.tenantId && !isPublicApi) {
@@ -121,9 +126,10 @@ async function proxy(request: NextRequest) {
       } else {
         const employee = await prisma.employee.findUnique({
           where: { id: payload.sub },
-          select: { role: true, status: true, tenantId: true },
+          select: { role: true, status: true, tenantId: true, mustChangePassword: true, sessionVersion: true },
         });
-        if (employee && employee.status === "active") {
+        if (employee && employee.status === "active" && employee.tenantId === payload.tenantId && employee.sessionVersion === (payload.sessionVersion ?? 0)) {
+          if (employee.mustChangePassword && pathname !== "/change-password") return NextResponse.redirect(new URL("/change-password", request.url));
           role = employee.role;
           tenantId = employee.tenantId;
         }
@@ -142,7 +148,7 @@ async function proxy(request: NextRequest) {
 
   const authed = Boolean(role);
   if (!authed) {
-    if (isAdminRoute || isEmployeeRoute) {
+    if (isAdminRoute || isEmployeeRoute || pathname === "/change-password" || pathname === "/notifications") {
       const res = NextResponse.redirect(new URL("/login", request.url));
       // Invalid, expired, or stale token — clear it so the user can log in
       // fresh instead of being stuck in a redirect loop.
@@ -218,6 +224,7 @@ export const config = {
     "/admin/:path*",
     "/employee/:path*",
     "/notifications",
+    "/change-password",
     "/login",
     "/register",
     "/superadmin/:path*",

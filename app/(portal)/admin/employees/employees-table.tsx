@@ -542,15 +542,15 @@ export function EmployeesTable({
             <Field label="Device Code" hint="eBio enrollment ID used for attendance matching">
               <Input name="deviceCode" defaultValue={editing?.deviceCode ?? ""} placeholder="e.g. 8767" />
             </Field>
-            <Field label="Email" hint="Optional. Provide a password too only to enable portal sign-in.">
+            <Field label="Email" hint="Optional. Real email is preserved; employee ID can be used for ESS sign-in.">
               <Input name="email" type="email" defaultValue={editing?.email ?? ""} />
             </Field>
             <Field label="Phone">
               <Input name="phone" defaultValue={editing?.phone ?? ""} />
             </Field>
             {!editing && (
-              <Field label="Password" hint="Optional. Requires an email to enable portal sign-in.">
-                <Input name="password" type="password" minLength={12} placeholder="Min 12 characters" />
+              <Field label="Password" hint="Optional temporary password. An internal email is generated if needed; first-login change is required.">
+                <Input name="password" type="password" minLength={12} maxLength={72} placeholder="Min 12 characters" />
               </Field>
             )}
             <Field label="Position">

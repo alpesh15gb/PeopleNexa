@@ -9,8 +9,6 @@ import { StatusPill } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { CalendarClock } from "lucide-react";
 import { CorrectionsPanel } from "./corrections-panel";
-import { LocationPinger } from "./location-pinger";
-import { trackingState } from "@/lib/journey";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +38,6 @@ export default async function EmployeeAttendancePage() {
 
   const recordByDay = new Map(records.map((r) => [toDateKey(r.date), r]));
   const todayRecord = recordByDay.get(toDateKey(today));
-  const openSession = (await trackingState(session.tenantId, session.sub)).active;
   const leaveByDay = new Map<string, { type: string; color: string }>();
   for (const l of leaves) {
     for (let d = l.fromDate; d <= l.toDate; d = addDays(d, 1)) {
@@ -64,7 +61,6 @@ export default async function EmployeeAttendancePage() {
       <PageHeader
         title={t(lang, "attendance.title")}
         description={`${month} — ${present + late} ${t(lang, "common.present").toLowerCase()} · ${late} ${t(lang, "common.late").toLowerCase()} · ${onLeave} ${t(lang, "common.onLeave").toLowerCase()}`}
-        actions={<LocationPinger active={openSession} />}
       />
 
       {/* 30-day heat grid — color is redundant: each cell also exposes text via aria + table fallback */}

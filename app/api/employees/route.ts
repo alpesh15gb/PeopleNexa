@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { internalEmployeeEmail, passwordError } from "@/lib/ess-login";
 import { hashPassword } from "@/lib/auth";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { profilePictureValue } from "@/lib/profile-picture";
@@ -205,13 +206,14 @@ export async function POST(req: NextRequest) {
     if (drivingLicenseIssuedAt === "invalid") return NextResponse.json({ error: "Driving License Issue Date must be a valid date." }, { status: 400 });
     const photo = body.profilePicture === undefined ? { value: null } : profilePictureValue(body.profilePicture);
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
-    const email = optionalEmployeeEmail(body.email);
+    let email = optionalEmployeeEmail(body.email);
     const position = optionalEmployeePosition(body.position);
     if (position && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: position, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation from Designation Master." }, { status: 400 });
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
     const lastName = lastNameRaw.trim();
     const password = body.password != null ? String(body.password).trim() : "";
+    if (!email && password && (body.role ?? "employee") === "employee") email = internalEmployeeEmail(session.tenantId, crypto.randomUUID());
     if (!firstName) return NextResponse.json({ error: "First name is required." }, { status: 400 });
     if (lastNameRaw !== "" && !lastName) {
       return NextResponse.json({ error: "Last name cannot be empty." }, { status: 400 });
@@ -222,8 +224,8 @@ export async function POST(req: NextRequest) {
     if (position && position.length > 100) {
       return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
     }
-    if (shouldProvisionEmployeeLogin(email, password) && password.length < 12) {
-      return NextResponse.json({ error: "Password must be at least 12 characters." }, { status: 400 });
+    if (shouldProvisionEmployeeLogin(email, password) && passwordError(password)) {
+      return NextResponse.json({ error: passwordError(password) }, { status: 400 });
     }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
@@ -357,6 +359,7 @@ export async function POST(req: NextRequest) {
           email: email || null,
           phone,
           password: shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : null,
+          mustChangePassword: shouldProvisionEmployeeLogin(email, password),
           role: loginOnly ? "branch_manager" : "employee",
           loginOnly,
           position: loginOnly ? null : position,

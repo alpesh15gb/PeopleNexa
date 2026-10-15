@@ -1,4 +1,5 @@
 "use client";
+import { EssLoginAccess } from "@/components/ess-login-access";
 
 import {
   createContext,
@@ -468,7 +469,7 @@ function EmployeeFields({
       )}
       <Field
         label="Work email"
-        hint="Optional. Add a password too to enable portal sign-in."
+        hint="Optional. Employees can sign in using their employee code."
       >
         <Input
           name="email"
@@ -861,11 +862,11 @@ function LicenseFields({
       </>}
       <Field
         label="Set or reset password"
-        hint="Optional. Leave blank to keep the current password."
+        hint="Optional temporary password. Leave blank to keep the current password; setting it requires a change at next login."
       >
         <Input
           type="password"
-          minLength={12}
+          minLength={12} maxLength={72}
           value={stringValue(core.password)}
           onChange={(event) => updateCore("password", event.target.value)}
         />
@@ -1194,6 +1195,7 @@ function Editor({
         title={canSkip ? "Add master details" : "Employee master editor"}
         description={canSkip ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in guided steps."}
       >
+        {canEditEmail && <div className="mb-4"><EssLoginAccess key={id} employeeId={id} /></div>}
         {loading ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             Loading employee master and available options...
@@ -2376,7 +2378,7 @@ function EmployeeMasterCreateContent({
             label="Initial password"
             hint="Optional. Provide this with a work email to create portal login access; at least 12 characters."
           >
-            <Input name="password" type="password" minLength={12} />
+            <Input name="password" type="password" minLength={12} maxLength={72} />
           </Field>
           <Field label="Branch">
             <select

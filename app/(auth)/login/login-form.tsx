@@ -30,18 +30,18 @@ export function LoginForm() {
           ...(slug ? { "X-Tenant-Slug": slug } : {}),
         },
         body: JSON.stringify({
-          email: form.get("email"),
+          identifier: form.get("identifier"),
           password: form.get("password"),
           ...(slug ? { slug } : {}),
         }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setError(data.error ?? "Invalid email or password");
+        setError(data.error ?? "Invalid employee ID, email or password");
         return;
       }
       toast("success", "Login successful — welcome back!");
-      router.push(data.role === "admin" || data.role === "branch_manager" || data.role === "location_manager" ? "/admin" : data.role === "supervisor" ? "/admin/attendance" : "/employee");
+      router.push(data.mustChangePassword ? "/change-password" : data.role === "admin" || data.role === "branch_manager" || data.role === "location_manager" ? "/admin" : data.role === "supervisor" ? "/admin/attendance" : "/employee");
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
@@ -62,13 +62,15 @@ export function LoginForm() {
             className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>
-        <Field label="Email address">
+        <Field label="Employee ID or email">
           <Input
-            name="email"
-            type="email"
+            name="identifier"
+            type="text"
             required
-            autoComplete="email"
-            placeholder="admin@yourcompany.com"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="Your employee code or email"
             className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>

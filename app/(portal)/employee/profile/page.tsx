@@ -40,7 +40,7 @@ export default async function EmployeeProfilePage() {
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title={t(lang, "profile.title")} />
+      <PageHeader title={t(lang, "profile.title")} actions={<a href="/change-password" className="text-sm text-primary underline">Change password</a>} />
       <Card>
         <CardContent className="p-6">
           <div className="flex flex-wrap items-center gap-5">

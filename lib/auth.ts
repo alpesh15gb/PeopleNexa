@@ -27,6 +27,7 @@ export interface SessionPayload {
   sub: string; // employee id
   role: string;
   tenantId: string;
+  sessionVersion?: number;
 }
 
 export function signToken(payload: SessionPayload) {

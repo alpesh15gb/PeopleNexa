@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAssignmentPending } from "@/lib/employee-assignment";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, signToken, SESSION_COOKIE, SESSION_COOKIE_DOMAIN } from "@/lib/auth";
 
@@ -25,10 +26,10 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    const email = String(body.email ?? "").toLowerCase().trim();
+    const identifier = String(body.identifier ?? body.email ?? "").trim();
     const password = String(body.password ?? "");
-    if (!email || !password) {
-      return NextResponse.json({ success: false, error: "Email and password are required." }, { status: 400 });
+    if (!identifier || !password || identifier.length > 254 || password.length > 128) {
+      return NextResponse.json({ success: false, error: "Employee ID or email and password are required." }, { status: 400 });
     }
 
     // The tenant is implied by the subdomain the user arrived on (x-tenant-slug
@@ -58,13 +59,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const employee = await prisma.employee.findFirst({
-      where: { tenantId: tenant.id, email },
+    const matches = await prisma.employee.findMany({
+      where: { tenantId: tenant.id, ...(identifier.includes("@") ? { email: identifier.toLowerCase() } : { employeeNumber: { equals: identifier, mode: "insensitive" } }) }, take: 2,
     });
+    const employee = matches.length === 1 ? matches[0] : null;
     if (!employee?.password || !(await verifyPassword(password, employee.password))) {
-      return NextResponse.json({ success: false, error: "Invalid email or password." }, { status: 401 });
+      return NextResponse.json({ success: false, error: "Invalid employee ID, email or password." }, { status: 401 });
     }
-    if (employee.status !== "active") {
+    if (employee.status !== "active" || isAssignmentPending(employee)) {
       return NextResponse.json({ success: false, error: "Your account is inactive. Contact your admin." }, { status: 403 });
     }
     if (employee.role === "branch_manager" && !employee.branchId) {
@@ -79,8 +81,8 @@ export async function POST(req: NextRequest) {
       data: { lastLoginAt: new Date() },
     });
 
-    const token = signToken({ sub: employee.id, role: employee.role, tenantId: employee.tenantId });
-    const res = NextResponse.json({ success: true, role: employee.role });
+    const token = signToken({ sub: employee.id, role: employee.role, tenantId: employee.tenantId, sessionVersion: employee.sessionVersion });
+    const res = NextResponse.json({ success: true, role: employee.role, mustChangePassword: employee.mustChangePassword });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

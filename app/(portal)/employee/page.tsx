@@ -1,3 +1,4 @@
+import { EssInstall } from "@/components/ess-install";
 import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
@@ -12,7 +13,6 @@ import { StatusPill } from "@/components/ui/badge";
 import { istStartOfDay } from "@/lib/ist";
 import { dayRangeIST, monthKeyIST } from "@/lib/dates";
 import { attendanceDayForPunch, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
-import { LocationPinger } from "./attendance/location-pinger";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +95,7 @@ export default async function EmployeeDashboardPage() {
         </p>
       </div>
 
+      <EssInstall />
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Clock card */}
         <div className="lg:col-span-2">
@@ -108,7 +109,6 @@ export default async function EmployeeDashboardPage() {
             pendingIn={heldPunch.some(punch => punch.inOutHint === "in" || punch.inOutHint === "unknown")}
             pendingOut={heldPunch.some(punch => punch.inOutHint === "out")}
           />
-          <div className="mt-3"><LocationPinger active={Boolean(todayRecord?.punchInTime && !todayRecord.punchOutTime) && !heldPunch.some(punch => punch.inOutHint === "out")} /></div>
         </div>
 
         {/* Month stats */}
