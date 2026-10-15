@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Info, CheckCircle2, AlertTriangle, XCircle, Inbox } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Bell, CheckCheck, Info, CheckCircle2, AlertTriangle, XCircle, Inbox, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Notif {
@@ -34,6 +35,41 @@ function timeAgo(dateStr: string) {
 
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState({ left: 16, top: 76, width: 320, maxHeight: 400 });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const rect = trigger.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewport = window.visualViewport;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const width = Math.min(window.innerWidth >= 640 ? 384 : 320, viewportWidth - 32);
+      const left = Math.max(viewportLeft + 16, Math.min(rect.right - width, viewportLeft + viewportWidth - width - 16));
+      const top = Math.max(viewportTop + 16, Math.min(rect.bottom + 8, viewportTop + viewportHeight - 160));
+      setPosition({ left, top, width, maxHeight: Math.max(0, viewportTop + viewportHeight - top - 16) });
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
   const [items, setItems] = useState<Notif[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -70,6 +106,7 @@ export function NotificationsBell() {
   return (
     <div className="relative">
       <button
+        ref={trigger}
         onClick={() => {
           setOpen((v) => !v);
           if (!open) load();
@@ -87,19 +124,24 @@ export function NotificationsBell() {
         )}
       </button>
 
-      {open && (
+      {open && createPortal(
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div role="dialog" aria-label="Notifications" className="card-surface absolute right-0 z-40 mt-2 max-w-[calc(100vw-2rem)] w-80 animate-scale-in overflow-hidden rounded-xl bg-card-2 shadow-2xl sm:w-96">
-            <div className="flex items-center justify-between border-b border-edge px-4 py-3">
+          <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} />
+          <div role="dialog" aria-label="Notifications" style={position} className="card-surface fixed z-[60] flex flex-col overflow-hidden rounded-xl bg-card-2 shadow-2xl">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-3">
               <p className="font-display text-sm font-semibold">Notifications</p>
+              <div className="flex items-center gap-3">
               {unread > 0 && (
                 <button onClick={markAll} className="flex cursor-pointer items-center gap-1 rounded-md text-[11.5px] font-medium text-primary transition-colors duration-200 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                   <CheckCheck className="h-3.5 w-3.5" /> Mark all read
                 </button>
               )}
+              <button aria-label="Close notifications" onClick={() => { setOpen(false); trigger.current?.focus(); }} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <X aria-hidden="true" className="h-4 w-4" />
+              </button>
+              </div>
             </div>
-            <div className="max-h-80 overflow-y-auto">
+            <div className="min-h-0 max-h-80 overflow-y-auto overscroll-contain">
               {loading ? (
                 <div className="flex items-center justify-center gap-2 py-10 text-[12.5px] text-muted-foreground">
                   <span className="h-3 w-3 animate-spin rounded-full border border-muted-foreground/40 border-t-transparent" />
@@ -135,12 +177,12 @@ export function NotificationsBell() {
             <Link
               href="/notifications"
               onClick={() => setOpen(false)}
-              className="block border-t border-edge px-4 py-2.5 text-center text-[12.5px] font-medium text-primary transition-colors duration-200 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
+              className="block shrink-0 border-t border-edge px-4 py-2.5 text-center text-[12.5px] font-medium text-primary transition-colors duration-200 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
             >
               View all notifications
             </Link>
           </div>
-        </>
+        </>, document.body
       )}
     </div>
   );
