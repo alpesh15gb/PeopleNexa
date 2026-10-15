@@ -90,6 +90,24 @@ async function main() {
     assert.ok(await verifyPassword(issued.temporaryPassword, employee.password));
     assert.equal((await proxy(request("/api/attendance/clock", {}, oldEmployeeCookie))).status, 401);
     assert.ok(!JSON.stringify(audits).includes(issued.temporaryPassword), "temporary passwords never enter audit logs");
+    const customPassword = "Chosen-Temp-2026!";
+    response = await provision(request("/api/employees/employee1/ess-login", { temporaryPassword: customPassword }), { params: Promise.resolve({ id: employee.id }) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).temporaryPassword, customPassword);
+    assert.ok(await verifyPassword(customPassword, employee.password));
+    assert.equal(employee.mustChangePassword, true);
+    assert.ok(!JSON.stringify(audits).includes(customPassword));
+    const versionBeforeInvalid = employee.sessionVersion, hashBeforeInvalid = employee.password;
+    for (const temporaryPassword of ["short", "x".repeat(73), "界".repeat(25), 123, null]) {
+      assert.equal((await provision(request("/api/employees/employee1/ess-login", { temporaryPassword }), { params: Promise.resolve({ id: employee.id }) })).status, 400);
+      assert.equal(employee.sessionVersion, versionBeforeInvalid);
+      assert.equal(employee.password, hashBeforeInvalid, "invalid passwords do not reset credentials");
+    }
+    response = await provision(request("/api/employees/employee1/ess-login", { temporaryPassword: "" }), { params: Promise.resolve({ id: employee.id }) });
+    assert.equal(response.status, 200);
+    const generated = (await response.json()).temporaryPassword;
+    assert.notEqual(generated, customPassword);
+    assert.ok(await verifyPassword(generated, employee.password));
     employee.email = "";
     response = await provision(request("/api/employees/employee1/ess-login", {}), { params: Promise.resolve({ id: employee.id }) });
     assert.equal(response.status, 200);

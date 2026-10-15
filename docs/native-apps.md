@@ -8,7 +8,7 @@ The service worker caches only public app icons. It purges earlier PeopleNexa ca
 
 ## Provisioning ESS
 
-Admin → Employee Master → Edit → Create/reset ESS login. Employee must be active, assigned a branch, and have an unambiguous employee code. A random temporary password is shown once; share it privately. This does not activate anyone or alter device codes. Real emails are preserved; missing/legacy device emails receive a stable internal `@employees.peoplenexa.invalid` identifier, not a mailbox.
+Admin → Employee Master → Edit → Create/reset ESS login. Employee must be active, assigned a branch, and have an unambiguous employee code. Enter a chosen temporary password (at least 12 characters, at most 72 UTF-8 bytes), or leave the field blank to generate a random one. The issued password is shown once; share it privately. This does not activate anyone or alter device codes. Real emails are preserved; missing/legacy device emails receive a stable internal `@employees.peoplenexa.invalid` identifier, not a mailbox.
 
 Login accepts the employee code (case insensitive, workspace scoped) or existing email. No slash/zero aliasing is performed at login. Ambiguous employee codes are rejected. Initial temporary credentials and admin password resets require a new password before any portal/API access. Passwords are hashed; audit records never include passwords. Reset/change increments session version and invalidates old sessions.
 
