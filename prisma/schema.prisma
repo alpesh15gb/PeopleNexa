@@ -585,6 +585,8 @@ model Employee {
   references                EmployeeReference[]
   bankAccounts              EmployeeBankAccount[]
 
+  @@index([tenantId, loginOnly, status, employeeNumber])
+  @@index([tenantId, loginOnly, branchId])
   @@unique([tenantId, employeeNumber])
   @@unique([tenantId, deviceCode])
   @@unique([tenantId, email])

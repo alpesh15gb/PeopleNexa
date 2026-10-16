@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import type { Prisma } from "@/generated/prisma/client";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BriefcaseBusiness, Building2, CreditCard, FileText, GraduationCap, IdCard, UserRound } from "lucide-react";
@@ -14,7 +16,7 @@ import { EmployeeStatusAction } from "./employee-status-action";
 import { EmployeeMasterImportExport } from "./employee-master-import-export";
 import { EmployeeMasterList } from "./employee-master-list";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
-import { assignmentPendingWhere, isAssignmentPending } from "@/lib/employee-assignment";
+import { loadEmployeeMasterList } from "@/lib/employee-master-list";
 
 export const dynamic = "force-dynamic";
 
@@ -93,25 +95,58 @@ export default async function EmployeeMasterPage({
       ],
     } : {}),
   };
-  const where = { ...baseWhere, ...(status === "assignment_pending" ? { AND: [assignmentPendingWhere] } : status !== "all" ? { status } : {}) };
-  const [total, employees, branches, departments, shifts, managers, positions, subdepartments, statusGroups] = await Promise.all([
-    prisma.employee.count({ where }),
-    prisma.employee.findMany({
-      where,
-      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, email: true, legacyImportData: true, branch: { select: { name: true } } },
-      orderBy: { employeeNumber: "asc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(locationId ? { locationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.shift.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, status: "active", ...locationScope }, select: { id: true, firstName: true, lastName: true, employeeNumber: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
-    prisma.employee.findMany({ where: { tenantId: session.tenantId, loginOnly: false, position: { not: null }, ...locationScope }, distinct: ["position"], select: { position: true }, orderBy: { position: "asc" } }),
-    prisma.employeeEmploymentProfile.findMany({ where: { subDepartment: { not: null }, employee: { tenantId: session.tenantId, loginOnly: false, ...locationScope } }, distinct: ["subDepartment"], select: { subDepartment: true }, orderBy: { subDepartment: "asc" } }),
-    prisma.employee.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
+  const [list, branches, positions] = await Promise.all([
+    loadEmployeeMasterList(baseWhere, status, page),
+    prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(isLocationManager ? { locationId: locationId ?? "__unassigned_location__" } : isBranchManager ? { id: branchId ?? "__unassigned_branch__" } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.designation.findMany({ where: { tenantId: session.tenantId, active: true }, select: { name: true }, orderBy: { name: "asc" } }),
   ]);
+  const { total, employees, counts, where } = list;
   const selectedId = params.employee ?? employees[0]?.id;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (page > pageCount) redirect(`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), status, page: String(pageCount) })}`);
+
+  return (
+    <div className="animate-fade-up space-y-6">
+      <PageHeader
+        title="Employee Master"
+        description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
+        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap gap-2">{isAdmin && <EmployeeMasterImportExport />}<EmployeeMasterCreate branches={branches} positions={positions.map(row => row.name)} requireBranch={isLocationManager} /><Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Download master data</Link></div> : undefined}
+      />
+      {isLocationManager && !locationId && (
+        <Card>
+          <CardContent className="p-6 text-sm text-muted-foreground">
+            Your Location Manager account has no location assigned. Ask an administrator to assign your location before viewing Employee Master.
+          </CardContent>
+        </Card>
+      )}
+      {isBranchManager && !branchId && <Card><CardContent className="p-6 text-sm text-muted-foreground">Your Branch Manager account has no branch assigned. Ask an administrator to assign your branch before viewing Employee Master.</CardContent></Card>}
+      <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
+        <Card className="h-fit xl:sticky xl:top-6">
+          <CardHeader>
+            <CardTitle>Employees</CardTitle>
+            <CardDescription>{total} {status === "all" ? "" : `${status} `}employee{total === 1 ? "" : "s"}{query ? " matching your search" : " in the master"}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <form action="/admin/employee-master" className="flex gap-2">
+              <input type="hidden" name="status" value={status} />
+              <input name="q" defaultValue={query} placeholder="Name, code, device ID" className="min-w-0 flex-1 rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
+              <button className="rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint" type="submit">Find</button>
+            </form>
+            <EmployeeMasterList key={`${query}:${status}:${page}`} employees={employees} selectedId={selectedId} query={query} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} />
+          </CardContent>
+        </Card>
+
+        <Suspense key={`${status}:${selectedId ?? "empty"}`} fallback={<Card><CardContent className="p-10 text-sm text-muted-foreground" role="status">Loading employee details…</CardContent></Card>}>
+          <EmployeeMasterDetails selectedId={selectedId} where={where} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+async function EmployeeMasterDetails({ selectedId, where, isAdmin, isLocationManager, isBranchManager }: {
+  selectedId?: string; where: Prisma.EmployeeWhereInput; isAdmin: boolean; isLocationManager: boolean; isBranchManager: boolean;
+}) {
   const employee = selectedId
     ? await prisma.employee.findFirst({
         where: { id: selectedId, ...where },
@@ -134,47 +169,8 @@ export default async function EmployeeMasterPage({
     ? employee.legacyImportData as Record<string, unknown>
     : {};
   const scheduledTransfer = employee?.transfers[0];
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  if (page > pageCount) redirect(`/admin/employee-master?${new URLSearchParams({ ...(query ? { q: query } : {}), status, page: String(pageCount) })}`);
-  const counts = {
-    all: statusGroups.reduce((sum, group) => sum + group._count._all, 0),
-    active: statusGroups.find((group) => group.status === "active")?._count._all ?? 0,
-    inactive: statusGroups.find((group) => group.status === "inactive")?._count._all ?? 0,
-    assignment_pending: await prisma.employee.count({ where: { ...baseWhere, AND: [assignmentPendingWhere] } }),
-  };
-
-  return (
-    <div className="animate-fade-up space-y-6">
-      <PageHeader
-        title="Employee Master"
-        description={isAdmin ? "Complete employee records, biometric identity, employment data, and imported HR master fields." : "Employee records for your assigned location."}
-        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap gap-2">{isAdmin && <EmployeeMasterImportExport />}<EmployeeMasterCreate branches={branches} positions={positions.flatMap((row) => row.position ? [row.position] : [])} requireBranch={isLocationManager} /><Link href="/api/reports/master-data" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Download master data</Link></div> : undefined}
-      />
-      {isLocationManager && !locationId && (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
-            Your Location Manager account has no location assigned. Ask an administrator to assign your location before viewing Employee Master.
-          </CardContent>
-        </Card>
-      )}
-      {isBranchManager && !branchId && <Card><CardContent className="p-6 text-sm text-muted-foreground">Your Branch Manager account has no branch assigned. Ask an administrator to assign your branch before viewing Employee Master.</CardContent></Card>}
-      <div className="grid gap-6 xl:grid-cols-[19rem_minmax(0,1fr)]">
-        <Card className="h-fit xl:sticky xl:top-6">
-          <CardHeader>
-            <CardTitle>Employees</CardTitle>
-            <CardDescription>{total} {status === "all" ? "" : `${status} `}employee{total === 1 ? "" : "s"}{query ? " matching your search" : " in the master"}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form action="/admin/employee-master" className="flex gap-2">
-              <input type="hidden" name="status" value={status} />
-              <input name="q" defaultValue={query} placeholder="Name, code, device ID" className="min-w-0 flex-1 rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
-              <button className="rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint" type="submit">Find</button>
-            </form>
-            <EmployeeMasterList key={`${query}:${status}:${page}`} employees={employees.map(({ email, legacyImportData, ...item }) => ({ ...item, assignmentPending: isAssignmentPending({ ...item, email, legacyImportData }) }))} selectedId={employee?.id} query={query} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} />
-          </CardContent>
-        </Card>
-
-        {!employee ? <Card><CardContent className="p-10 text-center text-sm text-muted-foreground">Select an employee to view the master record.</CardContent></Card> : (
+  const destinationBranch = scheduledTransfer ? await prisma.branch.findFirst({ where: { id: scheduledTransfer.destinationBranchId, tenantId: employee!.tenantId }, select: { name: true } }) : null;
+  return <>        {!employee ? <Card><CardContent className="p-10 text-center text-sm text-muted-foreground">Select an employee to view the master record.</CardContent></Card> : (
           <div className="space-y-6">
             <Card>
               <CardContent className="p-6">
@@ -185,7 +181,7 @@ export default async function EmployeeMasterPage({
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode ?? "—"}</span><span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} /><EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={branches} departments={departments} shifts={shifts} managers={managers} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: branches.find((branch) => branch.id === scheduledTransfer.destinationBranchId)?.name ?? "selected branch" } : null} /></>}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={branches} departments={departments} shifts={shifts} managers={managers} positions={positions.flatMap((row) => row.position ? [row.position] : [])} subdepartments={subdepartments.flatMap((row) => row.subDepartment ? [row.subDepartment] : [])} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
+                  <div className="flex flex-wrap gap-2"><EmployeeDeviceAccess employeeId={employee.id} />{(isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} /><EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={[]} departments={[]} shifts={[]} managers={[]} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: destinationBranch?.name ?? "selected branch" } : null} /></>}<EmployeeMasterQuickEdit canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={[]} departments={[]} shifts={[]} managers={[]} positions={[]} subdepartments={[]} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} /></div>
                 </div>
               </CardContent>
             </Card>
@@ -204,8 +200,5 @@ export default async function EmployeeMasterPage({
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" /> Work experience</CardTitle></CardHeader><CardContent>{employee.workExperience.length ? <div className="space-y-3">{employee.workExperience.map((entry) => <div key={entry.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{entry.employer} · {entry.jobTitle}</p><p className="mt-1 text-sm text-muted-foreground">{formatDateIST(entry.startDate)} to {entry.isCurrent ? "Present" : formatDateIST(entry.endDate)}{entry.location ? ` · ${entry.location}` : ""}</p></div>)}</div> : <DetailGrid fields={sourceFields(source, "WRK_")}/>}</CardContent></Card>
             </section>
           </div>
-        )}
-      </div>
-    </div>
-  );
+        )}</>;
 }

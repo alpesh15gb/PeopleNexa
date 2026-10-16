@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,13 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
   page: number; pageCount: number; counts: { all: number; active: number; inactive: number; assignment_pending: number }; canChangeStatus: boolean; actorId: string;
 }) {
   const router = useRouter();
+  const [navigating, startNavigation] = useTransition();
+  function navigate(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const url = event.currentTarget.getAttribute("href");
+    if (url) startNavigation(() => router.push(url, { scroll: false }));
+  }
   const [selecting, setSelecting] = useState(false);
   const [selection, setSelection] = useState<string[]>([]);
   const [target, setTarget] = useState<EmployeeStatus | null>(null);
@@ -43,12 +50,13 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
   const retryIds = results?.filter((result) => result.outcome === "failed").map((result) => result.id) ?? [];
   const resultCount = (outcome: StatusBatchResult["outcome"]) => results?.filter((result) => result.outcome === outcome).length ?? 0;
 
-  return <>
+  return <div aria-busy={navigating}>
+    {navigating && <p role="status" className="mb-2 text-xs text-muted-foreground">Loading employees…</p>}
     <div className="flex items-center justify-between gap-2">
       <nav aria-label="Employee status filter" className="flex flex-wrap gap-1">
-        {(["all", "active", "inactive"] as const).map((value) => <Link key={value} href={href(1, value)} aria-current={status === value ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs font-medium ${status === value ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{value === "all" ? "All" : value === "active" ? "Active" : "Inactive"} ({counts[value]})</Link>)}
+        {(["all", "active", "inactive"] as const).map((value) => <Link prefetch={false} scroll={false} onClick={navigate} key={value} href={href(1, value)} aria-current={status === value ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs font-medium ${status === value ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{value === "all" ? "All" : value === "active" ? "Active" : "Inactive"} ({counts[value]})</Link>)}
       </nav>
-      <Link href={href(1, "assignment_pending")} aria-current={status === "assignment_pending" ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs ${status === "assignment_pending" ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>Assignment Pending ({counts.assignment_pending})</Link>
+      <Link prefetch={false} scroll={false} onClick={navigate} href={href(1, "assignment_pending")} aria-current={status === "assignment_pending" ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs ${status === "assignment_pending" ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>Assignment Pending ({counts.assignment_pending})</Link>
       {canChangeStatus && !selecting && <Button size="sm" variant="ghost" disabled={!eligible.length} onClick={() => setSelecting(true)}>Select</Button>}
     </div>
     {selecting && <div className="space-y-2 rounded-lg border border-edge bg-muted/30 p-2">
@@ -63,7 +71,7 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
     <div className="max-h-[60vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">
       {employees.map((item) => <div key={item.id} className={`flex items-center gap-1 px-3 py-3 transition-colors hover:bg-tint ${item.id === selectedId ? "bg-primary/[0.08]" : ""}`}>
         {selecting && <input type="checkbox" className="mr-2" aria-label={`Select ${item.firstName} ${item.lastName} (${item.employeeNumber})`} disabled={busy || !eligible.some((employee) => employee.id === item.id)} checked={selection.includes(item.id)} onChange={(event) => setSelection((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />}
-        <Link href={href(page, status, item.id)} className="min-w-0 flex-1">
+        <Link prefetch={false} scroll={false} onClick={navigate} href={href(page, status, item.id)} className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber} · {item.deviceCode ?? "No device ID"}</p>
           <p className="mt-1 truncate text-[11px] text-muted-foreground">{item.assignmentPending ? "Assignment Pending" : item.branch?.name ?? "Unassigned"} · {item.position ?? "No designation"}</p>
@@ -73,7 +81,7 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
       </div>)}
       {!employees.length && <p className="p-5 text-center text-sm text-muted-foreground">No employees found.</p>}
     </div>
-    {pageCount > 1 && <div className="flex items-center justify-between text-xs"><Link href={href(Math.max(1, page - 1))} aria-disabled={page === 1} className={page === 1 ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Previous</Link><span className="text-muted-foreground">Page {page} of {pageCount}</span><Link href={href(Math.min(pageCount, page + 1))} aria-disabled={page === pageCount} className={page === pageCount ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Next</Link></div>}
+    {pageCount > 1 && <div className="flex items-center justify-between text-xs"><Link prefetch={false} scroll={false} onClick={navigate} href={href(Math.max(1, page - 1))} aria-disabled={page === 1} className={page === 1 ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Previous</Link><span className="text-muted-foreground">Page {page} of {pageCount}</span><Link prefetch={false} scroll={false} onClick={navigate} href={href(Math.min(pageCount, page + 1))} aria-disabled={page === pageCount} className={page === pageCount ? "pointer-events-none text-muted-foreground/50" : "font-medium text-primary"}>Next</Link></div>}
     <Modal open={target !== null} onClose={close} title={`Mark ${selected.length} employee${selected.length === 1 ? "" : "s"} ${target ?? ""}?`} description="Only the selected employees on this page are included.">
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">{target === "inactive" ? "Employment status changes immediately and biometric access is blocked. Attendance, payroll history and employee records are retained. This does not start offboarding." : "Employment status is restored. Device access stays blocked until explicitly restored under Device access."}</p>
@@ -84,5 +92,5 @@ export function EmployeeMasterList({ employees, selectedId, query, status, page,
         <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={close}>{results ? "Close and refresh" : "Cancel"}</Button>{results === null ? <Button variant={target === "inactive" ? "danger" : "primary"} loading={busy} onClick={() => void submit()}>Confirm {target}</Button> : retryIds.length > 0 && !resultCount("uncertain") ? <Button disabled={busy} onClick={() => { setSelection(retryIds); void submit(retryIds); }}>Retry failed ({retryIds.length})</Button> : null}</div>
       </div>
     </Modal>
-  </>;
+  </div>;
 }
