@@ -12,6 +12,7 @@
     "test:payroll-attendance-import": "tsx scripts/test-payroll-attendance-import.ts",
     "test:payroll-configurable": "tsx scripts/test-payroll-configurable-proration.ts",
     "test:attendance": "tsx scripts/test-attendance-day-key.ts",
+    "test:machine-employee-location": "tsx scripts/test-machine-employee-location.ts",
     "test:employee-master-list": "tsx scripts/test-employee-master-list.ts",
     "test:ess-login": "tsx scripts/test-ess-login.ts",
     "test:mobile-attendance": "tsx scripts/test-mobile-attendance.ts",

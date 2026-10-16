@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -68,7 +69,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (session.role === "branch_manager" && !branchId) return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
 
   const employee = await prisma.employee.findFirst({
-    where: { id, tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}), ...(branchId ? { branchId } : {}) },
+    where: { id, tenantId: session.tenantId, ...(locationId ? { AND: [employeeLocationScope(locationId)] } : {}), ...(branchId ? { branchId } : {}) },
     include: {
       profile: true,
       employmentProfile: true,
@@ -113,7 +114,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     : null;
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   if (session.role === "branch_manager" && !branchId) return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
-  const exists = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}), ...(branchId ? { branchId } : {}) }, select: { id: true } });
+  const exists = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { AND: [employeeLocationScope(locationId)] } : {}), ...(branchId ? { branchId } : {}) }, select: { id: true } });
   if (!exists) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const collections = ["dependents", "references", "bankAccounts", "education", "workExperience", "documents"] as const;

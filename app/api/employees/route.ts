@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -144,7 +145,7 @@ export async function GET() {
     const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
     if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     const employees = await prisma.employee.findMany({
-      where: { tenantId: session.tenantId, branch: { locationId: manager.locationId } },
+      where: { tenantId: session.tenantId, AND: [employeeLocationScope(manager.locationId)] },
       select: safeSelect,
       orderBy: { createdAt: "asc" },
     });

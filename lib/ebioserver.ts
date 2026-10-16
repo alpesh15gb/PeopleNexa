@@ -2,6 +2,7 @@ import * as soapNs from "soap";
 // CJS/ESM interop: module.exports carries createClientAsync directly; some
 // bundlers wrap it in .default, so accept both shapes.
 const soap = (soapNs as { default?: typeof soapNs }).default ?? soapNs;
+import { discoverMachineEmployeeLocations, attachPendingMachineLocations } from "./machine-employee-location";
 import { prisma } from "./prisma";
 import { encryptSecret, decryptSecret } from "./encrypt";
 import { istDateKey, istStartOfDay, parseIST } from "./ist";
@@ -430,8 +431,8 @@ function splitName(name: string): [string, string] {
 export async function importEmployeesFromEbioserver(
   tenantId: string,
   profile: EbioserverProfile
-): Promise<{ ok: boolean; total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number; message?: string }> {
-  const result = { ok: false, total: 0, created: 0, activated: 0, skipped: 0, failed: 0, reprocessed: 0, message: "" as string | undefined };
+): Promise<{ ok: boolean; total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number; locationAssigned: number; message?: string }> {
+  const result = { ok: false, total: 0, created: 0, activated: 0, skipped: 0, failed: 0, reprocessed: 0, locationAssigned: 0, message: "" as string | undefined };
   try {
     const client = await createClient(profile);
     const codesResult = await call<unknown>(client, "GetEmployeeCodes", { ...authArgs(profile), EmployeeLocation: "" });
@@ -440,6 +441,13 @@ export async function importEmployeesFromEbioserver(
       .map((c) => c.trim())
       .filter(Boolean))];
     result.total = codes.length;
+    const ownership = await discoverMachineEmployeeLocations(tenantId, async locationCode => {
+      const roster = await call<unknown>(client, "GetEmployeeCodes", { ...authArgs(profile), EmployeeLocation: locationCode });
+      return [...new Set(resultString(roster).split(",").map(code => code.trim()).filter(Boolean))];
+    });
+    if (ownership.incomplete) result.message = "Some machine location rosters were unavailable. Location assignments were deferred; retry the import.";
+    if (!ownership.incomplete && ownership.ambiguous) result.message = `${ownership.ambiguous} machine codes appear in multiple locations and need admin assignment.`;
+    if (!ownership.groups) result.message = "No mapped machine locations found. Map machine branches/locations before importing again.";
     const existing = await prisma.employee.findMany({
       where: { tenantId, OR: [{ deviceCode: { in: codes } }, { employeeNumber: { in: codes } }] },
       select: { deviceCode: true, employeeNumber: true },
@@ -463,6 +471,7 @@ export async function importEmployeesFromEbioserver(
           email: null,
           password: null,
           legacyImportData: { source: "ebioserver", assignmentPending: true },
+          locationId: ownership.locations.get(code) ?? null,
           role: "employee",
           status: "inactive",
         })),
@@ -471,6 +480,7 @@ export async function importEmployeesFromEbioserver(
       result.created += created.count;
       result.failed += batch.length - created.count;
     }
+    result.locationAssigned = await attachPendingMachineLocations(tenantId, ownership.locations);
     result.ok = true;
     // Now that employees exist, reconcile punches that were flagged earlier
     // because their code had no match at ingest time.

@@ -16,6 +16,7 @@ import { EmployeeStatusAction } from "./employee-status-action";
 import { EmployeeMasterImportExport } from "./employee-master-import-export";
 import { EmployeeMasterList } from "./employee-master-list";
 import { shouldShowSpouseDetails } from "@/lib/employee-spouse";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { loadEmployeeMasterList } from "@/lib/employee-master-list";
 
 export const dynamic = "force-dynamic";
@@ -76,7 +77,7 @@ export default async function EmployeeMasterPage({
     ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId
     : null;
   const branchId = isBranchManager ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true } }))?.branchId : null;
-  const locationScope = isLocationManager ? { branch: { locationId: locationId ?? "__unassigned_location__" } } : isBranchManager ? { branchId: branchId ?? "__unassigned_branch__" } : {};
+  const locationScope = isLocationManager ? { AND: [employeeLocationScope(locationId ?? "__unassigned_location__")] } : isBranchManager ? { branchId: branchId ?? "__unassigned_branch__" } : {};
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
   const status = params.status === "active" || params.status === "inactive" || params.status === "assignment_pending" ? params.status : "all";

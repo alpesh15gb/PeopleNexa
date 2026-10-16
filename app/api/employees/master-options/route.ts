@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
@@ -22,7 +23,7 @@ export async function GET() {
   const branchId = actor?.branchId ?? null;
 
   const employeeScope = session.role === "location_manager"
-    ? { branch: { locationId: locationId! } }
+    ? { AND: [employeeLocationScope(locationId!)] }
     : session.role === "branch_manager"
       ? { branchId: branchId! }
       : {};

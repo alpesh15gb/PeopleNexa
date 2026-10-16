@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { getSession, requireActiveSession } from "@/lib/session";
@@ -177,10 +178,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!manager?.locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
     ownLocationId = manager.locationId;
     const target = await prisma.employee.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, ...employeeLocationScope(ownLocationId) },
       select: { role: true, branch: { select: { locationId: true } } },
     });
-    if (!target?.branch || target.branch.locationId !== ownLocationId) {
+    if (!target) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
     if (["admin", "branch_manager", "location_manager"].includes(target.role)) {
@@ -535,7 +536,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   const locationId = session.role === "location_manager" ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId : null;
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}) } });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (session.role === "location_manager" && ["admin", "branch_manager", "location_manager"].includes(employee.role)) {
     return NextResponse.json({ error: "Location managers cannot delete privileged accounts." }, { status: 403 });

@@ -38,7 +38,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
     lastErrorAt: initial.lastErrorAt,
   });
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number; locationAssigned: number; message?: string } | null>(null);
   const [syncingTopology, setSyncingTopology] = useState(false);
   const [topologyResult, setTopologyResult] = useState<{ locations: number; branches: number; devices: number; skipped: number; cleanedBranches: number; cleanedLocations: number } | null>(null);
 
@@ -75,7 +75,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         toast("error", data.error ?? data.message ?? "Import failed");
         return;
       }
-      setImportResult({ total: data.total, created: data.created, activated: data.activated ?? 0, skipped: data.skipped, failed: data.failed, reprocessed: data.reprocessed ?? 0 });
+      setImportResult({ total: data.total, created: data.created, activated: data.activated ?? 0, skipped: data.skipped, failed: data.failed, reprocessed: data.reprocessed ?? 0, locationAssigned: data.locationAssigned ?? 0, message: data.message });
       toast("success", `Imported ${data.created} employee(s) to Assignment Pending · ${data.reprocessed ?? 0} punches reconciled. Existing employee statuses unchanged.`);
     } catch {
       toast("error", "Something went wrong.");
@@ -247,6 +247,8 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
                 <span className="text-muted-foreground">
                   {" · "}
                   Assignment Pending · {importResult.skipped} already present (status unchanged) · {importResult.failed} failed · of {importResult.total} codes
+                  {importResult.locationAssigned > 0 && ` · ${importResult.locationAssigned} existing employees linked to machine location`}
+                  {importResult.message && ` · ${importResult.message}`}
                   {importResult.reprocessed > 0 && ` · ${importResult.reprocessed} flagged punches reconciled`}
                 </span>
               </p>

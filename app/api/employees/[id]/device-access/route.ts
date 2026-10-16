@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
@@ -20,7 +21,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const locationId = await locationIdFor(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const locationScope = locationId ? { branch: { locationId } } : {};
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true, deviceAccessEnabled: true, status: true } });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) }, select: { id: true, deviceCode: true, deviceAccessEnabled: true, status: true } });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
   const [devices, access, provisionResults] = await Promise.all([
     prisma.device.findMany({ where: { tenantId: session.tenantId, status: "active", config: { path: ["ebioserver"], equals: true }, ...locationScope }, select: { id: true, name: true, serialNumber: true, config: true }, orderBy: { name: "asc" } }),
@@ -67,7 +68,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const locationId = await locationIdFor(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const locationScope = locationId ? { branch: { locationId } } : {};
-  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...locationScope }, select: { id: true, deviceCode: true, firstName: true, lastName: true, status: true } });
+  const employee = await prisma.employee.findFirst({ where: { id, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) }, select: { id: true, deviceCode: true, firstName: true, lastName: true, status: true } });
   if (!employee?.deviceCode) return NextResponse.json({ error: "Employee needs a Device Code before device access can be managed." }, { status: 400 });
   if (employee.status !== "active") return NextResponse.json({ error: "Inactive employees are blocked on all active eBio devices and cannot be granted device access." }, { status: 409 });
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });

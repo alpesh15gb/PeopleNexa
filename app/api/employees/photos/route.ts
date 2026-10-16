@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
     const code = String(item.code ?? "").trim();
     const photo = profilePictureValue(item.profilePicture);
     if (!code || photo.error) { results.push({ code: code || "unknown", error: photo.error ?? "Filename must be an Employee Code or Device Code." }); continue; }
-    const employee = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, ...(locationId ? { branch: { locationId } } : {}), OR: [{ deviceCode: code }, { employeeNumber: code }] }, select: { id: true } });
+    const employee = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, ...(locationId ? { AND: [employeeLocationScope(locationId)] } : {}), OR: [{ deviceCode: code }, { employeeNumber: code }] }, select: { id: true } });
     if (!employee) { results.push({ code, error: "No employee matches this filename." }); continue; }
     await prisma.employee.update({ where: { id: employee.id }, data: { profilePicture: photo.value } });
     results.push({ code });
