@@ -1,3 +1,4 @@
+import { needsEbioAccessCommand } from "@/lib/ebio-access-plan";
 import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -86,23 +87,25 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       error: `Cannot provision ${unmappedDevices.map((device) => device.name).join(", ")}: its eBio location code is missing. ${topologySyncInstruction(session.role)}`,
     }, { status: 409 });
   }
-  const previous = await prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId, allowed: true }, select: { deviceId: true } });
+  const previous = await prisma.employeeDeviceAccess.findMany({ where: { employeeId: id, tenantId: session.tenantId }, select: { deviceId: true, allowed: true, commandStatus: true } });
+  const previousByDevice = new Map(previous.map((row) => [row.deviceId, row]));
+  const commandDevices = devices.filter((device) => needsEbioAccessCommand(previousByDevice.get(device.id), body.mode === "all" || selected.has(device.id)));
 
   // Persist the desired policy first, but mark every machine pending until eBio
   // accepts the command. An empty eBio response means command sent, not verified.
   await prisma.$transaction([
     prisma.employee.update({ where: { id }, data: { deviceAccessEnabled: body.mode === "restricted" } }),
-    ...devices.map((device) => prisma.employeeDeviceAccess.upsert({
+    ...commandDevices.map((device) => prisma.employeeDeviceAccess.upsert({
       where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } },
       create: { tenantId: session.tenantId, employeeId: id, deviceId: device.id, allowed: body.mode === "all" || selected.has(device.id), commandStatus: "pending", lastError: null, lastResponse: null },
       update: { allowed: body.mode === "all" || selected.has(device.id), commandStatus: "pending", lastError: null, lastResponse: null },
     })),
   ]);
 
-  const results: Array<{ deviceId: string; name: string; allowed: boolean; status: "sent" | "failed"; response?: string; error?: string }> = [];
+  const results: Array<{ deviceId: string; name: string; allowed: boolean; status: "sent" | "failed" | "unchanged"; response?: string; error?: string }> = [];
   const provisionResults: Array<{ locationCode: string; status: "sent" | "failed"; response?: string; error?: string }> = [];
   const selectedLocations = new Set<string>();
-  for (const device of devices) {
+  for (const device of commandDevices) {
     if (body.mode === "all" || selected.has(device.id)) {
       const locationCode = ebioLocationCode(device.config);
       if (locationCode) selectedLocations.add(locationCode);
@@ -150,6 +153,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
   for (const device of devices) {
+    if (!commandDevices.some((pending) => pending.id === device.id)) {
+      results.push({ deviceId: device.id, name: device.name, allowed: body.mode === "all" || selected.has(device.id), status: "unchanged" });
+      continue;
+    }
     const requestedAllowed = body.mode === "all" || selected.has(device.id);
     const locationCode = requestedAllowed ? ebioLocationCode(device.config) : null;
     // A provisioning failure is followed only by a block command.
@@ -169,7 +176,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     try {
       const response = await setEbioUserDeviceAccess(profile, device.serialNumber, employee.deviceCode, allowed);
       const provisionFailure = requestedAllowed && locationCode && failedLocations.has(locationCode);
-      const error = provisionFailure ? `Provisioning failed for eBio location ${locationCode}; device remains blocked.` : null;
+      const error = provisionFailure ? `Provisioning failed for eBio location ${locationCode}: ${provisionResults.find((result) => result.locationCode === locationCode)?.error ?? "Unknown eBio error"}. Block requested; physical state is not verified.` : null;
       await prisma.employeeDeviceAccess.update({
         where: { employeeId_deviceId: { employeeId: id, deviceId: device.id } },
         // The block command was accepted, but the requested access did not
@@ -187,7 +194,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     tenantId: session.tenantId, actorId: session.sub, actorRole: session.role,
     action: "employee.device_access.update", entity: "Employee", entityId: id,
     summary: `Updated biometric device access for ${employee.deviceCode}`,
-    before: { deviceIds: previous.map((row) => row.deviceId) },
+    before: { deviceIds: previous.filter((row) => row.allowed).map((row) => row.deviceId) },
     after: { mode: body.mode, deviceIds, provisionResults: provisionResults.map(({ response: _response, ...result }) => result), results: results.map(({ response: _response, ...result }) => result) },
   });
   return NextResponse.json({ results, provisionResults, note: "Mapped locations are provisioned before unblocking. Sent means eBio accepted the request; confirm physical access on the device." }, { status: results.some((result) => result.status === "failed") || provisionResults.some((result) => result.status === "failed") ? 207 : 200 });
