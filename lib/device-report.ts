@@ -1,3 +1,4 @@
+import { assessAttendanceDay, assessmentRequiresReview } from "./attendance-assessment";
 // eBioserver-style Daily + Monthly attendance report builders.
 // Pure functions only (no prisma, no I/O). All wall-clock formatting goes
 // through lib/ist + lib/dates helpers so output stays IST-consistent.
@@ -17,12 +18,19 @@ function reportShift(rosters: Map<string, DeviceShift> | undefined, employee: De
   return rosters?.get(`${employee.id}|${day}`) ?? record?.shift ?? employee.shift;
 }
 
+function assessmentFor(args: { asOfDay?: string; sourceRecoveryDays?: Set<string>; leaves: Set<string>; holidays: Set<string> }, emp: DeviceEmployee, day: string, record: DeviceRecord | undefined, shift: DeviceShift | null, raw: SnapshotPunch[] | undefined) {
+  return assessAttendanceDay({ day, asOfDay: args.asOfDay, joiningDate: emp.joiningDate, record, hasShift: Boolean(shift),
+    hasAuthorizedPunch: Boolean(raw?.length), hasUnprocessedSource: args.sourceRecoveryDays?.has(`${emp.id}|${day}`), holiday: args.holidays.has(day),
+    leave: args.leaves.has(`${emp.id}|${day}`) || args.leaves.has(emp.id), weeklyOff: isWeeklyOff(day, shift) });
+}
+
 function isWeeklyOff(day: string, shift: DeviceShift | null) {
   return shift?.sundayWeeklyOff === true && new Date(`${day}T12:00:00Z`).getUTCDay() === 0;
 }
 
 export interface DeviceEmployee {
   id: string;
+  joiningDate?: Date | null;
   employeeNumber: string;
   firstName: string;
   lastName: string;
@@ -60,6 +68,13 @@ export function formatClockIST(d: Date | string | null | undefined): string {
   if (Number.isNaN(dt.getTime())) return "";
   const w = istWallClock(dt);
   return `${pad2(w.getUTCHours())}:${pad2(w.getUTCMinutes())}`;
+}
+
+/** Show the workday offset so next-morning OUT is not mistaken for same-day OUT. */
+export function formatAttendanceClockIST(value: Date | null, day: Date): string {
+  if (!value) return "";
+  const offset = Math.round((Date.parse(istDateKey(value)) - Date.parse(istDateKey(day))) / 86400000);
+  return formatClockIST(value) + (offset ? ` (${offset > 0 ? "+" : ""}${offset}d)` : "");
 }
 
 /** Minutes since IST midnight for a stored instant, or null when missing. */
@@ -198,11 +213,13 @@ function buildDayCells(
     earlyMinutes: 0,
     durationMinutes: 0,
   };
-  if (!record) return empty;
-  if (!record.shift && !employeeShift && record.punchInTime && record.punchOutTime && istDateKey(record.punchInTime) !== istDateKey(record.punchOutTime)) return { ...empty, inTime: formatClockIST(record.punchInTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
-  if (attendanceRequiresReview(record)) return { ...empty, inTime: formatClockIST(record.punchInTime), outTime: formatClockIST(record.punchOutTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
-  const inTime = formatClockIST(record.punchInTime);
-  const outTime = formatClockIST(record.punchOutTime);
+  if (!record) {
+    const entries = (fallback ?? []).map(p => new Date(p.time)).filter(d => !Number.isNaN(d.getTime())).sort((a,b) => a.getTime()-b.getTime());
+    return { ...empty, inTime: entries[0] ? formatClockIST(entries[0]) : "", punches: punchesText([], fallback) };
+  }
+  if (assessmentRequiresReview(record, Boolean(record.shift || employeeShift))) return { ...empty, inTime: formatAttendanceClockIST(record.punchInTime, record.date), outTime: formatAttendanceClockIST(record.punchOutTime, record.date), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
+  const inTime = formatAttendanceClockIST(record.punchInTime, record.date);
+  const outTime = formatAttendanceClockIST(record.punchOutTime, record.date);
   const late = record.lateMinutes > 0 ? formatHM(record.lateMinutes) : "";
   const overtime = record.overtimeMinutes > 0 ? formatHM(record.overtimeMinutes) : "";
 
@@ -214,7 +231,9 @@ function buildDayCells(
   if (shift && outMin !== null) {
     const endMin = minutesOfDay(shift.endTime);
     if (shift.endTime && /^\d{2}:\d{2}$/.test(shift.endTime)) {
-      earlyMinutes = Math.max(0, endMin - outMin);
+      const endDayOffset = endMin < minutesOfDay(shift.startTime) ? 1440 : 0;
+      const outDayOffset = Math.round((Date.parse(istDateKey(record.punchOutTime!)) - Date.parse(istDateKey(record.date))) / 86400000) * 1440;
+      earlyMinutes = Math.max(0, endDayOffset + endMin - outDayOffset - outMin);
       early = earlyMinutes > 0 ? formatHM(earlyMinutes) : "";
     }
   }
@@ -275,11 +294,13 @@ export const DEVICE_DAILY_COLUMNS = [
   "Duration",
   "Overtime",
   "Punches",
-  "Status",
-  "Finalized Attendance",
+  "Scan Presence",
+  "Assessed Attendance",
 ];
 
 export function buildDeviceDaily(args: {
+  asOfDay?: string;
+  sourceRecoveryDays?: Set<string>;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -305,11 +326,10 @@ export function buildDeviceDaily(args: {
     if (rawPunches.length) {
       cells.punches = punchesText(null, rawPunches);
       if (!cells.inTime) cells.inTime = formatClockIST(rawPunches[0].time);
-      const last = rawPunches[rawPunches.length - 1];
-      if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatClockIST(last.time);
+
     }
     const status = rawPunches.length ? "P" : args.holidays.has(day) ? "H" : leaves.has(emp.id) ? "L" : isWeeklyOff(day, shift) ? "WO" : "A";
-    const attendanceStatus = record?.status ?? "Pending";
+    const attendanceStatus = assessmentFor(args, emp, day, record, shift, rawPunches).code;
     const { earlyMinutes: _e, durationMinutes: _d, ...rest } = cells;
     return {
       ...rest,
@@ -398,6 +418,8 @@ export const DEVICE_MONTHLY_COLUMNS = [
 const PRESENT_STATUSES = new Set(["present", "late", "permission", "half_day"]);
 
 export function buildDeviceMonthly(args: {
+  asOfDay?: string;
+  sourceRecoveryDays?: Set<string>;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -430,40 +452,41 @@ export function buildDeviceMonthly(args: {
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
       const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       let status: string;
-      if (record && PRESENT_STATUSES.has(record.status)) {
-        status = record.status === "half_day" ? "½P" : "P";
+      const assessment = assessmentFor(args, emp, dayKey, record, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      if (assessment.assessedPresent && record) {
+        status = assessment.code;
         present++;
         lateSum += Math.max(0, record.lateMinutes);
         earlySum += cells.earlyMinutes;
         durationSum += cells.durationMinutes;
         if (!attendanceRequiresReview(record)) otSum += Math.max(0, record.overtimeMinutes);
-      } else if (holidays.has(dayKey)) {
+      } else if (assessment.status === "holiday") {
         status = "H";
         holidayCount++;
-      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+      } else if (assessment.status === "on_leave") {
         status = "L";
         leaveCount++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (assessment.status === "weekly_off") {
         status = "WO";
         weeklyOffs++;
       } else {
-        status = "A";
+        status = assessment.code;
       }
       return {
         day: idx + 1,
         dayKey,
         status,
         shift: shiftLabel(shift),
-        inTime: status === "P" || status === "½P" ? cells.inTime : "",
-        outTime: status === "P" || status === "½P" ? cells.outTime : "",
+        inTime: cells.inTime,
+        outTime: cells.outTime,
         lateBy: status === "P" || status === "½P" ? cells.late : "",
         earlyBy: status === "P" || status === "½P" ? cells.early : "",
-        duration: status === "P" || status === "½P" ? cells.duration : "",
+        duration: assessment.requiresReview ? "Review" : assessment.assessedPresent ? cells.duration : "",
         overTime: status === "P" || status === "½P" ? cells.overtime : "",
       };
     });
 
-    const absent = Math.max(days.length - present - leaveCount - weeklyOffs - holidayCount, 0);
+    const absent = rows.filter(row => row.status === "A").length;
     const summary: DeviceMonthlySummary = {
       present,
       absent,
@@ -480,7 +503,7 @@ export function buildDeviceMonthly(args: {
     };
     const summaryLine =
       `Present: ${summary.present} Absent: ${summary.absent} Leaves: ${summary.leaves} ` +
-      `CompOffs: 0 Weekly Offs: ${summary.weeklyOffs} Holidays: ${summary.holidays} WOP: 0 HP: 0 ` +
+      `Review/Pending: ${rows.filter(row => row.status === "Review" || row.status === "Pending").length} CompOffs: 0 Weekly Offs: ${summary.weeklyOffs} Holidays: ${summary.holidays} WOP: 0 HP: 0 ` +
       `Total Late: ${summary.totalLate} Total Early: ${summary.totalEarly} ` +
       `Total Duration: ${summary.totalDuration} Total OverTime: ${summary.totalOvertime}`;
     return {
@@ -598,6 +621,8 @@ export interface DeviceStatusMatrixOutput {
 
 export function buildStatusMatrix(args: {
   /** Explicit employee/day rosters override the saved day shift and default. */
+  asOfDay?: string;
+  sourceRecoveryDays?: Set<string>;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -623,33 +648,34 @@ export function buildStatusMatrix(args: {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
       const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
-      const present = !!record && PRESENT_STATUSES.has(record.status);
+      const assessment = assessmentFor(args, emp, dayKey, record, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const present = assessment.assessedPresent;
       const isSunday = new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
       let status: string;
       if (present) {
-        status = record.status === "half_day" ? "½P" : "P";
+        status = assessment.code;
         totals.present++;
-      } else if (holidays.has(dayKey)) {
+      } else if (assessment.status === "holiday") {
         status = "H";
         totals.holiday++;
-      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+      } else if (assessment.status === "on_leave") {
         status = "L";
         totals.leave++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (assessment.status === "weekly_off") {
         status = "WO";
         totals.weekOff++;
       } else {
-        status = "A";
-        totals.absent++;
+        status = assessment.code;
+        if (status === "A") totals.absent++;
       }
       return {
         day: idx + 1,
         dow: dowLetter(dayKey),
         isSunday,
         status,
-        inTime: present ? cells.inTime : "",
-        outTime: present ? cells.outTime : "",
-        total: present ? cells.duration : "",
+        inTime: cells.inTime,
+        outTime: cells.outTime,
+        total: assessment.requiresReview ? "Review" : present ? cells.duration : "",
       };
     });
     return {
@@ -678,6 +704,7 @@ export function buildStatusMatrix(args: {
 // ─── Work summary ("Work Hours Summary") ────────────────────────────────────
 
 export interface DeviceWorkSummaryRow {
+  status: string;
   date: string; // DD/MM/YYYY
   dayKey: string;
   shift: string;
@@ -714,6 +741,8 @@ export interface DeviceWorkSummaryOutput {
 }
 
 export function buildWorkSummary(args: {
+  asOfDay?: string;
+  sourceRecoveryDays?: Set<string>;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -743,42 +772,13 @@ export function buildWorkSummary(args: {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
       const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
-      const present = !!record && PRESENT_STATUSES.has(record.status);
-      let firstIn = "";
-      let lastOut = "";
-      let grossMin = 0;
-      let gross = "";
-      let requiresReview = record ? attendanceRequiresReview(record) : false;
-      if (record) {
-        // Use the reconciled pair, never infer an OUT from the final raw punch.
-        const first = record.punchInTime;
-        const crossDayWithoutShift = !shift && first && record.punchOutTime && istDateKey(first) !== istDateKey(record.punchOutTime);
-        const last = crossDayWithoutShift ? null : record.punchOutTime;
-        requiresReview ||= Boolean(crossDayWithoutShift);
-        if (first && last) {
-          requiresReview ||= attendanceRequiresReview({ punchInTime: first, punchOutTime: last });
-          firstIn = formatClockIST(first);
-          lastOut = formatClockIST(last);
-          const diff = Math.round((last.getTime() - first.getTime()) / 60000);
-          if (diff >= 0) {
-            grossMin = diff;
-            gross = formatHM(diff);
-          }
-        } else if (first && !last) {
-          firstIn = formatClockIST(first);
-        } else {
-          // Snapshot empty even after fallback → punchIn/Out columns.
-          firstIn = formatClockIST(record.punchInTime);
-          lastOut = formatClockIST(record.punchOutTime);
-          if (record.punchInTime && record.punchOutTime) {
-            const diff = Math.round((record.punchOutTime.getTime() - record.punchInTime.getTime()) / 60000);
-            if (diff >= 0) {
-              grossMin = diff;
-              gross = formatHM(diff);
-            }
-          }
-        }
-      }
+      const assessment = assessmentFor(args, emp, dayKey, record, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const present = assessment.assessedPresent;
+      const firstIn = cells.inTime;
+      const lastOut = cells.outTime;
+      const requiresReview = assessment.requiresReview;
+      const grossMin = present ? cells.durationMinutes : 0;
+      const gross = requiresReview ? "Review" : present ? cells.duration : "";
       const late = present ? cells.late : "";
       const overtime = present ? cells.overtime : "";
       const early = present ? cells.early : "";
@@ -789,6 +789,7 @@ export function buildWorkSummary(args: {
         earlySum += cells.earlyMinutes;
       }
       return {
+        status: assessment.code,
         date: formatDDMMYYYY(dayKey),
         dayKey,
         shift: shiftLabel(shift),
@@ -874,6 +875,8 @@ export interface DevicePerformanceOutput {
 }
 
 export function buildPerformance(args: {
+  asOfDay?: string;
+  sourceRecoveryDays?: Set<string>;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -904,39 +907,40 @@ export function buildPerformance(args: {
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
       const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
       let status: string;
-      if (record && PRESENT_STATUSES.has(record.status)) {
-        status = record.status === "half_day" ? "½P" : "P";
+      const assessment = assessmentFor(args, emp, dayKey, record, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      if (assessment.assessedPresent && record) {
+        status = assessment.code;
         present++;
         if (record.status === "half_day") half++;
         else fullPresent++;
         workMin += cells.durationMinutes;
         if (!attendanceRequiresReview(record)) otMin += Math.max(0, record.overtimeMinutes);
-      } else if (holidays.has(dayKey)) {
+      } else if (assessment.status === "holiday") {
         status = "H";
         hld++;
-      } else if (leaves.has(`${emp.id}|${dayKey}`)) {
+      } else if (assessment.status === "on_leave") {
         status = "L";
         leaveCount++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (assessment.status === "weekly_off") {
         status = "WO";
         wo++;
       } else {
-        status = "A";
+        status = assessment.code;
       }
       const isP = status === "P" || status === "½P";
       return {
         day: idx + 1,
         status,
-        inTime: isP ? cells.inTime : "",
-        outTime: isP ? cells.outTime : "",
+        inTime: cells.inTime,
+        outTime: cells.outTime,
         shift: shiftHoursLabel(shift),
         late: isP ? cells.late : "",
         ot: isP ? cells.overtime : "",
         early: isP ? cells.early : "",
       };
     });
-    const absent = Math.max(days.length - present - leaveCount - wo - hld, 0);
-    const paidDay = (fullPresent + leaveCount + half * 0.5).toFixed(2);
+    const absent = rows.filter(row => row.status === "A").length;
+    const paidDay = (fullPresent + half * 0.5).toFixed(2);
     return {
       code: emp.employeeNumber,
       name: fullName(emp),

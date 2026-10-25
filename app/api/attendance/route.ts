@@ -1,10 +1,14 @@
+import { unprocessedAttendanceSourceDays } from "@/lib/attendance-source-recovery";
+import { assessAttendanceDay, isAttendanceHoliday, isScheduledWeeklyOff } from "@/lib/attendance-assessment";
+import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dayRangeIST, isDateKey, todayKey } from "@/lib/dates";
 import { istStartOfDay, parseIST } from "@/lib/ist";
-import { finalizeEligibleDays, shiftForEmployeeDay } from "@/lib/reconcile";
+import { shiftForEmployeeDay } from "@/lib/reconcile";
 
 const MANUAL_STATUSES = ["present", "late", "permission", "absent", "half_day"];
 
@@ -32,35 +36,33 @@ export async function GET(req: NextRequest) {
     locationId = manager.locationId;
   }
 
-  // Lazy finalization (Phase 4): once a day's window closes + grace, re-derive
-  // non-finalized days so late punches stop mutating them and lone-punch days
-  // get flagged. Bounded so a page load never stalls; the polling job drains
-  // the rest.
-  await finalizeEligibleDays(session.tenantId, 100);
+  // Reads never finalize or repair attendance; the scheduled worker owns that work.
 
   const dateKey = req.nextUrl.searchParams.get("date") || todayKey();
   if (!isDateKey(dateKey)) return NextResponse.json({ error: "date must use a real YYYY-MM-DD calendar date." }, { status: 400 });
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
 
-  const [employees, records, leaves, holidays] = await Promise.all([
+  const [employees, records, leaves, holidays, punches, rosters] = await Promise.all([
     prisma.employee.findMany({
-       where: { tenantId: session.tenantId, status: "active", ...(locationId ? { branch: { locationId } } : {}), ...(branchId ? { branchId } : {}) },
+       where: { tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}), ...(branchId ? { branchId } : {}) },
       select: {
         id: true,
         employeeNumber: true,
+        deviceCode: true,
+        joiningDate: true,
         firstName: true,
         lastName: true,
         department: { select: { name: true } },
-        shift: { select: { name: true } },
+        shift: { select: { name: true, sundayWeeklyOff: true } },
       },
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}) },
+       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch: { select: { name: true } },
-        shift: { select: { name: true } },
+        shift: { select: { name: true, sundayWeeklyOff: true } },
       },
     }),
     prisma.leaveRequest.findMany({
@@ -69,13 +71,19 @@ export async function GET(req: NextRequest) {
         status: "approved",
         fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
-        ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}),
+        ...(branchId ? { employee: { branchId } } : locationId ? { employee: employeeLocationScope(locationId) } : {}),
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
-    prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
+    prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{date: { gte: dayStart, lt: dayEnd }}, {isRecurring: true}] } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(dayStart, dayEnd), employee: branchId ? { branchId } : locationId ? employeeLocationScope(locationId) : {} }, select: { employeeId: true } }),
+    prisma.rosterAssignment.findMany({ where: { tenantId: session.tenantId, date: dayStart, employee: branchId ? { branchId } : locationId ? employeeLocationScope(locationId) : {} }, include: { shift: true } }),
   ]);
 
+  const sourceRecoveryDays = await unprocessedAttendanceSourceDays(session.tenantId, employees, dayStart, dayEnd);
+  const dayHolidays = holidays.filter(h => isAttendanceHoliday(dateKey, [h]));
+  const rosterByEmployee = new Map(rosters.map(r => [r.employeeId, r.shift]));
+  const punched = new Set(punches.map(p => p.employeeId));
   const leaveByEmployee = new Map(leaves.map((l) => [l.employee.id, l]));
   const recordByEmployee = new Map(records.map((r) => [r.employee.id, r]));
 
@@ -88,7 +96,7 @@ export async function GET(req: NextRequest) {
       leave: leave
         ? { type: leave.leaveType.name, color: leave.leaveType.color }
         : null,
-      status: leave ? "on_leave" : record ? record.status : "absent",
+      status: assessAttendanceDay({ day: dateKey, joiningDate: emp.joiningDate, record, hasShift: Boolean(rosterByEmployee.get(emp.id) ?? record?.shift ?? emp.shift), hasAuthorizedPunch: punched.has(emp.id), hasUnprocessedSource: sourceRecoveryDays.has(`${emp.id}|${dateKey}`), leave: Boolean(leave), holiday: dayHolidays.length > 0, weeklyOff: isScheduledWeeklyOff(dateKey, rosterByEmployee.get(emp.id) ?? record?.shift ?? emp.shift) }).status,
     };
   });
 
@@ -99,8 +107,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     date: dateKey,
-    isHoliday: holidays.length > 0,
-    holidays: holidays.map((h) => h.name),
+    isHoliday: dayHolidays.length > 0,
+    holidays: dayHolidays.map((h) => h.name),
     counts,
     rows,
   });
@@ -187,7 +195,7 @@ export async function POST(req: NextRequest) {
         tenantId: session.tenantId,
         employeeId,
         branchId: employee.branchId ?? null,
-        shiftId: (await shiftForEmployeeDay(employee, dayStart))?.id ?? null,
+        shiftId: (await shiftForEmployeeDay(employee, dayStart, tx))?.id ?? null,
         date: dayStart,
         status,
         note,

@@ -62,6 +62,11 @@ export async function POST(req: NextRequest) {
       const count = await prisma.$transaction(async tx => {
         await assertLeavePayrollOpen(tx, tenantId, punch!.employeeId, workDay, workDay);
         const changed = await tx.punch.updateMany({ where: { id: punch!.id, tenantId, authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, data });
+        if (changed.count) await tx.attendanceReconcileJob.upsert({
+          where: { punchId: punch!.id },
+          create: { tenantId, employeeId: punch!.employeeId, punchId: punch!.id },
+          update: { version: { increment: 1 }, status: "pending", nextAttemptAt: new Date(), lastError: null },
+        });
         if (changed.count) await tx.auditLog.create({ data: { tenantId, actorId: session!.sub, actorRole: session!.role, action: "punch.authorization", entity: "Punch", entityId: punch!.id, summary: `Mobile punch ${decision === "accept" ? "approved" : "declined"} for ${employee ? auditEmployeeLabel(employee) : punch!.employeeId} — evidence retained`, before: { authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, after: { ...data, employeeId: punch!.employeeId, ...(employee ? { employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber } } : {}), punchTime: punchTimeValue.toISOString() } } });
         return changed.count;
       }, { isolationLevel: "Serializable" });

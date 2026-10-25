@@ -23,6 +23,9 @@ assert.equal(automaticShiftPolicy({ ...policy, earlyMinutes: -1 }), null);
 
 // Exercise the production resolution/reconciliation paths with an in-memory
 // database boundary. No production data or external database is touched.
+(prisma as any).$transaction = async (fn: any) => fn(prisma);
+(prisma.payrollRun as any).findFirst = async () => null;
+(prisma.payslip as any).findFirst = async () => null;
 let branch = "configured";
 let roster: unknown = null;
 let prior: unknown = null;
@@ -41,7 +44,7 @@ let saved: any;
 (prisma.realtimeDevice as any).findMany = async () => [];
 (prisma.branch as any).findUnique = async () => null;
 (prisma.attendance as any).create = async (args: any) => { saved = args.data; return { id: "attendance", ...args.data }; };
-(prisma.attendance as any).update = async (args: any) => { saved = args.data; return { id: "attendance", ...args.data }; };
+(prisma.attendance as any).updateMany = async (args: any) => { saved = args.data; return { count: 1 }; };
 const employee = () => ({ id: "employee", tenantId: "tenant", branchId: branch, shiftId: null });
 const punch = (s: string, type = "in") => ({ id: s, punchTime: ist(s), inOutHint: type, employeeId: "employee", tenantId: "tenant", deviceId: null, realtimeDeviceId: null, source: "device", authStatus: "auto" });
 branch = "other";

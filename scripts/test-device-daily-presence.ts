@@ -24,7 +24,7 @@ assert.equal(output.rows.filter((r) => r.status === "P").length, 131);
 assert.equal(output.rows.filter((r) => r.status === "A").length, 122);
 assert.equal(tally.livePresent, 131);
 assert.equal(tally.liveAbsent, 122);
-assert.equal(output.rows[58].attendanceStatus, "absent");
+assert.equal(output.rows[58].attendanceStatus, "A");
 assert.equal(output.rows[59].attendanceStatus, "Pending");
 assert.equal(output.rows[59].inTime, "09:00");
 assert.equal(output.rows[59].outTime, "", "repeated IN scans must not invent an OUT");

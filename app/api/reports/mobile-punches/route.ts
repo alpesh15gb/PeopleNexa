@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   if (end <= start || end.getTime() - start.getTime() > 93 * 86400000) return NextResponse.json({ error: "Select a range of up to 93 days." }, { status: 400 });
   const q = params.get("q")?.trim();
   const approval = params.get("approval");
-  const where = { tenantId: session.tenantId, source: "mobile", punchTime: { gte: start, lt: end }, ...(approval && ["auto", "pending", "approved", "declined"].includes(approval) ? { authStatus: approval } : {}), employee: { ...employeeScope, ...(q ? { OR: [{ firstName: { contains: q, mode: "insensitive" as const } }, { lastName: { contains: q, mode: "insensitive" as const } }, { employeeNumber: { contains: q, mode: "insensitive" as const } }, { deviceCode: { contains: q, mode: "insensitive" as const } }] } : {}) } };
+  const where = { tenantId: session.tenantId, source: "mobile", punchTime: { gte: start, lt: end }, ...(approval && ["auto", "pending", "approved", "declined"].includes(approval) ? { authStatus: approval } : {}), employee: { AND: [employeeScope, ...(q ? [{ OR: [{ firstName: { contains: q, mode: "insensitive" as const } }, { lastName: { contains: q, mode: "insensitive" as const } }, { employeeNumber: { contains: q, mode: "insensitive" as const } }, { deviceCode: { contains: q, mode: "insensitive" as const } }] }] : [])] } };
   const page = Math.max(1, Math.floor(Number(params.get("page")) || 1));
   const size = Math.max(10, Math.min(500, Math.floor(Number(params.get("size")) || 50)));
   const excel = params.get("format") === "xlsx";

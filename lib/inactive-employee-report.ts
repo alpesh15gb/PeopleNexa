@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "./location-scope";
 import type { Prisma } from "@/generated/prisma/client";
 
 /** Shared by the on-screen report and export so filters and manager scopes agree. */
@@ -7,7 +8,7 @@ export function inactiveEmployeeReportWhere({ tenantId, role, manager, branchId,
 }): Prisma.EmployeeWhereInput {
   const AND: Prisma.EmployeeWhereInput[] = [];
   if (role === "branch_manager") AND.push(manager?.branchId ? { branchId: manager.branchId } : { id: { in: [] } });
-  if (role === "location_manager") AND.push(manager?.locationId ? { branch: { locationId: manager.locationId } } : { id: { in: [] } });
+  if (role === "location_manager") AND.push(manager?.locationId ? employeeLocationScope(manager.locationId) : { id: { in: [] } });
   if (branchId) AND.push({ branchId });
   if (departmentId) AND.push({ departmentId });
   for (const term of query?.trim().split(/\s+/).filter(Boolean) ?? []) {

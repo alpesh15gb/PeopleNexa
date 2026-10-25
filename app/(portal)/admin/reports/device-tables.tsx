@@ -42,6 +42,7 @@ export function DeviceTables({
         </Button>
       </div>
 
+      <p className="text-xs text-muted-foreground">Scan presence counts observed scans. Assessed attendance is used for day status. Review hours are excluded from totals; Pending and Upcoming are excluded from absence. Reports include active staff and historical staff with records in the selected period.</p>
       {kind === "daily" ? (
         <DailyDirect apiUrl={apiUrl} />
       ) : kind === "monthly" ? (
@@ -110,6 +111,18 @@ function usePagedDevice(baseUrl: string) {
       ? (data as { total: number }).total
       : null;
   return { data, loading, error, page, setPage, query, setQuery, total };
+}
+
+function ReportNotice({ data }: { data: unknown }) {
+  const jobs = (data as { metadata?: { processing?: Record<string, number> } } | null)?.metadata?.processing;
+  const count = Object.values(jobs ?? {}).reduce((a, b) => a + b, 0);
+  const sourceDays = (data as { metadata?: { unprocessedSourceDays?: number } } | null)?.metadata?.unprocessedSourceDays ?? 0;
+  if (!count && !sourceDays) return null;
+  return <p role="status" className="rounded-lg border border-amber-400/30 p-3 text-sm text-amber-300">
+    {count > 0 && <>{count} punch processing jobs need attention ({jobs?.failed ?? 0} failed, {jobs?.blocked ?? 0} held for review, {(jobs?.pending ?? 0) + (jobs?.processing ?? 0)} pending). </>}
+    {sourceDays > 0 && <>{sourceDays} retained device source day{sourceDays === 1 ? "" : "s"} on this page await{sourceDays === 1 ? "s" : ""} recovery. </>}
+    Attendance may be incomplete.
+  </p>;
 }
 
 function LoadingCard() {
@@ -214,7 +227,7 @@ function DailyDirect({ apiUrl }: { apiUrl: string }) {
 
   if (loading) return <LoadingCard />;
   if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
-  return <DailyTable output={data} />;
+  return <><ReportNotice data={data} /><DailyTable output={data} /></>;
 }
 
 const TH = "border border-input bg-card-2 px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-foreground";
@@ -287,7 +300,7 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
 
 function MonthlyTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  const pager = <><ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} /><ReportNotice data={data} /></>;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
   if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceMonthlyOutput;
@@ -357,7 +370,7 @@ function statusCellClass(status: string): string {
 
 function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  const pager = <><ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} /><ReportNotice data={data} /></>;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
   if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceStatusMatrixOutput;
@@ -427,11 +440,11 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
   );
 }
 
-const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
+const WORK_SUMMARY_COLUMNS = ["Date", "Attendance", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
 
 function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  const pager = <><ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} /><ReportNotice data={data} /></>;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
   if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DeviceWorkSummaryOutput;
@@ -474,6 +487,7 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
                   {block.rows.map((r) => (
                     <tr key={r.dayKey}>
                       <td className={`${TD} tabular-nums`}>{r.date}</td>
+                      <td className={TD}>{r.status}</td>
                       <td className={TD}>{r.shift}</td>
                       <td className={`${TD} tabular-nums`}>{r.firstIn}</td>
                       <td className={`${TD} tabular-nums`}>{r.lastOut}</td>
@@ -486,6 +500,7 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
                   ))}
                   <tr>
                     <td className={`${TD} font-bold`}>Totals</td>
+                    <td className={TD}></td>
                     <td className={TD}></td>
                     <td className={TD}></td>
                     <td className={TD}></td>
@@ -507,7 +522,7 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
 
 function PerformanceTables({ baseUrl }: { baseUrl: string }) {
   const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
-  const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
+  const pager = <><ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} /><ReportNotice data={data} /></>;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
   if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
   const output = data as DevicePerformanceOutput;
@@ -593,7 +608,7 @@ function PerformanceTables({ baseUrl }: { baseUrl: string }) {
               </table>
             </div>
             <p className="mt-1 bg-card text-[12px] text-foreground">
-              Total Working Hrs: {block.totals.work} | Total OT Hrs: {block.totals.ot} | Present: {block.totals.present} Absent: {block.totals.absent} | Paid Day: {block.totals.paidDay} | WO: {block.totals.wo} HLD: {block.totals.hld} Leave: {block.totals.leave}
+              Total Working Hrs: {block.totals.work} | Total OT Hrs: {block.totals.ot} | Present: {block.totals.present} Absent: {block.totals.absent} | Attendance units (excluding leave): {block.totals.paidDay} | WO: {block.totals.wo} HLD: {block.totals.hld} Leave: {block.totals.leave}
             </p>
           </div>
         ))}

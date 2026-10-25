@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "./location-scope";
 import { authorizedPunchDayFilter } from "./attendance-presence";
 
 export type AttendanceDrilldownStatus = "present" | "late";
@@ -19,7 +20,7 @@ export function attendanceEmployeeScope({
     tenantId,
     status: "active",
     loginOnly: false,
-    ...(locationId ? { branch: { locationId } } : {}),
+    ...(locationId ? employeeLocationScope(locationId) : {}),
     ...(branchId ? { branchId } : {}),
   };
 }

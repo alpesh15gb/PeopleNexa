@@ -853,7 +853,29 @@ model Punch {
   holdReason       String?
   createdAt        DateTime        @default(now())
 
+  reconciliationJob AttendanceReconcileJob?
+
   @@index([tenantId, employeeId, punchTime])
+}
+
+// Durable completion of a normalized event. A duplicate Punch is not proof
+// that its attendance projection succeeded. Versions protect approval/retry
+// requests arriving while a worker is processing the previous request.
+model AttendanceReconcileJob {
+  id            String   @id @default(cuid())
+  tenantId      String
+  employeeId    String
+  punchId       String   @unique
+  punch         Punch    @relation(fields: [punchId], references: [id], onDelete: Cascade)
+  status        String   @default("pending")
+  version       Int      @default(1)
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, status, nextAttemptAt])
 }
 
 // ─── Face enrollments (server-side match foundations) ──────────────────────

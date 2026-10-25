@@ -13,7 +13,7 @@ assert.equal(attendanceRequiresReview({ ...record, punchOutTime: new Date(first.
 const work = buildWorkSummary(args).blocks[0];
 const missing = buildWorkSummary({ ...args, records: [{ ...record, punchOutTime: null, reviewStatus: "missed_punch" }] }).blocks[0].rows[0];
 assert.equal(missing.lastOut, "", "a snapshot's final punch cannot invent a missing OUT");
-assert.equal(missing.gross, "", "missing OUT has no computed duration");
+assert.equal(missing.gross, "Review", "missing OUT never produces a numeric duration");
 assert.equal(missing.work, "Review");
 assert.equal(work.rows[0].work, "Review");
 assert.equal(work.totals.work, "0:00");

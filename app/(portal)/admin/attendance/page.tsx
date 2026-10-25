@@ -1,8 +1,11 @@
+import { unprocessedAttendanceSourceDays } from "@/lib/attendance-source-recovery";
+import { formatAttendanceClockIST } from "@/lib/device-report";
+import { assessAttendanceDay, isAttendanceHoliday, isScheduledWeeklyOff } from "@/lib/attendance-assessment";
 import Link from "next/link";
 import { ArrowLeft, PartyPopper } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { dayRangeIST, todayKey, isDateKey, formatTime, formatDate } from "@/lib/dates";
+import { dayRangeIST, todayKey, isDateKey, formatDate } from "@/lib/dates";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
 import { AttendanceTable } from "./attendance-table";
@@ -33,11 +36,15 @@ export default async function AdminAttendancePage({
   const isBranchManager = session.role === "branch_manager";
   const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
-    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true } } } })
+    ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true, branch: { select: { name: true } } } })
     : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
-  const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
+  const ownLocationId = isLocationManager ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId ?? null : null;
+
+  if ((isBranchManager && !ownBranchId) || (isLocationManager && !ownLocationId)) {
+    return <EmptyState title="No reporting scope assigned" description="Ask an administrator to assign your branch or location." />;
+  }
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = isBranchManager
@@ -68,18 +75,20 @@ export default async function AdminAttendancePage({
       select: {
         id: true,
         employeeNumber: true,
+        deviceCode: true,
+        joiningDate: true,
         firstName: true,
         lastName: true,
         department: { select: { name: true } },
         branch: { select: { name: true } },
-        shift: { select: { name: true, startTime: true } },
+        shift: { select: { name: true, startTime: true, sundayWeeklyOff: true } },
       },
        orderBy: { employeeNumber: "asc" },
        skip: (page - 1) * pageSize,
        take: pageSize,
      }),
     prisma.employee.findMany({ where: employeeScope, select: { id: true } }),
-    prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
+    prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{date: { gte: dayStart, lt: dayEnd }}, {isRecurring: true}] } }),
     prisma.branch.findMany({
        where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) },
       select: { id: true, name: true },
@@ -91,11 +100,16 @@ export default async function AdminAttendancePage({
   ]);
 
   const employeeIds = employees.map((employee) => employee.id);
-  const [records, leaves] = await Promise.all([
-    prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } }, shift: { select: { name: true } } } }),
+  const [records, leaves, rosters] = await Promise.all([
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } }, shift: { select: { name: true, sundayWeeklyOff: true } } } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, }, include: { employee: { select: { id: true } }, leaveType: true } }),
+    prisma.rosterAssignment.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: dayStart }, include: { shift: true } }),
   ]);
 
+  const sourceRecoveryDays = await unprocessedAttendanceSourceDays(session.tenantId, employees, dayStart, dayEnd);
+  const rosterByEmp = new Map(rosters.map(r => [r.employeeId, r.shift]));
+  const punched = new Set(tallyPunches.map(p => p.employeeId));
+  const dayHolidays = holidays.filter(h => isAttendanceHoliday(dateKey, [h]));
   const leaveByEmp = new Map(leaves.map((l) => [l.employee.id, l]));
   const recordByEmp = new Map(records.map((r) => [r.employeeId, r]));
 
@@ -103,6 +117,7 @@ export default async function AdminAttendancePage({
     const record = recordByEmp.get(emp.id);
     const leave = leaveByEmp.get(emp.id);
     return {
+      assessment: assessAttendanceDay({ day: dateKey, joiningDate: emp.joiningDate, record, hasShift: Boolean(rosterByEmp.get(emp.id) ?? record?.shift ?? emp.shift), hasAuthorizedPunch: punched.has(emp.id), hasUnprocessedSource: sourceRecoveryDays.has(`${emp.id}|${dateKey}`), leave: Boolean(leave), holiday: dayHolidays.length > 0, weeklyOff: isScheduledWeeklyOff(dateKey, rosterByEmp.get(emp.id) ?? record?.shift ?? emp.shift) }).status,
       employeeId: emp.id,
       employeeNumber: emp.employeeNumber,
       name: `${emp.firstName} ${emp.lastName}`.trim(),
@@ -112,8 +127,8 @@ export default async function AdminAttendancePage({
       record: record
         ? {
             id: record.id,
-            punchIn: formatTime(record.punchInTime),
-            punchOut: formatTime(record.punchOutTime),
+            punchIn: formatAttendanceClockIST(record.punchInTime, record.date) || "—",
+            punchOut: formatAttendanceClockIST(record.punchOutTime, record.date) || "—",
             lateMinutes: record.lateMinutes,
             status: record.status,
             note: record.note,
@@ -129,7 +144,7 @@ export default async function AdminAttendancePage({
   const dashboardHref = branchId ? `/admin?branch=${encodeURIComponent(branchId)}` : "/admin";
 
   const statCards = [
-    { label: "Present", value: counts.livePresent, cls: "text-emerald-300" },
+    { label: "Scan presence", value: counts.livePresent, cls: "text-emerald-300" },
     { label: "Late", value: counts.late, cls: "text-amber-300" },
     { label: "Half day", value: counts.halfDay, cls: "text-violet-300" },
     { label: "Permission", value: counts.permission, cls: "text-sky-300" },
@@ -138,7 +153,7 @@ export default async function AdminAttendancePage({
     { label: "No record", value: counts.noRecord, cls: "text-muted-foreground" },
   ];
 
-  const isHoliday = holidays.length > 0;
+  const isHoliday = dayHolidays.length > 0;
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -147,7 +162,7 @@ export default async function AdminAttendancePage({
           <PartyPopper className="h-5 w-5 shrink-0 text-violet-300" />
           <div>
             <p className="font-display text-sm font-semibold text-violet-200">
-              {holidays.map((h) => h.name).join(", ")}
+              {dayHolidays.map((h) => h.name).join(", ")}
             </p>
             <p className="text-[12.5px] text-violet-300/80">
               Company holiday — no attendance is expected on this date.

@@ -22,6 +22,7 @@ interface PunchRow {
 }
 
 interface Row {
+  assessment: string;
   employeeId: string;
   employeeNumber: string;
   name: string;
@@ -174,7 +175,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
         </THead>
         <TBody>
           {rows.map((row) => {
-            const statusNow = row.record?.status ?? (row.leave ? "on_leave" : "no_record");
+            const statusNow = row.assessment;
             return (
               <TR key={row.employeeId}>
                 <TD className="sticky left-0 z-10 bg-card">
@@ -202,7 +203,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                 <TD className="font-mono text-[13px]">{row.record?.punchIn ?? "—"}</TD>
                 <TD className="font-mono text-[13px]">{row.record?.punchOut ?? "—"}</TD>
                 <TD className="sticky right-0 z-10 bg-card">
-                  {!row.record && row.leave ? (
+                  {row.assessment === "on_leave" && row.leave ? (
                     <Badge className="border-transparent" style={{ background: `${row.leave.color}22`, color: row.leave.color }}>
                       On leave · {row.leave.type}
                     </Badge>
@@ -218,7 +219,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                   ) : (
                     <div className="flex items-center gap-2">
                       <StatusPill status={statusNow} />
-                      {row.record?.reviewStatus && (
+                      {row.assessment === "needs_review" && (
                         <Badge tone="warning">Review</Badge>
                       )}
                     </div>

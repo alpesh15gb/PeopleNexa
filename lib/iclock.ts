@@ -59,7 +59,7 @@ export async function handleDevicePunch(
   const existing = await prisma.deviceLog.findFirst({
     where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing?.processed) {
+  if (existing?.processed && !existing.error) {
     return { accepted: true, action: "duplicate", logId: existing.id };
   }
 
@@ -82,7 +82,7 @@ export async function handleDevicePunch(
         where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
       });
       if (!duplicate) throw error;
-      if (duplicate.processed) return { accepted: true, action: "duplicate", logId: duplicate.id };
+      if (duplicate.processed && !duplicate.error) return { accepted: true, action: "duplicate", logId: duplicate.id };
       log = duplicate;
     }
   }
@@ -114,10 +114,6 @@ export async function handleDevicePunch(
       punchTime: punch.punchTime,
       inOutHint: hint,
   });
-  if (!created.created) {
-    await markProcessed(log.id);
-    return { accepted: true, action: "duplicate", logId: log.id };
-  }
 
   // 4. Re-derive the day.
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
@@ -150,13 +146,20 @@ function markProcessed(logId: string, error?: string) {
  */
 export async function reprocessFailedLogs(
   tenantId: string,
-  limit = 2000
+  limit = 2000,
+  options: { includeHistorical?: boolean } = {}
 ): Promise<{ accepted: number; duplicate: number; failed: number }> {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  // Filter to exactly mapped active codes so old unmapped employees cannot
+  // starve the recovery queue. Older retained evidence requires an explicit
+  // historical recovery request, rather than silently changing past months.
+  const employees = await prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false }, select: { deviceCode: true, employeeNumber: true } });
+  const mappedCodes = employees.map(employee => employee.deviceCode ?? employee.employeeNumber);
+  if (!mappedCodes.length) return { accepted: 0, duplicate: 0, failed: 0 };
   const logs = await prisma.deviceLog.findMany({
     where: {
       tenantId,
-      createdAt: { gte: weekAgo },
+      userId: { in: mappedCodes },
+      ...(!options.includeHistorical ? { createdAt: { gte: new Date(Date.now() - 7 * 86400000) } } : {}),
       OR: [{ processed: false }, { error: { not: null } }],
     },
     select: { id: true, deviceId: true, userId: true, punchTime: true, rawData: true },
@@ -192,11 +195,6 @@ export async function reprocessFailedLogs(
           punchTime: log.punchTime,
           inOutHint: "unknown",
       });
-      if (!created.created) {
-        await markProcessed(log.id);
-        counters.duplicate++;
-        continue;
-      }
 
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       await reconcileWithRetry(
@@ -205,7 +203,7 @@ export async function reprocessFailedLogs(
         await attendanceDayForPunch(employee, log.punchTime)
       );
       await markProcessed(log.id);
-      counters.accepted++;
+      if (created.created) counters.accepted++; else counters.duplicate++;
     } catch {
       counters.failed++;
     }

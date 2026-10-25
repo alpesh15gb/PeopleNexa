@@ -585,7 +585,8 @@ export async function backfillDays(
     }
 
     await touchDevices(touched);
-    summary.ok = true;
+    summary.ok = summary.skipped === 0;
+    if (summary.skipped) summary.message = `${summary.skipped} source events remain unresolved; see ingestion logs.`;
     return summary;
   } catch (err) {
     summary.message = err instanceof Error ? err.message : "Backfill failed";
@@ -784,9 +785,9 @@ export async function pullTenant(
             deviceId: { in: [...new Set([...deviceByEbioKey.values()].map((device) => device.id))] },
             punchTime: { gte: dayStart, lt: dayEnd },
           },
-          select: { deviceId: true, userId: true, punchTime: true },
+          select: { deviceId: true, userId: true, punchTime: true, processed: true, error: true },
         });
-        const known = new Set(knownLogs.map((log) => `${log.deviceId}|${log.userId}|${log.punchTime?.getTime() ?? ""}`));
+        const known = new Set(knownLogs.filter(log => log.processed && !log.error).map((log) => `${log.deviceId}|${log.userId}|${log.punchTime?.getTime() ?? ""}`));
         for (const rec of parseLogRecords(resultString(dayResult))) {
           const device = deviceByEbioKey.get(ebioDeviceKey(rec.deviceName, rec.location));
           if (device && known.has(`${device.id}|${rec.userId}|${rec.punchTime.getTime()}`)) continue;
@@ -801,7 +802,8 @@ export async function pullTenant(
     }
 
     await touchDevices(touched);
-    summary.ok = true;
+    summary.ok = summary.skipped === 0;
+    if (summary.skipped) summary.message = `${summary.skipped} source events remain unresolved; see ingestion logs.`;
     return summary;
 
     /** Ingest one parsed record; returns true when it produced a punch. */

@@ -1,12 +1,14 @@
+import { isAttendanceWriteConflict } from "./attendance-conflicts";
 import { prisma } from "./prisma";
 import { istStartOfDay, istDateKey, IST_OFFSET_MS } from "./ist";
 import { computePunchStatusIST } from "./attendance";
 import { minutesOfDay } from "./dates";
 import { configurationEffectiveAtISTDay, DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS, payrollPolicyDraft, resolveConfiguration, type PayrollAttendanceTreatment, type PayrollPolicyDraft } from "./configuration";
-import type { Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
+import type { Prisma, Attendance, Employee, Punch, Shift, Tenant } from "@/generated/prisma/client";
 import { automaticShiftsForEmployee, automaticShiftForDay } from "./automatic-shift-resolution";
 import { automaticShiftWindow, detectAutomaticShift } from "./automatic-shifts";
 import { unassignedSinglePunchHalfDay } from "./unassigned-shift-policy";
+import { assertLeavePayrollOpen } from "./leave-payroll-lock";
 
 // A day is finalizable once its IST window has closed plus a grace period,
 // so late-arriving punches can't keep mutating a finalized day.
@@ -42,6 +44,7 @@ export interface PunchEntry {
 
 export interface ReconcileResult {
   attendanceId: string | null;
+  protected?: boolean;
   action: "created" | "updated" | "unchanged" | "cleared";
   inAt: Date | null;
   outAt: Date | null;
@@ -154,9 +157,10 @@ export function attendanceDayKey(istDay: Date): Date {
 /** Resolve the shift assigned to one canonical attendance day. */
 export async function shiftForEmployeeDay(
   employee: Pick<Employee, "id" | "shiftId" | "tenantId"> & { branchId?: string | null },
-  istDay: Date
+  istDay: Date,
+  db: Prisma.TransactionClient = prisma
 ): Promise<Shift | null> {
-  const roster = await prisma.rosterAssignment.findUnique({
+  const roster = await db.rosterAssignment.findUnique({
     where: {
       tenantId_employeeId_date: {
         tenantId: employee.tenantId,
@@ -167,20 +171,21 @@ export async function shiftForEmployeeDay(
     include: { shift: true },
   });
   if (roster) return roster.shift;
-  const automatic = await automaticShiftsForEmployee(employee);
-  if (automatic) return automaticShiftForDay(employee, istDay, automatic);
-  return employee.shiftId ? prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null;
+  const automatic = await automaticShiftsForEmployee(employee, db);
+  if (automatic) return automaticShiftForDay(employee, istDay, automatic, db);
+  return employee.shiftId ? db.shift.findUnique({ where: { id: employee.shiftId } }) : null;
 }
 
 async function payrollPolicyForEmployeeDay(
   tenantId: string,
   employee: Pick<Employee, "branchId"> & { locationId?: string | null },
   istDay: Date,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<PayrollPolicyDraft | null> {
-  const branch = employee.branchId ? await prisma.branch.findUnique({ where: { id: employee.branchId }, select: { locationId: true } }) : null;
+  const branch = employee.branchId ? await db.branch.findUnique({ where: { id: employee.branchId }, select: { locationId: true } }) : null;
   const locationId = branch?.locationId ?? employee.locationId ?? null;
   if (!locationId) return null;
-  const policies = await prisma.configurationRecord.findMany({
+  const policies = await db.configurationRecord.findMany({
     where: { tenantId, kind: "payroll_policy", active: true },
     select: { locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
   });
@@ -195,28 +200,29 @@ async function payrollPolicyForEmployeeDay(
  */
 export async function attendanceDayForPunch(
   employee: Pick<Employee, "id" | "shiftId" | "tenantId" | "branchId"> & { locationId?: string | null },
-  instant: Date
+  instant: Date,
+  db: Prisma.TransactionClient = prisma
 ): Promise<Date> {
   const today = attendanceDayKey(instant);
   const previousDay = new Date(today.getTime() - 24 * 3600 * 1000);
   const [previousRoster, todayRoster] = await Promise.all([
-    prisma.rosterAssignment.findUnique({
+    db.rosterAssignment.findUnique({
       where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: previousDay } },
       include: { shift: true },
     }),
-    prisma.rosterAssignment.findUnique({
+    db.rosterAssignment.findUnique({
       where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: today } },
       include: { shift: true },
     }),
   ]);
-  const automatic = await automaticShiftsForEmployee(employee);
+  const automatic = await automaticShiftsForEmployee(employee, db);
   if (automatic && !todayRoster && !previousRoster) {
-    const previous = await prisma.attendance.findUnique({ where: { employeeId_date: { employeeId: employee.id, date: previousDay } }, select: { shiftId: true, punchInTime: true } });
+    const previous = await db.attendance.findUnique({ where: { employeeId_date: { employeeId: employee.id, date: previousDay } }, select: { shiftId: true, punchInTime: true } });
     const previousAutoShift = automatic.shifts.find((s) => s.id === previous?.shiftId)
-      ?? await automaticShiftForDay(employee, previousDay, automatic);
+      ?? await automaticShiftForDay(employee, previousDay, automatic, db);
     if (previousAutoShift?.isNightShift) {
       const window = automaticShiftWindow(previousDay, previousAutoShift, automatic.policy);
-      const punch = await prisma.punch.findFirst({ where: { tenantId: employee.tenantId, employeeId: employee.id, punchTime: instant }, select: { inOutHint: true } });
+      const punch = await db.punch.findFirst({ where: { tenantId: employee.tenantId, employeeId: employee.id, punchTime: instant }, select: { inOutHint: true } });
       const newDayIn = punch?.inOutHint === "in" && detectAutomaticShift(today, instant, automatic.shifts, automatic.policy);
       if (!newDayIn && instant >= window.start && instant < window.end) return previousDay;
     }
@@ -228,14 +234,14 @@ export async function attendanceDayForPunch(
   // A roster on the previous day is authoritative for that day's overnight
   // window. If it is not a night shift, do not infer a night shift from the
   // employee default merely because today's roster is a night shift.
-  const previousShift = previousRoster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
+  const previousShift = previousRoster?.shift ?? (employee.shiftId ? await db.shift.findUnique({ where: { id: employee.shiftId } }) : null);
   if (previousShift?.isNightShift) {
     const previousWindow = shiftWindow(previousDay, previousShift);
     if (instant >= previousWindow.start && instant < previousWindow.end) return previousDay;
   }
   if (previousRoster) return today;
   // Without a configured overnight shift, next-day punches belong to today.
-  return punchDayForShift(instant, todayRoster?.shift ?? (employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null));
+  return punchDayForShift(instant, todayRoster?.shift ?? (employee.shiftId ? await db.shift.findUnique({ where: { id: employee.shiftId } }) : null));
 }
 
 /**
@@ -271,19 +277,56 @@ export async function reconcileEmployeeDay(
   istDay: Date,
   opts: { finalize?: boolean; mode?: PunchMode } = {}
 ): Promise<ReconcileResult> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await prisma.$transaction(tx => reconcileEmployeeDayInTransaction(tx, tenant, employee, istDay, opts), {
+        isolationLevel: "Serializable", timeout: 20_000,
+      });
+    } catch (error) {
+      if (!isAttendanceWriteConflict(error) || attempt >= 5) throw error;
+      // Jitter avoids synchronized device batches colliding again on COMMIT.
+      await new Promise(resolve => setTimeout(resolve, 25 * 2 ** Math.min(attempt, 3) + Math.floor(Math.random() * 25)));
+    }
+  }
+}
+
+async function reconcileEmployeeDayInTransaction(
+  db: Prisma.TransactionClient,
+  tenant: Pick<Tenant, "id" | "config">,
+  employee: Pick<Employee, "id" | "shiftId" | "tenantId" | "branchId"> & { locationId?: string | null },
+  istDay: Date,
+  opts: { finalize?: boolean; mode?: PunchMode } = {}
+): Promise<ReconcileResult> {
+  if (employee.tenantId !== tenant.id) throw new Error("Attendance workspace mismatch.");
   const attendanceDate = attendanceDayKey(istDay);
+  // Capture the version before reading punches; an older computation must
+  // never overwrite a newer projection or an intervening manual decision.
+  const existing = await db.attendance.findUnique({
+    where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },
+  });
+  try {
+    await assertLeavePayrollOpen(db, tenant.id, employee.id, attendanceDate, attendanceDate);
+    const legacyPaid = await db.payslip.findFirst({ where: { tenantId: tenant.id, employeeId: employee.id, month: istDateKey(attendanceDate).slice(0,7), status: "paid" }, select: { id: true } });
+    if (legacyPaid) throw Object.assign(new Error("Paid payslip protects this attendance month."), { code: "PAYROLL_LOCKED" });
+  } catch (error) {
+    if ((error as { code?: string }).code !== "PAYROLL_LOCKED") throw error;
+    return { attendanceId: existing?.id ?? null, action: "unchanged", protected: true,
+      inAt: existing?.punchInTime ?? null, outAt: existing?.punchOutTime ?? null,
+      status: existing?.status ?? "pending", lateMinutes: existing?.lateMinutes ?? 0,
+      reviewStatus: existing?.reviewStatus ?? null, punches: [] };
+  }
   // The day's shift: a roster assignment for this date wins over the
   // employee's default shift (weekly rosters drive daily reconciliation).
-  const roster = await prisma.rosterAssignment.findUnique({
+  const roster = await db.rosterAssignment.findUnique({
     where: { tenantId_employeeId_date: { tenantId: employee.tenantId, employeeId: employee.id, date: attendanceDate } },
     include: { shift: true },
   });
-  const automatic = !roster ? await automaticShiftsForEmployee(employee) : null;
-  const shift = roster?.shift ?? (automatic ? await automaticShiftForDay(employee, attendanceDate, automatic) : employee.shiftId ? await prisma.shift.findUnique({ where: { id: employee.shiftId } }) : null);
-  const policy = await payrollPolicyForEmployeeDay(tenant.id, employee, attendanceDate);
+  const automatic = !roster ? await automaticShiftsForEmployee(employee, db) : null;
+  const shift = roster?.shift ?? (automatic ? await automaticShiftForDay(employee, attendanceDate, automatic, db) : employee.shiftId ? await db.shift.findUnique({ where: { id: employee.shiftId } }) : null);
+  const policy = await payrollPolicyForEmployeeDay(tenant.id, employee, attendanceDate, db);
   const noShiftAttendanceWindowHours = policy?.attendanceTreatment.noShiftAttendanceWindowHours ?? DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS;
   const initialWindow = automatic && shift ? automaticShiftWindow(attendanceDate, shift, automatic.policy) : attendanceWindow(attendanceDate, shift, noShiftAttendanceWindowHours);
-  const windowPunches = await prisma.punch.findMany({
+  const windowPunches = await db.punch.findMany({
     // Held-for-approval self-service punches must not leak into attendance
     // via another punch's reconcile pass — only auto/approved rows count.
     where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: initialWindow.start, lt: shift ? initialWindow.end : new Date(initialWindow.start.getTime() + 24 * 3600 * 1000) } },
@@ -292,23 +335,23 @@ export async function reconcileEmployeeDay(
   // Adjacent automatic windows can overlap. Route each punch to its workday
   // before pairing, so yesterday's OUT or tomorrow's IN cannot leak in.
   const routedDays = automatic && shift
-    ? await Promise.all(windowPunches.map((punch) => attendanceDayForPunch(employee, punch.punchTime)))
+    ? await Promise.all(windowPunches.map((punch) => attendanceDayForPunch(employee, punch.punchTime, db)))
     : null;
   const initialPunches = routedDays
     ? windowPunches.filter((_, index) => routedDays[index].getTime() === attendanceDate.getTime())
     : windowPunches;
   const { start: dayStart, end: dayEnd } = automatic && shift ? initialWindow : attendanceWindow(attendanceDate, shift, noShiftAttendanceWindowHours, shift ? null : initialPunches[0]?.punchTime);
   const punches = !shift && initialPunches[0]
-    ? await prisma.punch.findMany({ where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
+    ? await db.punch.findMany({ where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
     : initialPunches;
   const missingOutTreatment = policy?.attendanceTreatment.missingOutPunch ?? "review";
-  const singlePunchHalfDay = shift ? shift.singlePunchHalfDay : !automatic && await unassignedSinglePunchHalfDay(employee.tenantId);
+  const singlePunchHalfDay = shift ? shift.singlePunchHalfDay : !automatic && await unassignedSinglePunchHalfDay(employee.tenantId, db);
 
-  const devices = await prisma.device.findMany({
+  const devices = await db.device.findMany({
     where: { id: { in: punches.map((p) => p.deviceId).filter(Boolean) as string[] } },
     select: { id: true, serialNumber: true },
   });
-  const rtDevices = await prisma.realtimeDevice.findMany({
+  const rtDevices = await db.realtimeDevice.findMany({
     where: { id: { in: punches.map((p) => p.realtimeDeviceId).filter(Boolean) as string[] } },
     select: { id: true, serialNumber: true },
   });
@@ -351,7 +394,7 @@ export async function reconcileEmployeeDay(
         outAtDate.setTime(outAtDate.getTime() + 24 * 3600 * 1000); // next-day morning out
       }
       if (outAtDate.getTime() <= Date.now()) {
-        await prisma.punch.create({
+        await db.punch.create({
           data: {
             tenantId: tenant.id,
             employeeId: employee.id,
@@ -360,7 +403,7 @@ export async function reconcileEmployeeDay(
             inOutHint: "out",
           },
         });
-        return reconcileEmployeeDay(tenant, employee, istDay, opts);
+        return reconcileEmployeeDayInTransaction(db, tenant, employee, istDay, opts);
       }
     }
   }
@@ -421,10 +464,6 @@ export async function reconcileEmployeeDay(
     if (finalize) { status = "half_day"; lateMinutes = 0; }
   }
 
-  const existing = await prisma.attendance.findUnique({
-    where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },
-  });
-
   // A live punch (mobile/device ingest with finalize:false) landing on an
   // already-locked day must not re-open it: the punch stays as immutable
   // audit, but the derived day keeps its finalized in/out/status. Admin
@@ -433,6 +472,9 @@ export async function reconcileEmployeeDay(
   if (existing?.finalized && !finalize) {
     return {
       attendanceId: existing.id,
+      protected: !Array.isArray(existing.punches) ||
+        punches.some(p => !(existing.punches as unknown[]).some(entry => entry && typeof entry === "object" && "id" in entry && entry.id === p.id)) ||
+        existing.punches.some(entry => entry && typeof entry === "object" && !Array.isArray(entry) && !punches.some(p => p.id === entry.id)),
       action: "unchanged",
       inAt: existing.punchInTime,
       outAt: existing.punchOutTime,
@@ -453,7 +495,8 @@ export async function reconcileEmployeeDay(
 
   if (punches.length === 0) {
     if (existing) {
-      await prisma.attendance.delete({ where: { id: existing.id } });
+      const removed = await db.attendance.deleteMany({ where: { id: existing.id, updatedAt: existing.updatedAt } });
+      if (!removed.count) throw Object.assign(new Error("Attendance changed during reconciliation; retry."), { code: "P2034" });
       return { attendanceId: null, action: "cleared", inAt: null, outAt: null, status: "absent", lateMinutes: 0, reviewStatus: null, punches: [] };
     }
     return { attendanceId: null, action: "unchanged", inAt: null, outAt: null, status: "absent", lateMinutes: 0, reviewStatus: null, punches: [] };
@@ -476,9 +519,11 @@ export async function reconcileEmployeeDay(
 
   let attendance: Attendance;
   if (existing) {
-    attendance = await prisma.attendance.update({ where: { id: existing.id }, data });
+    const changed = await db.attendance.updateMany({ where: { id: existing.id, updatedAt: existing.updatedAt }, data });
+    if (!changed.count) throw Object.assign(new Error("Attendance changed during reconciliation; retry."), { code: "P2034" });
+    attendance = { ...existing, ...data } as Attendance;
   } else {
-    attendance = await prisma.attendance.create({
+    attendance = await db.attendance.create({
       data: {
         ...data,
         employeeId: employee.id,
@@ -522,12 +567,23 @@ export function isFinalizable(
  * backlog drains over successive calls (oldest first).
  */
 export async function finalizeEligibleDays(tenantId: string, limit = 200): Promise<number> {
-  const open = await prisma.attendance.findMany({
-    where: { tenantId, finalized: false },
-    select: { id: true, employeeId: true, date: true, punchInTime: true },
-    orderBy: { date: "asc" },
-    take: limit,
-  });
+  // Skip payroll-protected rows in the selection itself: a large old locked
+  // month must not consume every bounded batch and starve newer attendance.
+  const open = await prisma.$queryRaw<Array<Pick<Attendance, "id" | "employeeId" | "date" | "punchInTime">>>`
+    SELECT a."id", a."employeeId", a."date", a."punchInTime"
+    FROM "Attendance" a
+    WHERE a."tenantId" = ${tenantId} AND a."finalized" = false
+      AND NOT EXISTS (
+        SELECT 1 FROM "PayrollRun" r WHERE r."tenantId" = a."tenantId"
+          AND r."month" = to_char(a."date" + INTERVAL '5 hours 30 minutes', 'YYYY-MM')
+          AND r."status" IN ('reviewed','approved','finalized','paid')
+          AND (EXISTS (SELECT 1 FROM "PayrollRunMember" m WHERE m."payrollRunId" = r."id" AND m."employeeId" = a."employeeId")
+            OR EXISTS (SELECT 1 FROM "Payslip" p WHERE p."payrollRunId" = r."id" AND p."employeeId" = a."employeeId"))
+      )
+      AND NOT EXISTS (SELECT 1 FROM "Payslip" p WHERE p."tenantId" = a."tenantId" AND p."employeeId" = a."employeeId"
+        AND p."month" = to_char(a."date" + INTERVAL '5 hours 30 minutes', 'YYYY-MM') AND p."status" = 'paid')
+    ORDER BY a."date", a."id" LIMIT ${Math.max(1, Math.min(2000, Math.floor(limit)))}
+  `;
   if (open.length === 0) return 0;
 
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
@@ -543,8 +599,8 @@ export async function finalizeEligibleDays(tenantId: string, limit = 200): Promi
     const shift = await shiftForEmployeeDay(employee, row.date);
     const policy = await payrollPolicyForEmployeeDay(tenant.id, employee, row.date);
     if (!isFinalizable(row.date, undefined, shift, policy?.attendanceTreatment.noShiftAttendanceWindowHours, row.punchInTime)) continue;
-    await reconcileEmployeeDay(tenant, employee, row.date, { finalize: true });
-    count++;
+    const result = await reconcileEmployeeDay(tenant, employee, row.date, { finalize: true });
+    if (!result.protected && result.action !== "unchanged") count++;
   }
   return count;
 }

@@ -1,3 +1,6 @@
+import { processAttendanceReconcileJobs } from "@/lib/attendance-reconcile-jobs";
+import { reprocessFailedLogs } from "@/lib/iclock";
+import { reprocessFailedRealtimeLogs } from "@/lib/realtime-devices";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getEbioserverConfig, getEbioserverPassword, pullTenant, updateEbioserverStatus } from "@/lib/ebioserver";
@@ -51,29 +54,32 @@ export async function POST(req: NextRequest) {  const secret = process.env.CRON_
     const results: Array<Record<string, unknown>> = [];
     for (const tenant of tenants) {
       if (tenant.subscriptionExpiry && tenant.subscriptionExpiry.getTime() < Date.now()) continue;
+      const result: Record<string, unknown> = { tenant: tenant.slug, ok: true };
       try {
         const profile = getEbioserverConfig(tenant);
-        const canPull = profile.enabled && profile.url && getEbioserverPassword(profile);
-        const res = canPull ? await pullTenant(tenant.id, profile) : null;
-        // Finalize after ingesting the device backlog so a valid OUT already
-        // present on a device is not classified as missing prematurely. This
-        // still runs for tenants without an eBio connection.
-        const finalized = await finalizeEligibleDays(tenant.id, 500);
-        const now = new Date().toISOString();
-        if (!res) {
-          results.push({ tenant: tenant.slug, ok: true, pulled: 0, ingested: 0, devices: 0, skipped: 0, finalized });
-        } else if (res.ok) {
-          await updateEbioserverStatus(tenant.id, { lastPulledAt: now, lastError: null, lastErrorAt: null });
-          results.push({ tenant: tenant.slug, ok: true, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, finalized });
-        } else {
-          await updateEbioserverStatus(tenant.id, { lastError: res.message ?? "Pull failed", lastErrorAt: now });
-          results.push({ tenant: tenant.slug, ok: false, error: res.message });
+        const res = profile.enabled && profile.url && getEbioserverPassword(profile) ? await pullTenant(tenant.id, profile) : null;
+        if (res) {
+          Object.assign(result, { ok: res.ok, pulled: res.pulled, ingested: res.ingested, devices: res.devices, skipped: res.skipped, error: res.message });
+          await updateEbioserverStatus(tenant.id, res.ok
+            ? { lastPulledAt: new Date().toISOString(), lastError: null, lastErrorAt: null }
+            : { lastError: res.message ?? "Pull failed", lastErrorAt: new Date().toISOString() });
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Pull failed";
-        await updateEbioserverStatus(tenant.id, { lastError: message, lastErrorAt: new Date().toISOString() });
-        results.push({ tenant: tenant.slug, ok: false, error: message });
+        result.ok = false;
+        result.error = err instanceof Error ? err.message : "Pull failed";
+        await updateEbioserverStatus(tenant.id, { lastError: String(result.error), lastErrorAt: new Date().toISOString() }).catch(() => undefined);
       }
+      // A device/network failure must not prevent already-saved punches recovering.
+      for (const [key, work] of [
+        ["recovery", () => reprocessFailedLogs(tenant.id, 200)],
+        ["realtimeRecovery", () => reprocessFailedRealtimeLogs(tenant.id, 200)],
+        ["reconciliation", () => processAttendanceReconcileJobs(tenant.id, 200)],
+        ["finalized", () => finalizeEligibleDays(tenant.id, 500)],
+      ] as const) {
+        try { result[key] = await work(); }
+        catch (err) { result.ok = false; result[`${key}Error`] = err instanceof Error ? err.message : "Processing failed"; }
+      }
+      results.push(result);
     }
 
     return NextResponse.json({ ran: true, tenants: results });

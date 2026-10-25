@@ -1,3 +1,6 @@
+import { assessedWorkingMinutes, assessAttendanceDay, isAttendanceHoliday, isScheduledWeeklyOff } from "@/lib/attendance-assessment";
+import { istDateKey } from "@/lib/ist";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
@@ -14,8 +17,13 @@ type AttendanceRow = {
   punchInTime: Date | null;
   punchOutTime: Date | null;
   status: string;
+  reviewStatus: string | null;
+  shiftId: string | null;
+  shift: { sundayWeeklyOff: boolean } | null;
   employee: {
     employeeNumber: string;
+    joiningDate: Date | null;
+    shiftId: string | null;
     deviceCode: string | null;
     firstName: string;
     lastName: string;
@@ -23,7 +31,7 @@ type AttendanceRow = {
     branch: { name: string } | null;
     department: { name: string } | null;
     employmentProfile: { subDepartment: string | null } | null;
-    shift: { name: string } | null;
+    shift: { name: string; sundayWeeklyOff: boolean } | null;
   };
 };
 
@@ -37,11 +45,20 @@ type DevicePunch = {
 
 async function withMachines(rows: AttendanceRow[], tenantId: string, start: Date, end: Date) {
   const employeeIds = [...new Set(rows.map((row) => row.employeeId))];
-  if (!employeeIds.length) return rows.map((row) => ({ ...row, deviceIn: null, deviceOut: null, workingMinutes: null }));
-  const punches = await prisma.punch.findMany({
+  if (!employeeIds.length) return [];
+  const [punches, rosters, leaves, holidays] = await Promise.all([prisma.punch.findMany({
     where: { tenantId, employeeId: { in: employeeIds }, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: new Date(start.getTime() - 86400000), lt: new Date(end.getTime() + 86400000) } },
     select: { employeeId: true, punchTime: true, source: true, device: { select: { name: true, serialNumber: true } }, realtimeDevice: { select: { name: true, serialNumber: true } } },
-  });
+  }),
+    prisma.rosterAssignment.findMany({ where: { tenantId, employeeId: { in: employeeIds }, date: { gte: start, lt: end } }, include: { shift: true } }),
+    prisma.leaveRequest.findMany({ where: { tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: end }, toDate: { gte: start } }, select: { employeeId: true, fromDate: true, toDate: true } }),
+    prisma.holiday.findMany({ where: { tenantId, OR: [{ date: { gte: start, lt: end } }, { isRecurring: true }] }, select: { date: true, isRecurring: true } }),
+  ]);
+  const rosterByDay = new Map(rosters.map(r => [`${r.employeeId}|${istDateKey(r.date)}`, r.shift]));
+  const assessment = (row: AttendanceRow) => {
+    const day = istDateKey(row.date), shift = rosterByDay.get(`${row.employeeId}|${day}`) ?? row.shift ?? row.employee.shift;
+    return assessAttendanceDay({ day, record: row, joiningDate: row.employee.joiningDate, hasShift: Boolean(shift || row.shiftId || row.employee.shiftId), holiday: isAttendanceHoliday(day, holidays), leave: leaves.some(l => l.employeeId === row.employeeId && istDateKey(l.fromDate) <= day && istDateKey(l.toDate) >= day), weeklyOff: isScheduledWeeklyOff(day, shift) });
+  };
   const byEmployee = new Map<string, DevicePunch[]>();
   for (const punch of punches) {
     const employeePunches = byEmployee.get(punch.employeeId) ?? [];
@@ -52,7 +69,9 @@ async function withMachines(rows: AttendanceRow[], tenantId: string, start: Date
     ...row,
     deviceIn: nearestReportSource(byEmployee.get(row.employeeId) ?? [], row.punchInTime),
     deviceOut: nearestReportSource(byEmployee.get(row.employeeId) ?? [], row.punchOutTime),
-    workingMinutes: row.punchInTime && row.punchOutTime ? Math.max(0, Math.round((row.punchOutTime.getTime() - row.punchInTime.getTime()) / 60_000)) : null,
+    assessment: assessment(row).code,
+    workingMinutes: assessment(row).assessedPresent ? assessedWorkingMinutes(row) : null,
+    requiresReview: assessment(row).requiresReview,
   }));
 }
 
@@ -74,6 +93,7 @@ export async function GET(req: NextRequest) {
   if (start.getTime() > end.getTime()) {
     return NextResponse.json({ error: "From date must be before To date." }, { status: 400 });
   }
+  if (end.getTime() - start.getTime() > 93 * 86400000) return NextResponse.json({ error: "Select a date range of at most 93 days." }, { status: 400 });
   const format = (params.get("format") ?? "json").toLowerCase();
   const search = params.get("q")?.trim() ?? "";
   const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
@@ -96,7 +116,7 @@ export async function GET(req: NextRequest) {
     session.role === "branch_manager"
       ? { branchId: manager?.branchId ?? "__none__" }
       : session.role === "location_manager"
-        ? { branch: { locationId: manager?.locationId ?? "__none__" } }
+        ? employeeLocationScope(manager?.locationId ?? "__none__")
         : {};
   const searchFilter = search
     ? {
@@ -111,7 +131,7 @@ export async function GET(req: NextRequest) {
   const where = {
     tenantId: session.tenantId,
     date: { gte: start, lt: end },
-    employee: { ...employeeScope, ...searchFilter },
+    employee: { AND: [employeeScope, searchFilter] },
   };
 
   if (format === "xlsx") {
@@ -124,9 +144,14 @@ export async function GET(req: NextRequest) {
         punchInTime: true,
         punchOutTime: true,
         status: true,
+        reviewStatus: true,
+        shiftId: true,
+        shift: { select: { sundayWeeklyOff: true } },
         employee: {
           select: {
             employeeNumber: true,
+            joiningDate: true,
+            shiftId: true,
             deviceCode: true,
             firstName: true,
             lastName: true,
@@ -134,7 +159,7 @@ export async function GET(req: NextRequest) {
             branch: { select: { name: true } },
             department: { select: { name: true } },
             employmentProfile: { select: { subDepartment: true } },
-            shift: { select: { name: true } },
+            shift: { select: { name: true, sundayWeeklyOff: true } },
           },
         },
       },
@@ -154,8 +179,8 @@ export async function GET(req: NextRequest) {
       { header: "Date", key: "date", width: 14 },
       { header: "In Device", key: "deviceIn", width: 26 },
       { header: "In Device Serial Number", key: "deviceInSerial", width: 24 },
-      { header: "In Time", key: "inTime", width: 14 },
-      { header: "Out Time", key: "outTime", width: 14 },
+      { header: "In Time (IST, includes date)", key: "inTime", width: 14 },
+      { header: "Out Time (IST, includes date)", key: "outTime", width: 14 },
       { header: "Attendance", key: "attendance", width: 14 },
       { header: "Out Device", key: "deviceOut", width: 26 },
       { header: "Out Device Serial Number", key: "deviceOutSerial", width: 24 },
@@ -173,12 +198,12 @@ export async function GET(req: NextRequest) {
         date: formatDateIST(row.date),
         deviceIn: row.deviceIn?.name ?? "",
         deviceInSerial: row.deviceIn?.serialNumber ?? "",
-        inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
-        outTime: row.punchOutTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchOutTime) : "",
-        attendance: row.status,
+        inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).format(row.punchInTime) : "",
+        outTime: row.punchOutTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).format(row.punchOutTime) : "",
+        attendance: row.assessment,
         deviceOut: row.deviceOut?.name ?? "",
         deviceOutSerial: row.deviceOut?.serialNumber ?? "",
-        workingHours: row.workingMinutes == null ? "" : `${Math.floor(row.workingMinutes / 60)}h ${row.workingMinutes % 60}m`,
+        workingHours: row.requiresReview ? "Review" : row.workingMinutes == null ? "" : `${Math.floor(row.workingMinutes / 60)}h ${row.workingMinutes % 60}m`,
       });
     }
     ws.getRow(1).font = { bold: true };
@@ -202,9 +227,14 @@ export async function GET(req: NextRequest) {
         punchInTime: true,
         punchOutTime: true,
         status: true,
+        reviewStatus: true,
+        shiftId: true,
+        shift: { select: { sundayWeeklyOff: true } },
         employee: {
           select: {
             employeeNumber: true,
+            joiningDate: true,
+            shiftId: true,
             deviceCode: true,
             firstName: true,
             lastName: true,
@@ -212,7 +242,7 @@ export async function GET(req: NextRequest) {
           branch: { select: { name: true } },
           department: { select: { name: true } },
           employmentProfile: { select: { subDepartment: true } },
-          shift: { select: { name: true } },
+          shift: { select: { name: true, sundayWeeklyOff: true } },
         },
         },
       },

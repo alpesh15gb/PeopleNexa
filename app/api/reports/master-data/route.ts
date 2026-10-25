@@ -1,3 +1,4 @@
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
@@ -65,12 +66,13 @@ export async function GET(req: NextRequest) {
   const employees = await prisma.employee.findMany({
     where: inactiveOnly
       ? inactiveEmployeeReportWhere({ tenantId: session.tenantId, role: session.role, manager: { locationId: locationId ?? null, branchId: null }, branchId: params.get("branchId") ?? "", departmentId: params.get("departmentId") ?? "", query: params.get("q") ?? "" })
-      : { tenantId: session.tenantId, loginOnly: false, ...(locationId ? { branch: { locationId } } : {}) },
+      : { tenantId: session.tenantId, loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
     select: {
       employeeNumber: true, deviceCode: true, firstName: true, lastName: true, email: true, phone: true, status: true, position: true, joiningDate: true,
       salary: true, salaryStructure: true, payMode: true, workBasisRate: true, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, aadhaarNumber: true,
       drivingLicenseNumber: true, drivingLicenseType: true, drivingLicenseExpiresAt: true,
       esiIpNumber: true, drivingLicenseClassification: true, drivingLicenseIssuedAt: true, idCardIssuedAt: true, idCardValidUntil: true, legacyImportData: true,
+      location: { select: { name: true } },
       branch: { select: { name: true, location: { select: { name: true } } } }, department: { select: { name: true } }, shift: { select: { name: true } }, manager: { select: { employeeNumber: true, firstName: true, lastName: true } },
       profile: true, employmentProfile: true, dependents: true, references: true, bankAccounts: true,
       education: true, workExperience: true,
@@ -91,7 +93,7 @@ export async function GET(req: NextRequest) {
     "ESI / IP Number", "Driving Licence Classification", "Driving Licence Issue Date", "ID Card Issue Date", "ID Card Valid Until",
   ], employees.map((employee) => {
     const profile = employee.profile; const employment = employee.employmentProfile;
-    return [employee.employeeNumber, employee.deviceCode, employee.firstName, employee.lastName, employee.email, employee.phone, employee.status, employee.position, formatDateIST(employee.joiningDate), employee.branch?.location?.name, employee.branch?.name, employee.department?.name, employee.shift?.name, employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "", employee.payMode, employee.salary, employee.workBasisRate,
+    return [employee.employeeNumber, employee.deviceCode, employee.firstName, employee.lastName, employee.email, employee.phone, employee.status, employee.position, formatDateIST(employee.joiningDate), employee.branch?.location?.name ?? employee.location?.name, employee.branch?.name, employee.department?.name, employee.shift?.name, employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "", employee.payMode, employee.salary, employee.workBasisRate,
       employee.pan, employee.uan, employee.aadhaarNumber, employee.drivingLicenseNumber, employee.drivingLicenseType, formatDateIST(employee.drivingLicenseExpiresAt),
        profile?.middleName, profile?.nameAsOnAadhaar, profile?.nickName, profile?.gender, formatDateIST(profile?.dateOfBirthCertificate), formatDateIST(profile?.actualDateOfBirth), profile?.celebrateDatePreference, profile?.maritalStatus, profile?.maritalStatus === "Married" ? profile.spouseName : "", profile?.maritalStatus === "Married" ? profile.spouseContactNumber : "", formatDateIST(profile?.marriageDate), profile?.bloodGroup, profile?.whatsappNumber, profile?.otherMobile, profile?.personalEmail, profile?.placeOfBirth, profile?.nationality, profile?.citizenship, profile?.fatherName, profile?.motherName, profile?.emergencyContactName, profile?.emergencyContactNumber, profile?.emergencyContactRelation, address(profile?.currentAddress), address(profile?.permanentAddress),
       formatDateIST(employment?.rejoiningDate), employment?.employmentMode, employment?.natureOfEmployment, employment?.probationPeriod, employment?.totalExperience, employment?.salaryGroup, employment?.ctc, employment?.salaryPaymentMode, employment?.paySalaryFrom, yesNo(employment?.tdsAllowed), yesNo(employment?.pfAllowed), yesNo(employment?.esicAllowed), employment?.ptLocation, yesNo(employment?.autoCreditLeave), employment?.subDepartment, employment?.grade, employment?.vehicleCategory, employment?.vehicleClass, employment?.vehicleSubClass, yesNo(employment?.licenseRequired), employment?.extensionNumber, employment?.secondManagerCode, employment?.hrManagerCode,

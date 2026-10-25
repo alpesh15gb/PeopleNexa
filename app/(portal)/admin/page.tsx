@@ -1,3 +1,5 @@
+import { assessAttendanceDay } from "@/lib/attendance-assessment";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { Suspense } from "react";
 import Link from "next/link";
 import { CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper, Fingerprint, Building2 } from "lucide-react";
@@ -56,11 +58,15 @@ export default async function AdminDashboardPage({
   const isBranchManager = session.role === "branch_manager";
   const isLocationManager = session.role === "location_manager";
   const ownScope = isBranchManager
-    ? await prisma.employee.findUnique({ where: { id: session.sub }, select: { branchId: true, branch: { select: { name: true, locationId: true } } } })
+    ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true, branch: { select: { name: true, locationId: true } } } })
     : null;
-  const ownLocationId = isLocationManager ? (await prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true } }))?.locationId ?? null : null;
+  const ownLocationId = isLocationManager ? (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId ?? null : null;
   const ownBranchId = ownScope?.branchId ?? null;
   const ownBranchName = ownScope?.branch?.name ?? "";
+
+  if ((isBranchManager && !ownBranchId) || (isLocationManager && !ownLocationId)) {
+    return <EmptyState title="No reporting scope assigned" description="Ask an administrator to assign your branch or location." />;
+  }
 
   // Branch filter must belong to this tenant; unknown ids are ignored.
   const branchFilter = isBranchManager
@@ -77,7 +83,7 @@ export default async function AdminDashboardPage({
   });
   // Invalid records are ignored so an existing dashboard always remains usable.
   const activeDashboardLayout = dashboardLayout(resolveConfiguration(activeDashboardRecords.filter((record) => dashboardLayout(record.payload)), dashboardLocationId)?.payload);
-  const locationEmployeeScope = ownLocationId ? { branch: { locationId: ownLocationId } } : {};
+  const locationEmployeeScope = ownLocationId ? employeeLocationScope(ownLocationId) : {};
   const empScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = istDateKey(today).slice(0, 7);
   const attendancePageSize = 25;
@@ -91,7 +97,7 @@ export default async function AdminDashboardPage({
 
   const attendanceWhere = branchId
     ? { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: { branchId, status: "active", loginOnly: false } }
-    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } };
+    : { tenantId: session.tenantId, date: { gte: today, lt: addDays(today, 1) }, employee: ownLocationId ? { status: "active", loginOnly: false, ...employeeLocationScope(ownLocationId) } : { status: "active", loginOnly: false } };
   const [employees, attendance, attendanceRecords, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
@@ -100,7 +106,7 @@ export default async function AdminDashboardPage({
     prisma.attendance.findMany({
       where: attendanceWhere,
       include: {
-        employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } },
+        employee: { select: { firstName: true, lastName: true, employeeNumber: true, joiningDate: true, shiftId: true, department: { select: { name: true } } } },
       },
       orderBy: { punchInTime: "asc" },
     }),
@@ -155,12 +161,12 @@ export default async function AdminDashboardPage({
     }),
     prisma.punch.findMany({
       where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: empScope },
-      select: { employeeId: true, punchTime: true, authStatus: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true, department: { select: { name: true } } } } },
+      select: { employeeId: true, punchTime: true, authStatus: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true, joiningDate: true, shiftId: true, department: { select: { name: true } } } } },
       orderBy: { punchTime: "asc" },
     }),
   ]);
 
-  const trendEmployeeScope = branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false };
+  const trendEmployeeScope = branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, ...employeeLocationScope(ownLocationId) } : { status: "active", loginOnly: false };
   const [weekRows, weekPunches] = await Promise.all([
     prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: currentMonthStart, lt: addDays(today, 1) }, employee: trendEmployeeScope }, select: { employeeId: true, date: true, status: true } }),
     prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(currentMonthStart, addDays(today, 1)), employee: trendEmployeeScope }, select: { employeeId: true, punchTime: true, authStatus: true } }),
@@ -190,7 +196,7 @@ export default async function AdminDashboardPage({
   });
   const anniversaries = celebrationProfiles.filter((profile) => profile.marriageDate && istDateKey(profile.marriageDate).slice(5) === todayMonthDay);
   const [devicePunches, projectAttendance] = await Promise.all([
-    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, branch: { locationId: ownLocationId } } : { status: "active", loginOnly: false } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
+    prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: branchId ? { branchId, status: "active", loginOnly: false } : ownLocationId ? { status: "active", loginOnly: false, ...employeeLocationScope(ownLocationId) } : { status: "active", loginOnly: false } }, select: { employeeId: true, device: { select: { name: true } }, realtimeDevice: { select: { name: true } } } }),
     prisma.attendance.findMany({ where: attendanceWhere, select: { employeeId: true, status: true, employee: { select: { branch: { select: { name: true } } } } } }),
   ]);
   const deviceEmployees = new Map<string, Set<string>>();
@@ -294,10 +300,10 @@ export default async function AdminDashboardPage({
       <Suspense fallback={<StatsSkeleton />}>
        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
          <div className={widgetClass("total_employees")} style={widgetStyle("total_employees")}><StatCard label="Total employees" value={counts.total} icon={<Users className="h-4.5 w-4.5" />} tone="indigo" className={statCardClass} /></div>
-          <div className={widgetClass("present")} style={widgetStyle("present")}><Link href={attendanceDrilldownHref("present")} aria-label={`View ${counts.livePresent} present employees`} className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><StatCard label="Present" value={counts.livePresent} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={`${statCardClass} group-hover:border-emerald-400/40 group-hover:shadow-[0_14px_32px_-24px_rgba(16,185,129,0.55)]`} /></Link></div>
+          <div className={widgetClass("present")} style={widgetStyle("present")}><Link href={attendanceDrilldownHref("present")} aria-label={`View ${counts.livePresent} employees with scans`} className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><StatCard label="Scan presence" value={counts.livePresent} icon={<UserCheck className="h-4.5 w-4.5" />} tone="emerald" className={`${statCardClass} group-hover:border-emerald-400/40 group-hover:shadow-[0_14px_32px_-24px_rgba(16,185,129,0.55)]`} /></Link></div>
           <div className={widgetClass("late")} style={widgetStyle("late")}><Link href={attendanceDrilldownHref("late")} aria-label={`View ${counts.late} late employees`} className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"><StatCard label="Late" value={counts.late} icon={<Clock4 className="h-4.5 w-4.5" />} tone="amber" className={`${statCardClass} group-hover:border-amber-400/40 group-hover:shadow-[0_14px_32px_-24px_rgba(245,158,11,0.55)]`} /></Link></div>
          <div className={widgetClass("permission")} style={widgetStyle("permission")}><StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} /></div>
-         <div className={widgetClass("absent")} style={widgetStyle("absent")}><StatCard label="Absent" value={counts.liveAbsent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} /></div>
+         <div className={widgetClass("absent")} style={widgetStyle("absent")}><StatCard label="No scan" value={counts.liveAbsent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} /></div>
          <div className={widgetClass("pending_leaves")} style={widgetStyle("pending_leaves")}><StatCard
           label="Pending leaves"
           value={pendingLeaveCount}
@@ -322,7 +328,7 @@ export default async function AdminDashboardPage({
 
        <div className="grid gap-6 lg:grid-cols-2">
          <Card className={widgetClass("device_attendance")} style={widgetStyle("device_attendance")}><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
-         <Card className={widgetClass("project_attendance")} style={widgetStyle("project_attendance")}><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.livePresent}/{count.total} present · {count.liveAbsent} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
+         <Card className={widgetClass("project_attendance")} style={widgetStyle("project_attendance")}><CardHeader><div><CardTitle>Project-wise attendance</CardTitle><CardDescription>Today&apos;s attendance by branch/project</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{projectAttendanceCounts.size ? <div className="divide-y divide-edge">{[...projectAttendanceCounts.entries()].sort((a, b) => b[1].total - a[1].total).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.livePresent}/{count.total} scanned · {count.liveAbsent} without scans</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No active employees assigned to a project.</p>}</CardContent></Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
@@ -364,7 +370,7 @@ export default async function AdminDashboardPage({
                         {a.punchOutTime && <span className="text-muted-foreground"> → {formatTime(a.punchOutTime)}</span>}
                       </p>
                     </div>
-                    <StatusPill status={a.status} />
+                    <StatusPill status={a.id.startsWith("punch-") ? "pending" : assessAttendanceDay({ day: istDateKey(today), record: a, joiningDate: a.employee.joiningDate, hasShift: Boolean(a.shiftId || a.employee.shiftId) }).status} />
                   </div>
                 ))}
                 </div>

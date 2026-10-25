@@ -1,3 +1,5 @@
+import { unprocessedAttendanceSourceDays } from "@/lib/attendance-source-recovery";
+import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireActiveSession } from "@/lib/session";
@@ -120,14 +122,15 @@ export async function GET(req: NextRequest) {
   const employeeWhere = {
     tenantId: session.tenantId,
     loginOnly: false,
-    ...(scopedLocationId ? { branch: { locationId: scopedLocationId } } : {}),
+    ...(scopedLocationId ? employeeLocationScope(scopedLocationId) : {}),
     ...(branchId ? { branchId } : {}),
     ...(departmentId ? { departmentId } : {}),
     AND: [
       {
         OR: [
           { status: "active" },
-          ...(kind === "daily" ? [] : [{ attendance: { some: { tenantId: session.tenantId, date: { gte: rangeStart, lt: rangeEnd } } } }]),
+          { attendance: { some: { tenantId: session.tenantId, date: { gte: rangeStart, lt: rangeEnd } } } },
+          { punches: { some: { tenantId: session.tenantId, ...authorizedPunchDayFilter(rangeStart, rangeEnd) } } },
         ],
       },
       ...(q
@@ -153,13 +156,23 @@ export async function GET(req: NextRequest) {
       : Promise.resolve(null),
   ]);
 
+  const jobCounts = await prisma.attendanceReconcileJob.groupBy({
+    by: ["status"], where: { tenantId: session.tenantId, status: { in: ["pending", "processing", "failed", "blocked"] }, punch: { punchTime: { gte: rangeStart, lt: rangeEnd }, employee: employeeWhere } }, _count: { _all: true },
+  });
+  const metadata: ReportMetadata = {
+    asOfDay: istDateKey(new Date()),
+    population: "Active staff plus staff with attendance or authorized scans in the selected period; login-only accounts excluded.",
+    processing: Object.fromEntries(jobCounts.map(r => [r.status, r._count._all])),
+  };
   const employees = await prisma.employee.findMany({
     where: employeeWhere,
     select: {
       id: true,
       employeeNumber: true,
+      deviceCode: true,
       firstName: true,
       lastName: true,
+      joiningDate: true,
       position: true,
       shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } },
       department: { select: { name: true } },
@@ -170,6 +183,8 @@ export async function GET(req: NextRequest) {
   // Day-level queries are scoped to the page's employees so a screen fetch
   // touches ~25 staff, not the whole company.
   const pageIds = employees.map((e) => e.id);
+  const sourceRecoveryDays = await unprocessedAttendanceSourceDays(session.tenantId, employees, rangeStart, rangeEnd);
+  metadata.unprocessedSourceDays = sourceRecoveryDays.size;
 
   const [department, runByEmployee, records, leaves, holidays, punches, rosters] = await Promise.all([
     departmentId
@@ -217,8 +232,7 @@ export async function GET(req: NextRequest) {
       where: {
         tenantId: session.tenantId,
         employeeId: { in: pageIds },
-        punchTime: { gte: rangeStart, lt: rangeEnd },
-        ...(kind === "daily" ? authorizedPunchDayFilter(rangeStart, rangeEnd) : {}),
+        ...authorizedPunchDayFilter(rangeStart, rangeEnd),
       },
       select: { employeeId: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "asc" },
@@ -276,7 +290,9 @@ export async function GET(req: NextRequest) {
       if (key.endsWith(`|${dayKey}`)) dailyLeaves.add(key.slice(0, -(dayKey.length + 1)));
     }
     const output: DeviceDailyOutput = buildDeviceDaily({
+      asOfDay: metadata.asOfDay,
       rosterShifts,
+      sourceRecoveryDays,
       tenant: tenantInfo,
       branch: branchInfo,
       day: dayKey,
@@ -286,13 +302,15 @@ export async function GET(req: NextRequest) {
       leaves: dailyLeaves,
       holidays: holidayKeys,
     });
-    if (format === "xlsx") return dailyXlsx(output, dayKey);
-    return NextResponse.json(page !== null ? { ...output, total, page } : output);
+    if (format === "xlsx") return dailyXlsx(output, dayKey, metadata);
+    return NextResponse.json({ ...output, metadata, ...(page !== null ? { total, page } : {}) });
   }
 
   if (kind === "monthly") {
     const output: DeviceMonthlyOutput = buildDeviceMonthly({
+      asOfDay: metadata.asOfDay,
       rosterShifts,
+      sourceRecoveryDays,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -302,13 +320,15 @@ export async function GET(req: NextRequest) {
       leaves: leaveKeys,
       holidays: holidayKeys,
     });
-    if (format === "xlsx") return monthlyXlsx(output, monthKey);
-    return NextResponse.json(page !== null ? { ...output, total, page } : output);
+    if (format === "xlsx") return monthlyXlsx(output, monthKey, metadata);
+    return NextResponse.json({ ...output, metadata, ...(page !== null ? { total, page } : {}) });
   }
 
   if (kind === "status-matrix") {
     const output: DeviceStatusMatrixOutput = buildStatusMatrix({
+      asOfDay: metadata.asOfDay,
       rosterShifts,
+      sourceRecoveryDays,
       tenant: tenantInfo,
       branch: branchInfo,
       department: departmentInfo,
@@ -320,8 +340,8 @@ export async function GET(req: NextRequest) {
       leaveLabels,
       holidays: holidayKeys,
     });
-    if (format === "xlsx") return statusMatrixXlsx(output, monthKey);
-    return NextResponse.json(page !== null ? { ...output, total, page } : output);
+    if (format === "xlsx") return statusMatrixXlsx(output, monthKey, metadata);
+    return NextResponse.json({ ...output, metadata, ...(page !== null ? { total, page } : {}) });
   }
 
   if (kind === "work-summary") {
@@ -336,7 +356,9 @@ export async function GET(req: NextRequest) {
       timeZone: "Asia/Kolkata",
     }).format(new Date());
     const output: DeviceWorkSummaryOutput = buildWorkSummary({
+      asOfDay: metadata.asOfDay,
       rosterShifts,
+      sourceRecoveryDays,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -348,12 +370,14 @@ export async function GET(req: NextRequest) {
       runBy,
       generatedAt,
     });
-    if (format === "xlsx") return workSummaryXlsx(output, monthKey);
-    return NextResponse.json(page !== null ? { ...output, total, page } : output);
+    if (format === "xlsx") return workSummaryXlsx(output, monthKey, metadata);
+    return NextResponse.json({ ...output, metadata, ...(page !== null ? { total, page } : {}) });
   }
 
   const output: DevicePerformanceOutput = buildPerformance({
+      asOfDay: metadata.asOfDay,
       rosterShifts,
+      sourceRecoveryDays,
     tenant: tenantInfo,
     branch: branchInfo,
     month: monthKey,
@@ -363,8 +387,8 @@ export async function GET(req: NextRequest) {
     leaves: leaveKeys,
     holidays: holidayKeys,
   });
-  if (format === "xlsx") return performanceXlsx(output, monthKey);
-  return NextResponse.json(page !== null ? { ...output, total, page } : output);
+  if (format === "xlsx") return performanceXlsx(output, monthKey, metadata);
+  return NextResponse.json({ ...output, metadata, ...(page !== null ? { total, page } : {}) });
 }
 
 // ─── Excel export (same columns/blocks as the on-screen report) ────────────
@@ -394,8 +418,8 @@ function borderAll(ws: ExcelJS.Worksheet, rowNumber: number, colCount: number) {
   }
 }
 
-function dailyXlsx(output: DeviceDailyOutput, dayKey: string) {
-  return xlsxResponse(`daily-attendance-${dayKey}.xlsx`, (wb) => {
+function dailyXlsx(output: DeviceDailyOutput, dayKey: string, metadata: ReportMetadata) {
+  return xlsxResponse(metadata, `daily-attendance-${dayKey}.xlsx`, (wb) => {
     const ws = wb.addWorksheet("Daily Attendance");
     const cols = output.columns.length;
     ws.mergeCells(1, 1, 1, 4);
@@ -432,8 +456,8 @@ function dailyXlsx(output: DeviceDailyOutput, dayKey: string) {
   });
 }
 
-function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string) {
-  return xlsxResponse(`monthly-attendance-${monthKey}.xlsx`, (wb) => {
+function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string, metadata: ReportMetadata) {
+  return xlsxResponse(metadata, `monthly-attendance-${monthKey}.xlsx`, (wb) => {
     const ws = wb.addWorksheet("Monthly Attendance");
     const cols = output.columns.length;
     const widths = [7, 9, 26, 9, 9, 9, 9, 10, 10];
@@ -466,8 +490,8 @@ function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string) {
   });
 }
 
-function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
-  return xlsxResponse(`status-matrix-${monthKey}.xlsx`, (wb) => {
+function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string, metadata: ReportMetadata) {
+  return xlsxResponse(metadata, `status-matrix-${monthKey}.xlsx`, (wb) => {
     const ws = wb.addWorksheet("Monthly Attendance Matrix");
     const dayCount = output.blocks[0]?.days.length ?? 0;
     const fixedColumns = [7, 15, 28, 18, 12];
@@ -518,13 +542,13 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
   });
 }
 
-const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
+const WORK_SUMMARY_COLUMNS = ["Date", "Attendance", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
 
-function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string) {
-  return xlsxResponse(`work-summary-${monthKey}.xlsx`, (wb) => {
+function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string, metadata: ReportMetadata) {
+  return xlsxResponse(metadata, `work-summary-${monthKey}.xlsx`, (wb) => {
     const ws = wb.addWorksheet("Work Summary");
     const cols = WORK_SUMMARY_COLUMNS.length;
-    const widths = [13, 26, 9, 9, 9, 11, 9, 10, 9];
+    const widths = [13, 14, 26, 9, 9, 9, 11, 9, 10, 9];
     widths.forEach((w, i) => {
       ws.getColumn(i + 1).width = w;
     });
@@ -546,10 +570,11 @@ function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string) {
       const headerRow = ws.addRow(WORK_SUMMARY_COLUMNS);
       styleHeaderRow(headerRow);
       for (const r of block.rows) {
-        ws.addRow([r.date, r.shift, r.firstIn, r.lastOut, r.gross, r.work, r.late, r.overtime, r.early]);
+        ws.addRow([r.date, r.status, r.shift, r.firstIn, r.lastOut, r.gross, r.work, r.late, r.overtime, r.early]);
       }
       const totalRow = ws.addRow([
         "Totals",
+        "",
         "",
         "",
         "",
@@ -565,8 +590,8 @@ function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string) {
   });
 }
 
-function performanceXlsx(output: DevicePerformanceOutput, monthKey: string) {
-  return xlsxResponse(`performance-${monthKey}.xlsx`, (wb) => {
+function performanceXlsx(output: DevicePerformanceOutput, monthKey: string, metadata: ReportMetadata) {
+  return xlsxResponse(metadata, `performance-${monthKey}.xlsx`, (wb) => {
     const ws = wb.addWorksheet("Performance");
     const dayCount = output.blocks[0]?.days.length ?? 0;
     const cols = dayCount + 1;
@@ -602,7 +627,7 @@ function performanceXlsx(output: DevicePerformanceOutput, monthKey: string) {
       for (let n = headRow.number; n <= ws.rowCount; n++) borderAll(ws, n, Math.max(cols, 1));
       const footers = [
         `Total Working Hrs: ${block.totals.work} | Total OT Hrs: ${block.totals.ot}`,
-        `Present: ${block.totals.present} Absent: ${block.totals.absent} Paid Day: ${block.totals.paidDay}`,
+        `Present: ${block.totals.present} Absent: ${block.totals.absent} Attendance units (excluding leave): ${block.totals.paidDay}`,
         `WO: ${block.totals.wo} HLD: ${block.totals.hld} Leave: ${block.totals.leave}`,
       ];
       for (const f of footers) {
@@ -614,10 +639,27 @@ function performanceXlsx(output: DevicePerformanceOutput, monthKey: string) {
   });
 }
 
-async function xlsxResponse(filename: string, build: (wb: ExcelJS.Workbook) => void) {
+type ReportMetadata = { asOfDay: string; population: string; processing: Record<string, number>; unprocessedSourceDays?: number };
+
+async function xlsxResponse(metadata: ReportMetadata, filename: string, build: (wb: ExcelJS.Workbook) => void) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "PeopleNexa";
   build(wb);
+  const notes = wb.addWorksheet("Report Notes");
+  notes.columns = [{ header: "Item", width: 30 }, { header: "Meaning", width: 110 }];
+  notes.addRows([
+    ["As of (IST)", metadata.asOfDay], ["Population", metadata.population],
+    ["Scan Presence", "Observed authorized scan on the calendar day; does not grant a full paid day."],
+    ["Pending", "Authorized punches or retained device source events exist without assessed attendance, or today is incomplete."],
+    ["Review", "Attendance needs review; unverified hours excluded from totals."],
+    ["Clock offset", "(+1d) means the clock is on the day after the attendance workday; negative offsets indicate a prior date."],
+    ["Upcoming / —", "Future dates / dates before joining; excluded from absence."],
+    ["Attendance units", "Full and half assessed days only; not a payroll payable-days calculation."],
+    ["Recovery queue (punch jobs)", JSON.stringify(metadata.processing)],
+    ["Retained source days awaiting recovery", String(metadata.unprocessedSourceDays ?? 0)],
+    ["Punch Details", "Calculated employee/workday records, not a raw device-event export. Dates/times use IST."],
+  ]);
+  notes.getColumn(2).alignment = { wrapText: true };
   const buffer = await wb.xlsx.writeBuffer();
   return new Response(Buffer.from(buffer as ArrayBuffer), {
     headers: {

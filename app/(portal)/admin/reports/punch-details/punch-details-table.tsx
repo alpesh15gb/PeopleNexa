@@ -15,6 +15,8 @@ interface AttendanceRow {
   punchOutTime: string | null;
   status: string;
   workingMinutes: number | null;
+  requiresReview?: boolean;
+  assessment?: string;
   employee: {
     employeeNumber: string;
     deviceCode: string | null;
@@ -31,7 +33,7 @@ interface AttendanceRow {
 }
 
 function time(value: string | null) {
-  return value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)) : "—";
+  return value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value)) : "—";
 }
 
 function date(value: string) {
@@ -169,10 +171,10 @@ export function PunchDetailsTable({
             </THead>
             <TBody>
               {loading && (
-                <TR><TD colSpan={15} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
+                <TR><TD colSpan={16} className="py-10 text-center text-muted-foreground">Loading attendance details…</TD></TR>
               )}
               {!loading && (data?.rows.length ?? 0) === 0 && (
-                <TR><TD colSpan={15} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
+                <TR><TD colSpan={16} className="py-10 text-center text-muted-foreground">No attendance found for this filter.</TD></TR>
               )}
               {(data?.rows ?? []).map((row, i) => {
                 return <TR key={row.id}>
@@ -188,10 +190,10 @@ export function PunchDetailsTable({
                   <TD className="font-mono">{row.deviceIn?.serialNumber ?? "—"}</TD>
                   <TD className="font-mono">{time(row.punchInTime)}</TD>
                   <TD className="font-mono">{time(row.punchOutTime)}</TD>
-                  <TD className="capitalize">{row.status.replace(/_/g, " ")}</TD>
+                  <TD className="capitalize">{row.assessment ?? row.status.replace(/_/g, " ")}</TD>
                   <TD><span className="block max-w-44 truncate" title={row.deviceOut?.serialNumber ?? ""}>{row.deviceOut?.name ?? "—"}</span></TD>
                   <TD className="font-mono">{row.deviceOut?.serialNumber ?? "—"}</TD>
-                  <TD className="font-mono">{workingHours(row.workingMinutes)}</TD>
+                  <TD className="font-mono">{row.requiresReview ? "Review" : workingHours(row.workingMinutes)}</TD>
                 </TR>;
               })}
             </TBody>

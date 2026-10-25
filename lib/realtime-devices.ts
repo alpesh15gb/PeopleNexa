@@ -82,7 +82,7 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   const existing = await prisma.realtimeLog.findFirst({
     where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing?.processed) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
+  if (existing?.processed && !existing.error) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
 
   let log = existing;
   if (!log) {
@@ -103,7 +103,7 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
         where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
       });
       if (!duplicate) throw error;
-      if (duplicate.processed) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
+      if (duplicate.processed && !duplicate.error) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
       log = duplicate;
     }
   }
@@ -135,10 +135,6 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
       punchTime: punch.punchTime,
       inOutHint: hint,
   });
-  if (!created.created) {
-    await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-    return { accepted: true as const, action: "duplicate" as const, logId: log.id };
-  }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
   const result = await reconcileWithRetry(
@@ -159,16 +155,24 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
 /** Re-attempt realtime logs flagged with no-employee (mirrors reprocessFailedLogs). */
 export async function reprocessFailedRealtimeLogs(
   tenantId: string,
-  limit = 2000
+  limit = 2000,
+  options: { includeHistorical?: boolean } = {}
 ): Promise<{ accepted: number; duplicate: number; failed: number }> {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  // Filter to exactly mapped active codes so old unmapped employees cannot
+  // starve the recovery queue. Older retained evidence requires an explicit
+  // historical recovery request, rather than silently changing past months.
+  const employees = await prisma.employee.findMany({ where: { tenantId, status: "active", loginOnly: false }, select: { deviceCode: true, employeeNumber: true } });
+  const mappedCodes = employees.map(employee => employee.deviceCode ?? employee.employeeNumber);
+  if (!mappedCodes.length) return { accepted: 0, duplicate: 0, failed: 0 };
   const logs = await prisma.realtimeLog.findMany({
     where: {
       tenantId,
-      createdAt: { gte: weekAgo },
+      userId: { in: mappedCodes },
+      ...(!options.includeHistorical ? { createdAt: { gte: new Date(Date.now() - 7 * 86400000) } } : {}),
       OR: [{ processed: false }, { error: { not: null } }],
     },
     select: { id: true, realtimeDeviceId: true, userId: true, punchTime: true },
+    orderBy: [{ punchTime: "asc" }, { id: "asc" }],
     take: limit,
   });
   const counters = { accepted: 0, duplicate: 0, failed: 0 };
@@ -200,11 +204,6 @@ export async function reprocessFailedRealtimeLogs(
           punchTime: log.punchTime,
           inOutHint: "unknown",
       });
-      if (!created.created) {
-        await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-        counters.duplicate++;
-        continue;
-      }
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       await reconcileWithRetry(
         tenant ?? { id: tenantId, config: null },
@@ -212,7 +211,7 @@ export async function reprocessFailedRealtimeLogs(
         await attendanceDayForPunch(employee, log.punchTime)
       );
       await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-      counters.accepted++;
+      if (created.created) counters.accepted++; else counters.duplicate++;
     } catch {
       counters.failed++;
     }

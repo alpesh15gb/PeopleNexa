@@ -18,10 +18,10 @@ assert.deepEqual(attendanceEmployeeScope({ tenantId: "tenant-a", branchId: "bran
   tenantId: "tenant-a", status: "active", loginOnly: false, branchId: "branch-a",
 });
 assert.deepEqual(attendanceEmployeeScope({ tenantId: "tenant-a", locationId: "location-a" }), {
-  tenantId: "tenant-a", status: "active", loginOnly: false, branch: { locationId: "location-a" },
+  tenantId: "tenant-a", status: "active", loginOnly: false, OR: [{ branch: { locationId: "location-a" } }, { branchId: null, locationId: "location-a" }],
 });
 assert.deepEqual(attendanceEmployeeScope({ tenantId: "tenant-a", locationId: "location-a", branchId: "branch-a" }), {
-  tenantId: "tenant-a", status: "active", loginOnly: false, branch: { locationId: "location-a" }, branchId: "branch-a",
+  tenantId: "tenant-a", status: "active", loginOnly: false, OR: [{ branch: { locationId: "location-a" } }, { branchId: null, locationId: "location-a" }], branchId: "branch-a",
 });
 
 console.log("attendance drilldown tests passed");
