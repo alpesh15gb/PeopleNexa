@@ -41,6 +41,14 @@ async function main() {
     await assert.rejects(applyHistoricalRepair(tampered, m.hash), /hash/);
     check("wrong and edited manifests cannot write");
 
+    await prisma.tenant.update({ where: { id: tenantId }, data: { config: { ebioserver: { lastPulledAt: "2026-10-26T04:00:00Z" } } } });
+    const telemetryPlan = await prepareHistoricalRepair(selection(f.e.id), now);
+    assert.equal(telemetryPlan.components[0].expectedHash, m.components[0].expectedHash, "Routine ingestion telemetry must not invalidate an otherwise unchanged repair");
+    await prisma.tenant.update({ where: { id: tenantId }, data: { config: { punches: { mode: "strict" } } } });
+    assert.equal((await applyHistoricalRepair(m, m.hash, 25, now))[0].status, "skipped", "An actual pairing-policy change must invalidate the preview");
+    await prisma.tenant.update({ where: { id: tenantId }, data: { config: { ebioserver: { lastPulledAt: "2026-10-26T04:05:00Z" } } } });
+    check("ongoing poll telemetry is tolerated while actual punch-policy changes fail closed");
+
     // Arrival from yesterday/today after the preview must remain live and intact.
     for (const time of ["2026-10-25 08:00:00", "2026-10-26 08:00:00"]) {
       await createPunchForEvent({ tenantId, employeeId: f.e.id, deviceId: device.id, source: "device", punchTime: at(time), eventKey: `qa-recent:${time}` });

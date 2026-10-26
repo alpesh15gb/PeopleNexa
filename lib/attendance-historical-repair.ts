@@ -69,7 +69,7 @@ async function evidence(db: Prisma.TransactionClient, tenantId: string, employee
   const branchIds = new Set([employee.branchId, ...referenced.map(r => r.branchId), ...history.flatMap(a => [a.before.branchId, a.after.branchId])]);
   const deviceIds = new Set([...punches.map(p => p.deviceId), ...logs.map(l => l.deviceId)]);
   const tenantConfig = tenant.config && typeof tenant.config === "object" && !Array.isArray(tenant.config) ? tenant.config as Row : {};
-  return repairPlain({ employee, tenant: { id: tenant.id, configHash: repairHash(tenant.config), punchMode: tenantConfig.punches?.mode ?? "first_last" }, records: referenced, punches, logs, tuplePunches, rosters, configs: settings, branches: branches.filter(b => branchIds.has(b.id)), shifts, devices: devices.filter(d => deviceIds.has(d.id)), audits: history, pending });
+  return repairPlain({ employee, tenant: { id: tenant.id, punchConfigHash: repairHash(tenantConfig.punches ?? null), punchMode: tenantConfig.punches?.mode ?? "first_last" }, records: referenced, punches, logs, tuplePunches, rosters, configs: settings, branches: branches.filter(b => branchIds.has(b.id)), shifts, devices: devices.filter(d => deviceIds.has(d.id)), audits: history, pending });
 }
 
 function proposal(state: Row, days: string[], sourceIds: string[], recentCutoff: string) {

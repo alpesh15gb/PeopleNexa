@@ -35,11 +35,14 @@ async function workbook(handler: Handler, params: string) {
 async function main() {
   assert.equal(process.env.ATTENDANCE_LAB, "isolated");
   const db = await prisma.$queryRaw<Array<{ db: string; listen: string }>>`SELECT current_database() AS db, current_setting('listen_addresses') AS listen`;
-  const repairLab = process.env.ATTENDANCE_REPAIR_LAB === "isolated";
-  assert.deepEqual(db, [{ db: repairLab ? "peoplenexa_repair_20261026" : "peoplenexa_working", listen: "" }]);
+  const freshLab = process.env.ATTENDANCE_REPAIR_LAB === "fresh";
+  const repairLab = freshLab || process.env.ATTENDANCE_REPAIR_LAB === "isolated";
+  assert.deepEqual(db, [{ db: freshLab ? "peoplenexa_fresh_20261026_working" : repairLab ? "peoplenexa_repair_20261026" : "peoplenexa_working", listen: "" }]);
   globalThis.fetch = async () => { throw new Error("Network forbidden in report tests"); };
   const RealDate = Date;
-  const fixed = new RealDate("2026-10-25T16:00:00Z").getTime();
+  const asOfDay = freshLab ? "2026-10-26" : "2026-10-25";
+  const asOfDate = freshLab ? 26 : 25;
+  const fixed = new RealDate(`${asOfDay}T16:00:00Z`).getTime();
   globalThis.Date = new Proxy(RealDate, {
     construct(target, args) { return Reflect.construct(target, args.length ? args : [fixed]); },
     get(target, property) { return property === "now" ? () => fixed : Reflect.get(target, property); },
@@ -51,7 +54,7 @@ async function main() {
   const month = "month=2026-10";
   for (const kind of ["monthly", "status-matrix", "work-summary", "performance"]) {
     reports[kind] = await json(deviceReport, `kind=${kind}&${month}`);
-    assert.equal(reports[kind].metadata.asOfDay, "2026-10-25");
+    assert.equal(reports[kind].metadata.asOfDay, asOfDay);
   }
   const blocks = reports.monthly.blocks;
   const map = (kind: string) => new Map<string, any>(reports[kind].blocks.map((b: any) => [b.code, b]));
@@ -71,7 +74,7 @@ async function main() {
       assert.equal(m.days[i].outTime, day.outTime);
       assert.equal(p.days[i].outTime, day.outTime);
       assert.equal(w.rows[i].lastOut, day.outTime);
-      if (day.day > 25) { assert.equal(day.status, "Upcoming"); futureCells++; }
+      if (day.day > asOfDate) { assert.equal(day.status, "Upcoming"); futureCells++; }
       if (day.status === "Review") assert.equal(w.rows[i].work, "Review");
       assessedCells++;
     }
@@ -80,7 +83,7 @@ async function main() {
   }
   const byCode = new Map<string, any>(blocks.map((b: any) => [b.code, b]));
   assert.equal(byCode.get("MN/953").days[1].status, repairLab ? "Review" : "Pending", "Recovered evidence stays under Review; unrecovered retained evidence stays Pending");
-  for (let day = 1; day <= 25; day++) {
+  for (let day = 1; day <= asOfDate; day++) {
     const key = `2026-10-${String(day).padStart(2, "0")}`;
     const daily = await json(deviceReport, `kind=daily&date=${key}`);
     const adminRows = await json(attendance, `date=${key}`);
@@ -139,7 +142,7 @@ async function main() {
   const daily = await json(deviceReport, "kind=daily&date=2026-10-02&q=MN%2F004");
   const dailyWb = await workbook(deviceReport, "kind=daily&date=2026-10-02&q=MN%2F004&format=xlsx");
   assert.equal(dailyWb.worksheets[0].getRow(3).getCell(13).text, daily.rows[0].attendanceStatus);
-  const pd = await json(punchDetails, "from=2026-10-01&to=2026-10-25&q=MN%2F004&size=500");
+  const pd = await json(punchDetails, `from=2026-10-01&to=${asOfDay}&q=MN%2F004&size=500`);
   assert.ok(pd.rows.length);
   for (const r of pd.rows) {
     const key = new RealDate(r.date).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -147,7 +150,7 @@ async function main() {
     assert.equal(r.assessment, byCode.get(r.employee.employeeNumber).days[index].status);
     if (r.requiresReview) assert.equal(r.workingMinutes, null);
   }
-  const pdWb = await workbook(punchDetails, "from=2026-10-01&to=2026-10-25&q=MN%2F004&format=xlsx");
+  const pdWb = await workbook(punchDetails, `from=2026-10-01&to=${asOfDay}&q=MN%2F004&format=xlsx`);
   assert.equal(pdWb.worksheets[0].rowCount - 1, pd.total);
   assert.ok(pdWb.worksheets[0].getRow(2).getCell(11).text.includes("/2026"), "Punch export includes full date");
 
@@ -161,8 +164,8 @@ async function main() {
   const inactive = await workbook(inactiveReport, "");
   const inactiveFull = await workbook(masterData, "status=inactive");
   assert.equal(inactive.worksheets[0].rowCount, inactiveFull.getWorksheet("Employees")!.rowCount);
-  const mobile = await json(mobileReport, "from=2026-10-01&to=2026-10-25");
-  const mobileWb = await workbook(mobileReport, "from=2026-10-01&to=2026-10-25&format=xlsx");
+  const mobile = await json(mobileReport, `from=2026-10-01&to=${asOfDay}`);
+  const mobileWb = await workbook(mobileReport, `from=2026-10-01&to=${asOfDay}&format=xlsx`);
   assert.equal(mobileWb.worksheets[0].rowCount - 1, mobile.rows.length);
   console.log(JSON.stringify({ check: "other exports", punchDetails: pd.total, master: master.getWorksheet("Employees")!.rowCount - 1, inactive: inactive.worksheets[0].rowCount - 1, mobile: mobile.rows.length, status: "passed" }));
 
@@ -213,6 +216,23 @@ async function main() {
     await prisma.punch.deleteMany({ where: { tenantId: qa.id } });
     await prisma.location.deleteMany({ where: { tenantId: qa.id } });
     await prisma.tenant.delete({ where: { id: qa.id } });
+  }
+  if (freshLab) {
+    globals.attendanceTestSession = { sub: manager.id, tenantId, role: "admin" };
+    const ylr = await prisma.employee.findFirstOrThrow({ where: { tenantId, employeeNumber: "YLR0332" }, select: { branchId: true } });
+    assert.ok(ylr.branchId);
+    const sample: Record<string, any> = {};
+    for (const kind of ["monthly", "status-matrix", "work-summary", "performance"]) sample[kind] = await json(deviceReport, `kind=${kind}&${month}&branchId=${ylr.branchId}&q=YLR0332`);
+    const monthly = sample.monthly.blocks.find((b: any) => b.code === "YLR0332");
+    assert.ok(monthly);
+    for (const kind of ["status-matrix", "performance", "work-summary"]) {
+      const block = sample[kind].blocks.find((b: any) => b.code === "YLR0332");
+      assert.ok(block);
+      for (let i = 0; i < 31; i++) assert.equal(kind === "work-summary" ? block.rows[i].status : block.days[i].status, monthly.days[i].status, `YLR0332/${i + 1}: ${kind}`);
+    }
+    assert.equal(monthly.days[24].status, "Review", "Shared night OUT must not silently grant the next day's attendance");
+    assert.equal(sample["work-summary"].blocks.find((b: any) => b.code === "YLR0332").rows[24].work, "Review");
+    console.log("PASS fresh YLR0332 night-shift exception agrees across reports and stays excluded from verified work");
   }
   await prisma.$disconnect();
 }

@@ -53,6 +53,8 @@ node node_modules/tsx/dist/cli.mjs scripts/attendance-historical-repair.ts \
 
 Apply uses short serializable transactions, a 750 ms database lock timeout, optimistic row versions and exact evidence/context fingerprints. A new relevant scan, boundary link, source update, employee edit, roster or configuration change invalidates the affected component. It is skipped, not merged automatically. A commit conflict retries at most twice and revalidates the original preview; permanent changes stay skipped. Each committed component keeps full before/after attendance and evidence images in `AuditLog`, with employee code/name and the manifest hash. Reruns do not repeat applied components. Use the printed offset to move past held/skipped groups rather than silently broadening the selection.
 
+Routine integration telemetry such as `ebioserver.lastPulledAt` is excluded from the tenant fingerprint so live polling can continue. Actual punch-pairing/auto-out settings and the relevant configuration records remain protected. Build a new preview with the exact tool release that will apply it; earlier manifests are not a production migration input.
+
 Inspect every batch's `failed`, `skipped`, `held` and `already_applied` results. A skipped component requires a new preview and review. Do not interpret a successful process exit as every employee being repaired. Hold all payroll calculations affecting unresolved Review days for the appropriate business review.
 
 ## Verify after each batch
@@ -77,5 +79,9 @@ Rollback only restores the attendance records changed by that component, using t
 `test-attendance-historical-repair.ts` requires `ATTENDANCE_LAB=isolated`, database `peoplenexa_repair_20261026` and socket-only PostgreSQL. It creates/removes its own QA tenant and rejects other database identities. It includes a deliberately injected post-insert failure and an arrival released between the repair transaction's reads and writes.
 
 The report integration test permits that same database only with the additional `ATTENDANCE_REPAIR_LAB=isolated` acknowledgement. Otherwise its original `peoplenexa_working` guard remains unchanged.
+
+The fresh October 26 snapshot uses `peoplenexa_fresh_20261026_working` only when `ATTENDANCE_REPAIR_LAB=fresh`. That test includes daily comparisons through October 26 and the YLR0332 night-shift exception; its existing Review day must not become verified work. The October 26 baseline remains separate and read-only.
+
+`scripts/retain-next-static.cjs` can carry previous public Next.js chunks into a staged image for browsers open during a cutover. It only adds missing regular files, never overwrites the new build, and does not follow source symlinks. Public assets/model weights, runtime secrets, maps-key configuration and the existing uploads volume must be checked before moving traffic. Building the application image off the VPS avoids competing with live ingestion during compilation.
 
 The local October 26 rehearsal changed 1,145 day projections into Review, preserving 606 existing IDs and creating 539 rows. It recovered 15 older events; 19 recent source events and both invalid joining-date components remained held. All 125,316 unaffected original attendance rows and all October 25-onward attendance/punch/raw rows were identical to the baseline. This is evidence about that rehearsal, not a promise about a newer production snapshot.
