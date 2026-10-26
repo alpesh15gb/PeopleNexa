@@ -339,7 +339,9 @@ async function reconcileEmployeeDayInTransaction(
   });
   // Adjacent automatic windows can overlap. Route each punch to its workday
   // before pairing, so yesterday's OUT or tomorrow's IN cannot leak in.
-  const routedDays = automatic && shift
+  // An unmatched automatic shift still has to exclude a prior night's OUT.
+  // Falling back to calendar pairing does not transfer ownership of that scan.
+  const routedDays = automatic
     ? await Promise.all(windowPunches.map((punch) => attendanceDayForPunch(employee, punch.punchTime, db)))
     : null;
   const initialPunches = routedDays
@@ -347,7 +349,9 @@ async function reconcileEmployeeDayInTransaction(
     : windowPunches;
   const { start: dayStart, end: dayEnd } = automatic && shift ? initialWindow : attendanceWindow(attendanceDate, shift, noShiftAttendanceWindowHours, shift ? null : initialPunches[0]?.punchTime);
   const punches = !shift && initialPunches[0]
-    ? await db.punch.findMany({ where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
+    ? automatic
+      ? initialPunches.filter(punch => punch.punchTime >= dayStart && punch.punchTime < dayEnd)
+      : await db.punch.findMany({ where: { employeeId: employee.id, authStatus: { in: ["auto", "approved"] }, punchTime: { gte: dayStart, lt: dayEnd } }, orderBy: { punchTime: "asc" } })
     : initialPunches;
   const missingOutTreatment = policy?.attendanceTreatment.missingOutPunch ?? "review";
   const singlePunchHalfDay = shift ? shift.singlePunchHalfDay : !automatic && await unassignedSinglePunchHalfDay(employee.tenantId, db);

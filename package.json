@@ -18,6 +18,7 @@
     "test:mobile-attendance": "tsx scripts/test-mobile-attendance.ts",
     "test:attendance-financial-safety": "tsx scripts/test-attendance-financial-safety.ts",
     "test:automatic-shifts": "tsx scripts/test-automatic-shifts.ts",
+    "test:attendance-automatic-boundary": "tsx scripts/test-attendance-automatic-boundary-integration.ts",
     "test:attendance-tally": "tsx scripts/test-attendance-tally.ts",
     "test:attendance-drilldown": "tsx scripts/test-attendance-drilldown.ts",
     "test:report-month-range": "tsx scripts/test-report-month-range.ts",

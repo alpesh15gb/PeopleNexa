@@ -9,7 +9,7 @@ const sessionBoundary = { name: "isolated-lab-session", setup(builder) {
   builder.onLoad({ filter: /.*/, namespace: "lab" }, () => ({ contents: "export async function requireActiveSession(){return globalThis.attendanceTestSession}; export const requireSession=requireActiveSession; export const getSession=requireActiveSession;", loader: "js" }));
 } };
 async function main() {
-  for (const kind of ["recovery", "report"]) await build({
+  for (const kind of ["recovery", "report", "automatic-boundary"]) await build({
     entryPoints: [`scripts/test-attendance-${kind}-integration.ts`],
     outfile: path.join(output, `${kind}-test.mjs`),
     bundle: true, platform: "node", format: "esm", external: ["pg-native"],
