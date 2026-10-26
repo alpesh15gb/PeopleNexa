@@ -21,7 +21,7 @@ export const EARLY_WINDOW_MINUTES = 60;
 
 // A single in→out span longer than this is implausible for a normal shift and
 // flags the day for review (the mispunch guard).
-import { MAX_SPAN_HOURS } from "./attendance-validation";
+import { MAX_SPAN_HOURS, isAmbiguousPunchBurst } from "./attendance-validation";
 export { MAX_SPAN_HOURS } from "./attendance-validation";
 
 // Total presence below this marks the day as a half day (only when finalized
@@ -304,6 +304,11 @@ async function reconcileEmployeeDayInTransaction(
   const existing = await db.attendance.findUnique({
     where: { employeeId_date: { employeeId: employee.id, date: attendanceDate } },
   });
+  if (existing?.reviewStatus === "manual_override") {
+    return { attendanceId: existing.id, action: "unchanged", protected: true,
+      inAt: existing.punchInTime, outAt: existing.punchOutTime, status: existing.status,
+      lateMinutes: existing.lateMinutes, reviewStatus: existing.reviewStatus, punches: [] };
+  }
   try {
     await assertLeavePayrollOpen(db, tenant.id, employee.id, attendanceDate, attendanceDate);
     const legacyPaid = await db.payslip.findFirst({ where: { tenantId: tenant.id, employeeId: employee.id, month: istDateKey(attendanceDate).slice(0,7), status: "paid" }, select: { id: true } });
@@ -463,6 +468,7 @@ async function reconcileEmployeeDayInTransaction(
     reviewStatus = null;
     if (finalize) { status = "half_day"; lateMinutes = 0; }
   }
+  if (isAmbiguousPunchBurst(punches)) reviewStatus = "needs_review";
 
   // A live punch (mobile/device ingest with finalize:false) landing on an
   // already-locked day must not re-open it: the punch stays as immutable
@@ -573,6 +579,7 @@ export async function finalizeEligibleDays(tenantId: string, limit = 200): Promi
     SELECT a."id", a."employeeId", a."date", a."punchInTime"
     FROM "Attendance" a
     WHERE a."tenantId" = ${tenantId} AND a."finalized" = false
+      AND a."reviewStatus" IS DISTINCT FROM 'manual_override'
       AND NOT EXISTS (
         SELECT 1 FROM "PayrollRun" r WHERE r."tenantId" = a."tenantId"
           AND r."month" = to_char(a."date" + INTERVAL '5 hours 30 minutes', 'YYYY-MM')

@@ -35,7 +35,8 @@ async function workbook(handler: Handler, params: string) {
 async function main() {
   assert.equal(process.env.ATTENDANCE_LAB, "isolated");
   const db = await prisma.$queryRaw<Array<{ db: string; listen: string }>>`SELECT current_database() AS db, current_setting('listen_addresses') AS listen`;
-  assert.deepEqual(db, [{ db: "peoplenexa_working", listen: "" }]);
+  const repairLab = process.env.ATTENDANCE_REPAIR_LAB === "isolated";
+  assert.deepEqual(db, [{ db: repairLab ? "peoplenexa_repair_20261026" : "peoplenexa_working", listen: "" }]);
   globalThis.fetch = async () => { throw new Error("Network forbidden in report tests"); };
   const RealDate = Date;
   const fixed = new RealDate("2026-10-25T16:00:00Z").getTime();
@@ -78,7 +79,7 @@ async function main() {
     assert.equal(p.totals.absent, b.summary.absent);
   }
   const byCode = new Map<string, any>(blocks.map((b: any) => [b.code, b]));
-  assert.equal(byCode.get("MN/953").days[1].status, "Pending", "Retained October 2 source events without normalized punches are not an absence");
+  assert.equal(byCode.get("MN/953").days[1].status, repairLab ? "Review" : "Pending", "Recovered evidence stays under Review; unrecovered retained evidence stays Pending");
   for (let day = 1; day <= 25; day++) {
     const key = `2026-10-${String(day).padStart(2, "0")}`;
     const daily = await json(deviceReport, `kind=daily&date=${key}`);

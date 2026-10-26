@@ -2,6 +2,8 @@
 
 This change separates observed scans, assessed attendance and payroll calculations. It does not automatically repair historical attendance or change employee/device access.
 
+The guarded, review-only historical repair and live-ingestion verification workflow is documented in [attendance-historical-repair.md](attendance-historical-repair.md). It requires a fresh production preview and preserves yesterday/today by default.
+
 ## Behavior
 
 - A normalized source punch and its durable reconciliation job commit together. A duplicate source event still retries unfinished reconciliation.
