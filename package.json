@@ -34,6 +34,7 @@
     "test:theme": "tsx scripts/test-theme.ts",
     "test:payroll-field-mapping": "tsx scripts/test-payroll-field-mapping.ts",
     "test:payroll-workspace": "tsx scripts/test-payroll-workspace.ts",
+    "test:payroll-attendance-workflow": "tsx scripts/test-payroll-attendance-workflow.ts",
     "test:payroll-selected-members": "tsx scripts/test-payroll-selected-members.ts",
     "test:payroll-generation-results": "tsx scripts/test-payroll-generation-results.ts",
     "diagnose:payroll-db": "tsx scripts/diagnose-payroll-db.ts",
