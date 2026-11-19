@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { fyFromMonth } from "@/lib/payroll";
 
@@ -62,35 +62,27 @@ export async function POST(req: NextRequest) {
       num(body.sections?.["80c"]) + num(body.sections?.["80d"]) + num(body.sections?.hra) + num(body.sections?.lta) + num(body.sections?.other),
   };
 
-  const existing = await prisma.taxDeclaration.findUnique({
-    where: { employeeId_fy: { employeeId: session.sub, fy } },
-  });
-  if (existing && existing.tenantId !== session.tenantId) {
-    return NextResponse.json({ error: "Declaration not found in this workspace." }, { status: 403 });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const where = { employeeId_fy: { employeeId: session.sub, fy } };
+      const existing = await tx.taxDeclaration.findUnique({ where });
+      if (existing && existing.tenantId !== session.tenantId) {
+        return NextResponse.json({ error: "Declaration not found in this workspace." }, { status: 403 });
+      }
+      if (existing?.status === "verified") {
+        return NextResponse.json({ error: "Ask an independent reviewer to return this verified declaration before editing it." }, { status: 409 });
+      }
+      const declaration = await tx.taxDeclaration.upsert({
+        where,
+        update: { sections, status: "submitted", note: null },
+        create: { tenantId: session.tenantId, employeeId: session.sub, fy, sections, status: "submitted" },
+      });
+      return NextResponse.json({ declaration }, { status: 201 });
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (["P2002", "P2034"].includes((error as { code?: string })?.code ?? "")) {
+      return NextResponse.json({ error: "The declaration changed. Refresh and try again." }, { status: 409 });
+    }
+    throw error;
   }
-  // Once verified, only an admin (via verify/reject) may change the status —
-  // an employee resubmission must not silently reset it to "submitted".
-  if (existing && existing.status === "verified" && session.role !== "admin") {
-    return NextResponse.json({ error: "Declaration is verified and cannot be modified." }, { status: 403 });
-  }
-
-  const declaration = await prisma.taxDeclaration.upsert({
-    where: { employeeId_fy: { employeeId: session.sub, fy } },
-    update: { sections: sections as unknown as object, status: "submitted", note: null },
-    create: {
-      tenantId: session.tenantId,
-      employeeId: session.sub,
-      fy,
-      sections: sections as unknown as object,
-      status: "submitted",
-    },
-  });
-
-  // Tenant guard: an employeeId is globally unique, but never let a token from
-  // tenant A write a declaration row that belongs to tenant B.
-  if (declaration.tenantId !== session.tenantId) {
-    return NextResponse.json({ error: "Declaration not found in this workspace." }, { status: 403 });
-  }
-
-  return NextResponse.json({ declaration }, { status: 201 });
 }

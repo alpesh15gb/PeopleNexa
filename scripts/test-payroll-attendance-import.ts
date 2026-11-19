@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import * as XLSX from "xlsx";
-import { existsSync, readFileSync } from "node:fs";
-import { codeKey, ylrAlias, nextPayrollMonth, earnedFromWorkDays, previewPayrollAttendance, reviewAttendanceRows, manualAttendanceSource, readAttendanceWorkbook, type ImportEmployee } from "../lib/payroll-attendance-import";
+import { codeKey, ylrAlias, nextPayrollMonth, earnedFromWorkDays, previewPayrollAttendance, reviewAttendanceRows, manualAttendanceSource, payrollAttendanceTemplate, readAttendanceWorkbook, type ImportEmployee } from "../lib/payroll-attendance-import";
 import { computePayroll, DEFAULT_PAYROLL_CONFIG } from "../lib/payroll";
+import { resolveManualPayrollSource, validateManualPayrollSource } from "../lib/payroll-manual-source";
 import { finalizeManualAttendanceCredits } from "../lib/payroll-attendance-credit";
 import { refreshEarnedLeaveBalances } from "../lib/leave-accrual-refresh";
 import type { Prisma } from "../generated/prisma/client";
@@ -19,6 +19,41 @@ function workbook(extra: unknown[][] = []) {
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([header, ["YLR/158", "Test Person", ...Array(19).fill("P"), ...Array(9).fill("OD"), "L", "L", 28, 2], ...extra]), "Attendance Sep-2026");
   return book;
 }
+function previewLegacyAttendance(book: XLSX.WorkBook, sheet: string, month: string, employees: ImportEmployee[]) {
+  return previewPayrollAttendance(book, sheet, month, employees, "legacy");
+}
+
+const standardMonth = "2028-02";
+const standardSheet = `Attendance ${standardMonth}`;
+const standardBook = readAttendanceWorkbook(payrollAttendanceTemplate(standardMonth));
+assert.deepEqual(standardBook.SheetNames, [standardSheet, "Instructions"]);
+const standardEmployee = { ...employee, employeeNumber: "002", joiningDate: new Date("2028-02-03T12:00:00Z") };
+XLSX.utils.sheet_add_aoa(standardBook.Sheets[standardSheet], [["002", "Test Person", null, null, "P", "OD", "A", "HL", "PL", "UL", "WO", "H", ...Array(19).fill("P")]], { origin: "A2" });
+const [standardRow] = previewPayrollAttendance(standardBook, standardSheet, standardMonth, [standardEmployee]);
+assert.equal(standardRow.match, "exact");
+assert.equal(standardRow.workDays, 21.5);
+assert.equal(standardRow.blankDays, 0, "days before joining are outside payroll");
+assert.equal(standardRow.earnedLeave, 0, "standard uploads do not apply client accrual tiers");
+assert.deepEqual(standardRow.blockers, []);
+assert.deepEqual(standardRow.issues, []);
+assert.throws(() => previewPayrollAttendance(standardBook, standardSheet, "2032-02", [standardEmployee]), /Worksheet identifies/);
+assert.equal(previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-09", [employee])[0].match, "unmatched", "standard preview uses exact numbers only");
+const standardReviewed = reviewAttendanceRows([standardRow], [{ rowNumber: 2 }]);
+const standardDb = {
+  payrollAttendanceImport: { findFirst: async () => ({ reviewedRows: standardReviewed }) },
+  employee: { findFirst: async () => ({ joiningDate: standardEmployee.joiningDate }) },
+} as unknown as Prisma.TransactionClient;
+const standardSource = await resolveManualPayrollSource(standardDb, "tenant-a", "location-a", standardMonth, "standard-upload", employee.id);
+assert.deepEqual(standardSource.summary, { presentDays: 21, lateDays: 0, halfDays: 1, absentDays: 1, onLeaveDays: 2, paidLeaveDays: 1, unpaidLeaveDays: 1, overtimeHours: 0, workingDays: 23, workedHours: 0 });
+assert.throws(() => validateManualPayrollSource(standardSource, "monthly", false), /unpaid-day deduction/);
+assert.throws(() => validateManualPayrollSource(standardSource, "daily", true), /requires monthly pay/);
+assert.doesNotThrow(() => validateManualPayrollSource(standardSource, "monthly", true));
+await finalizeManualAttendanceCredits(standardDb, { id: "standard-run", tenantId: "tenant-a", locationId: "location-a", month: standardMonth, payslips: [{ employeeId: employee.id, inputSnapshot: { manualAttendance: standardSource } }] });
+XLSX.utils.sheet_add_aoa(standardBook.Sheets[standardSheet], [[null, "Missing ID", "P"]], { origin: "A3" });
+assert.match(previewPayrollAttendance(standardBook, standardSheet, standardMonth, [standardEmployee])[1].blockers.join(" "), /number is missing/);
+XLSX.utils.sheet_add_aoa(standardBook.Sheets[standardSheet], [[1]], { origin: "AF1" });
+assert.throws(() => previewPayrollAttendance(standardBook, standardSheet, standardMonth, [standardEmployee]), /day columns/);
+
 assert.equal(ylrAlias("YLR/158"), "YLR0158");
 assert.equal(ylrAlias("YLR/002"), "YLR0002");
 assert.equal(ylrAlias("YLR0002"), "YLR/002");
@@ -26,7 +61,7 @@ assert.equal(ylrAlias("ABC/158"), null);
 assert.equal(codeKey(" ylr/158 "), "YLR/158");
 assert.equal(nextPayrollMonth("2026-12"), "2027-01");
 assert.deepEqual([0, 13, 14, 24, 25, 31].map(earnedFromWorkDays), [0, 0, 1, 1, 2, 2]);
-const rows = previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-09", [employee]);
+const rows = previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-09", [employee]);
 assert.equal(rows[0].match, "alias");
 assert.equal(rows[0].workDays, 28);
 assert.equal(rows[0].leaveDays, 2);
@@ -55,30 +90,30 @@ assert.equal(source.summary.unpaidLeaveDays, 2);
 const config = { ...DEFAULT_PAYROLL_CONFIG, salaryDivisorMethod: "calendar_days" as const, pf: { ...DEFAULT_PAYROLL_CONFIG.pf, enabled: false }, esic: { ...DEFAULT_PAYROLL_CONFIG.esic, enabled: false }, pt: { ...DEFAULT_PAYROLL_CONFIG.pt, enabled: false }, tds: { ...DEFAULT_PAYROLL_CONFIG.tds, enabled: false } };
 const pay = computePayroll(config, { salary: 30000, payMode: "monthly" }, source.summary, 0, "2026-09");
 assert.equal(pay.netSalary, 28000, "two L days must be unpaid using app salary and calendar-day policy");
-const collision = previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-09", [employee, { ...employee, id: "employee-b", employeeNumber: "YLR/158" }]);
+const collision = previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-09", [employee, { ...employee, id: "employee-b", employeeNumber: "YLR/158" }]);
 assert.equal(collision[0].match, "collision");
 assert.throws(() => reviewAttendanceRows(collision, [{ rowNumber: 2, reason: "verified" }]), /different employees/);
-const duplicate = previewPayrollAttendance(workbook([["YLR0158", "Test Person", ...Array(30).fill("P"), 30, 2]]), "Attendance Sep-2026", "2026-09", [employee]);
+const duplicate = previewLegacyAttendance(workbook([["YLR0158", "Test Person", ...Array(30).fill("P"), 30, 2]]), "Attendance Sep-2026", "2026-09", [employee]);
 assert(duplicate.every(row => row.blockers.some(issue => issue.includes("Duplicate"))));
-assert.throws(() => previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-10", [employee]), /Worksheet identifies/);
-assert.throws(() => previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-06", [employee]), /Worksheet identifies/);
+assert.throws(() => previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-10", [employee]), /Worksheet identifies/);
+assert.throws(() => previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-06", [employee]), /Worksheet identifies/);
 const blankBook = workbook(); blankBook.Sheets["Attendance Sep-2026"]["C2"] = { t: "s", v: "" };
-const blankRows = previewPayrollAttendance(blankBook, "Attendance Sep-2026", "2026-09", [employee]);
+const blankRows = previewLegacyAttendance(blankBook, "Attendance Sep-2026", "2026-09", [employee]);
 assert.equal(blankRows[0].blankDays, 1);
 assert.throws(() => reviewAttendanceRows(blankRows, [{ rowNumber: 2, reason: "checked" }]), /resolve blank/);
 assert.throws(() => reviewAttendanceRows(blankRows, [{ rowNumber: 2, blankAsUnpaid: true }]), /reason/);
 const blankReviewed = reviewAttendanceRows(blankRows, [{ rowNumber: 2, blankAsUnpaid: true, reason: "Confirmed unpaid" }]);
 assert.equal(manualAttendanceSource("upload-a", blankReviewed[0]).summary.absentDays, 1);
-const inactive = previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-09", [{ ...employee, status: "inactive" }]);
+const inactive = previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-09", [{ ...employee, status: "inactive" }]);
 assert.throws(() => reviewAttendanceRows(inactive, [{ rowNumber: 2 }]), /reason/);
-const hourly = previewPayrollAttendance(workbook(), "Attendance Sep-2026", "2026-09", [{ ...employee, payMode: "hourly" }]);
+const hourly = previewLegacyAttendance(workbook(), "Attendance Sep-2026", "2026-09", [{ ...employee, payMode: "hourly" }]);
 assert(hourly[0].blockers.some(issue => issue.includes("Hourly")));
 
 // Finalization/retries/replacements use the same durable per-month credit.
 let saved: Record<string, unknown> | null = null;
 const earnedRule = { name: "Earned Leave", code: "EL", annualEntitlement: null, paid: true, allowsHalfDay: true, requiresApproval: true, carryForward: false, carryForwardLimit: null, workedDayAccrual: { source: "attendance_status", tiers: [{ minDays: 0, maxDays: 13, daysEarned: 0 }, { minDays: 14, maxDays: 24, daysEarned: 1 }, { minDays: 25, maxDays: 31, daysEarned: 2 }], joiningMonthClaimDeferral: "none" } };
 const db = {
-  payrollAttendanceImport: { findFirst: async () => ({ reviewedRows: reviewed }) },
+  payrollAttendanceImport: { findFirst: async () => ({ reviewedRows: reviewed.map(({ format: _format, ...historicalRow }) => historicalRow) }) },
   employee: { findFirst: async () => ({ joiningDate: null }) },
   leavePolicyBalance: { findMany: async () => [{ policySnapshot: { rules: earnedRule } }] },
   payrollAttendanceCredit: {
@@ -112,18 +147,6 @@ assert.equal((updatedBalance as unknown as { entitlement: number }).entitlement,
 await refreshEarnedLeaveBalances(accrualDb, "tenant-a", [employee.id], new Date("2026-10-01T00:00:00Z"));
 assert.equal((updatedBalance as unknown as { entitlement: number }).entitlement, 2);
 
-const clientPath = "C:/Users/Administrator/Desktop/Banswada Attendance-Sep-2026 (3).xlsx";
-if (existsSync(clientPath)) {
-  const book = readAttendanceWorkbook(readFileSync(clientPath));
-  const sheet = "Attendance Sep-2026  (3)";
-  const data = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[sheet], { header: 1 });
-  const clientEmployees = data.slice(2).filter(row => /^YLR\/\d+$/.test(String(row[2] ?? ""))).map((row, i) => ({ ...employee, id: `client-${i}`, employeeNumber: ylrAlias(String(row[2]))!, firstName: String(row[3]), lastName: "" }));
-  const parsed = previewPayrollAttendance(book, sheet, "2026-09", clientEmployees);
-  assert.equal(parsed.length, 199, "retain the malformed YLR435 row for explicit unmatched review");
-  assert.equal(parsed.reduce((sum, row) => sum + row.earnedLeave, 0), 343, "daily-derived credits include the hardcoded-zero discrepancy and unmatched row");
-  assert(parsed.some(row => row.code === "YLR/368" && row.issues.some(issue => issue.includes("earned leave differs"))));
-  console.log(`Client workbook verified: ${parsed.length} employees, ${parsed.filter(row => row.blankDays).length} rows with blanks.`);
-}
 console.log("Payroll manual attendance checks passed.");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

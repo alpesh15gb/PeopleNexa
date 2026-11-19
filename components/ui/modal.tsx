@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Portal } from "@/components/ui/portal";
@@ -12,6 +12,7 @@ export function Modal({
   description,
   children,
   size = "md",
+  initialFocus,
 }: {
   open: boolean;
   onClose: () => void;
@@ -19,6 +20,7 @@ export function Modal({
   description?: ReactNode;
   children: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
+  initialFocus?: RefObject<HTMLElement | null>;
 }) {
   const titleId = useId();
   const descId = useId();
@@ -37,20 +39,21 @@ export function Modal({
     const savedY = window.scrollY;
     const selector =
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const dialog = dialogRef.current;
     // Focus first focusable on open (fallback: dialog itself). preventScroll
     // is load-bearing: without it the browser scrolls the document to reveal
     // the focused node (page jumps down on open, back up on close).
     const focusTimer = window.setTimeout(() => {
+      const dialog = dialogRef.current;
       if (!dialog) return;
       const focusables = dialog.querySelectorAll<HTMLElement>(selector);
-      (focusables[0] ?? dialog).focus({ preventScroll: true });
+      (initialFocus?.current ?? focusables[0] ?? dialog).focus({ preventScroll: true });
     }, 0);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onCloseRef.current();
         return;
       }
+      const dialog = dialogRef.current;
       if (e.key !== "Tab" || !dialog) return;
       const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(selector));
       if (focusables.length === 0) {
@@ -76,7 +79,7 @@ export function Modal({
       previouslyFocused?.focus?.({ preventScroll: true });
       if (window.scrollY !== savedY) window.scrollTo(0, savedY);
     };
-  }, [open]);
+  }, [open, initialFocus]);
 
   if (!open) return null;
 

@@ -1,47 +1,15 @@
-"use client";
-
-import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export function AuditFilter({ action, entity }: { action: string; entity: string }) {
-  const router = useRouter();
-  const params = useSearchParams();
-  const [actionVal, setActionVal] = useState(action);
-  const [entityVal, setEntityVal] = useState(entity);
-
-  const push = (nextAction: string, nextEntity: string) => {
-    const next = new URLSearchParams(params.toString());
-    if (nextAction.trim()) next.set("action", nextAction.trim());
-    else next.delete("action");
-    if (nextEntity.trim()) next.set("entity", nextEntity.trim());
-    else next.delete("entity");
-    const qs = next.toString();
-    router.replace(qs ? `/admin/audit?${qs}` : "/admin/audit");
-  };
-
+export function AuditFilter({ action, entity, q }: { action: string; entity: string; q: string }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Input
-        aria-label="Filter by action"
-        placeholder="Filter action…"
-        value={actionVal}
-        onChange={(e) => {
-          setActionVal(e.target.value);
-          push(e.target.value, entityVal);
-        }}
-        className="h-10 w-full sm:w-48"
-      />
-      <Input
-        aria-label="Filter by entity"
-        placeholder="Filter entity…"
-        value={entityVal}
-        onChange={(e) => {
-          setEntityVal(e.target.value);
-          push(actionVal, e.target.value);
-        }}
-        className="h-10 w-full sm:w-48"
-      />
-    </div>
+    <form action="/admin/audit" aria-label="Audit log filters" className="flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-card p-3">
+      <Input type="search" aria-label="Search audit summaries" name="q" defaultValue={q} maxLength={200} placeholder="Search summary or record ID" className="w-full sm:w-60" />
+      <Input aria-label="Filter by action" name="action" defaultValue={action} maxLength={200} placeholder="Action code" className="w-full sm:w-44" />
+      <Input aria-label="Filter by entity" name="entity" defaultValue={entity} maxLength={200} placeholder="Entity type" className="w-full sm:w-40" />
+      <Button type="submit" variant="outline">Apply filters</Button>
+      {(action || entity || q) && <Link href="/admin/audit" className="rounded-lg px-3 py-2 text-sm text-primary hover:underline">Clear filters</Link>}
+    </form>
   );
 }

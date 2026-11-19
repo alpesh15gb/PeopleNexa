@@ -124,7 +124,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
           <div>
             <h3 className="font-display text-base font-semibold">eBioserver</h3>
             <p className="text-[12px] text-muted-foreground">
-              ESSL middleware — each client connects their own server, punches flow into attendance.
+              Pull punches from your eBioserver into workspace attendance.
             </p>
           </div>
         </div>
@@ -132,12 +132,12 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         <div className="mt-6 space-y-4">
           <Field
             label="Web Service URL"
-            hint="e.g. http://192.168.6.47:8080/Webservice.asmx or the eSSL cloud demo"
+            hint="Use the Webservice.asmx address provided by your device administrator."
           >
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://192.168.x.x:8080/Webservice.asmx"
+              placeholder="https://attendance.example.com/Webservice.asmx"
               className="h-11 font-mono"
             />
           </Field>
@@ -183,7 +183,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
           </div>
         </div>
 
-        <div className="mt-6 flex items-center gap-2">
+        <div className="mt-6 flex flex-wrap items-center gap-2">
           <Button onClick={save} loading={saving}>
             <Save className="h-4 w-4" /> Save connection
           </Button>
@@ -212,7 +212,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <Link2 className="h-4 w-4 text-brand" /> eBio locations and worksites
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Maps each eBio device group (for example MNP) to a PeopleNexa Location and each eBio worksite to its own Branch. This does not move employees, change punches, or reset live sync.
+            Match eBio device groups to PeopleNexa locations and worksites to branches. Use this after adding or moving devices in eBioserver.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
@@ -233,8 +233,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             <UserPlus className="h-4 w-4 text-brand" /> Employees from eBioserver
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            Imports missing employee codes into Assignment Pending for review in Employee Master.
-            Existing employee statuses stay unchanged. Portal login ID and password are optional.
+            Import missing employee codes for review in the employee directory.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button variant="outline" onClick={importEmployees} loading={importing}>
@@ -283,21 +282,12 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             )}
             {!status.lastError && (
               <p className="text-[12px] text-muted-foreground">
-                After saving, run the polling job — it pulls from this workspace's own server and isolates failures per client.
+                Test the saved connection before enabling automated pull.
               </p>
             )}
           </dl>
         </div>
 
-        <div className="card-surface rounded-2xl p-6">
-          <h4 className="text-[13px] font-semibold">How it works</h4>
-          <ol className="mt-3 list-decimal space-y-2 pl-4 text-[12.5px] leading-relaxed text-muted-foreground">
-            <li>Enter your eBioserver Web Service URL + credentials (password encrypted).</li>
-            <li>Test the connection, then enable the automated pull.</li>
-            <li>Devices appear under <span className="text-foreground">Admin → Devices</span> automatically; their punches flow into attendance.</li>
-            <li>Each client's server is polled in isolation — a slow or failing server only flags itself.</li>
-          </ol>
-        </div>
       </div>
     </div>
   );

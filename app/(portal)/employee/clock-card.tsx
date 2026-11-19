@@ -6,9 +6,10 @@ import { useRouter } from "next/navigation";
 import { LogIn, LogOut, MapPin, Camera, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Portal } from "@/components/ui/portal";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, formatTime } from "@/lib/dates";
+import { DEFAULT_WORKSPACE_REGION, type WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime } from "@/lib/workspace-time";
 import { t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ export function ClockCard({
   pendingApproval = false,
   pendingIn = false,
   pendingOut = false,
+  region = DEFAULT_WORKSPACE_REGION,
 }: {
   record: Record | null;
   shift: Shift | null;
@@ -43,6 +45,7 @@ export function ClockCard({
   pendingApproval?: boolean;
   pendingIn?: boolean;
   pendingOut?: boolean;
+  region?: WorkspaceRegion;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -50,6 +53,8 @@ export function ClockCard({
   const [mounted, setMounted] = useState(false);
   const [locating, setLocating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [clockError, setClockError] = useState("");
+  const [retrying, setRetrying] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [selfie, setSelfie] = useState<string | null>(null);
   const selfieCapturedAtRef = useRef<string | null>(null);
@@ -96,7 +101,7 @@ export function ClockCard({
           if (!cancelled) setCameraReady(true);
         }
       } catch {
-        toast("error", t(lang, "clock.cameraUnavailable"));
+        setClockError(t(lang, "clock.cameraUnavailable"));
         setCameraOpen(false);
       }
     })();
@@ -105,7 +110,7 @@ export function ClockCard({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [cameraOpen, toast, lang]);
+  }, [cameraOpen, lang]);
 
   // On-device MediaPipe gate: dynamic import inside the capture-modal flow
   // only (never top-level, initial bundle unaffected). Single-shot VIDEO
@@ -236,13 +241,14 @@ export function ClockCard({
   const punch = useCallback(
     async (action: "in" | "out") => {
       if (punchBusyRef.current || submitting || locating) return;
+      setClockError("");
       if (!selfie) { setCameraOpen(true); toast("info", "Capture a fresh selfie before clocking in or out."); return; }
       if (!requestPayloadRef.current && (!selfieCapturedAtRef.current || Date.now() - Date.parse(selfieCapturedAtRef.current) > 120_000)) { setSelfie(null); setCameraOpen(true); toast("info", "Selfie expired. Capture a fresh photo."); return; }
       punchBusyRef.current = true;
       setLocating(true);
       try {
         if (!navigator.geolocation) {
-          toast("error", t(lang, "clock.geoRequired"));
+          setClockError(t(lang, "clock.geoRequired"));
           return;
         }
         if (!requestPayloadRef.current) {
@@ -259,16 +265,24 @@ export function ClockCard({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestPayloadRef.current),
         });
-        const data = await res.json();
-        if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success !== true) {
           // A 5xx may have happened after persistence; retain the identity so
           // the next tap retries that event rather than creating another one.
-          if (res.status < 500) { punchRequestIdRef.current = null; requestPayloadRef.current = null; }
-          toast("error", data.error ?? "Failed to clock " + action);
+          const uncertain = res.ok || res.status >= 500;
+          if (!uncertain) {
+            punchRequestIdRef.current = null;
+            requestPayloadRef.current = null;
+            setRetrying(false);
+          } else {
+            setRetrying(true);
+          }
+          setClockError(data.error ?? (uncertain ? "We couldn’t confirm this punch. Retry to send the same punch again." : "The punch was not accepted. Check your attendance and try again."));
           return;
         }
         punchRequestIdRef.current = null;
         requestPayloadRef.current = null;
+        setRetrying(false);
         if (data.pendingApproval) {
           // Held for admin authorization (no Face ID enrolled): the punch is
           // recorded with selfie + location but counts only after approval.
@@ -282,7 +296,8 @@ export function ClockCard({
         router.refresh();
       } catch {
         setLocating(false);
-        toast("error", requestPayloadRef.current ? "Punch could not be confirmed. Tap again to retry the same punch." : t(lang, "clock.locError"));
+        setRetrying(Boolean(requestPayloadRef.current));
+        setClockError(requestPayloadRef.current ? "We couldn’t confirm this punch. Retry to send the same punch again." : t(lang, "clock.locError"));
       } finally {
         setSubmitting(false);
         setLocating(false);
@@ -298,9 +313,10 @@ export function ClockCard({
   // clocked in" so the employee knows their punch wasn't lost.
   const awaitingApproval = pendingApproval;
   const statusTone = awaitingApproval ? "warning" : punchedOut ? "neutral" : punchedIn ? "success" : "warning";
+  const missingIn = punchedOut && !punchedIn;
   const statusLabel = awaitingApproval
     ? t(lang, "clock.pendingApproval")
-    : punchedOut
+    : missingIn ? "Missing clock-in" : punchedOut
       ? t(lang, "clock.dayComplete")
       : punchedIn
         ? t(lang, "clock.clockedIn")
@@ -309,9 +325,9 @@ export function ClockCard({
   // Ticking clock: server HTML and first client render must agree, so show a
   // static placeholder until mount (else React #418 every load).
   const time = mounted
-    ? now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" })
+    ? now.toLocaleTimeString(region.locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone: region.timeZone })
     : "--:--:--";
-  const dateLabel = mounted ? formatDate(now) : "";
+  const dateLabel = mounted ? formatCalendarDate(dateKeyInTimeZone(now, region.timeZone), region.locale) : "";
 
   return (
     <div className="card-surface relative overflow-hidden rounded-2xl">
@@ -329,7 +345,7 @@ export function ClockCard({
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge tone={statusTone}>{statusLabel}</Badge>
               {awaitingApproval && (
-                <span className="text-[12px] text-muted-foreground">{t(lang, "clock.enrollNudge")}</span>
+                <span className="text-[12px] text-muted-foreground">A manager will review the punch before it counts toward attendance.</span>
               )}
               {shift && <Badge tone="violet">{shift.name} · {shift.startTime}–{shift.endTime}</Badge>}
               {geofenced && (
@@ -342,37 +358,38 @@ export function ClockCard({
             <div className="flex flex-col gap-2 rounded-xl border border-edge bg-tint p-4 text-center">
               <div>
                 <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t(lang, "clock.in")}</p>
-                <p className="font-display text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{formatTime(new Date(record.punchInTime!))}</p>
+                <p className="font-display text-xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{formatWorkspaceTime(record.punchInTime ? new Date(record.punchInTime) : null, region)}</p>
               </div>
               <div>
                 <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{t(lang, "clock.out")}</p>
-                <p className="font-display text-xl font-bold tabular-nums text-rose-700 dark:text-rose-300">{record.punchOutTime ? formatTime(new Date(record.punchOutTime)) : "—"}</p>
+                <p className="font-display text-xl font-bold tabular-nums text-rose-700 dark:text-rose-300">{record.punchOutTime ? formatWorkspaceTime(new Date(record.punchOutTime), region) : "—"}</p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          {!punchedIn && (
+        {clockError && <p role="alert" className="mt-5 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">{clockError}</p>}
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          {!punchedIn && !punchedOut && (
             <Button size="lg" loading={submitting || locating} onClick={() => punch("in")} className="min-w-44">
               {!submitting && !locating && <LogIn className="h-4 w-4" />}
-              {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingIn") : t(lang, "clock.clockIn")}
+              {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingIn") : retrying ? "Retry clock-in" : t(lang, "clock.clockIn")}
             </Button>
           )}
           {punchedIn && !punchedOut && (
             <Button size="lg" loading={submitting || locating} onClick={() => punch("out")} className="min-w-44">
               {!submitting && !locating && <LogOut className="h-4 w-4" />}
-              {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingOut") : t(lang, "clock.clockOut")}
+              {locating ? t(lang, "clock.gettingLocation") : submitting ? t(lang, "clock.punchingOut") : retrying ? "Retry clock-out" : t(lang, "clock.clockOut")}
             </Button>
           )}
-          {punchedOut && !pendingApproval && (
+          {punchedOut && !missingIn && !pendingApproval && (
             <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> {t(lang, "clock.allSet")}
             </span>
           )}
 
           {!punchedOut && (
-            <Button variant="outline" size="lg" disabled={submitting || locating} onClick={() => { if (requestPayloadRef.current) { toast("info", "Retry the unconfirmed punch before capturing another photo."); return; } setCameraOpen(true); }}>
+            <Button variant="outline" size="lg" disabled={submitting || locating || retrying} onClick={() => setCameraOpen(true)}>
               <Camera className="h-4 w-4" /> {selfie ? t(lang, "clock.retakeSelfie") : t(lang, "clock.addSelfie")}
             </Button>
           )}
@@ -381,7 +398,7 @@ export function ClockCard({
           </Button>
         </div>
 
-        <p className="mt-4 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+        <p className="mt-4 flex items-start gap-1.5 text-[12px] text-muted-foreground">
           <MapPin className="h-3.5 w-3.5" />
           {geofenced
             ? t(lang, "clock.geofenceNote", { name: branch!.name })
@@ -389,34 +406,22 @@ export function ClockCard({
         </p>
       </div>
 
-      {/* Selfie capture modal (portaled: animated ancestors trap fixed) */}
-      {cameraOpen && (
-        <Portal>
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setCameraOpen(false)} />
-          <div className="card-surface relative w-full max-w-md animate-scale-in rounded-2xl bg-card-2 p-5">
-            <p className="font-display text-lg font-semibold">{t(lang, "clock.captureSelfie")}</p>
-            <p className="mt-0.5 text-[13px] text-muted-foreground">{t(lang, "clock.captureDesc")}</p>
-            <div className="relative mt-4 overflow-hidden rounded-xl border border-edge-strong bg-black">
-              <video ref={videoRef} className="aspect-[4/3] w-full object-cover" playsInline muted />
-            </div>
-            {faceBasic ? (
-              <p className="mt-2 text-[11px] text-muted-foreground">Basic mode — face check unavailable.</p>
-            ) : faceHint ? (
-              <p className="mt-2 text-[12px] text-muted-foreground">{faceHint}</p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">{t(lang, "common.cancel")}</Button>
-              <Button onClick={captureSelfie} disabled={!faceOk || !cameraReady} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
-            </div>
-          </div>
+      <Modal open={cameraOpen} onClose={() => setCameraOpen(false)} title={t(lang, "clock.captureSelfie")} description={t(lang, "clock.captureDesc")} size="sm">
+        <div className="overflow-hidden rounded-xl border border-edge-strong bg-black">
+          <video ref={videoRef} className="aspect-[4/3] w-full object-cover" playsInline muted />
         </div>
-        </Portal>
-      )}
+        {faceBasic ? (
+          <p className="mt-2 text-xs text-muted-foreground">Live face guidance is unavailable. You can still capture your photo.</p>
+        ) : faceHint && <p className="mt-2 text-xs text-muted-foreground">{faceHint}</p>}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">{t(lang, "common.cancel")}</Button>
+          <Button onClick={captureSelfie} disabled={!faceOk || !cameraReady} className="min-h-11"><Camera className="h-4 w-4" /> {t(lang, "clock.capture")}</Button>
+        </div>
+      </Modal>
 
       {/* Selfie preview */}
       {selfie && !cameraOpen && (
-        <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        <div className="mx-6 mb-5 flex items-center gap-2 sm:mx-8">
           <PunchPhoto src={selfie} label="Your attendance selfie" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><img src={selfie} alt="Selfie preview" className="h-16 w-16 rounded-xl border border-edge-strong object-cover" /></PunchPhoto>
           <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">{t(lang, "clock.attached")}</span>
         </div>

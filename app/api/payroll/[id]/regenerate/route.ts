@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveManualPayrollSource, manualUploadId } from "@/lib/payroll-manual-source";
+import { ManualPayrollError, resolveManualPayrollSource, manualUploadId, validateManualPayrollSource } from "@/lib/payroll-manual-source";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 import type { Prisma } from "@/generated/prisma/client";
 import {
   attendanceSummary,
@@ -13,6 +14,8 @@ import {
   loanDeductionForMonth,
   loanDeductionAllocations,
   reverseLoanDeductionAllocations,
+  snapshottedPayrollWeeklyOffDates,
+  unpaidAttendanceDays,
 } from "@/lib/payroll";
 import { payrollConfigFromSnapshot } from "@/lib/payroll-policy";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
@@ -175,6 +178,8 @@ export async function POST(
         };
         const uploadId = manualUploadId(savedInput);
         const manualSource = uploadId ? await resolveManualPayrollSource(tx, session.tenantId, existing.payrollRunId ? (await tx.payrollRun.findUnique({ where: { id: existing.payrollRunId }, select: { locationId: true } }))?.locationId : null, existing.month, uploadId, employee.id) : null;
+        const payMode = typeof savedEmployee.payMode === "string" ? savedEmployee.payMode : employee.payMode;
+        if (manualSource) validateManualPayrollSource(manualSource, payMode, config.deductAbsentDays);
         const summary = manualSource?.summary ?? await attendanceSummary(
           session.tenantId,
           {
@@ -185,6 +190,7 @@ export async function POST(
           existing.month,
           true,
           tx,
+          snapshottedPayrollWeeklyOffDates(savedInput.attendance),
         );
         const [loans, adjustments, taxDecl] = await Promise.all([
           tx.employeeLoan.findMany({
@@ -284,10 +290,7 @@ export async function POST(
               salaryStructure: (Object.hasOwn(savedEmployee, "salaryStructure")
                 ? savedEmployee.salaryStructure
                 : employee.salaryStructure) as typeof employee.salaryStructure,
-              payMode:
-                typeof savedEmployee.payMode === "string"
-                  ? savedEmployee.payMode
-                  : employee.payMode,
+              payMode,
               workBasisRate:
                 Object.hasOwn(savedEmployee, "workBasisRate")
                   ? (typeof savedEmployee.workBasisRate === "number" ? savedEmployee.workBasisRate : null)
@@ -320,10 +323,7 @@ export async function POST(
                   result.lateDays +
                   result.halfDays * 0.5 +
                   result.paidLeaveDays,
-                lop:
-                  result.absentDays +
-                  result.halfDays * 0.5 +
-                  result.unpaidLeaveDays,
+                lop: unpaidAttendanceDays(summary),
               },
               components: documentComponents(result),
               totals: {
@@ -346,6 +346,7 @@ export async function POST(
           ...savedInput,
           version: 2,
           attendance: summary,
+          adjustmentInputs: adjustments,
           result,
           loanAllocations,
         };
@@ -455,8 +456,15 @@ export async function POST(
       { isolationLevel: "Serializable", timeout: 20000 },
     );
   } catch (error) {
+    if (error instanceof Error && (
+      error instanceof ManualPayrollError ||
+      error.message.startsWith("Payroll blocked for employee") ||
+      error.message.startsWith("Leave snapshot has no valid day fraction")
+    )) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (
-      (error as { code?: string })?.code === "P2034" ||
+      isTransactionWriteConflict(error) ||
       (error instanceof Error &&
         error.message === "PAYROLL_REGENERATION_CONFLICT")
     )

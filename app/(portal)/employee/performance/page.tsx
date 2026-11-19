@@ -41,7 +41,7 @@ export default function EmployeePerformancePage() {
   const [fbRating, setFbRating] = useState<number | "">("");
 
   async function load() {
-    const res = await fetch("/api/performance");
+    const res = await fetch("/api/performance?scope=self");
     const data = await res.json();
     setReviews(data.reviews);
     setPeers(data.peerReviews ?? []);
@@ -195,14 +195,14 @@ export default function EmployeePerformancePage() {
             <div key={r.id} className="rounded-2xl border border-edge bg-card p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[13.5px] font-medium">{r.employee.firstName} {r.employee.lastName} <span className="text-muted-foreground">· {r.period}</span></p>
-                <Button size="sm" variant="outline" onClick={() => { setFbId(r.id); setFbComment(""); setFbRating(""); }}>
+                {r.feedbacks.length === 0 && <Button size="sm" variant="outline" onClick={() => { setFbId(r.id); setFbComment(""); setFbRating(""); }}>
                   <MessageSquarePlus className="mr-1.5 h-3.5 w-3.5" /> Give feedback
-                </Button>
+                </Button>}
               </div>
               {r.feedbacks.length > 0 && (
                 <div className="mt-3 space-y-1.5">
                   {r.feedbacks.map((f) => (
-                    <p key={f.id} className="text-[12px] text-muted-foreground"><span className="font-medium text-foreground">{f.rater}:</span> {f.comment}</p>
+                    <p key={f.id} className="text-[12px] text-muted-foreground"><span className="font-medium text-foreground">Your feedback:</span> {f.comment}</p>
                   ))}
                 </div>
               )}

@@ -9,8 +9,25 @@ export type PayslipDocumentSnapshot = {
   period: string; days: { payable: number; paid: number; lop: number }; components: PayslipComponent[]; totals: { gross: number; earnedGross?: number; deductions: number; net: number };
 };
 export const mask = (value: string | null | undefined, keep = 4) => value ? `${"*".repeat(Math.max(0, value.length - keep))}${value.slice(-keep)}` : null;
+
 export function documentSnapshotForResponse(snapshot: unknown): PayslipDocumentSnapshot | null {
-  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as PayslipDocumentSnapshot : null;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const document = snapshot as Partial<PayslipDocumentSnapshot>;
+  if (
+    (document.version !== 1 && document.version !== 2) ||
+    typeof document.period !== "string" ||
+    typeof document.employee?.name !== "string" ||
+    typeof document.employee.employeeNumber !== "string" ||
+    typeof document.branding?.displayName !== "string" ||
+    typeof document.branding.legalName !== "string" ||
+    !document.totals ||
+    ![document.totals.gross, document.totals.deductions, document.totals.net].every(Number.isFinite) ||
+    !document.days ||
+    ![document.days.payable, document.days.paid, document.days.lop].every(Number.isFinite) ||
+    !Array.isArray(document.components) ||
+    document.components.some((component) => !component || typeof component.label !== "string" || !Number.isFinite(component.earned))
+  ) return null;
+  return document as PayslipDocumentSnapshot;
 }
 export function payslipReconciliation(snapshot: Pick<PayslipDocumentSnapshot, "components" | "totals">): string[] {
   const amounts = [snapshot.totals.gross, snapshot.totals.deductions, snapshot.totals.net,

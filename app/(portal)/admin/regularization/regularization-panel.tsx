@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, formatTime } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime } from "@/lib/workspace-time";
 
 type Correction = {
   id: string;
@@ -25,9 +27,6 @@ type Correction = {
   reviewNote: string | null;
   createdAt: string;
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
-  // True when the employee's correction day has a face review/rejected punch
-  // (computed server-side from Punch.faceStatus — see page.tsx).
-  faceFlagged?: boolean;
 };
 
 type FaceReview = {
@@ -46,7 +45,6 @@ type FaceReview = {
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
 };
 
-const fmt = (iso: string | null) => (iso ? formatTime(new Date(iso)) : "—");
 
 // Tiny local loader for the punch-location mini maps. Renders nothing when the
 // API key is missing (callers fall back to the link-only UI).
@@ -68,12 +66,19 @@ function PunchMiniMap({ lat, lng }: { lat: number; lng: number }) {
 export function RegularizationPanel({
   corrections,
   faceReviews = [],
+  view,
+  reviewed,
+  region,
 }: {
   corrections: Correction[];
   faceReviews?: FaceReview[];
+  view: "corrections" | "punches";
+  reviewed: boolean;
+  region: Pick<WorkspaceRegion, "timeZone" | "locale">;
 }) {
   const router = useRouter();
   const toast = useToast();
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [faceBusy, setFaceBusy] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
@@ -81,20 +86,29 @@ export function RegularizationPanel({
   const showFaceMaps = FACE_MAPS_API_KEY.length > 0 && faceMapsLoaded && !faceMapsError;
   const faceMapsPending = FACE_MAPS_API_KEY.length > 0 && !faceMapsLoaded && !faceMapsError;
 
+  function fmt(iso: string | null, day?: string) {
+    if (!iso) return "—";
+    const instant = new Date(iso);
+    const punchDay = dateKeyInTimeZone(instant, region.timeZone);
+    const time = formatWorkspaceTime(instant, region);
+    return day && punchDay !== day ? `${formatCalendarDate(punchDay, region.locale)} ${time}` : time;
+  }
+
   async function review(id: string, status: "approved" | "rejected") {
     setBusy(id);
+    setErrors((current) => ({ ...current, [id]: "" }));
     try {
       const res = await fetch(`/api/attendance/corrections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, reviewNote: reviewNote[id] || null }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Failed to review");
       toast("success", status === "approved" ? "Correction approved — attendance updated." : "Correction rejected.");
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to review");
+      setErrors((current) => ({ ...current, [id]: e instanceof Error && e.name !== "TypeError" ? e.message : "This decision couldn’t be confirmed. Refresh the queue before trying again." }));
     } finally {
       setBusy(null);
     }
@@ -102,18 +116,19 @@ export function RegularizationPanel({
 
   async function reviewFace(id: string, decision: "accept" | "reject") {
     setFaceBusy(id);
+    setErrors((current) => ({ ...current, [id]: "" }));
     try {
       const res = await fetch("/api/face/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ punchId: id, decision }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Failed to review face");
       toast("success", decision === "accept" ? "Face accepted." : "Face rejected — evidence retained.");
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to review face");
+      setErrors((current) => ({ ...current, [id]: e instanceof Error && e.name !== "TypeError" ? e.message : "This decision couldn’t be confirmed. Refresh the queue before trying again." }));
     } finally {
       setFaceBusy(null);
     }
@@ -123,8 +138,8 @@ export function RegularizationPanel({
     return (
       <EmptyState
         icon={<FileQuestion className="h-5 w-5" />}
-        title="No corrections yet"
-        description="Employee-requested punch corrections will appear here for approval."
+        title={view === "punches" ? "No held punches" : reviewed ? "No reviewed corrections" : "No pending corrections"}
+        description={view === "punches" ? "Mobile punches awaiting verification will appear here." : reviewed ? "Approved and rejected correction requests will appear here." : "There are no employee correction requests awaiting your review."}
       />
     );
   }
@@ -134,7 +149,7 @@ export function RegularizationPanel({
       {faceReviews.length > 0 && (
         <div className="border-b border-edge">
           <div className="px-5 pt-4">
-            <p className="text-[13px] font-semibold">Face review</p>
+            <p className="text-[13px] font-semibold">Held mobile punches</p>
             <p className="text-[12px] text-muted-foreground">
               {faceReviews.length} punch{faceReviews.length === 1 ? "" : "es"} need{faceReviews.length === 1 ? "s" : ""} verification
             </p>
@@ -170,7 +185,7 @@ export function RegularizationPanel({
                         </span>
                       </p>
                       <span className="font-mono text-[12px] text-muted-foreground">
-                        {formatDate(new Date(r.punchTime))} · {fmt(r.punchTime)}
+                        {formatCalendarDate(dateKeyInTimeZone(new Date(r.punchTime), region.timeZone), region.locale)} · {fmt(r.punchTime)}
                         {r.inOutHint && r.inOutHint !== "unknown" ? ` · Clock ${r.inOutHint}` : ""}
                       </span>
                       <Badge tone={r.faceStatus === "rejected" && r.authStatus !== "pending" ? "danger" : "warning"}>
@@ -205,6 +220,7 @@ export function RegularizationPanel({
                         </p>
                       </div>
                     )}
+                    {errors[r.id] && <p role="alert" className="mt-2 text-sm text-destructive">{errors[r.id]}</p>}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Button
                         size="sm"
@@ -232,12 +248,11 @@ export function RegularizationPanel({
           </div>
         </div>
       )}
-      {corrections.length === 0 ? (
-        <p className="px-5 py-4 text-[12.5px] text-muted-foreground">No corrections yet.</p>
-      ) : (
+      {corrections.length > 0 && (
         <div className="divide-y divide-[color:var(--border)]">
       {corrections.map((c) => {
         const pending = c.status === "pending";
+        const day = istDateKey(new Date(c.date));
         return (
           <div key={c.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
@@ -249,19 +264,16 @@ export function RegularizationPanel({
                   {c.employee.firstName} {c.employee.lastName}
                   <span className="ml-1.5 text-[11.5px] text-muted-foreground">({c.employee.employeeNumber})</span>
                 </p>
-                <span className="font-mono text-[12px] text-muted-foreground">{formatDate(new Date(c.date))}</span>
+                <span className="font-mono text-[12px] text-muted-foreground">{formatCalendarDate(day, region.locale)}</span>
                 <Badge tone={pending ? "warning" : c.status === "approved" ? "success" : "danger"}>{c.status}</Badge>
-                {c.faceFlagged === true && (
-                  <Badge tone="warning">Face flagged — see review queue</Badge>
-                )}
               </div>
 
               <div className="mt-2 grid max-w-md grid-cols-2 gap-x-6 gap-y-1 text-[12.5px]">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <Clock3 className="h-3.5 w-3.5" /> Current: {fmt(c.currentIn)} → {fmt(c.currentOut)}
+                  <Clock3 className="h-3.5 w-3.5" /> Current: {fmt(c.currentIn, day)} → {fmt(c.currentOut, day)}
                 </div>
                 <div className="flex items-center gap-1.5 font-medium text-foreground">
-                  <Check className="h-3.5 w-3.5 text-emerald-400" /> Requested: {fmt(c.requestedIn)} → {fmt(c.requestedOut)}
+                  <Check className="h-3.5 w-3.5 text-emerald-400" /> Requested: {fmt(c.requestedIn, day)} → {fmt(c.requestedOut, day)}
                 </div>
               </div>
 
@@ -272,13 +284,16 @@ export function RegularizationPanel({
                 <p className="mt-1.5 text-[12px] text-muted-foreground/70">Note: {c.reviewNote}</p>
               )}
 
+              {errors[c.id] && <p role="alert" className="mt-2 text-sm text-destructive">{errors[c.id]}</p>}
               {pending && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Input
-                    placeholder="Note (optional)"
+                    placeholder="Review note (optional)"
+                    aria-label={`Review note for ${c.employee.firstName} ${c.employee.lastName}`}
+                    maxLength={2000}
                     value={reviewNote[c.id] ?? ""}
                     onChange={(e) => setReviewNote((v) => ({ ...v, [c.id]: e.target.value }))}
-                    className="h-9 w-56"
+                    className="h-10 w-full sm:w-56"
                   />
                   <Button size="sm" variant="success" loading={busy === c.id} disabled={busy !== null} onClick={() => review(c.id, "approved")}>
                     <Check className="h-3.5 w-3.5" /> Approve

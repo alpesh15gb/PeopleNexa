@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee } from "@/lib/notifications";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
@@ -32,17 +32,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const note = body.note ? String(body.note).trim() : null;
 
-  await prisma.$transaction([
-    prisma.assetAssignment.create({
+  const assigned = await prisma.$transaction(async (tx) => {
+    const changed = await tx.asset.updateMany({
+      where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}), status: "available", assignments: { none: { returnedAt: null } } },
+      data: { status: "assigned" },
+    });
+    if (!changed.count) return false;
+    await tx.assetAssignment.create({
       data: {
         assetId: asset.id,
         employeeId: employee.id,
         assignedBy: session.sub,
         note,
       },
-    }),
-    prisma.asset.update({ where: { id: asset.id }, data: { status: "assigned" } }),
-  ]);
+    });
+    return true;
+  });
+  if (!assigned) return NextResponse.json({ error: "This asset is no longer available for assignment. Refresh the inventory." }, { status: 409 });
 
   await notifyEmployee(
     session.tenantId,

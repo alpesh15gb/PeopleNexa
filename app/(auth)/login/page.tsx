@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LoginForm } from "./login-form";
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { headers } from "next/headers";
 
 export const metadata: Metadata = {
   title: "Login | PeopleNexa",
@@ -10,8 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default async function LoginPage() {
-  const session = await getSession();
-  if (session) redirect(session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager" ? "/admin" : session.role === "supervisor" ? "/admin/attendance" : "/employee");
+  const workspace = (await headers()).get("x-tenant-slug");
 
   return (
     <div className="animate-fade-up motion-reduce:animate-none">
@@ -22,7 +20,7 @@ export default async function LoginPage() {
           Pick up where your team left off. Your people data, requests, and daily actions are waiting.
         </p>
       </div>
-      <LoginForm />
+      <LoginForm workspace={workspace} />
       <p className="mt-7 text-center text-[13px] text-muted-foreground">
         New to PeopleNexa?{" "}
         <Link

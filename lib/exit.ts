@@ -1,5 +1,6 @@
 import { round2 } from "./utils";
-import { daysBetween, startOfDay } from "./dates";
+import { dayRangeIST } from "./dates";
+import { istDateKey } from "./ist";
 
 export interface FandFSummary {
   grossMonthly: number;
@@ -36,18 +37,19 @@ export function computeFandF(input: {
   const monthly = Math.max(0, input.grossMonthly);
 
   // Days worked in the final month: 1st of the LWD month → LWD inclusive.
-  const lwd = startOfDay(input.lastWorkingDay);
-  const monthStart = new Date(lwd.getFullYear(), lwd.getMonth(), 1);
+  const lastWorkingDay = istDateKey(input.lastWorkingDay);
+  const [year, month, day] = lastWorkingDay.split("-").map(Number);
   // Per-day rate uses the actual calendar days in the LWD month (28–31), not a fixed 30.
-  const daysInMonth = new Date(lwd.getFullYear(), lwd.getMonth() + 1, 0).getDate();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const perDay = round2(monthly / daysInMonth);
 
-  const earnedDays = daysBetween(monthStart, lwd);
+  const earnedDays = day;
   // Cap earned salary at one full month.
   const earnedSalary = Math.min(round2(perDay * earnedDays), monthly);
 
-  // daysBetween is inclusive, so same-day resign+LWD = 1. Notice served should be 0 in that case.
-  const noticeDaysGiven = Math.max(0, daysBetween(input.resignationDate, input.lastWorkingDay) - 1);
+  const lastDayStart = dayRangeIST(lastWorkingDay).start;
+  const resignationStart = dayRangeIST(istDateKey(input.resignationDate)).start;
+  const noticeDaysGiven = Math.max(0, (lastDayStart.getTime() - resignationStart.getTime()) / 86_400_000);
   const noticeShortfallDays = Math.max(0, input.noticeDays - noticeDaysGiven);
   const noticeDeduction = round2(perDay * noticeShortfallDays);
 

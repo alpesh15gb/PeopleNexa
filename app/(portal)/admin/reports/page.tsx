@@ -1,13 +1,19 @@
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
-import { istDateKey } from "@/lib/ist";
-import { monthKeyIST } from "@/lib/dates";
+import { isDateKey } from "@/lib/dates";
+import { getTenantAccess } from "@/lib/modules-server";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone } from "@/lib/workspace-time";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { ReportControls } from "./report-controls";
 import { DeviceTables } from "./device-tables";
 import Link from "next/link";
 import { Download } from "lucide-react";
 import { inactiveEmployeeReportSelect, inactiveEmployeeReportWhere } from "@/lib/inactive-employee-report";
+import { ReportLibrary } from "./report-library";
+import { WorkforceMovement } from "./workforce-movement";
+import { EmptyState } from "@/components/ui/stat";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +26,7 @@ const KNOWN_TYPES = new Set([
   "device-work-summary",
   "device-performance",
   "inactive-employees",
+  "workforce-movement",
 ]);
 
 const DEVICE_KIND_BY_TYPE: Record<string, "daily" | "monthly" | "status-matrix" | "work-summary" | "performance"> = {
@@ -36,33 +43,50 @@ export default async function AdminReportsPage({
   searchParams: Promise<{ type?: string; departmentId?: string; date?: string; month?: string; branchId?: string; q?: string }>;
 }) {
   const session = await requireActiveSession();
-  const params = await searchParams;
-  const type = KNOWN_TYPES.has(params.type ?? "") ? params.type! : "device-daily";
+  if (!["admin", "location_manager", "branch_manager"].includes(session.role)) redirect("/employee");
+  const [params, access, tenant, manager] = await Promise.all([
+    searchParams,
+    getTenantAccess(session.tenantId),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+    session.role === "admin" ? null : prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      select: { branchId: true, locationId: true },
+    }),
+  ]);
+  const forcedBranchId = session.role === "branch_manager" ? (manager?.branchId ?? null) : null;
+  const forcedLocationId = session.role === "location_manager" ? (manager?.locationId ?? null) : null;
+  if ((session.role === "branch_manager" && !forcedBranchId) || (session.role === "location_manager" && !forcedLocationId)) {
+    return <EmptyState title="Workspace assignment needed" description="Ask your administrator to assign your branch or location." />;
+  }
+  const canReadAttendance = access.modules.has("attendance");
+  const canReadPeople = access.modules.has("employees");
+  const canReadPayroll = session.role !== "branch_manager" && access.modules.has("payroll");
+  const requestedType = params.type ?? ((params.date || params.month || params.branchId || params.departmentId) ? "device-daily" : "");
+  const type = KNOWN_TYPES.has(requestedType) ? requestedType : "";
+  const isPeopleReport = type === "inactive-employees" || type === "workforce-movement";
+  if (!type || (isPeopleReport ? !canReadPeople : !canReadAttendance)) {
+    return <ReportLibrary attendance={canReadAttendance} people={canReadPeople && !forcedBranchId} payroll={canReadPayroll} />;
+  }
+  const region = workspaceRegion(tenant?.config);
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const month = params.month && /^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(params.month) && params.month < "9999-12" ? params.month : today.slice(0, 7);
+  if (type === "workforce-movement") {
+    if (forcedBranchId) redirect("/admin/reports");
+    return <WorkforceMovement tenantId={session.tenantId} locationId={forcedLocationId} month={month} locale={region.locale} showExits={access.modules.has("exit")} />;
+  }
 
   const branches = await prisma.branch.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...(forcedBranchId ? { id: forcedBranchId } : {}), ...(forcedLocationId ? { locationId: forcedLocationId } : {}) },
     select: { id: true, name: true, locationId: true },
     orderBy: { name: "asc" },
   });
 
-  const [departments, manager] = await Promise.all([
-    prisma.department.findMany({
+  const departments = await prisma.department.findMany({
       where: { tenantId: session.tenantId },
       select: { id: true, name: true },
-    }),
-    session.role === "branch_manager" || session.role === "location_manager"
-      ? prisma.employee.findFirst({
-          where: { id: session.sub, tenantId: session.tenantId },
-          select: { branchId: true, locationId: true },
-        })
-      : Promise.resolve(null),
-  ]);
-  const forcedBranchId = session.role === "branch_manager" ? (manager?.branchId ?? null) : null;
-  const forcedLocationId = session.role === "location_manager" ? (manager?.locationId ?? null) : null;
-  const visibleBranches = forcedBranchId ? branches.filter((b) => b.id === forcedBranchId) : forcedLocationId ? branches.filter((b) => b.locationId === forcedLocationId) : branches;
-  const todayIST = istDateKey(new Date());
-  const date = params.date || todayIST;
-  const month = params.month || monthKeyIST(new Date());
+  });
+  const visibleBranches = branches;
+  const date = params.date && isDateKey(params.date) ? params.date : today;
   const deviceBranchId = forcedBranchId ?? (forcedLocationId && !visibleBranches.some((branch) => branch.id === params.branchId) ? "" : params.branchId ?? "");
   const deviceDepartmentId = params.departmentId ?? "";
   const kind = DEVICE_KIND_BY_TYPE[type];
@@ -84,6 +108,7 @@ export default async function AdminReportsPage({
 
   return (
     <div className="animate-fade-up space-y-6">
+      <Link href="/admin/reports" className="inline-flex text-sm font-medium text-primary hover:underline">Report library</Link>
       <PageHeader
         title="Reports"
         description="Attendance reports with Excel and print"
@@ -102,6 +127,8 @@ export default async function AdminReportsPage({
         <CardContent className="p-5">
           <ReportControls
             type={type}
+            showAttendance={canReadAttendance}
+            showPeople={canReadPeople}
             departments={departments}
             branches={visibleBranches}
             effectiveDate={date}

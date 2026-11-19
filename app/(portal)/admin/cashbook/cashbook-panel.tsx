@@ -37,10 +37,12 @@ const categoryTone: Record<string, "violet" | "info" | "warning" | "neutral"> = 
 export function CashbookPanel({
   month,
   totals,
+  totalEntries,
   entries,
 }: {
   month: string;
-  totals: { cashIn: number; cashOut: number; balance: number };
+  totals: { cashIn: number; cashOut: number; balance: number; cashInCount: number; cashOutCount: number };
+  totalEntries: number;
   entries: CashbookEntryRow[];
 }) {
   const router = useRouter();
@@ -108,14 +110,14 @@ export function CashbookPanel({
         <StatCard
           label="Cash in"
           value={formatMoney(totals.cashIn)}
-          sub={`${month} · ${entries.filter((e) => e.type === "cash_in").length} entries`}
+          sub={`${month} · ${totals.cashInCount} entries`}
           icon={<TrendingUp className="h-4.5 w-4.5" />}
           tone="emerald"
         />
         <StatCard
           label="Cash out"
           value={formatMoney(totals.cashOut)}
-          sub={`${month} · ${entries.filter((e) => e.type === "cash_out").length} entries`}
+          sub={`${month} · ${totals.cashOutCount} entries`}
           icon={<TrendingDown className="h-4.5 w-4.5" />}
           tone="rose"
         />
@@ -128,7 +130,7 @@ export function CashbookPanel({
         />
         <StatCard
           label="Entries"
-          value={entries.length}
+          value={totalEntries}
           sub={month}
           icon={<BookOpenText className="h-4.5 w-4.5" />}
           tone="sky"
@@ -153,7 +155,7 @@ export function CashbookPanel({
           <EmptyState
             icon={<BookOpenText className="h-5 w-5" />}
             title="No entries this month"
-            description="Record cash-in and cash-out to track your cashbook like PagarBook."
+              description="Record the first cash movement for this month."
             action={
               <Button size="sm" onClick={() => setAddOpen(true)}>
                 <Plus className="h-3.5 w-3.5" /> Add entry

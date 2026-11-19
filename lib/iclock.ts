@@ -1,6 +1,5 @@
 import { prisma } from "./prisma";
-import { createPunchForEvent } from "./punch-idempotency";
-import { attendanceDayForPunch, reconcileEmployeeDay } from "./reconcile";
+import { isUniqueWriteConflict, PENDING_DEVICE_ATTENDANCE, reconcileDeviceEvent } from "./device-attendance-ingest";
 import type { Device, Employee } from "@/generated/prisma/client";
 
 export interface RawPunch {
@@ -16,31 +15,6 @@ export interface PunchResult {
   action: string;
   logId?: string;
   attendanceId?: string | null;
-}
-
-function prismaErrorCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? (error as { code?: string }).code
-    : undefined;
-}
-
-function isReconciliationRace(error: unknown): boolean {
-  const code = prismaErrorCode(error);
-  return code === "P2002" || code === "P2034";
-}
-
-async function reconcileWithRetry(
-  tenant: Parameters<typeof reconcileEmployeeDay>[0],
-  employee: Parameters<typeof reconcileEmployeeDay>[1],
-  istDay: Date
-) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await reconcileEmployeeDay(tenant, employee, istDay, { finalize: false });
-    } catch (error) {
-      if (!isReconciliationRace(error) || attempt === 1) throw error;
-    }
-  }
 }
 
 /**
@@ -59,11 +33,12 @@ export async function handleDevicePunch(
   const existing = await prisma.deviceLog.findFirst({
     where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing?.processed) {
+  if (existing?.processed && !existing.error) {
     return { accepted: true, action: "duplicate", logId: existing.id };
   }
 
   let log = existing;
+  let resume = Boolean(existing);
   if (!log) {
     try {
       log = await prisma.deviceLog.create({
@@ -77,65 +52,41 @@ export async function handleDevicePunch(
         },
       });
     } catch (error) {
-      if (prismaErrorCode(error) !== "P2002") throw error;
+      if (!isUniqueWriteConflict(error)) throw error;
       const duplicate = await prisma.deviceLog.findFirst({
         where: { deviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
       });
       if (!duplicate) throw error;
-      if (duplicate.processed) return { accepted: true, action: "duplicate", logId: duplicate.id };
+      if (duplicate.processed && !duplicate.error) return { accepted: true, action: "duplicate", logId: duplicate.id };
       log = duplicate;
+      resume = true;
     }
   }
 
-  // 2. Match the immutable device enrollment code first. Employee Code is a
-  // legacy fallback only for records not yet assigned a Device Code.
-  const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, status: "active", OR: [{ deviceCode: punch.userId }, { deviceCode: null, employeeNumber: punch.userId }] },
-    select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-  });
-
-  if (!employee) {
-    await prisma.deviceLog.update({
-      where: { id: log.id },
-       data: { error: `No active employee with device code "${punch.userId}" in this workspace`, processed: true },
-    });
-    return { accepted: true, action: "no_employee", logId: log.id };
+  const event = { id: log.id, userId: punch.userId, punchTime: punch.punchTime };
+  try {
+    const processed = await reconcileDeviceEvent(device, event, "device", resume, punch.inOutMode);
+    if (!processed) {
+      await prisma.deviceLog.update({
+        where: { id: log.id },
+        data: { processed: true, error: `No active employee with device code "${punch.userId}" in this workspace` },
+      });
+      return { accepted: true as const, action: "no_employee" as const, logId: log.id };
+    }
+    await prisma.deviceLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+    return {
+      accepted: true as const,
+      action: processed.created ? (processed.result.action === "created" ? "in" as const : "out" as const) : "duplicate" as const,
+      logId: log.id,
+      attendanceId: processed.result.attendanceId,
+    };
+  } catch (error) {
+    await prisma.deviceLog.updateMany({
+      where: { id: log.id, OR: [{ processed: false }, { error: { not: null } }] },
+      data: { processed: false, error: PENDING_DEVICE_ATTENDANCE },
+    }).catch(() => undefined);
+    throw error;
   }
-
-  // 3. Append exactly once for this immutable raw-device event. Unlike a time
-  // window this preserves distinct IN/OUT events seconds apart.
-  const hint = String(punch.inOutMode ?? "0").trim() === "5" ? "in" : String(punch.inOutMode ?? "0").trim() === "1" ? "out" : "unknown";
-  const created = await createPunchForEvent({
-      tenantId: device.tenantId,
-      employeeId: employee.id,
-      deviceId: device.id,
-      source: "device",
-      eventKey: `device-log:${log.id}`,
-      punchTime: punch.punchTime,
-      inOutHint: hint,
-  });
-  if (!created.created) {
-    await markProcessed(log.id);
-    return { accepted: true, action: "duplicate", logId: log.id };
-  }
-
-  // 4. Re-derive the day.
-  const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
-  const result = await reconcileWithRetry(
-    tenant ?? { id: device.tenantId, config: null },
-    { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    await attendanceDayForPunch(employee, punch.punchTime)
-  );
-
-  await markProcessed(log.id);
-  return { accepted: true, action: result.action === "created" ? "in" : "out", logId: log.id, attendanceId: result.attendanceId };
-}
-
-function markProcessed(logId: string, error?: string) {
-  return prisma.deviceLog.update({
-    where: { id: logId },
-    data: error ? { error, processed: true } : { error: null, processed: true },
-  });
 }
 
 /**
@@ -159,7 +110,7 @@ export async function reprocessFailedLogs(
       createdAt: { gte: weekAgo },
       OR: [{ processed: false }, { error: { not: null } }],
     },
-    select: { id: true, deviceId: true, userId: true, punchTime: true, rawData: true },
+    select: { id: true, deviceId: true, userId: true, punchTime: true },
     // Always heal the newest device activity first. Without an explicit order,
     // PostgreSQL may fill this bounded queue with arbitrary old failures and
     // leave today's newly mapped punches unreconciled.
@@ -169,43 +120,22 @@ export async function reprocessFailedLogs(
 
   const counters = { accepted: 0, duplicate: 0, failed: 0 };
   for (const log of logs) {
+    if (!log.userId || !log.punchTime) {
+      counters.failed++;
+      continue;
+    }
     try {
-      if (!log.userId || !log.punchTime) {
-        counters.failed++;
-        continue;
-      }
-      const employee = await prisma.employee.findFirst({
-        where: { tenantId, status: "active", OR: [{ deviceCode: log.userId }, { deviceCode: null, employeeNumber: log.userId }] },
-        select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-      });
-      if (!employee) {
-        counters.failed++;
-        continue; // still unmapped — stays flagged
-      }
-
-      const created = await createPunchForEvent({
-          tenantId,
-          employeeId: employee.id,
-          deviceId: log.deviceId,
-          source: "device",
-          eventKey: `device-log:${log.id}`,
-          punchTime: log.punchTime,
-          inOutHint: "unknown",
-      });
-      if (!created.created) {
-        await markProcessed(log.id);
-        counters.duplicate++;
-        continue;
-      }
-
-      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      await reconcileWithRetry(
-        tenant ?? { id: tenantId, config: null },
-        { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        await attendanceDayForPunch(employee, log.punchTime)
+      const processed = await reconcileDeviceEvent(
+        { id: log.deviceId, tenantId },
+        { id: log.id, userId: log.userId, punchTime: log.punchTime },
+        "device", true,
       );
-      await markProcessed(log.id);
-      counters.accepted++;
+      if (!processed) {
+        counters.failed++;
+        continue;
+      }
+      await prisma.deviceLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
+      counters[processed.created ? "accepted" : "duplicate"]++;
     } catch {
       counters.failed++;
     }

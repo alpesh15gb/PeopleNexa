@@ -1,137 +1,116 @@
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
-import { istDateKey } from "@/lib/ist";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
-import { RegularizationPanel } from "./regularization-panel";
-import { employeeLocationScope } from "@/lib/location-scope";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { DatePicker } from "../attendance/date-picker";
+import { prisma } from "@/lib/prisma";
+import { requireActiveSession } from "@/lib/session";
+import { dayRangeIST, isDateKey } from "@/lib/dates";
+import { employeeLocationScope } from "@/lib/location-scope";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { formatCalendarDate, timeZoneDayRange } from "@/lib/workspace-time";
+import type { RecordSearchParams } from "@/lib/document-expense-pagination";
+import { RegularizationPanel } from "./regularization-panel";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminRegularizationPage() {
-  const session = await requireSession();
-  if (!["admin", "supervisor", "branch_manager", "location_manager"].includes(session.role)) redirect("/employee");
-
-  // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
-  const isBranchManager = session.role === "branch_manager";
-  const ownScope = isBranchManager || session.role === "location_manager"
-    ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { branchId: true, locationId: true, branch: { select: { name: true } } } })
+export default async function AdminRegularizationPage({ searchParams }: { searchParams: Promise<RecordSearchParams> }) {
+  const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
+  if (!["admin", "supervisor", "branch_manager", "location_manager"].includes(session.role)) redirect("/employee/attendance");
+  const { tenantId, role } = session;
+  const manager = role === "branch_manager" || role === "location_manager"
+    ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId }, select: { branchId: true, locationId: true } })
     : null;
-  const ownBranchId = ownScope?.branchId ?? null;
-  const ownBranchName = ownScope?.branch?.name ?? "";
-  const branchId = isBranchManager ? ownBranchId : null;
-  const employeeScope = isBranchManager ? { branchId: branchId ?? "__unassigned__" } : session.role === "location_manager" ? employeeLocationScope(ownScope?.locationId ?? "__unassigned__") : {};
+  const managerScope = role === "branch_manager" ? { branchId: manager?.branchId ?? "__unassigned__" } :
+    role === "location_manager" ? employeeLocationScope(manager?.locationId ?? "__unassigned__") : {};
+  const branch = role !== "branch_manager" && typeof params.branch === "string" && params.branch
+    ? await prisma.branch.findFirst({ where: { id: params.branch, tenantId, ...(role === "location_manager" && { locationId: manager?.locationId ?? "__unassigned__" }) }, select: { id: true, name: true } })
+    : null;
+  const employeeScope = { ...managerScope, ...(branch && { branchId: branch.id }) };
+  const correctionScope = role === "location_manager" ? { ...(branch && { branchId: branch.id }), branch: { locationId: manager?.locationId ?? "__unassigned__" } } : employeeScope;
+  const reviewOnly = params.review === "approvals";
+  const view = params.view === "punches" && !reviewOnly ? "punches" : "corrections";
+  const reviewed = params.status === "reviewed" && !reviewOnly && view === "corrections";
+  const date = typeof params.date === "string" && isDateKey(params.date) ? params.date : "";
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } });
+  const region = workspaceRegion(tenant?.config);
+  const correctionDay = date ? dayRangeIST(date) : null;
+  const punchDay = date ? timeZoneDayRange(date, region.timeZone) : null;
 
-  const corrections = await prisma.punchCorrection.findMany({
-    where: { tenantId: session.tenantId, employee: employeeScope },
-    include: {
-      employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
-
-  const pending = corrections.filter((c) => c.status === "pending").length;
-
-  // Flag corrections whose employee+day has a face review/rejected punch.
-  const flaggedPunches = await prisma.punch.findMany({
+  function href(section: string, status?: string, filterDate = date) {
+    const query = new URLSearchParams({ view: section });
+    if (status) query.set("status", status);
+    if (filterDate) query.set("date", filterDate);
+    if (branch) query.set("branch", branch.id);
+    return `/admin/regularization?${query}`;
+  }
+  const attendanceParams = new URLSearchParams();
+  if (date) attendanceParams.set("date", date);
+  if (branch) attendanceParams.set("branch", branch.id);
+  const attendanceHref = attendanceParams.size ? `/admin/attendance?${attendanceParams}` : "/admin/attendance";
+  const employeeDetails = { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } as const;
+  const corrections = view === "corrections" ? await prisma.punchCorrection.findMany({
     where: {
-      tenantId: session.tenantId,
-      faceStatus: { in: ["review", "rejected"] },
-      employeeId: { in: corrections.map((c) => c.employeeId) },
+      tenantId, employee: correctionScope, ...(reviewed ? { status: { in: ["approved", "rejected"] } } : { status: "pending", employeeId: { not: session.sub } }),
+      ...(correctionDay && { date: { gte: correctionDay.start, lt: correctionDay.end } }),
     },
-    select: { employeeId: true, punchTime: true },
-    take: 500,
-  });
-  const flaggedDays = new Set(flaggedPunches.map((p) => `${p.employeeId}|${istDateKey(p.punchTime)}`));
-
-  // Face review queue: recent gray-zone / rejected punches plus held
-  // self-service punches awaiting authorization. Photos are fetched lazily
-  // through the same scoped endpoint used by mobile punch reports.
-  const faceReviews = await prisma.punch.findMany({
+    include: { employee: employeeDetails },
+    orderBy: reviewed ? [{ reviewedAt: "desc" }, { id: "desc" }] : [{ createdAt: "asc" }, { id: "asc" }],
+    ...(reviewed && !date ? { take: 100 } : {}),
+  }) : [];
+  const faceReviews = view === "punches" ? await prisma.punch.findMany({
     where: {
-      tenantId: session.tenantId,
+      tenantId, employee: employeeScope, employeeId: { not: session.sub },
       OR: [{ faceStatus: { in: ["review", "rejected"] } }, { authStatus: "pending" }],
-      employee: employeeScope,
+      ...(punchDay && { punchTime: { gte: punchDay.start, lt: punchDay.end } }),
     },
     select: {
-      id: true,
-      punchTime: true,
-      faceStatus: true,
-      inOutHint: true,
-      locationAccuracy: true,
-      locationStatus: true,
-      faceScore: true,
-      lat: true,
-      lng: true,
-      authStatus: true,
-      holdReason: true,
-      employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } },
+      id: true, punchTime: true, faceStatus: true, inOutHint: true, locationAccuracy: true,
+      locationStatus: true, faceScore: true, lat: true, lng: true, authStatus: true, holdReason: true,
+      employee: employeeDetails,
     },
-    orderBy: { punchTime: "desc" },
-    take: 50,
-  });
-
-  const photoIds = new Set((await prisma.punch.findMany({ where: { tenantId: session.tenantId, id: { in: faceReviews.map(punch => punch.id) }, selfie: { not: null } }, select: { id: true } })).map(punch => punch.id));
+    orderBy: [{ punchTime: "asc" }, { id: "asc" }],
+    take: 100,
+  }) : [];
+  const photoIds = new Set(faceReviews.length ? (await prisma.punch.findMany({
+    where: { tenantId, id: { in: faceReviews.map((punch) => punch.id) }, selfie: { not: null } }, select: { id: true },
+  })).map(({ id }) => id) : []);
 
   return (
-    <div className="animate-fade-up space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        title="Punch Regularization"
-        description={`${pending} pending request${pending === 1 ? "" : "s"} · approve or reject employee-requested corrections`}
-        actions={
-          isBranchManager ? (
-            <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
-              Branch: {ownBranchName}
-            </span>
-          ) : undefined
-        }
+        title="Attendance review"
+        description={date ? `${formatCalendarDate(date, region.locale)}${branch ? ` · ${branch.name}` : ""} · ${region.timeZone}` : "Review employee corrections and verify held mobile punches."}
+        actions={<Link href={attendanceHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Back to daily attendance</Link>}
       />
-      <Card>
-        <CardContent className="p-0">
-          <RegularizationPanel
-            corrections={corrections.map((c) => ({
-              id: c.id,
-              date: c.date.toISOString(),
-              faceFlagged: flaggedDays.has(`${c.employeeId}|${istDateKey(c.date)}`),
-              currentIn: c.currentIn?.toISOString() ?? null,
-              currentOut: c.currentOut?.toISOString() ?? null,
-              requestedIn: c.requestedIn?.toISOString() ?? null,
-              requestedOut: c.requestedOut?.toISOString() ?? null,
-              reason: c.reason,
-              status: c.status,
-              reviewNote: c.reviewNote,
-              createdAt: c.createdAt.toISOString(),
-              employee: {
-                id: c.employee.id,
-                firstName: c.employee.firstName,
-                lastName: c.employee.lastName,
-                employeeNumber: c.employee.employeeNumber,
-              },
-            }))}
-            faceReviews={faceReviews.map((r) => ({
-              id: r.id,
-              punchTime: r.punchTime.toISOString(),
-              inOutHint: r.inOutHint,
-              locationAccuracy: r.locationAccuracy,
-              locationStatus: r.locationStatus,
-              faceStatus: r.faceStatus,
-              faceScore: r.faceScore,
-              selfie: photoIds.has(r.id) ? `/api/reports/mobile-punches?photo=${encodeURIComponent(r.id)}` : null,
-              lat: r.lat,
-              lng: r.lng,
-              authStatus: (r as { authStatus?: string }).authStatus ?? "auto",
-              holdReason: (r as { holdReason?: string | null }).holdReason ?? null,
-              employee: {
-                id: r.employee.id,
-                firstName: r.employee.firstName,
-                lastName: r.employee.lastName,
-                employeeNumber: r.employee.employeeNumber,
-              },
-            }))}
-          />
-        </CardContent>
-      </Card>
+      {reviewOnly ? <Link className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline" href={href("corrections")}>Open attendance review workspace</Link> :
+        <nav className="flex flex-wrap gap-x-5 border-b border-edge text-sm" aria-label="Attendance review views">
+          {[
+            { label: "Pending corrections", href: href("corrections"), active: view === "corrections" && !reviewed },
+            { label: "Held punches", href: href("punches"), active: view === "punches" },
+            { label: "Reviewed corrections", href: href("corrections", "reviewed"), active: reviewed },
+          ].map((tab) => <Link key={tab.label} href={tab.href} aria-current={tab.active ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${tab.active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{tab.label}</Link>)}
+        </nav>}
+      <div className="flex flex-wrap items-center gap-3">
+        <DatePicker value={date} label={view === "punches" ? "Punch date" : "Work date"} />
+        {date && <Link href={href(view, reviewed ? "reviewed" : undefined, "")} className="text-sm font-medium text-primary hover:underline">Clear date</Link>}
+      </div>
+      <Card><CardContent className="p-0">
+        <RegularizationPanel
+          region={region}
+          view={view}
+          reviewed={reviewed}
+          corrections={corrections.map((correction) => ({
+            id: correction.id, date: correction.date.toISOString(), currentIn: correction.currentIn?.toISOString() ?? null,
+            currentOut: correction.currentOut?.toISOString() ?? null, requestedIn: correction.requestedIn?.toISOString() ?? null,
+            requestedOut: correction.requestedOut?.toISOString() ?? null, reason: correction.reason, status: correction.status,
+            reviewNote: correction.reviewNote, createdAt: correction.createdAt.toISOString(), employee: correction.employee,
+          }))}
+          faceReviews={faceReviews.map((punch) => ({
+            ...punch, punchTime: punch.punchTime.toISOString(),
+            selfie: photoIds.has(punch.id) ? `/api/reports/mobile-punches?photo=${encodeURIComponent(punch.id)}` : null,
+          }))}
+        />
+      </CardContent></Card>
     </div>
   );
 }

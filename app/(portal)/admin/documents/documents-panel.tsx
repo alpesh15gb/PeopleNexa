@@ -1,16 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, AlertTriangle, CalendarX2, Plus, Trash2, Eye } from "lucide-react";
-import { Card, CardHeader } from "@/components/ui/card";
+import { FileText, AlertTriangle, CalendarX2, Plus, Trash2, Eye, Pencil } from "lucide-react";
+import { PageHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/stat";
+import { EmptyState, StatCard } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayKey } from "@/lib/dates";
+import { DOCUMENT_ATTACHMENT_MAX_BYTES, DOCUMENT_ATTACHMENT_TYPES } from "@/lib/document-attachment";
 
 type Doc = {
   id: string;
@@ -19,10 +20,23 @@ type Doc = {
   number: string | null;
   expiryDate: string | null;
   issuedDate: string | null;
+  updatedAt: string;
   notes: string | null;
+  hasAttachment: boolean;
   status: "none" | "expired" | "expiring" | "ok";
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
 };
+
+const emptyForm = { employeeId: "", name: "", docType: "other", number: "", issuedDate: "", expiryDate: "", notes: "" };
+
+function readAttachment(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read the attachment."));
+    reader.readAsDataURL(file);
+  });
+}
 
 const tone: Record<string, "danger" | "warning" | "success" | "neutral"> = {
   expired: "danger",
@@ -35,43 +49,66 @@ export function DocumentsPanel({
   documents,
   employees,
   summary,
+  canAdd,
+  canDelete,
 }: {
   documents: Doc[];
   employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[];
   summary: { total: number; expired: number; expiring: number };
+  canAdd: boolean;
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Doc | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [viewing, setViewing] = useState<Doc | null>(null);
 
-  const [form, setForm] = useState({ employeeId: "", name: "", docType: "passport", number: "", expiryDate: "", notes: "" });
+  const [form, setForm] = useState(emptyForm);
 
-  const sorted = useMemo(
-    () => [...documents].sort((a, b) => (a.status === b.status ? 0 : a.status === "expired" ? -1 : b.status === "expired" ? 1 : a.status === "expiring" ? -1 : 1)),
-    [documents]
-  );
+  function openForm(document?: Doc) {
+    setEditing(document ?? null);
+    setForm(document ? {
+      employeeId: document.employee.id,
+      name: document.name,
+      docType: document.docType,
+      number: document.number ?? "",
+      issuedDate: document.issuedDate ? todayKey(new Date(document.issuedDate)) : "",
+      expiryDate: document.expiryDate ? todayKey(new Date(document.expiryDate)) : "",
+      notes: document.notes ?? "",
+    } : emptyForm);
+    setViewing(null);
+    setFormOpen(true);
+  }
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const attachment = new FormData(e.currentTarget).get("attachment");
     setBusy(true);
     try {
-      const res = await fetch("/api/documents", {
-        method: "POST",
+      let fileUrl: string | null = null;
+      if (attachment instanceof File && attachment.size > 0) {
+        if (attachment.size > DOCUMENT_ATTACHMENT_MAX_BYTES || !Object.keys(DOCUMENT_ATTACHMENT_TYPES).includes(attachment.type)) {
+          throw new Error("Choose a PDF, PNG, JPEG, WebP or GIF file up to 2 MB.");
+        }
+        fileUrl = await readAttachment(attachment);
+      }
+      const res = await fetch(editing ? `/api/documents/${editing.id}` : "/api/documents", {
+        method: editing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, expectedUpdatedAt: editing?.updatedAt, ...(fileUrl ? { fileUrl } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to add");
-      toast("success", "Document added.");
-      setAdding(false);
-      setForm({ employeeId: "", name: "", docType: "passport", number: "", expiryDate: "", notes: "" });
+      toast("success", editing ? "Document saved." : "Document added.");
+      setFormOpen(false);
+      setForm(emptyForm);
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to add");
+      toast("error", e instanceof Error ? e.message : "Could not save document.");
     } finally {
       setBusy(false);
     }
@@ -92,6 +129,8 @@ export function DocumentsPanel({
       } else {
         toast("error", "Failed to delete");
       }
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not delete document.");
     } finally {
       setConfirmBusy(false);
       setConfirmTarget(null);
@@ -100,36 +139,20 @@ export function DocumentsPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[13px] text-muted-foreground">
-          {summary.expired > 0 && (
-            <span className="mr-3 inline-flex items-center gap-1 text-rose-300">
-              <AlertTriangle className="h-3.5 w-3.5" /> {summary.expired} expired
-            </span>
-          )}
-          {summary.expiring > 0 && (
-            <span className="inline-flex items-center gap-1 text-amber-300">
-              <CalendarX2 className="h-3.5 w-3.5" /> {summary.expiring} expiring soon
-            </span>
-          )}
-          {summary.expired === 0 && summary.expiring === 0 && <span>All {summary.total} documents up to date</span>}
-        </p>
-        <Button size="sm" onClick={() => setAdding(true)}>
+      <PageHeader title="Employee documents" description="Manage employee records and track expiry dates." actions={canAdd && <Button size="sm" disabled={!employees.length} onClick={() => openForm()}>
           <Plus className="h-3.5 w-3.5" /> Add document
-        </Button>
-      </div>
+        </Button>} />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card><CardHeader><p className="text-[11px] uppercase tracking-wider text-muted-foreground">Total documents</p><p className="text-2xl font-bold">{summary.total}</p></CardHeader></Card>
-        <Card><CardHeader><p className="text-[11px] uppercase tracking-wider text-rose-300">Expired</p><p className="text-2xl font-bold text-rose-300">{summary.expired}</p></CardHeader></Card>
-        <Card><CardHeader><p className="text-[11px] uppercase tracking-wider text-amber-300">Expiring ≤ 60 days</p><p className="text-2xl font-bold text-amber-300">{summary.expiring}</p></CardHeader></Card>
+        <StatCard label="Total documents" value={summary.total} icon={<FileText className="h-4 w-4" />} />
+        <StatCard label="Expired" value={summary.expired} icon={<AlertTriangle className="h-4 w-4" />} tone="rose" />
+        <StatCard label="Expiring within 60 days" value={summary.expiring} icon={<CalendarX2 className="h-4 w-4" />} tone="amber" />
       </div>
-
-      {sorted.length === 0 ? (
-        <EmptyState icon={<FileText className="h-5 w-5" />} title="No documents yet" description="Track passports, visas, Aadhaar cards and more — with expiry alerts." />
+      {documents.length === 0 ? (
+        <EmptyState icon={<FileText className="h-5 w-5" />} title="No documents yet" description={canAdd ? "Add an employee document with an optional file and expiry date." : "Documents for your assigned location will appear here."} />
       ) : (
         <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
-          {sorted.map((d) => (
+          {documents.map((d) => (
             <div key={d.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
               <button onClick={() => setViewing(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint text-[11px] font-bold text-muted-foreground">
@@ -149,18 +172,18 @@ export function DocumentsPanel({
                     {formatDate(new Date(d.expiryDate))}
                   </span>
                 )}
-                <Badge tone={tone[d.status] ?? "neutral"} className="capitalize">{d.status}</Badge>
-                <Button size="icon" variant="ghost" onClick={() => setViewing(d)}><Eye className="h-4 w-4" /></Button>
-                <Button size="icon" variant="ghost" onClick={() => del(d.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
+                <Badge tone={tone[d.status]} className="capitalize">{d.status === "none" ? "No expiration" : d.status === "ok" ? "Current" : d.status}</Badge>
+                <Button size="icon" variant="ghost" aria-label={`View ${d.name}`} onClick={() => setViewing(d)}><Eye className="h-4 w-4" /></Button>
+                {canDelete && <Button size="icon" variant="ghost" aria-label={`Delete ${d.name}`} onClick={() => del(d.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <Modal open={adding} onClose={() => setAdding(false)} title="Add document" size="md">
+      <Modal open={formOpen} onClose={() => !busy && setFormOpen(false)} title={editing ? "Edit document" : "Add document"} size="md">
         <form onSubmit={submit} className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
+          {editing ? <p className="text-sm text-muted-foreground">{editing.employee.firstName} {editing.employee.lastName} · {editing.docType}</p> : <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Employee</span>
               <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} required className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50">
@@ -173,33 +196,42 @@ export function DocumentsPanel({
             <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Type</span>
               <select value={form.docType} onChange={(e) => setForm({ ...form, docType: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50">
-                {["passport", "visa", "aadhaar", "pan", "license", "other"].map((t) => (
+                {["other", "passport", "visa", "aadhaar", "pan", "license"].map((t) => (
                   <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
                 ))}
               </select>
             </label>
-          </div>
+          </div>}
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Document name</span>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="e.g. Passport" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
+              <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Issue date</span>
+              <input type="date" value={form.issuedDate} onChange={(e) => setForm({ ...form, issuedDate: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+            </label>
+            <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Document number</span>
               <input value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} placeholder="Masked in views" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
             </label>
             <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Expiry date</span>
-              <input type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+              <input type="date" min={form.issuedDate || undefined} value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
             </label>
           </div>
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Notes</span>
             <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-muted-foreground">{editing?.hasAttachment ? "Replace attachment" : "Attachment"}</span>
+            <input name="attachment" type="file" accept={Object.keys(DOCUMENT_ATTACHMENT_TYPES).join(",")} className="block w-full text-sm" />
+            <span className="mt-1 block text-xs text-muted-foreground">PDF or image, up to 2 MB.</span>
+          </label>
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button type="submit" loading={busy}>Add document</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => setFormOpen(false)}>Cancel</Button>
+            <Button type="submit" loading={busy}>{editing ? "Save document" : "Add document"}</Button>
           </div>
         </form>
       </Modal>
@@ -209,8 +241,11 @@ export function DocumentsPanel({
           <div className="space-y-3 text-[13px]">
             <p className="text-muted-foreground">{viewing.employee.firstName} {viewing.employee.lastName} · {viewing.docType}</p>
             {viewing.number && <p className="font-mono">••••{viewing.number.slice(-4)}</p>}
-            {viewing.expiryDate && <p>Expires: <span className="font-mono">{formatDate(new Date(viewing.expiryDate))}</span></p>}
+            {viewing.issuedDate && <p>Issued {formatDate(new Date(viewing.issuedDate))}</p>}
+            {viewing.expiryDate && <p>Expires {formatDate(new Date(viewing.expiryDate))}</p>}
             {viewing.notes && <p className="text-muted-foreground">{viewing.notes}</p>}
+            {viewing.hasAttachment && <a href={`/api/documents/${viewing.id}/attachment`} target="_blank" rel="noreferrer" className="inline-block font-medium text-primary hover:underline">Open attachment</a>}
+            {canDelete && <div className="flex justify-end"><Button size="sm" variant="outline" onClick={() => openForm(viewing)}><Pencil className="h-4 w-4" /> Edit document</Button></div>}
           </div>
         )}
       </Modal>

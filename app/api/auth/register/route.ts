@@ -24,9 +24,10 @@ export async function POST(req: NextRequest) {
     );
   }
   try {
-    const body = await req.json();
-    const { companyName, slug, name, email, password } = body as Record<string, string>;
-    if (!companyName || !slug || !name || !email || !password) {
+    const body = await req.json() as Record<string, unknown> | null;
+    const { companyName, slug, name, email, password } = body ?? {};
+    if (typeof companyName !== "string" || typeof slug !== "string" || typeof name !== "string" ||
+        typeof email !== "string" || typeof password !== "string") {
       return NextResponse.json({ success: false, error: "All fields are required." }, { status: 400 });
     }
 

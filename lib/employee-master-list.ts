@@ -12,14 +12,14 @@ export function masterStatusWhere(baseWhere: Prisma.EmployeeWhereInput, status: 
 }
 
 /** List navigation never loads full HR imports, profile images or editor option lists. */
-export async function loadEmployeeMasterList(baseWhere: Prisma.EmployeeWhereInput, status: MasterStatus, page: number) {
+export async function loadEmployeeMasterList(baseWhere: Prisma.EmployeeWhereInput, status: MasterStatus, page: number, showDevices = true) {
   const where = masterStatusWhere(baseWhere, status);
   const [groups, pendingCount, rows] = await Promise.all([
     prisma.employee.groupBy({ by: ["status"], where: baseWhere, _count: { _all: true } }),
-    prisma.employee.count({ where: pendingWhere(baseWhere) }),
+    showDevices ? prisma.employee.count({ where: pendingWhere(baseWhere) }) : 0,
     prisma.employee.findMany({
       where,
-      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, branchId: true, branch: { select: { name: true } } },
+      select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, status: true, role: true, branchId: true, branch: { select: { name: true } }, department: { select: { name: true } } },
       orderBy: [{ employeeNumber: "asc" }, { id: "asc" }], skip: (page - 1) * 50, take: 50,
     }),
   ]);
@@ -29,8 +29,8 @@ export async function loadEmployeeMasterList(baseWhere: Prisma.EmployeeWhereInpu
     inactive: groups.find(group => group.status === "inactive")?._count._all ?? 0,
     assignment_pending: pendingCount,
   };
-  const unassignedIds = rows.filter(row => !row.branchId).map(row => row.id);
+  const unassignedIds = showDevices ? rows.filter(row => !row.branchId).map(row => row.id) : [];
   const pending = status === "assignment_pending" ? rows : unassignedIds.length ? await prisma.employee.findMany({ where: { ...pendingWhere(baseWhere), id: { in: unassignedIds } }, select: { id: true } }) : [];
   const pendingIds = new Set(pending.map(row => row.id));
-  return { employees: rows.map(({ branchId: _branchId, ...row }) => ({ ...row, assignmentPending: pendingIds.has(row.id) })), counts, total: counts[status], where };
+  return { employees: rows.map(({ branchId: _branchId, ...row }) => ({ ...row, deviceCode: showDevices ? row.deviceCode : null, assignmentPending: pendingIds.has(row.id) })), counts, total: counts[status], where };
 }

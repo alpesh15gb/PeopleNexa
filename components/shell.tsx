@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -43,15 +43,18 @@ import {
   MessageSquareText,
   Wallet,
   IdCard,
-  SlidersHorizontal,
+  ListChecks,
+  Plus,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
-import { relativeDay, toDateKey } from "@/lib/dates";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
 import { t, type Lang } from "@/lib/i18n";
 import { useToast } from "@/components/ui/toast";
 import { NotificationsBell } from "@/components/notifications-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LanguageToggle } from "@/components/language-toggle";
+import { WorkspaceLauncher, type WorkspaceDestination } from "@/components/workspace-launcher";
 
 interface NavItem {
   href: string;
@@ -65,58 +68,67 @@ interface NavItem {
 
 const adminNav: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, exact: true, section: "Overview" },
-  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance", section: "People & time" },
-  { href: "/admin/regularization", label: "Regularization", icon: <Wrench className="h-4 w-4" />, module: "attendance", section: "People & time" },
-  { href: "/admin/employee-master", label: "Employee Master", icon: <IdCard className="h-4 w-4" />, module: "employees", section: "People & time" },
-  { href: "/admin/id-cards", label: "ID Cards", icon: <IdCard className="h-4 w-4" />, module: "employees", section: "People & time" },
-  { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" />, section: "People & time" },
-  { href: "/admin/designations", label: "Designations", icon: <BriefcaseBusiness className="h-4 w-4" />, section: "People & time" },
-  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts", section: "People & time" },
-  { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters", section: "People & time" },
-  { href: "/admin/org-chart", label: "Org Chart", icon: <Network className="h-4 w-4" />, module: "orgchart", section: "People & time" },
-  { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding", section: "People & time" },
-  { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit", section: "People & time" },
-  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches", section: "People & time" },
-  { href: "/admin/leaves", label: "Leaves", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves", section: "Time off" },
-  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays", section: "Time off" },
-  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets", section: "Operations" },
-  { href: "/admin/devices", label: "Devices", icon: <Fingerprint className="h-4 w-4" />, module: "devices", section: "Operations" },
-  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
-  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
-  { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & expenses" },
-  { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
-  { href: "/admin/cashbook", label: "Cashbook", icon: <Wallet className="h-4 w-4" />, module: "expenses", section: "Pay & expenses" },
-  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports", section: "Insights" },
-  { href: "/admin/ai", label: "Ask AI", icon: <Sparkles className="h-4 w-4" />, module: "ai", section: "Insights" },
-  { href: "/admin/documents", label: "Documents", icon: <FileText className="h-4 w-4" />, module: "documents", section: "Culture" },
-  { href: "/admin/performance", label: "Performance", icon: <ClipboardList className="h-4 w-4" />, module: "performance", section: "Culture" },
-  { href: "/admin/helpdesk", label: "Helpdesk", icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk", section: "Culture" },
-  { href: "/admin/policies", label: "Policies", icon: <ScrollText className="h-4 w-4" />, module: "policies", section: "Culture" },
-  { href: "/employee/feed", label: "Org Feed", icon: <Megaphone className="h-4 w-4" />, module: "feed", section: "Culture" },
-  { href: "/admin/webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" />, module: "platform", section: "Platform" },
-  { href: "/admin/device-health", label: "Device Health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform", section: "Platform" },
-  { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform", section: "Platform" },
-  { href: "/admin/settings", label: "Settings", icon: <Settings className="h-4 w-4" />, section: "Workspace" },
-  { href: "/admin/configuration/company-settings", label: "Company Settings", icon: <SlidersHorizontal className="h-4 w-4" />, section: "Workspace" },
-  { href: "/admin/audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" />, section: "Workspace" },
+  { href: "/admin/approvals", label: "Approvals", icon: <ListChecks className="h-4 w-4" />, section: "Overview" },
+  { href: "/admin/employee-master", label: "Employees", match: ["/admin/employee-master", "/admin/employees"], icon: <Users className="h-4 w-4" />, module: "employees", section: "People" },
+  { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" />, section: "People" },
+  { href: "/admin/designations", label: "Designations", icon: <BriefcaseBusiness className="h-4 w-4" />, section: "People" },
+  { href: "/admin/org-chart", label: "Org Chart", icon: <Network className="h-4 w-4" />, module: "orgchart", section: "People" },
+  { href: "/admin/onboarding", label: "Onboarding", icon: <UserCheck className="h-4 w-4" />, module: "onboarding", section: "People" },
+  { href: "/admin/exits", label: "Exits", icon: <DoorOpen className="h-4 w-4" />, module: "exit", section: "People" },
+  { href: "/admin/documents", label: "Documents", icon: <FileText className="h-4 w-4" />, module: "documents", section: "People" },
+  { href: "/admin/id-cards", label: "ID Cards", icon: <IdCard className="h-4 w-4" />, module: "employees", section: "People" },
+  { href: "/admin/attendance", label: "Attendance", icon: <CalendarClock className="h-4 w-4" />, module: "attendance", section: "Time & leave" },
+  { href: "/admin/regularization", label: "Attendance corrections", icon: <Wrench className="h-4 w-4" />, module: "attendance", section: "Time & leave" },
+  { href: "/admin/leaves", label: "Leave", icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves", section: "Time & leave" },
+  { href: "/admin/holidays", label: "Holidays", icon: <PartyPopper className="h-4 w-4" />, module: "holidays", section: "Time & leave" },
+  { href: "/admin/shifts", label: "Shifts", icon: <Clock3 className="h-4 w-4" />, module: "shifts", section: "Time & leave" },
+  { href: "/admin/rosters", label: "Rosters", icon: <CalendarRange className="h-4 w-4" />, module: "rosters", section: "Time & leave" },
+  { href: "/admin/payroll", label: "Payroll", icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Compensation" },
+  { href: "/admin/loans", label: "Loans & Advances", icon: <HandCoins className="h-4 w-4" />, module: "payroll", section: "Compensation" },
+  { href: "/admin/tax", label: "Tax Declarations", icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Compensation" },
+  { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Compensation" },
+  { href: "/admin/cashbook", label: "Cashbook", icon: <Wallet className="h-4 w-4" />, module: "expenses", section: "Compensation" },
+  { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches", section: "Workplace" },
+  { href: "/admin/performance", label: "Performance", icon: <ClipboardList className="h-4 w-4" />, module: "performance", section: "Workplace" },
+  { href: "/admin/helpdesk", label: "Helpdesk", icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk", section: "Workplace" },
+  { href: "/admin/policies", label: "Policies", icon: <ScrollText className="h-4 w-4" />, module: "policies", section: "Workplace" },
+  { href: "/employee/feed", label: "Org Feed", icon: <Megaphone className="h-4 w-4" />, module: "feed", section: "Workplace" },
+  { href: "/admin/assets", label: "Assets", icon: <Package className="h-4 w-4" />, module: "assets", section: "Workplace" },
+  { href: "/admin/reports", label: "Reports", icon: <BarChart3 className="h-4 w-4" />, module: "reports", section: "Reports" },
+  { href: "/admin/ai", label: "Ask AI", icon: <Sparkles className="h-4 w-4" />, module: "ai", section: "Reports" },
+  { href: "/admin/devices", label: "Device inventory", icon: <Fingerprint className="h-4 w-4" />, module: "devices", section: "Devices" },
+  { href: "/admin/device-health", label: "Device health", icon: <MonitorCheck className="h-4 w-4" />, module: "platform", section: "Devices" },
+  { href: "/admin/configuration/company-settings", label: "Settings", match: ["/admin/settings", "/admin/configuration"], icon: <Settings className="h-4 w-4" />, section: "Settings & integrations" },
+  { href: "/admin/webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" />, module: "platform", section: "Settings & integrations" },
+  { href: "/admin/whatsapp", label: "WhatsApp", icon: <MessageSquareText className="h-4 w-4" />, module: "platform", section: "Settings & integrations" },
+  { href: "/admin/audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" />, section: "Settings & integrations" },
+];
+
+const payrollPages: NavItem[] = [
+  { href: "/admin/payroll", label: "Monthly payroll", icon: <Banknote className="size-4" />, exact: true },
+  { href: "/admin/payroll/queue", label: "Payroll work queue", icon: <ListChecks className="size-4" /> },
+  { href: "/admin/payroll/variance", label: "Payroll history & reports", icon: <BarChart3 className="size-4" /> },
+  { href: "/admin/payroll/salary-revisions", label: "Salary changes", icon: <HandCoins className="size-4" /> },
+  { href: "/admin/payroll/configuration", label: "Payroll settings", icon: <Settings className="size-4" /> },
 ];
 
 function employeeNav(lang: Lang): NavItem[] {
   return [
-    { href: "/employee", label: t(lang, "nav.myDashboard"), icon: <LayoutDashboard className="h-4 w-4" />, exact: true },
-    { href: "/employee/attendance", label: t(lang, "nav.attendance"), icon: <CalendarClock className="h-4 w-4" />, module: "attendance" },
-    { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" /> },
-    { href: "/employee/onboarding", label: t(lang, "nav.onboarding"), icon: <UserCheck className="h-4 w-4" />, module: "onboarding" },
-    { href: "/employee/exits", label: t(lang, "nav.exits"), icon: <DoorOpen className="h-4 w-4" />, module: "exit" },
-    { href: "/employee/leaves", label: t(lang, "nav.leaves"), icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves" },
-    { href: "/employee/payslips", label: t(lang, "nav.payslips"), icon: <Banknote className="h-4 w-4" />, module: "payroll" },
-    { href: "/employee/tax", label: t(lang, "nav.taxDeclarations"), icon: <BadgePercent className="h-4 w-4" />, module: "payroll" },
-    { href: "/employee/expenses", label: t(lang, "nav.expenses"), icon: <Receipt className="h-4 w-4" />, module: "expenses" },
-    { href: "/employee/documents", label: t(lang, "nav.documents"), icon: <FileText className="h-4 w-4" />, module: "documents" },
-    { href: "/employee/performance", label: t(lang, "nav.performance"), icon: <ClipboardList className="h-4 w-4" />, module: "performance" },
-    { href: "/employee/helpdesk", label: t(lang, "nav.helpdesk"), icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk" },
-    { href: "/employee/feed", label: t(lang, "nav.feed"), icon: <Megaphone className="h-4 w-4" />, module: "feed" },
-    { href: "/employee/policies", label: t(lang, "nav.policies"), icon: <ScrollText className="h-4 w-4" />, module: "policies" },
+    { href: "/employee", label: t(lang, "nav.myDashboard"), icon: <LayoutDashboard className="h-4 w-4" />, exact: true, section: "Personal" },
+    { href: "/employee/profile", label: t(lang, "nav.myProfile"), icon: <Users className="h-4 w-4" />, section: "Personal" },
+    { href: "/employee/attendance", label: t(lang, "nav.attendance"), icon: <CalendarClock className="h-4 w-4" />, module: "attendance", section: "Time & leave" },
+    { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, module: "attendance", section: "Time & leave" },
+    { href: "/employee/onboarding", label: t(lang, "nav.onboarding"), icon: <UserCheck className="h-4 w-4" />, module: "onboarding", section: "Personal" },
+    { href: "/employee/exits", label: t(lang, "nav.exits"), icon: <DoorOpen className="h-4 w-4" />, module: "exit", section: "Personal" },
+    { href: "/employee/leaves", label: t(lang, "nav.leaves"), icon: <CalendarCheck2 className="h-4 w-4" />, module: "leaves", section: "Time & leave" },
+    { href: "/employee/payslips", label: t(lang, "nav.payslips"), icon: <Banknote className="h-4 w-4" />, module: "payroll", section: "Pay & claims" },
+    { href: "/employee/tax", label: t(lang, "nav.taxDeclarations"), icon: <BadgePercent className="h-4 w-4" />, module: "payroll", section: "Pay & claims" },
+    { href: "/employee/expenses", label: t(lang, "nav.expenses"), icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Pay & claims" },
+    { href: "/employee/documents", label: t(lang, "nav.documents"), icon: <FileText className="h-4 w-4" />, module: "documents", section: "Workplace" },
+    { href: "/employee/performance", label: t(lang, "nav.performance"), icon: <ClipboardList className="h-4 w-4" />, module: "performance", section: "Personal" },
+    { href: "/employee/helpdesk", label: t(lang, "nav.helpdesk"), icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk", section: "Workplace" },
+    { href: "/employee/feed", label: t(lang, "nav.feed"), icon: <Megaphone className="h-4 w-4" />, module: "feed", section: "Workplace" },
+    { href: "/employee/policies", label: t(lang, "nav.policies"), icon: <ScrollText className="h-4 w-4" />, module: "policies", section: "Workplace" },
   ];
 }
 
@@ -126,7 +138,6 @@ function Brand() {
       <div className="flex h-9 items-center rounded-[10px] bg-card px-2.5 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.18)] dark:bg-white">
         <img src="/logo.png" alt="PeopleNexa logo" width={110} height={22} className="h-[22px] w-auto" />
       </div>
-      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Workspace</span>
     </div>
   );
 }
@@ -137,7 +148,7 @@ function Brand() {
  * Render an identical placeholder on both, then swap to the live date after
  * mount so the first client pass always matches the server HTML.
  */
-function TopbarDate() {
+function TopbarDate({ region }: { region: WorkspaceRegion }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
@@ -146,19 +157,20 @@ function TopbarDate() {
     return (
       <div
         aria-hidden="true"
-        className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 backdrop-blur md:flex"
+        className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 backdrop-blur xl:flex"
       >
         <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
         <span className="inline-block h-3 w-28 animate-pulse rounded bg-muted" />
       </div>
     );
   }
+  const dateKey = dateKeyInTimeZone(now, region.timeZone);
   return (
-    <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur md:flex">
+    <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur xl:flex">
       <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
-      <span className="font-medium capitalize">{relativeDay(now)}</span>
+      <span className="font-medium">Today</span>
       <span aria-hidden="true" className="text-muted-foreground/50">•</span>
-      <span>{toDateKey(now)}</span>
+      <time dateTime={dateKey}>{formatCalendarDate(dateKey, region.locale)}</time>
     </div>
   );
 }
@@ -166,42 +178,41 @@ function TopbarDate() {
 function NavLinks({
   items,
   onNavigate,
-  canManagePayrollPolicy = false,
 }: {
   items: NavItem[];
   onNavigate?: () => void;
-  canManagePayrollPolicy?: boolean;
 }) {
   const pathname = usePathname();
-  const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  useEffect(() => {
     try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("peoplenexa-nav-collapsed") : null;
-      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+      const raw = localStorage.getItem("peoplenexa-nav-collapsed");
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) setCollapsed(saved);
     } catch {
-      return {};
+      // Navigation remains expanded when storage is unavailable.
     }
-  });
+    setPreferencesLoaded(true);
+  }, []);
 
   useEffect(() => {
+    if (!preferencesLoaded) return;
     try {
       localStorage.setItem("peoplenexa-nav-collapsed", JSON.stringify(collapsed));
     } catch {
       // ignore storage errors
     }
-  }, [collapsed]);
+  }, [collapsed, preferencesLoaded]);
 
-  const sections = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q ? items.filter((i) => i.label.toLowerCase().includes(q)) : items;
-    return filtered.reduce<{ label: string; items: NavItem[] }[]>((groups, item) => {
-      const label = item.section ?? "More";
-      const existing = groups.find((group) => group.label === label);
-      if (existing) existing.items.push(item);
-      else groups.push({ label, items: [item] });
-      return groups;
-    }, []);
-  }, [items, query]);
+  const groups = new Map<string, NavItem[]>();
+  for (const item of items) {
+    const label = item.section ?? "Other";
+    const entries = groups.get(label) ?? [];
+    entries.push(item);
+    groups.set(label, entries);
+  }
+  const sections = [...groups].map(([label, entries]) => ({ label, items: entries }));
 
   // Auto-expand the section containing the active route so keyboard/scroll users can reach it.
   useEffect(() => {
@@ -218,38 +229,20 @@ function NavLinks({
       setCollapsed((prev) => ({ ...prev, [activeSection.label]: false }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, [pathname, preferencesLoaded]);
 
   const isActive = (item: NavItem) =>
     item.exact
       ? pathname === item.href
       : item.match
         ? item.match.some((m) => pathname === m || pathname.startsWith(m + "/"))
-        : pathname.startsWith(item.href);
+        : (pathname === item.href || pathname.startsWith(item.href + "/"));
 
   return (
     <div>
-      <div className="sticky top-0 z-10 bg-sidebar/95 pb-2 pt-1 backdrop-blur">
-        <label htmlFor="sidebar-search" className="sr-only">
-          Filter navigation
-        </label>
-        <input
-          id="sidebar-search"
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter…"
-          className="h-9 w-full rounded-[10px] border border-input bg-card px-3 text-[13px] text-foreground transition-colors duration-200 placeholder:text-muted-foreground/60 hover:border-primary/30 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-        />
-      </div>
       <nav aria-label="Primary" className="space-y-3 pb-2">
-        {sections.length === 0 && (
-          <p role="status" className="px-3 py-4 text-[12.5px] text-muted-foreground">
-            No matches for “{query}”.
-          </p>
-        )}
         {sections.map((section) => {
-          const isCollapsed = Boolean(collapsed[section.label]) && !query.trim();
+          const isCollapsed = Boolean(collapsed[section.label]);
           const hasActive = section.items.some(isActive);
           return (
             <div key={section.label}>
@@ -260,7 +253,7 @@ function NavLinks({
                 className="mb-1 flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70 transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
               >
                 <span className="truncate">
-                  {section.label} <span className="ml-1 font-normal opacity-70">({section.items.length})</span>
+                  {section.label}
                   {hasActive && <span className="sr-only"> — contains current page</span>}
                 </span>
                 <ChevronDown
@@ -294,7 +287,6 @@ function NavLinks({
                         {item.label}
                         {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
                       </Link>
-                       {item.href === "/admin/payroll" && pathname.startsWith("/admin/payroll") && <div className="ml-6 mt-1 space-y-0.5 border-l border-edge pl-2"><PayrollNavLink href="/admin/payroll" label="Monthly payroll" active={pathname === "/admin/payroll"} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/variance" label="History & reports" active={pathname.startsWith("/admin/payroll/variance")} onNavigate={onNavigate} /><PayrollNavLink href="/admin/payroll/salary-revisions" label="Salary changes" active={pathname.startsWith("/admin/payroll/salary-revisions")} onNavigate={onNavigate} />{canManagePayrollPolicy && <PayrollNavLink href="/admin/payroll/configuration" label="Payroll settings" active={pathname.startsWith("/admin/payroll/configuration")} onNavigate={onNavigate} />}</div>}
                       </div>
                     );
                   })}
@@ -308,27 +300,14 @@ function NavLinks({
   );
 }
 
-function PayrollNavLink({ href, label, active, onNavigate }: { href: string; label: string; active: boolean; onNavigate?: () => void }) {
-  return <Link href={href} onClick={onNavigate} aria-current={active ? "page" : undefined} className={cn("flex min-h-8 items-center rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors", active ? "bg-teal-700 text-white dark:bg-teal-400 dark:text-slate-950" : "text-muted-foreground hover:bg-primary/[0.06] hover:text-foreground")}>{label}</Link>;
-}
-
-export interface LocationTreeBranch {
-  id: string;
-  name: string;
-}
-
-export interface LocationTree {
-  id: string;
-  name: string;
-  branches: LocationTreeBranch[];
-}
-
 export function Shell({
   role,
   name,
   companyName,
   lang = "en",
   enabledModules,
+  region,
+  loginOnly = false,
   children,
 }: {
   role: string;
@@ -336,7 +315,8 @@ export function Shell({
   companyName: string;
   lang?: Lang;
   enabledModules?: string[];
-  locationTree?: LocationTree[];
+  region: WorkspaceRegion;
+  loginOnly?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -346,25 +326,61 @@ export function Shell({
   const toast = useToast();
 
   const moduleSet = new Set(enabledModules ?? []);
-  // Branch managers run the branch portal AND still punch as employees: they
-  // keep scoped admin pages plus their own clock + Face ID enrollment.
-  // (/employee routes pass the proxy for any active session; the clock and
-  // enrollment APIs are self-scoped by session.sub, so no privilege leaks.)
-  const branchManagerNav: NavItem[] = [
-    ...adminNav.filter((n) => n.href === "/admin" || n.href === "/admin/attendance" || n.href === "/admin/regularization" || n.href === "/admin/employees" || n.href === "/admin/leaves"),
-    { href: "/employee", label: "My Punch", icon: <Fingerprint className="h-4 w-4" />, module: "attendance", section: "Self service", exact: true },
-    { href: "/employee/face-id", label: "Face ID", icon: <ScanFace className="h-4 w-4" />, section: "Self service" },
-  ];
-  const locationManagerNav: NavItem[] = [
-    ...adminNav.filter((n) => !["/admin/locations", "/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/settings", "/admin/configuration", "/admin/audit"].includes(n.href)),
-  ];
-  const allNav = role === "admin" ? adminNav : role === "branch_manager" ? branchManagerNav : role === "location_manager" ? locationManagerNav : role === "supervisor" ? adminNav.filter((n) => n.href === "/admin/attendance" || n.href === "/admin/regularization") : employeeNav(lang);
-  const nav = allNav.filter((n) => !n.module || moduleSet.has(n.module));
   const isAdmin = role === "admin";
+  const canManage = isAdmin || role === "branch_manager" || role === "location_manager" || role === "supervisor";
+  const selfService = pathname === "/employee" || pathname.startsWith("/employee/");
+  const managementHome = role === "supervisor" ? "/admin/attendance" : "/admin";
+  const branchRoutes = new Set(["/admin", "/admin/approvals", "/admin/attendance", "/admin/regularization", "/admin/employee-master", "/admin/leaves"]);
+  const locationHidden = new Set(["/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/configuration/company-settings", "/admin/audit"]);
+  const supervisorRoutes = new Set(["/admin/approvals", "/admin/attendance", "/admin/regularization"]);
+  const approvalModules = isAdmin || role === "location_manager" ? ["attendance", "leaves", "expenses", "exit"]
+    : role === "branch_manager" ? ["attendance", "leaves"] : ["attendance"];
+  const canSeeApprovals = canManage && approvalModules.some((module) => moduleSet.has(module));
+  const managementNav = !canManage ? [] : adminNav.filter(({ href }) => {
+    if (href === "/admin/approvals" && !canSeeApprovals) return false;
+    if (role === "branch_manager") return branchRoutes.has(href);
+    if (role === "location_manager") return !locationHidden.has(href);
+    if (role === "supervisor") return supervisorRoutes.has(href);
+    return true;
+  }).map((item) => role === "location_manager" && item.href === "/admin/policies" ? { ...item, href: "/employee/policies" } : item);
+  const enabledNav = (items: NavItem[]) => items.filter((item) => !item.module || moduleSet.has(item.module));
+  const personalNav = enabledNav(employeeNav(lang));
+  const teamNav = enabledNav(managementNav);
+  const nav = canManage && !selfService ? teamNav : personalNav;
+  const hasPayroll = teamNav.some((item) => item.href === "/admin/payroll");
+  const canManagePayrollPolicy = isAdmin && hasPayroll;
+  const payrollDestinations = hasPayroll
+    ? payrollPages.filter((item) => canManagePayrollPolicy || item.href !== "/admin/payroll/configuration").map((item) => ({ ...item, section: "Payroll" }))
+    : [];
+  const settingsDestinations = isAdmin
+    ? [
+        { href: "/admin/configuration?section=dashboard", label: "Dashboard layouts", icon: <LayoutDashboard className="size-4" />, section: "Settings & integrations" },
+        { href: "/admin/settings", label: "Connections and notifications", icon: <Settings className="size-4" />, section: "Settings & integrations" },
+      ]
+    : [];
+  const launcherPages = [...new Map([...nav, ...teamNav, ...personalNav, ...payrollDestinations, ...settingsDestinations].map((item) => [
+    item.href, { ...item, group: item.section },
+  ])).values()];
+  const actions: WorkspaceDestination[] = [
+    ...(canSeeApprovals ? [{ href: "/admin/approvals", label: "Review pending requests", description: "Team administration", icon: <ListChecks className="size-4" /> }] : []),
+    ...(teamNav.some((item) => item.href === "/admin/regularization") ? [{ href: "/admin/regularization?view=corrections", label: "Review attendance corrections", description: "Team attendance", icon: <Wrench className="size-4" /> }] : []),
+    ...(teamNav.some((item) => item.href === "/admin/leaves") ? [{ href: "/admin/leaves?review=approvals", label: "Review leave requests", description: "Team time off", icon: <CalendarCheck2 className="size-4" /> }] : []),
+    ...(teamNav.some((item) => item.href === "/admin/devices") ? [{ href: "/admin/devices?service=direct&action=add", label: "Add a direct device", description: "Register an attendance terminal", icon: <Fingerprint className="size-4" /> }] : []),
+    ...((isAdmin || role === "location_manager") && moduleSet.has("employees") ? [{ href: "/admin/employee-master?action=create", label: "Add an employee", description: "Employee directory", icon: <Users className="size-4" /> }] : []),
+    ...(!loginOnly && moduleSet.has("leaves") ? [{ href: "/employee/leaves?action=apply", label: "Request leave", description: "Personal time off", icon: <CalendarCheck2 className="size-4" /> }] : []),
+    ...(!loginOnly && moduleSet.has("attendance") ? [{ href: "/employee/attendance?view=today", label: "Clock in or out", description: "Today's attendance", icon: <Clock3 className="size-4" /> }] : []),
+    ...(!loginOnly && moduleSet.has("attendance") ? [{ href: "/employee/attendance?view=corrections&action=request", label: "Request an attendance correction", description: "Personal attendance", icon: <CalendarClock className="size-4" /> }] : []),
+    ...(!loginOnly && moduleSet.has("expenses") ? [{ href: "/employee/expenses?action=new", label: "Submit an expense claim", description: "Personal expenses", icon: <Plus className="size-4" /> }] : []),
+  ];
 
-  const current = nav.find((n) =>
-    n.exact ? pathname === n.href : n.match ? n.match.some((m) => pathname === m || pathname.startsWith(m + "/")) : pathname.startsWith(n.href)
-  );
+  const current = nav.find((item) => {
+    if (item.exact) return pathname === item.href;
+    return (item.match ?? [item.href]).some((path) => pathname === path || pathname.startsWith(path + "/"));
+  });
+
+  const servicePages = current?.section && current.href !== "/admin/payroll" && ["People", "Compensation", "Reports", "Devices"].includes(current.section)
+    ? nav.filter((item) => item.section === current.section)
+    : [];
 
   const logout = async () => {
     try {
@@ -389,13 +405,18 @@ export function Shell({
         aria-label="Workspace navigation"
         tabIndex={0}
       >
-        <div className="mb-3 mt-3 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-            {isAdmin ? "Admin workspace" : t(lang, "nav.employeePortal")}
-          </p>
-          <p className="mt-1 truncate text-[13px] font-semibold text-foreground">{companyName}</p>
+        <div className="mb-4 mt-3 rounded-xl border border-edge bg-card p-2.5">
+          <p className="px-1 pb-2 pt-0.5 text-sm font-semibold text-foreground truncate">{companyName}</p>
+          {canManage && (
+            <nav aria-label="Workspace mode" className="grid grid-cols-2 gap-1 rounded-lg bg-tint p-1 text-xs font-medium">
+              <Link href="/employee" onClick={() => setOpen(false)} aria-current={selfService ? "true" : undefined}
+                className={cn("rounded-md px-2 py-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", selfService ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>My work</Link>
+              <Link href={managementHome} onClick={() => setOpen(false)} aria-current={!selfService ? "true" : undefined}
+                className={cn("rounded-md px-2 py-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !selfService ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>Manage</Link>
+            </nav>
+          )}
         </div>
-        <NavLinks items={nav} canManagePayrollPolicy={isAdmin} onNavigate={() => setOpen(false)} />
+        <NavLinks key={selfService ? "self" : "management"} items={nav} onNavigate={() => setOpen(false)} />
       </div>
       <div className="shrink-0 border-t border-edge/60 p-3">
         <div className="card-surface rounded-xl border-primary/10 bg-card/70 p-3 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.4)] backdrop-blur-xl">
@@ -427,9 +448,9 @@ export function Shell({
   }, [open ]);
 
   return (
-    <div className="min-h-screen">
+    <div className="portal-workspace min-h-screen">
       {/* Desktop sidebar — fixed full-height flex column so inner nav can scroll */}
-      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-sidebar backdrop-blur-xl lg:flex">
+      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-[var(--workspace-sidebar)] lg:flex">
         {sidebar}
       </aside>
 
@@ -441,7 +462,7 @@ export function Shell({
             role="dialog"
             aria-modal="true"
             aria-label="Workspace navigation"
-            className="absolute inset-y-0 left-0 flex h-full w-72 max-w-[85vw] animate-fade-in flex-col border-r border-edge bg-sidebar"
+            className="absolute inset-y-0 left-0 flex h-full w-72 max-w-[85vw] animate-fade-in flex-col border-r border-edge bg-[var(--workspace-sidebar)]"
           >
             <button
               onClick={() => setOpen(false)}
@@ -468,14 +489,15 @@ export function Shell({
             <Menu aria-hidden="true" className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-              <p aria-hidden="true" className="truncate font-display text-[17px] font-bold tracking-[-0.015em]">
-              {current?.label ?? "Dashboard"}
-            </p>
+            {current?.section && <p className="hidden truncate text-[11px] font-medium text-muted-foreground md:block">{current.section}</p>}
+            <p className="truncate font-display text-[16px] font-semibold tracking-tight">{current?.label ?? (selfService ? "My work" : "Workspace")}</p>
           </div>
+
+          <WorkspaceLauncher actions={actions} pages={launcherPages} />
 
           <NotificationsBell />
 
-          <TopbarDate />
+          <TopbarDate region={region} />
 
           <ThemeToggle />
           <div className="hidden sm:block">
@@ -523,6 +545,18 @@ export function Shell({
             )}
           </div>
         </header>
+        {servicePages.length > 1 && (
+          <nav aria-label={`${current?.section} pages`} className="flex gap-3 overflow-x-auto border-b border-edge bg-card px-4 sm:gap-5 sm:px-7">
+            {servicePages.map((item) => (
+              <Link key={item.href} href={item.href} aria-current={item === current ? "page" : undefined}
+                className={cn("flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm",
+                  item === current ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
 
         <main className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9">{children}</main>
       </div>

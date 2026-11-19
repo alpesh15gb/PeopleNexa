@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { askAi } from "@/lib/ai";
 
 /** POST — ask a natural-language question over the tenant's data. */

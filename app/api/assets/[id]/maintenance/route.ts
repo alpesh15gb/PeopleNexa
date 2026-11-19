@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const description = String(body.description ?? "").trim();
   const type = String(body.type ?? "service").trim();
   const status = String(body.status ?? "completed").trim();
-  const cost = body.cost === undefined || body.cost === "" ? null : Number(body.cost);
+  const cost = body.cost == null || body.cost === "" ? null : Number(body.cost);
   const performedAt = body.performedAt ? new Date(String(body.performedAt)) : new Date();
   const nextDueDate = body.nextDueDate ? new Date(String(body.nextDueDate)) : null;
   if (!description) return NextResponse.json({ error: "Maintenance description is required." }, { status: 400 });
@@ -38,28 +38,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Enter valid maintenance dates." }, { status: 400 });
   }
 
-  const [record] = await prisma.$transaction([
-    prisma.assetMaintenance.create({
+  if (cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+    return NextResponse.json({ error: "Enter a valid maintenance cost." }, { status: 400 });
+  }
+  const record = await prisma.$transaction(async (tx) => {
+    const changed = await tx.asset.updateMany({
+      where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}), status: { in: ["available", "maintenance"] }, assignments: { none: { returnedAt: null } } },
+      data: { status: status === "completed" ? "available" : "maintenance", maintenanceDue: nextDueDate },
+    });
+    if (!changed.count) return null;
+    return tx.assetMaintenance.create({
       data: {
         assetId: asset.id,
         type,
         description,
         provider: body.provider ? String(body.provider).trim() : null,
-        cost: Number.isFinite(cost) ? cost : null,
+        cost,
         performedAt,
         nextDueDate,
         status,
         notes: body.notes ? String(body.notes).trim() : null,
         createdBy: session.sub,
       },
-    }),
-    prisma.asset.update({
-      where: { id: asset.id },
-      data: {
-        status: status === "completed" ? "available" : "maintenance",
-        maintenanceDue: nextDueDate,
-      },
-    }),
-  ]);
+    });
+  });
+  if (!record) return NextResponse.json({ error: "Return the asset before recording maintenance, or refresh its current status." }, { status: 409 });
   return NextResponse.json({ success: true, record }, { status: 201 });
 }

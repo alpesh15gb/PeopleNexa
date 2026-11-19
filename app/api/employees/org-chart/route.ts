@@ -1,15 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 /** GET — flat employee list with manager links for the org chart. */
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "active" },
+    where: { tenantId: session.tenantId, status: "active", loginOnly: false },
     select: {
       id: true,
       firstName: true,

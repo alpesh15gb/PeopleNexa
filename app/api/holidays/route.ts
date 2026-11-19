@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey, todayKey } from "@/lib/dates";
+import { optionalDateInput } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone } from "@/lib/workspace-time";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const holidays = await prisma.holiday.findMany({
-    where: { tenantId: session.tenantId },
-    orderBy: { date: "asc" },
-  });
-  const today = todayKey();
-  const upcoming = holidays.filter((h) => fromDateKey(todayKey()) <= h.date).length;
+  const [tenant, holidays] = await Promise.all([
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+    prisma.holiday.findMany({ where: { tenantId: session.tenantId }, orderBy: { date: "asc" } }),
+  ]);
+  const { timeZone } = workspaceRegion(tenant?.config);
+  const today = dateKeyInTimeZone(new Date(), timeZone);
+  const upcoming = holidays.filter((holiday) => holiday.isRecurring || istDateKey(holiday.date) >= today).length;
 
   return NextResponse.json({ holidays, upcoming });
 }
@@ -27,8 +31,8 @@ export async function POST(req: NextRequest) {
     if (!body.name || !body.date) {
       return NextResponse.json({ error: "Name and date are required." }, { status: 400 });
     }
-    const date = fromDateKey(body.date);
-    if (isNaN(date.getTime())) {
+    const date = optionalDateInput(body.date);
+    if (!date || date === "invalid") {
       return NextResponse.json({ error: "Invalid date. Use YYYY-MM-DD." }, { status: 400 });
     }
     const holiday = await prisma.holiday.create({
@@ -63,8 +67,8 @@ export async function PUT(req: NextRequest) {
     let skipped = 0;
     for (const row of rows) {
       const name = String(row.name ?? "").trim();
-      const date = row.date ? fromDateKey(String(row.date)) : null;
-      if (!name || !date || isNaN(date.getTime())) {
+      const date = optionalDateInput(row.date);
+      if (!name || !date || date === "invalid") {
         skipped++;
         continue;
       }

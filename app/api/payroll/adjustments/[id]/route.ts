@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { EXPENSE_REIMBURSEMENT_PREFIX } from "@/lib/expense-reimbursement";
 
 /** DELETE — remove a manual adjustment (admin). */
 export async function DELETE(
@@ -39,6 +40,7 @@ export async function DELETE(
       { error: "Adjustment not found." },
       { status: 404 },
     );
+  if (adjustment.label.startsWith(EXPENSE_REIMBURSEMENT_PREFIX)) return NextResponse.json({ error: "This reimbursement is linked to an approved expense claim." }, { status: 409 });
   try {
     return await prisma.$transaction(
       async (tx) => {

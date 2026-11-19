@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { parseIST } from "../lib/ist";
 import { istDateKey } from "../lib/ist";
 import { buildStatusMatrix, buildDeviceMonthly, buildPerformance, buildDeviceDaily, buildWorkSummary } from "../lib/device-report";
+import { parseShiftWeeklyOffDays, shiftWeeklyOffDays } from "../lib/shift-weekly-offs";
 
 const month = "2026-02";
 const start = parseIST(`${month}-01 00:00:00`)!;
-const days = new Date(Date.UTC(2026, 2, 0)).getDate();
+const days = new Date(Date.UTC(2026, 2, 0)).getUTCDate();
 const keys = Array.from({ length: days }, (_, n) => istDateKey(new Date(start.getTime() + n * 86400000)));
 assert.equal(keys.length, 28);
 assert.equal(keys[0], "2026-02-01");
@@ -41,6 +42,11 @@ const workingShift = { ...offShift, name: "Seven days", sundayWeeklyOff: false }
 const base = { tenant: { name: "Company" }, branch: null, department: null, month,
   employees: [{ id: "e", employeeNumber: "E", firstName: "Test", lastName: "Employee", position: null, shift: workingShift }],
   records: [], punchesByDay: new Map(), leaves: new Set<string>(), holidays: new Set<string>() };
+assert.deepEqual(parseShiftWeeklyOffDays([6, 5, 6]), [5, 6]);
+assert.deepEqual(parseShiftWeeklyOffDays([]), []);
+assert.equal(parseShiftWeeklyOffDays(["6"]), null);
+assert.equal(parseShiftWeeklyOffDays([7]), null);
+assert.deepEqual(shiftWeeklyOffDays({ weeklyOffDays: [6], sundayWeeklyOff: true }), [0, 6]);
 assert.equal(buildStatusMatrix(base).blocks[0].days[0].status, "A", "Sunday is not automatically a weekly off");
 assert.equal(buildStatusMatrix({ ...base, employees: [{ ...base.employees[0], shift: null }] }).blocks[0].totals.weekOff, 0, "unassigned employees have no assumed weekly off");
 assert.equal(buildStatusMatrix({ ...base, rosterShifts: new Map([["e|2026-02-01", offShift]]) }).blocks[0].days[0].status, "WO", "Sunday roster uses its own weekly-off setting");
@@ -58,6 +64,14 @@ assert.equal(performance.totals.wo, 1);
 assert.equal(performance.totals.absent, 27);
 assert.equal(buildDeviceDaily({ ...scheduled, day: "2026-02-01" }).rows[0].status, "WO");
 assert.equal(buildDeviceDaily({ ...base, day: "2026-02-01" }).rows[0].status, "A");
+const fridaySaturday = { ...workingShift, weeklyOffDays: [5, 6] };
+const weekend = { ...base, employees: [{ ...base.employees[0], shift: fridaySaturday }] };
+assert.equal(buildStatusMatrix(weekend).blocks[0].days[0].status, "A");
+assert.equal(buildStatusMatrix(weekend).blocks[0].totals.weekOff, 8);
+assert.equal(buildDeviceMonthly(weekend).blocks[0].summary.weeklyOffs, 8);
+assert.equal(buildPerformance(weekend).blocks[0].totals.wo, 8);
+assert.equal(buildDeviceDaily({ ...weekend, day: "2026-02-07" }).rows[0].status, "WO");
+assert.equal(buildDeviceDaily({ ...weekend, day: "2026-02-07", rosterShifts: new Map([["e|2026-02-07", workingShift]]) }).rows[0].status, "A");
 assert.match(buildWorkSummary({ ...scheduled, runBy: "Admin", generatedAt: "Test" }).blocks[0].rows[0].shift, /Sunday off/);
 const workedSunday = { ...scheduled, records: [{ ...sundayRecord, status: "present", punchInTime: parseIST("2026-02-01 09:00:00"), punchOutTime: parseIST("2026-02-01 18:00:00") }], holidays: new Set(["2026-02-01"]) };
 assert.equal(buildDeviceMonthly(workedSunday).blocks[0].days[0].status, "P", "worked holidays remain present in monthly attendance");

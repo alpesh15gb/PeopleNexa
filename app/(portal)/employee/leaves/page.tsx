@@ -5,20 +5,24 @@ import { requireSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader } from "@/components/ui/card";
-import { Card, CardContent } from "@/components/ui/card";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone } from "@/lib/workspace-time";
 import { LeavesPanel } from "./leaves-panel";
+import { leaveCancellationHistory } from "@/lib/leave-request-history";
+import { resolveLeavePolicy } from "@/lib/leave-policy";
 import {
   calculateLeaveBalance,
   importedLeaveOpening,
-  selectLeaveAllocation,
   policyHasUnlimitedEntitlement,
 } from "@/lib/leave-balance";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmployeeLeavesPage() {
+export default async function EmployeeLeavesPage({ searchParams }: {
+  searchParams: Promise<{ view?: string; range?: string; action?: string }>;
+}) {
   const session = await requireSession();
-  const lang = await getLang();
+  const [lang, query] = await Promise.all([getLang(), searchParams]);
 
   const [types, requests, employee] = await Promise.all([
     prisma.leaveType.findMany({
@@ -32,27 +36,36 @@ export default async function EmployeeLeavesPage() {
     }),
     prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
-      select: { locationId: true, branch: { select: { locationId: true } } },
+      select: { locationId: true, status: true, loginOnly: true, branch: { select: { locationId: true } }, tenant: { select: { config: true } } },
     }),
   ]);
-  await prisma.$transaction(
-    (tx) => refreshEarnedLeaveBalances(tx, session.tenantId, [session.sub]),
-    { isolationLevel: "Serializable" },
-  );
-  const [policyBalances, importedBalances] = await Promise.all([
+  let balanceRefreshPending = false;
+  if (employee && !employee.loginOnly && employee.status === "active") {
+    try {
+      await prisma.$transaction((tx) => refreshEarnedLeaveBalances(tx, session.tenantId, [session.sub]), { isolationLevel: "Serializable" });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "P2034") throw error;
+      balanceRefreshPending = true;
+    }
+  }
+  const region = workspaceRegion(employee?.tenant.config);
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const policyDate = configurationEffectiveAtISTDay(new Date(`${today}T00:00:00Z`));
+  const locationId = employee?.branch?.locationId ?? employee?.locationId ?? null;
+  const [policyBalances, policyRecords, importedBalances, cancellationHistory] = await Promise.all([
     prisma.leavePolicyBalance.findMany({
       where: {
         tenantId: session.tenantId,
         employeeId: session.sub,
         policyPeriod: {
-          effectiveFrom: { lte: configurationEffectiveAtISTDay(new Date()) },
+          effectiveFrom: { lte: policyDate },
           AND: [
             {
               OR: [
                 { effectiveTo: null },
                 {
                   effectiveTo: {
-                    gte: configurationEffectiveAtISTDay(new Date()),
+                    gte: policyDate,
                   },
                 },
               ],
@@ -60,8 +73,7 @@ export default async function EmployeeLeavesPage() {
             {
               OR: [
                 {
-                  locationId:
-                    employee?.branch?.locationId ?? employee?.locationId ?? "",
+                  locationId,
                 },
                 { locationId: null },
               ],
@@ -69,7 +81,10 @@ export default async function EmployeeLeavesPage() {
           ],
         },
       },
-      include: { policyPeriod: { select: { locationId: true } } },
+      include: { policyPeriod: { select: { configurationId: true, effectiveFrom: true, effectiveTo: true } } },
+    }),
+    prisma.configurationRecord.findMany({
+      where: { tenantId: session.tenantId, kind: "leave_policy", active: true },
     }),
     prisma.leaveBalanceImportEntry.findMany({
       where: {
@@ -79,23 +94,13 @@ export default async function EmployeeLeavesPage() {
       },
       orderBy: { periodEnd: "desc" },
     }),
+    leaveCancellationHistory(session.tenantId, requests.filter((request) => request.status === "approved" || request.status === "cancelled").map((request) => request.id)),
   ]);
 
-  const usedByType = new Map<string, number>();
-  for (const r of requests) {
-    if (r.status === "approved" || r.status === "pending") {
-      usedByType.set(
-        r.leaveTypeId,
-        (usedByType.get(r.leaveTypeId) ?? 0) + r.days,
-      );
-    }
-  }
-
   const balance = types.map((t) => {
-    const allocated = selectLeaveAllocation(
-      policyBalances,
-      t.id,
-      employee?.branch?.locationId ?? employee?.locationId,
+    const policy = resolveLeavePolicy(policyRecords, locationId, policyDate, t.code);
+    const allocated = policy && policyBalances.find((item) =>
+      item.leaveTypeId === t.id && item.policyPeriod.configurationId === policy.configurationId,
     );
     const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
     const policyRequests = allocated
@@ -134,11 +139,11 @@ export default async function EmployeeLeavesPage() {
       pending,
       unlimitedEntitlement,
     }).available;
+    const rules = allocated ? policy.rules : null;
     return {
       id: t.id,
       name: t.name,
       code: t.code,
-      maxDays: entitlement,
       color: t.color,
       opening: allocated ? 0 : (imported?.openingBalance ?? 0),
       credited: allocated
@@ -151,12 +156,27 @@ export default async function EmployeeLeavesPage() {
         ? "Current policy-period allocation"
         : imported
           ? `Imported snapshot through ${imported.periodEnd.toISOString().slice(0, 7)}`
-          : t.maxDays === null || t.maxDays === 0
-            ? "No annual maximum; balance accrues or is imported"
+          : unlimitedEntitlement
+            ? "Unlimited entitlement"
+            : t.maxDays === null || t.maxDays === 0
+              ? "No fixed allowance. Days are available when credited by policy or import."
             : "Leave type allowance",
-      policyPeriodId: allocated?.policyPeriodId ?? null,
+      policy: {
+        requiresApproval: rules?.requiresApproval ?? t.requiresApproval,
+        requiresReason: rules?.requiresReason ?? false,
+        allowsHalfDay: rules?.allowsHalfDay ?? false,
+        dayCounting: rules?.dayCounting ?? "legacy" as const,
+        noticeDays: rules?.noticeDays ?? 0,
+        minServiceDays: rules?.minServiceDays ?? 0,
+        maxConsecutiveDays: rules?.maxConsecutiveDays ?? null,
+        effectiveFrom: allocated?.policyPeriod.effectiveFrom.toISOString().slice(0, 10) ?? null,
+        effectiveTo: allocated?.policyPeriod.effectiveTo?.toISOString().slice(0, 10) ?? null,
+      },
     };
   });
+
+  const view = query.view === "requests" ? "requests" : "summary";
+  const range = query.range === "past" || query.range === "upcoming" ? query.range : "all";
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -164,7 +184,19 @@ export default async function EmployeeLeavesPage() {
         title={t(lang, "leaves.title")}
         description={t(lang, "leaves.desc")}
       />
-      <LeavesPanel balance={balance} requests={requests} lang={lang} />
+      {balanceRefreshPending && view === "summary" && <p role="status" className="text-sm text-muted-foreground">You are viewing the last saved balance. Refresh to check for newer accruals.</p>}
+      <LeavesPanel
+        key={query.action === "apply" ? "apply" : "leave"}
+        balance={balance}
+        requests={requests.map((request) => ({ ...request, cancellationDecision: cancellationHistory.get(request.id) }))}
+        lang={lang}
+        locale={region.locale}
+        today={today}
+        view={view}
+        range={range}
+        canApply={!!employee && employee.status === "active" && !employee.loginOnly && balance.length > 0}
+        openOnLoad={query.action === "apply"}
+      />
     </div>
   );
 }

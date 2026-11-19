@@ -29,7 +29,7 @@ type Review = {
 
 const statusTone: Record<string, "warning" | "info" | "success"> = { draft: "warning", self_done: "info", completed: "success" };
 
-export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; reviews: Review[]; employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[] }) {
+export function PerformancePanel({ kpis, reviews, employees, canManageKpis, actorId }: { canManageKpis: boolean; actorId: string; kpis: Kpi[]; reviews: Review[]; employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[] }) {
   const router = useRouter();
   const toast = useToast();
   const [tab, setTab] = useState<"reviews" | "kpis">("reviews");
@@ -149,7 +149,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
       if (confirmTarget.kind === "kpi") {
         const res = await fetch(`/api/performance/kpis/${confirmTarget.id}`, { method: "DELETE" });
         if (res.ok) {
-          toast("success", "KPI deleted.");
+          toast("success", "KPI retired.");
           router.refresh();
         } else toast("error", "Failed");
       } else {
@@ -166,6 +166,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
   }
 
   const pending = reviews.filter((r) => r.status !== "completed").length;
+  const readOnly = scoring?.status === "completed" || scoring?.employee.id === actorId;
 
   return (
     <div className="space-y-6">
@@ -179,30 +180,30 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
           </button>
         </div>
         {tab === "reviews" ? (
-          <Button size="sm" onClick={() => setCreatingReview(true)}><Plus className="h-3.5 w-3.5" /> Start review</Button>
+          <Button size="sm" disabled={!employees.length || !kpis.some((kpi) => kpi.enabled)} onClick={() => setCreatingReview(true)}><Plus className="h-3.5 w-3.5" /> Start review</Button>
         ) : (
-          <Button size="sm" onClick={() => setAddingKpi(true)}><Plus className="h-3.5 w-3.5" /> Add KPI</Button>
+          canManageKpis && <Button size="sm" onClick={() => setAddingKpi(true)}><Plus className="h-3.5 w-3.5" /> Add KPI</Button>
         )}
       </div>
 
       {tab === "kpis" ? (
         kpis.length === 0 ? (
-          <EmptyState icon={<Target className="h-5 w-5" />} title="No KPIs yet" description="Create measurable KPIs to use in review cycles." />
+          <EmptyState icon={<Target className="h-5 w-5" />} title="No KPIs yet" description={canManageKpis ? "Create a KPI to start a review." : "Ask an administrator to create a KPI for your team."} />
         ) : (
           <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
             {kpis.map((k) => (
               <div key={k.id} className="flex items-center gap-3 px-5 py-4">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13.5px] font-medium">{k.name}</p>
+                  <p className="text-[13.5px] font-medium">{k.name}{!k.enabled && <span className="ml-2 text-xs text-muted-foreground">Retired</span>}</p>
                   <p className="text-[11.5px] text-muted-foreground">{k.description ?? "—"} · {k.category}</p>
                 </div>
-                <Button size="icon" variant="ghost" onClick={() => deleteKpi(k.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
+                {canManageKpis && k.enabled && <Button size="icon" variant="ghost" aria-label={`Retire ${k.name}`} onClick={() => deleteKpi(k.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>}
               </div>
             ))}
           </div>
         )
       ) : reviews.length === 0 ? (
-        <EmptyState icon={<ClipboardList className="h-5 w-5" />} title="No reviews yet" description="Start a review cycle for an employee — they self-score, you complete it, peers give 360° feedback." />
+        <EmptyState icon={<ClipboardList className="h-5 w-5" />} title="No reviews yet" description="Start an employee review to collect a self-assessment, peer feedback, and a manager assessment." />
       ) : (
         <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
           {reviews.map((r) => (
@@ -219,7 +220,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
               <div className="flex items-center gap-2.5">
                 <Badge tone={statusTone[r.status] ?? "neutral"} className="capitalize">{r.status.replace("_", " ")}</Badge>
                 <Button size="sm" variant="outline" onClick={() => openScoring(r)}>
-                  {r.status === "completed" ? "View" : "Score"}
+                  {r.status === "completed" || r.employee.id === actorId ? "View" : "Score"}
                 </Button>
                 <Button size="icon" variant="ghost" onClick={() => deleteReview(r.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
               </div>
@@ -258,7 +259,7 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
           </label>
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Period</span>
-            <input value={rform.period} onChange={(e) => setRform({ ...rform, period: e.target.value })} required placeholder="e.g. Q3 2026" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+            <input value={rform.period} onChange={(e) => setRform({ ...rform, period: e.target.value })} required placeholder="e.g. Annual review" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
           </label>
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Due date</span>
@@ -275,6 +276,8 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
       <Modal open={Boolean(scoring)} onClose={() => setScoring(null)} title={scoring ? `${scoring.employee.firstName} ${scoring.employee.lastName} — ${scoring.period}` : ""} size="md">
         {scoring && (
           <form onSubmit={submitManager} className="space-y-4">
+            {scoring.employee.id === actorId && scoring.status !== "completed" && <p className="text-sm text-muted-foreground">Another authorized reviewer must complete your assessment.</p>}
+            <fieldset disabled={readOnly} className="space-y-4">
             <div className="space-y-2.5">
               {scoring.scores.map((s) => (
                 <div key={s.id} className="rounded-xl bg-tint p-3">
@@ -306,9 +309,10 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
                 {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} / 5</option>)}
               </select>
             </label>
+            </fieldset>
             <div className="flex justify-end gap-2 pt-1">
-              <Button type="button" variant="ghost" onClick={() => setScoring(null)}>Cancel</Button>
-              <Button type="submit" loading={busy}>Complete review</Button>
+              <Button type="button" variant="ghost" onClick={() => setScoring(null)}>{readOnly ? "Close" : "Cancel"}</Button>
+              {!readOnly && <Button type="submit" loading={busy}>Complete review</Button>}
             </div>
           </form>
         )}
@@ -316,9 +320,9 @@ export function PerformancePanel({ kpis, reviews, employees }: { kpis: Kpi[]; re
 
       <ConfirmDialog
         open={confirmTarget !== null}
-        title={confirmTarget?.kind === "kpi" ? "Delete KPI?" : "Delete review?"}
-        description={confirmTarget?.kind === "kpi" ? "Delete this KPI? Existing scores will be removed." : "Delete this review cycle? This action cannot be undone."}
-        confirmLabel="Delete"
+        title={confirmTarget?.kind === "kpi" ? "Retire KPI?" : "Delete review?"}
+        description={confirmTarget?.kind === "kpi" ? "Retired KPIs stay in existing reviews and are omitted from new reviews." : "Delete this review cycle? This action cannot be undone."}
+        confirmLabel={confirmTarget?.kind === "kpi" ? "Retire" : "Delete"}
         busy={confirmBusy}
         onCancel={() => {
           if (!confirmBusy) setConfirmTarget(null);

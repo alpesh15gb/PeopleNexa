@@ -121,12 +121,17 @@ function authArgs(profile: EbioserverProfile): { UserName: string; Password: str
 async function call<T>(client: SoapClient, method: string, args: Record<string, unknown>): Promise<T> {
   const fn = client[method + "Async"] as ((a: Record<string, unknown>) => Promise<[T, unknown, unknown]>) | undefined;
   if (typeof fn !== "function") throw new Error(`SOAP method ${method} not found in WSDL`);
-  return Promise.race([
-    fn(args).then(([result]) => result),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${method} timed out`)), CALL_TIMEOUT_MS)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(args).then(([result]) => result),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${method} timed out`)), CALL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Response parsing (real eBioserver formats) ─────────────────────────────
@@ -985,10 +990,11 @@ export async function enforceEbioEmployeeAccess(
   for (const device of devices) {
     // Write the desired state before touching the device so a failed call can
     // never leave the database reporting unrestricted access.
+    const lastCommandAt = new Date();
     await prisma.employeeDeviceAccess.upsert({
       where: { employeeId_deviceId: { employeeId: employee.id, deviceId: device.id } },
-      create: { tenantId, employeeId: employee.id, deviceId: device.id, allowed, commandStatus: "pending", lastError: null, lastResponse: null },
-      update: { allowed, commandStatus: "pending", lastError: null, lastResponse: null },
+      create: { tenantId, employeeId: employee.id, deviceId: device.id, allowed, commandStatus: "pending", lastCommandAt, lastError: null, lastResponse: null },
+      update: { allowed, commandStatus: "pending", lastCommandAt, lastError: null, lastResponse: null },
     });
 
     const deviceCode = employee.deviceCode;

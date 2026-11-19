@@ -16,7 +16,7 @@ export default async function EmployeeOnboardingPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="My Onboarding"
-        description="Welcome aboard 🎉 — work through your first-day checklist"
+        description="Review your onboarding tasks and mark them complete."
       />
       <Card>
         <CardContent className="p-0">

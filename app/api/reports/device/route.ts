@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
       firstName: true,
       lastName: true,
       position: true,
-      shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } },
+      shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } },
       department: { select: { name: true } },
     },
     orderBy: { employeeNumber: "asc" },
@@ -192,7 +192,7 @@ export async function GET(req: NextRequest) {
         punchInTime: true,
         punchOutTime: true,
         punches: true,
-        shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } },
+        shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } },
       },
       orderBy: { date: "asc" },
     }),
@@ -225,7 +225,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.rosterAssignment.findMany({
       where: { tenantId: session.tenantId, employeeId: { in: pageIds }, date: { gte: rangeStart, lt: rangeEnd } },
-      select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true } } },
+      select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } } },
     }),
   ]);
 

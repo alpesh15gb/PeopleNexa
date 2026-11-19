@@ -1,39 +1,90 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isDateKey } from "@/lib/dates";
+import { validateTransferDestination } from "@/lib/employee-transfer";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
-import { fromDateKey } from "@/lib/dates";
-import { appendAudit } from "@/lib/audit";
-
-async function locationScope(session: { role: string; sub: string; tenantId: string }) {
-  if (session.role !== "location_manager") return {};
-  const locationId = (await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } }))?.locationId;
-  return locationId ? { branch: { locationId } } : { branch: { locationId: "__none__" } };
-}
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const scope = await locationScope(session);
-  const transfers = await prisma.employeeTransfer.findMany({ where: { tenantId: session.tenantId, employee: scope }, include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } }, orderBy: [{ effectiveDate: "desc" }, { createdAt: "desc" }] });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "No location assigned." }, { status: 403 });
+  const transfers = await prisma.employeeTransfer.findMany({
+    where: { tenantId: session.tenantId, ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
+    include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
+    orderBy: [{ effectiveDate: "desc" }, { createdAt: "desc" }],
+  });
   return NextResponse.json({ transfers });
 }
 
 export async function POST(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => ({}));
-  const employeeId = String(body.employeeId ?? ""); const destinationBranchId = String(body.destinationBranchId ?? ""); const reason = String(body.reason ?? "").trim(); const effectiveDate = fromDateKey(String(body.effectiveDate ?? ""));
-  if (!employeeId || !destinationBranchId || !reason || Number.isNaN(effectiveDate.getTime())) return NextResponse.json({ error: "Employee, destination branch, reason, and effective date are required." }, { status: 400 });
-  const scope = await locationScope(session);
-  const [employee, branch] = await Promise.all([prisma.employee.findFirst({ where: { id: employeeId, tenantId: session.tenantId, ...scope } }), prisma.branch.findFirst({ where: { id: destinationBranchId, tenantId: session.tenantId } })]);
-  if (!employee || !branch) return NextResponse.json({ error: "Employee or destination branch was not found in your scope." }, { status: 404 });
-  if (session.role === "location_manager" && branch.locationId !== (await prisma.employee.findFirst({ where: { id: session.sub }, select: { locationId: true } }))?.locationId) return NextResponse.json({ error: "Destination branch must be in your assigned location." }, { status: 403 });
-  if (employee.branchId === branch.id) return NextResponse.json({ error: "Employee is already assigned to this branch." }, { status: 400 });
-  const openExit = await prisma.exitRequest.findFirst({ where: { tenantId: session.tenantId, employeeId, status: { in: ["pending", "approved"] } } });
-  if (openExit) return NextResponse.json({ error: "Resolve the employee's open exit request before scheduling a transfer." }, { status: 400 });
-  const existing = await prisma.employeeTransfer.findFirst({ where: { tenantId: session.tenantId, employeeId, status: "scheduled" } });
-  if (existing) return NextResponse.json({ error: "This employee already has a scheduled transfer." }, { status: 400 });
-  const transfer = await prisma.employeeTransfer.create({ data: { tenantId: session.tenantId, employeeId, sourceBranchId: employee.branchId, sourceDepartmentId: employee.departmentId, sourceShiftId: employee.shiftId, sourceManagerId: employee.managerId, destinationBranchId: branch.id, destinationDepartmentId: body.destinationDepartmentId ? String(body.destinationDepartmentId) : employee.departmentId, destinationShiftId: body.destinationShiftId ? String(body.destinationShiftId) : employee.shiftId, destinationManagerId: body.destinationManagerId ? String(body.destinationManagerId) : employee.managerId, destinationPosition: body.destinationPosition ? String(body.destinationPosition).trim() : employee.position, effectiveDate, reason, note: body.note ? String(body.note).trim() : null, requestedBy: session.sub } });
-  await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "transfer.schedule", entity: "EmployeeTransfer", entityId: transfer.id, summary: `${employee.firstName} ${employee.lastName} transfer scheduled`, after: { employeeId, sourceBranchId: employee.branchId, destinationBranchId: branch.id, effectiveDate: effectiveDate.toISOString() } });
-  return NextResponse.json({ transfer }, { status: 201 });
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "No location assigned." }, { status: 403 });
+  const body = await request.json().catch(() => null);
+  const employeeId = String(body?.employeeId ?? "").trim();
+  const branchId = String(body?.destinationBranchId ?? "").trim();
+  const reason = String(body?.reason ?? "").trim();
+  const note = String(body?.note ?? "").trim() || null;
+  const position = String(body?.destinationPosition ?? "").trim();
+  const date = String(body?.effectiveDate ?? "");
+  if (!employeeId || !branchId || !reason || !isDateKey(date)) {
+    return NextResponse.json({ error: "Employee, destination branch, reason and a valid effective date are required." }, { status: 400 });
+  }
+  if (reason.length > 2000 || (note?.length ?? 0) > 2000 || position.length > 100) {
+    return NextResponse.json({ error: "Use up to 2,000 characters for the reason and note, and 100 for the position." }, { status: 400 });
+  }
+  const tenantId = session.tenantId;
+  const effectiveDate = new Date(`${date}T00:00:00Z`);
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.findFirst({
+        where: { id: employeeId, tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
+        select: { id: true, branchId: true, departmentId: true, shiftId: true, managerId: true, loginOnly: true, status: true, role: true },
+      });
+      if (!employee) return { error: "Employee was not found in your scope.", status: 404 } as const;
+      if (employee.loginOnly || employee.status !== "active") return { error: "Select an active staff employee for transfer.", status: 400 } as const;
+      if (locationId && ["admin", "branch_manager", "location_manager"].includes(employee.role)) return { error: "Only workspace administrators can transfer manager accounts.", status: 403 } as const;
+      if (employee.branchId === branchId) return { error: "Employee is already assigned to this branch.", status: 400 } as const;
+
+      const departmentId = String(body.destinationDepartmentId ?? "").trim() || employee.departmentId;
+      const shiftId = String(body.destinationShiftId ?? "").trim() || employee.shiftId;
+      const managerId = String(body.destinationManagerId ?? "").trim() || employee.managerId;
+      const destination = await validateTransferDestination(tx, { employeeId, tenantId, managerLocationId: locationId, branchId, departmentId, shiftId, managerId });
+      if (destination.error) return { error: destination.error, status: destination.status } as const;
+
+      const [openExit, existing] = await Promise.all([
+        tx.exitRequest.findFirst({ where: { tenantId, employeeId, status: { in: ["pending", "approved"] } }, select: { id: true } }),
+        tx.employeeTransfer.findFirst({ where: { tenantId, employeeId, status: "scheduled" }, select: { id: true } }),
+      ]);
+      if (openExit) return { error: "Resolve the employee's open exit request before scheduling a transfer.", status: 409 } as const;
+      if (existing) return { error: "This employee already has a scheduled transfer.", status: 409 } as const;
+
+      const transfer = await tx.employeeTransfer.create({ data: {
+        tenantId, employeeId,
+        sourceBranchId: employee.branchId,
+        sourceDepartmentId: employee.departmentId,
+        sourceShiftId: employee.shiftId,
+        sourceManagerId: employee.managerId,
+        destinationBranchId: branchId,
+        destinationDepartmentId: departmentId,
+        destinationShiftId: shiftId,
+        destinationManagerId: managerId,
+        destinationPosition: position || null,
+        effectiveDate, reason, note, requestedBy: session.sub,
+      } });
+      await tx.auditLog.create({ data: {
+        tenantId, actorId: session.sub, actorRole: session.role, action: "transfer.schedule", entity: "EmployeeTransfer", entityId: transfer.id,
+        summary: "Scheduled employee transfer", after: { employeeId, sourceBranchId: employee.branchId, destinationBranchId: branchId, effectiveDate: date },
+      } });
+      return { transfer } as const;
+    }, { isolationLevel: "Serializable" });
+    if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ transfer: result.transfer }, { status: 201 });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2034") return NextResponse.json({ error: "Employee assignments changed. Refresh and try again." }, { status: 409 });
+    throw error;
+  }
 }

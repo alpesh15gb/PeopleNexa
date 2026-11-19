@@ -13,6 +13,8 @@ import {
 } from "@/lib/payroll-runs";
 import { payrollRunPreflight } from "@/lib/payroll-preflight";
 import { payrollOperationLocationId } from "@/lib/location-scope";
+import { canApprovePayrollRun } from "@/lib/payroll-work-queue";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 import {
   reverseLoanDeductionAllocations,
   type LoanDeductionAllocation,
@@ -82,7 +84,7 @@ export async function PATCH(
             { error: `Cannot move a ${run.status} run directly to ${target}.` },
             { status: 409 },
           );
-        if (target === "approved" && run.createdBy === session.sub)
+        if (target === "approved" && !canApprovePayrollRun(run.createdBy, session.sub))
           return NextResponse.json(
             { error: "The run creator cannot approve their own payroll run." },
             { status: 403 },
@@ -288,7 +290,7 @@ export async function PATCH(
   } catch (error) {
     if (error instanceof ManualPayrollError) return NextResponse.json({ error: error.message, sourceIssues: [error.message] }, { status: 409 });
     if (
-      (error as { code?: string })?.code === "P2034" ||
+      isTransactionWriteConflict(error) ||
       (error instanceof Error && error.message === "PAYROLL_RUN_CONFLICT")
     )
       return NextResponse.json(

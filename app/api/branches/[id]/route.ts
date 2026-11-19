@@ -97,6 +97,11 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   if (branch.isDefault) {
     return NextResponse.json({ error: "The default branch cannot be deleted." }, { status: 400 });
   }
-  await prisma.branch.delete({ where: { id } });
+  const changed = await prisma.branch.deleteMany({ where: {
+    id, tenantId: session.tenantId, isDefault: false,
+    ...(manager?.locationId ? { locationId: manager.locationId } : {}),
+    employees: { none: {} }, attendance: { none: {} }, devices: { none: {} },
+  } });
+  if (!changed.count) return NextResponse.json({ error: "Move current assignments and retain branches with attendance history." }, { status: 409 });
   return NextResponse.json({ success: true });
 }

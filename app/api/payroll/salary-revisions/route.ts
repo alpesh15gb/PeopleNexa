@@ -228,6 +228,9 @@ export async function PATCH(request: NextRequest) {
           action === "cancel" &&
           ["draft", "submitted", "approved"].includes(revision.status)
         ) {
+          if (revision.status === "approved" && session.role !== "admin") {
+            return NextResponse.json({ error: "Only an administrator can cancel an approved salary change." }, { status: 403 });
+          }
           const next = await tx.salaryRevision.updateMany({
             where: { id, tenantId: session.tenantId, status: revision.status },
             data: {

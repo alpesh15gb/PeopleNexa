@@ -1,287 +1,173 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, Banknote, FileText, Download } from "lucide-react";
+import { ArrowUpRight, Banknote, Download, FileText } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusPill } from "@/components/ui/badge";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/ui/stat";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
-import { formatMoney } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/stat";
+import type { PayslipComponent, PayslipDocumentSnapshot } from "@/lib/payslip-document";
 import { t, type Lang } from "@/lib/i18n";
 
 interface Payslip {
   id: string;
   month: string;
   status: string;
-  document: {
-    days: { payable: number; paid: number; lop: number };
-    components: {
-      label: string;
-      category: string;
-      earned: number;
-      visibleOnPayslip: boolean;
-    }[];
-    totals: { gross: number; deductions: number; net: number };
-  };
+  totals: PayslipDocumentSnapshot["totals"];
+  details: { name: string; days: PayslipDocumentSnapshot["days"]; components: PayslipComponent[] } | null;
 }
 
-export function PayslipsPanel({
-  payslips,
-  name,
-  lang = "en",
-}: {
-  payslips: Payslip[];
-  name: string;
-  lang?: Lang;
-}) {
+const states = {
+  finalized: { label: "Payment pending", tone: "info", explanation: "Your payslip is ready. Payroll has yet to record payment." },
+  paid: { label: "Paid", tone: "success", explanation: "Payroll has recorded payment." },
+  reversed: { label: "Reversed", tone: "warning", explanation: "Payroll reversed this statement. Check this period for a replacement or contact payroll." },
+} as const;
+
+function statementState(status: string) {
+  return states[status as keyof typeof states] ?? states.finalized;
+}
+
+export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Payslip[]; locale: string; lang?: Lang }) {
   const [viewing, setViewing] = useState<Payslip | null>(null);
   const [year, setYear] = useState("all");
-  const sorted = [...payslips].sort((a, b) => b.month.localeCompare(a.month));
-  const visible = sorted.filter(
-    (p) => year === "all" || p.month.startsWith(year),
-  );
-  const latest = sorted[0];
-  const download = (p: Payslip) => {
-    window.location.href = `/api/payroll/payslips?id=${encodeURIComponent(p.id)}&month=${encodeURIComponent(p.month)}`;
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState("");
+  const formatter = new Intl.NumberFormat(locale, { style: "currency", currency: "INR" });
+  const periodFormatter = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" });
+  const monthLabel = (month: string) => {
+    const date = new Date(month + "-01T00:00:00Z");
+    return Number.isNaN(date.getTime()) ? month : periodFormatter.format(date);
   };
+  const money = (value: number) => formatter.format(value);
+  const latest = payslips[0];
+  const years = [...new Set(payslips.map(({ month }) => month.slice(0, 4)))];
+  const visible = payslips.filter(({ month }) => year === "all" || month.startsWith(year + "-"));
 
-  if (payslips.length === 0) {
+  async function download(payslip: Payslip) {
+    if (downloading || payslip.status === "reversed") return;
+    setDownloading(payslip.id);
+    setDownloadError("");
+    try {
+      const params = new URLSearchParams({ scope: "personal", id: payslip.id, month: payslip.month });
+      const response = await fetch("/api/payroll/payslips?" + params);
+      if (!response.ok || !response.headers.get("Content-Type")?.startsWith("application/pdf")) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error ?? "Could not download this payslip. Try again.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "payslip-" + payslip.month + ".pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Could not download this payslip. Try again.");
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  function openDetails(payslip: Payslip) {
+    setDownloadError("");
+    setViewing(payslip);
+  }
+
+  if (!latest) {
     return (
-      <EmptyState
-        icon={<FileText className="h-5 w-5" />}
-        title={t(lang, "payslips.none")}
-        description={t(lang, "payslips.noneDesc")}
-      />
+      <Card>
+        <EmptyState icon={<FileText className="size-5" />} title={t(lang, "payslips.none")} description="Your payslip appears here when payroll finalizes it. Contact your payroll team if a statement is missing." />
+      </Card>
     );
   }
 
+  const latestState = statementState(latest.status);
   return (
     <>
-      <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5">
+      <section aria-labelledby="latest-payslip" className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
-          <p className="text-xs font-medium text-muted-foreground">
-            Latest payslip · {latest.month}
-          </p>
-          <p className="mt-2 text-3xl font-semibold tabular-nums">
-            {formatMoney(latest.document.totals.net)}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t(lang, "payslips.netPay")} ·{" "}
-            {latest.status === "paid"
-              ? t(lang, "payslips.disbursed")
-              : "Finalized · payment pending"}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="latest-payslip" className="font-semibold">{monthLabel(latest.month)} payslip</h2>
+            <Badge tone={latestState.tone}>{latestState.label}</Badge>
+          </div>
+          <p className="mt-3 font-display text-3xl font-semibold tabular-nums">{money(latest.totals.net)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{latest.status === "reversed" ? "Original net pay" : t(lang, "payslips.netPay")} · {latestState.explanation}</p>
         </div>
-        <Button variant="outline" onClick={() => download(latest)}>
-          <Download aria-hidden="true" className="h-4 w-4" />
-          Download PDF
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => openDetails(latest)}>View details <ArrowUpRight aria-hidden="true" className="size-4" /></Button>
+          {latest.status !== "reversed" && <Button onClick={() => download(latest)} loading={downloading === latest.id} disabled={downloading !== null}>
+            <Download aria-hidden="true" className="size-4" /> Download PDF
+          </Button>}
+        </div>
       </section>
-      <div className="flex flex-wrap items-center justify-between gap-3 p-5">
-        <h2 className="font-semibold">Payslip history</h2>
-        <Field label="Year">
-          <Select
-            value={year}
-            onChange={(event) => setYear(event.target.value)}
-          >
-            <option value="all">All years</option>
-            {[...new Set(sorted.map((p) => p.month.slice(0, 4)))].map(
-              (value) => (
-                <option key={value}>{value}</option>
-              ),
-            )}
-          </Select>
-        </Field>
-      </div>
-      <div className="hidden md:block">
-        <Table>
-          <THead>
-            <TR>
-              <TH>{t(lang, "payslips.month")}</TH>
-              <TH className="text-right">{t(lang, "payslips.base")}</TH>
-              <TH className="text-right">{t(lang, "payslips.netPay")}</TH>
-              <TH>{t(lang, "payslips.status")}</TH>
-              <TH className="w-20" />
-            </TR>
-          </THead>
-          <TBody>
-            {visible.map((p) => (
-              <TR key={p.id}>
-                <TD className="tabular-nums text-[13px] font-medium">{p.month}</TD>
-                <TD className="text-right tabular-nums text-[13px]">
-                  {formatMoney(p.document.totals.gross)}
-                </TD>
-                <TD className="text-right tabular-nums text-[13px] font-semibold">
-                  {formatMoney(p.document.totals.net)}
-                </TD>
-                <TD>
-                  <StatusPill status={p.status} lang={lang} />
-                </TD>
-                <TD>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setViewing(p)}
-                    >
-                      <Eye className="h-3.5 w-3.5" /> {t(lang, "payslips.view")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Download payslip ${p.month}`}
-                      onClick={() => download(p)}
-                    >
-                      <Download aria-hidden="true" className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      </div>
-      <div className="divide-y divide-edge md:hidden">
-        {visible.map((p) => (
-          <article key={p.id} className="p-5">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="font-semibold">{p.month}</h3>
-              <StatusPill status={p.status} lang={lang} />
-            </div>
-            <p className="mt-3 text-2xl font-semibold">
-              {formatMoney(p.document.totals.net)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t(lang, "payslips.netPay")} · Gross{" "}
-              {formatMoney(p.document.totals.gross)}
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setViewing(p)}>
-                <Eye aria-hidden="true" className="h-4 w-4" />
-                {t(lang, "payslips.view")}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => download(p)}>
-                <Download aria-hidden="true" className="h-4 w-4" />
-                PDF
-              </Button>
-            </div>
-          </article>
-        ))}
-      </div>
-      {!visible.length && (
-        <p className="p-8 text-center text-sm text-muted-foreground">
-          No payslips for this year.
-        </p>
-      )}
-
-      <Modal
-        open={viewing !== null}
-        onClose={() => setViewing(null)}
-        title={`Payslip · ${viewing?.month ?? ""}`}
-        size="sm"
-      >
-        {viewing && (
-          <div>
-            <div className="flex items-center justify-between border-b border-edge pb-4">
-              <div>
-                <p className="font-display text-[15px] font-semibold">{name}</p>
-                <p className="text-[12px] text-muted-foreground">
-                  {t(lang, "payslips.statement")}
-                </p>
-              </div>
-              <StatusPill status={viewing.status} lang={lang} />
-            </div>
-            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              <span className="rounded-md bg-tint px-2 py-0.5">
-                {viewing.document.days.paid} paid days
-              </span>
-              {viewing.document.days.lop > 0 && (
-                <span className="rounded-md bg-tint px-2 py-0.5">
-                  {viewing.document.days.lop} LOP days
-                </span>
-              )}
-            </div>
-            <h3 className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Earnings
-            </h3>
-            <div className="divide-y divide-[color:var(--border)]">
-              {[
-                ...viewing.document.components.filter(
-                  (component) =>
-                    component.category === "earning" &&
-                    component.visibleOnPayslip,
-                ),
-                {
-                  label: "Gross earnings",
-                  earned: viewing.document.totals.gross,
-                },
-              ].map((r) => (
-                <div
-                  key={r.label}
-                  className="flex items-center justify-between py-2.5 text-[13.5px]"
-                >
-                  <span className="text-muted-foreground">{r.label}</span>
-                  <span className="tabular-nums font-medium">
-                    {formatMoney(r.earned)}
-                  </span>
+      {downloadError && !viewing && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
+      <Card aria-labelledby="payslip-history">
+        <CardHeader className="flex-wrap">
+          <CardTitle id="payslip-history">Payslip history</CardTitle>
+          {years.length > 1 && <Field label="Year">
+            <Select value={year} onChange={(event) => setYear(event.target.value)}>
+              <option value="all">All years</option>
+              {years.map((value) => <option key={value} value={value}>{value}</option>)}
+            </Select>
+          </Field>}
+        </CardHeader>
+        <CardContent className="pt-2">
+          <ul className="divide-y divide-edge">
+            {visible.map((payslip) => (
+              <li key={payslip.id} className="grid min-w-0 gap-3 py-4 sm:grid-cols-[minmax(9rem,1.1fr)_minmax(0,1fr)_auto] sm:items-center">
+                <div>
+                  <h3 className="mb-1 font-medium">{monthLabel(payslip.month)}</h3>
+                  <Badge tone={statementState(payslip.status).tone}>{statementState(payslip.status).label}</Badge>
                 </div>
-              ))}
+                <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums">
+                  <div><dt className="text-xs text-muted-foreground">Gross pay</dt><dd>{money(payslip.totals.gross)}</dd></div>
+                  <div><dt className="text-xs text-muted-foreground">{payslip.status === "reversed" ? "Original net pay" : t(lang, "payslips.netPay")}</dt><dd className="font-semibold">{money(payslip.totals.net)}</dd></div>
+                </dl>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" aria-label={"View payslip for " + monthLabel(payslip.month)} onClick={() => openDetails(payslip)}>View</Button>
+                  {payslip.status !== "reversed" && <Button size="sm" variant="ghost" aria-label={"Download payslip for " + monthLabel(payslip.month)} onClick={() => download(payslip)} loading={downloading === payslip.id} disabled={downloading !== null}><Download aria-hidden="true" className="size-4" /> PDF</Button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+      <Modal open={viewing !== null} onClose={() => { setViewing(null); setDownloadError(""); }} title={viewing ? monthLabel(viewing.month) + " payslip" : ""} size="md">
+        {viewing && (
+          <div className="space-y-5">
+            <div className="flex items-start gap-2 rounded-lg bg-tint px-3 py-2.5 text-sm">
+              <Banknote aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
+              <p>{statementState(viewing.status).explanation}</p>
             </div>
-            <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Deductions
-            </h3>
-            <div className="mt-1 divide-y divide-[color:var(--border)] border-t border-edge pt-1">
-              {viewing.document.components
-                .filter(
-                  (component) =>
-                    component.category === "deduction" &&
-                    component.visibleOnPayslip &&
-                    component.earned > 0,
-                )
-                .map((r) => (
-                  <div
-                    key={r.label}
-                    className="flex items-center justify-between py-2.5 text-[13.5px]"
-                  >
-                    <span className="text-muted-foreground">{r.label}</span>
-                    <span className="tabular-nums font-medium">
-                      − {formatMoney(r.earned)}
-                    </span>
-                  </div>
-                ))}
-              <div className="flex items-center justify-between py-2 text-sm">
-                <span>Total deductions</span>
-                <span className="tabular-nums">
-                  {formatMoney(viewing.document.totals.deductions)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-3">
-                <span className="font-display text-sm font-semibold">
-                  {t(lang, "payslips.netPay")}
-                </span>
-                <span className="font-display text-lg font-bold text-indigo-300">
-                  {formatMoney(viewing.document.totals.net)}
-                </span>
-              </div>
-            </div>
-            <div className="mt-2 flex items-center gap-2 rounded-xl border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12.5px] text-emerald-300">
-              <Banknote className="h-4 w-4" />
-              {viewing.status === "paid"
-                ? t(lang, "payslips.disbursed")
-                : "Finalized · payment pending"}
-            </div>
-            <Button
-              className="mt-3 w-full"
-              variant="outline"
-              onClick={() => {
-                window.location.href = `/api/payroll/payslips?id=${encodeURIComponent(viewing.id)}&month=${encodeURIComponent(viewing.month)}`;
-              }}
-            >
-              <Download className="h-4 w-4" /> Download official PDF
-            </Button>
+            {viewing.details ? (
+              <>
+                <div>
+                  <p className="font-medium">{viewing.details.name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{viewing.details.days.paid} paid days{viewing.details.days.lop > 0 ? " · " + viewing.details.days.lop + " unpaid days" : ""}</p>
+                </div>
+                {viewing.details.components.length > 0 && (
+                  <dl className="divide-y divide-edge border-y border-edge">
+                    {viewing.details.components.map((component) => (
+                      <div key={component.code} className="flex items-center justify-between gap-4 py-2.5 text-sm">
+                        <dt>{component.label}</dt>
+                        <dd className="shrink-0 tabular-nums">{money(component.category === "deduction" ? -component.earned : component.earned)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </>
+            ) : <p className="text-sm text-muted-foreground">This older statement shows the totals recorded at the time.{viewing.status !== "reversed" && " The PDF contains the available breakdown."}</p>}
+            <dl className="space-y-2 text-sm tabular-nums">
+              <div className="flex justify-between gap-3"><dt>Gross pay</dt><dd>{money(viewing.totals.gross)}</dd></div>
+              <div className="flex justify-between gap-3"><dt>Total deductions</dt><dd>{money(viewing.totals.deductions)}</dd></div>
+              <div className="flex justify-between gap-3 border-t border-edge pt-2 text-base font-semibold"><dt>{viewing.status === "reversed" ? "Original net pay" : t(lang, "payslips.netPay")}</dt><dd>{money(viewing.totals.net)}</dd></div>
+            </dl>
+            {downloadError && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
+            {viewing.status !== "reversed" && <Button variant="outline" className="w-full" onClick={() => download(viewing)} loading={downloading === viewing.id} disabled={downloading !== null}><Download aria-hidden="true" className="size-4" /> Download PDF</Button>}
           </div>
         )}
       </Modal>

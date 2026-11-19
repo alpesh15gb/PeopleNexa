@@ -8,6 +8,7 @@ import { requireActiveSession } from "@/lib/session";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { resolveCompanyBranding } from "@/lib/company-branding";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
+import { personalPayslipWhere } from "@/lib/personal-payslips";
 
 export const runtime = "nodejs";
 
@@ -15,18 +16,19 @@ const safeName = (value: string) => value.replace(/[^a-z0-9_-]/gi, "_");
 
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
-  if (!session || !["admin", "location_manager", "employee"].includes(session.role)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const locationId = await managerLocationId(session);
-  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  if (!session || session.role === "superadmin") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const personal = req.nextUrl.searchParams.get("scope") === "personal" || (session.role !== "admin" && session.role !== "location_manager");
+  const locationId = personal ? null : await managerLocationId(session);
+  if (!personal && session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
-  const ids = session.role === "employee" ? [session.sub] : [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
+  const ids = personal ? [] : [...new Set((req.nextUrl.searchParams.get("employeeIds") || "").split(",").filter(Boolean))];
   const slipId = req.nextUrl.searchParams.get("id");
   const runId = req.nextUrl.searchParams.get("runId");
   const [tenant, slips] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
     prisma.payslip.findMany({
-      where: { tenantId: session.tenantId, month, ...(slipId ? { id: slipId } : {}), ...(runId ? { payrollRunId: runId } : {}), ...(ids.length ? { employeeId: { in: ids } } : {}), ...(session.role === "employee" ? { status: { in: ["finalized", "paid"] } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
+      where: { ...(personal ? personalPayslipWhere(session.tenantId, session.sub, false) : { tenantId: session.tenantId }), month, ...(slipId ? { id: slipId } : {}), ...(runId ? { payrollRunId: runId } : {}), ...(ids.length ? { employeeId: { in: ids } } : {}), ...(locationId ? { employee: employeeLocationScope(locationId) } : {}) },
       include: { employee: { select: { employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, department: { select: { name: true } }, bankName: true, accountNumber: true, ifscCode: true, pan: true, uan: true, esiIpNumber: true, branch: { select: { location: { select: { profile: true } } } }, location: { select: { profile: true } } } } },
       orderBy: { employee: { employeeNumber: "asc" } },
     }),
@@ -57,22 +59,24 @@ export async function GET(req: NextRequest) {
         }),
       };
     }
-    const snapshot = slip.status === "finalized" || slip.status === "paid"
+    const archived = slip.status === "finalized" || slip.status === "paid";
+    const snapshot = archived
       ? (slip.inputSnapshot as { employee?: { employeeNumber?: string; firstName?: string; lastName?: string; position?: string | null; joiningDate?: string | Date | null; departmentName?: string | null; pan?: string | null; uan?: string | null }; bank?: { bankName?: string | null; accountNumber?: string | null; ifscCode?: string | null } } | null)
       : null;
-    const employee = snapshot?.employee ? {
+    const employee = archived ? {
       ...slip.employee,
-      employeeNumber: snapshot.employee.employeeNumber ?? slip.employee.employeeNumber,
-      firstName: snapshot.employee.firstName ?? slip.employee.firstName,
-      lastName: snapshot.employee.lastName ?? slip.employee.lastName,
-      position: snapshot.employee.position ?? slip.employee.position,
-      joiningDate: snapshot.employee.joiningDate ? new Date(snapshot.employee.joiningDate) : slip.employee.joiningDate,
-      department: snapshot.employee.departmentName ? { name: snapshot.employee.departmentName } : slip.employee.department,
-      bankName: snapshot.bank?.bankName ?? slip.employee.bankName,
-      accountNumber: snapshot.bank?.accountNumber ?? slip.employee.accountNumber,
-      ifscCode: snapshot.bank?.ifscCode ?? slip.employee.ifscCode,
-      pan: snapshot.employee.pan ?? slip.employee.pan,
-      uan: snapshot.employee.uan ?? slip.employee.uan,
+      employeeNumber: snapshot?.employee?.employeeNumber ?? slip.employee.employeeNumber,
+      firstName: snapshot?.employee?.firstName ?? slip.employee.firstName,
+      lastName: snapshot?.employee?.lastName ?? slip.employee.lastName,
+      position: snapshot?.employee?.position ?? slip.employee.position,
+      joiningDate: snapshot?.employee?.joiningDate ? new Date(snapshot.employee.joiningDate) : slip.employee.joiningDate,
+      department: snapshot?.employee?.departmentName ? { name: snapshot.employee.departmentName } : slip.employee.department,
+      bankName: snapshot?.bank?.bankName ?? null,
+      accountNumber: snapshot?.bank?.accountNumber ?? null,
+      ifscCode: snapshot?.bank?.ifscCode ?? null,
+      pan: snapshot?.employee?.pan ?? null,
+      uan: snapshot?.employee?.uan ?? null,
+      esiIpNumber: null,
     } : slip.employee;
     return {
       name: `${safeName(employee.employeeNumber)}-${month}.pdf`,
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
   if (slips.length === 1) {
     try {
       const pdf = await renderPdf(slips[0]);
-      return new NextResponse(new Uint8Array(pdf.data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdf.name}"` } });
+      return new NextResponse(new Uint8Array(pdf.data), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdf.name}"`, "Cache-Control": "private, no-store" } });
     } catch (error) {
       console.error("Unable to generate payslip PDF", { tenantId: session.tenantId, employeeNumber: slips[0].employee.employeeNumber, error });
       return NextResponse.json({ error: "Unable to generate the requested payslip." }, { status: 500 });

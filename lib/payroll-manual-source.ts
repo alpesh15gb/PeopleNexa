@@ -4,6 +4,13 @@ import { istDateKey } from "./ist";
 
 export class ManualPayrollError extends Error {}
 
+export function validateManualPayrollSource(source: ReturnType<typeof manualAttendanceSource>, payMode: string | null | undefined, deductAbsentDays: boolean) {
+  if (payMode === "hourly") throw new ManualPayrollError("Manual day marks cannot be used for hourly payroll.");
+  const { absentDays, unpaidLeaveDays, halfDays, paidLeaveDays } = source.summary;
+  if (source.format === "standard" && paidLeaveDays && payMode && payMode !== "monthly") throw new ManualPayrollError("Paid leave in the workbook requires monthly pay.");
+  if (!deductAbsentDays && (absentDays || unpaidLeaveDays || halfDays)) throw new ManualPayrollError("Publish a payroll policy with unpaid-day deduction enabled before using unpaid attendance marks.");
+}
+
 export async function resolveManualPayrollSource(db: Prisma.TransactionClient, tenantId: string, locationId: string | null | undefined, month: string, uploadId: string, employeeId: string) {
   const upload = await db.payrollAttendanceImport.findFirst({ where: { id: uploadId, tenantId, locationId: locationId ?? "", month, reviewedAt: { not: null } } });
   const rows = upload?.reviewedRows as unknown as ReviewedAttendanceRow[] | null;
@@ -15,7 +22,13 @@ export async function resolveManualPayrollSource(db: Prisma.TransactionClient, t
   const marks = row.marks.filter((_, day) => !joiningDay || `${month}-${String(day + 1).padStart(2, "0")}` >= joiningDay);
   if (!marks.length) throw new ManualPayrollError("Employee had not joined in this payroll month.");
   if (employee.joiningDate && row.marks.some((mark, day) => mark && `${month}-${String(day + 1).padStart(2, "0")}` < joiningDay!)) throw new ManualPayrollError("Joining date changed; attendance before joining requires a corrected upload.");
-  return manualAttendanceSource(uploadId, { ...row, marks, workDays: marks.filter(mark => mark === "P" || mark === "OD").length, leaveDays: marks.filter(mark => mark === "L").length, blankDays: marks.filter(mark => !mark).length });
+  return manualAttendanceSource(uploadId, {
+    ...row,
+    marks,
+    workDays: marks.filter(mark => mark === "P" || mark === "OD").length,
+    leaveDays: marks.filter(mark => row.format === "standard" ? mark === "PL" || mark === "UL" : mark === "L").length,
+    blankDays: marks.filter(mark => !mark).length,
+  });
 }
 export function manualUploadId(input: unknown): string | null {
   if (!input || typeof input !== "object") return null;

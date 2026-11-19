@@ -36,8 +36,10 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { payrollPolicyDraft } from "@/lib/configuration";
+import { isMonthKey } from "@/lib/dates";
 import { payrollFieldMappings } from "@/lib/payroll-field-mapping";
 import { workingPolicy } from "@/lib/policy-workspace";
+import { PayrollScheduleComparisonPanel } from "./payroll-schedule-comparison";
 import {
   payrollPolicyEditorDraft,
   payrollScheduleExample,
@@ -128,8 +130,10 @@ export function PayrollConfigurationHub({
   const section = SECTIONS.some((item) => item.key === requestedSection)
     ? (requestedSection as SectionKey)
     : "schedule";
+  const requestedPeriod = searchParams.get("period");
+  const requestedEffectiveFrom = requestedPeriod && isMonthKey(requestedPeriod) ? `${requestedPeriod}-01` : null;
   const [effectiveFrom, setEffectiveFrom] = useState(
-    () => `${todayKey().slice(0, 7)}-01`,
+    () => requestedEffectiveFrom ?? `${todayKey().slice(0, 7)}-01`,
   );
   const selectedLocation =
     locations.find((location) => location.id === selectedScope) ?? null;
@@ -160,9 +164,9 @@ export function PayrollConfigurationHub({
     setEffectiveFrom(
       editableRecord && editableRecord.locationId === selectedLocationId
         ? dateKey(editableRecord.effectiveFrom)
-        : `${todayKey().slice(0, 7)}-01`,
+        : requestedEffectiveFrom ?? `${todayKey().slice(0, 7)}-01`,
     );
-  }, [selectedScope, editableRecord?.id]);
+  }, [selectedScope, editableRecord?.id, requestedEffectiveFrom]);
 
   function replaceQuery(
     values: Partial<{ section: SectionKey; location: string }>,
@@ -306,7 +310,7 @@ export function PayrollConfigurationHub({
       </header>
 
       <div className="mt-4">
-        <PayrollNavigation active="settings" canManageSettings />
+        <PayrollNavigation active="settings" canManageSettings locationId={selectedLocationId} period={effectiveFrom.slice(0, 7)} />
       </div>
       <nav
         aria-label="Payroll policy sections"
@@ -335,6 +339,7 @@ export function PayrollConfigurationHub({
         sourceRecord={editableRecord as PolicyRecord | null}
         selectedLocation={selectedLocation}
         selectedLocationId={selectedLocationId}
+        comparisonLocations={locations}
         effectiveFrom={effectiveFrom}
         records={records}
         organization={organization}
@@ -350,6 +355,7 @@ function PolicyEditor({
   sourceRecord,
   selectedLocation,
   selectedLocationId,
+  comparisonLocations,
   effectiveFrom,
   records,
   organization,
@@ -360,6 +366,7 @@ function PolicyEditor({
   sourceRecord: PolicyRecord | null;
   selectedLocation: Location | null;
   selectedLocationId: string | null;
+  comparisonLocations: Location[];
   effectiveFrom: string;
   records: PolicyRecord[];
   organization: Organization;
@@ -508,6 +515,8 @@ function PolicyEditor({
         <ScheduleSection
           draft={draft}
           effectiveMonth={effectiveFrom.slice(0, 7)}
+          selectedLocationId={selectedLocationId}
+          locations={comparisonLocations}
           errors={errors}
           onChange={change}
         />
@@ -721,11 +730,15 @@ function SectionPanel({
 function ScheduleSection({
   draft,
   effectiveMonth,
+  selectedLocationId,
+  locations,
   errors,
   onChange,
 }: {
   draft: PayrollPolicyEditorDraft;
   effectiveMonth: string;
+  selectedLocationId: string | null;
+  locations: Location[];
   errors: FieldErrors;
   onChange: (draft: PayrollPolicyEditorDraft, clear?: string[]) => void;
 }) {
@@ -947,6 +960,29 @@ function ScheduleSection({
               onChange({ ...draft, deductLossOfPay: checked }, ["form"])
             }
           />
+          <Field
+            label="Weekly-off treatment"
+            hint="Applies to new system-attendance payroll drafts from the effective month above. Existing drafts and completed runs retain their captured treatment."
+          >
+            <Select
+              value={draft.attendanceTreatment.useShiftWeeklyOffs === undefined ? "inherit" : draft.attendanceTreatment.useShiftWeeklyOffs ? "shifts" : "legacy"}
+              onChange={(event) => {
+                const { useShiftWeeklyOffs: _previous, ...treatment } = draft.attendanceTreatment;
+                const value = event.target.value;
+                onChange({ ...draft, attendanceTreatment: value === "inherit" ? treatment : { ...treatment, useShiftWeeklyOffs: value === "shifts" } });
+              }}
+            >
+              <option value="inherit">Use workspace defaults</option>
+              <option value="legacy">Legacy attendance</option>
+              <option value="shifts">Respect shift and roster weekly offs</option>
+            </Select>
+          </Field>
+          <PayrollScheduleComparisonPanel
+            key={`${selectedLocationId ?? "workspace"}:${effectiveMonth}`}
+            locations={locations}
+            selectedLocationId={selectedLocationId}
+            effectiveMonth={effectiveMonth}
+          />
           <details
             className="rounded-lg border border-edge p-4"
             open={errors.noShiftAttendanceWindowHours ? true : undefined}
@@ -1007,7 +1043,7 @@ function ScheduleSection({
               </Field>
               <Field
                 label="No IN and no OUT punch"
-                hint="No-punch days are treated as a full-day LOP by payroll."
+                hint="A workday without punches is treated as a full day of lost pay when deductions apply."
               >
                 <Input value="Deduct full day" readOnly aria-readonly="true" />
               </Field>
@@ -3435,11 +3471,11 @@ function AdvancedSection({
         className="rounded-xl border border-edge bg-card p-4 shadow-sm sm:p-5"
       >
         <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          Register field reference
+          Legacy register field reference
         </summary>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Reference-only mapping for payroll register columns. It does not add
-          settings or change calculations.
+          Use this reference to map fields from the legacy workbook. Current
+          Excel registers use the salary components recorded for each run.
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[...new Set(payrollFieldMappings.map((field) => field.group))].map(

@@ -9,6 +9,7 @@ export async function finalizeManualAttendanceCredits(tx: Prisma.TransactionClie
     const uploadId = manualUploadId(slip.inputSnapshot);
     if (!uploadId) continue;
     const source = await resolveManualPayrollSource(tx, run.tenantId, run.locationId, run.month, uploadId, slip.employeeId);
+    if (source.format === "standard") continue;
     if (source.earnedLeave > 0) {
       const allocations = await tx.leavePolicyBalance.findMany({ where: { tenantId: run.tenantId, employeeId: slip.employeeId, policyPeriod: { effectiveFrom: { lte: new Date(`${run.month}-01T12:00:00Z`) }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date(`${run.month}-01T12:00:00Z`) } }], AND: [{ OR: [{ locationId: null }, { locationId: run.locationId }] }] } }, select: { policySnapshot: true } });
       const ready = allocations.some(allocation => {

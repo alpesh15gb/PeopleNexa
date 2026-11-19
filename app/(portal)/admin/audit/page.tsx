@@ -5,13 +5,17 @@ import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/stat";
 import { AuditFilter } from "./audit-filter";
+import { auditFilters, auditLogPage } from "@/lib/audit-log-query";
+import { recordPageNumber } from "@/lib/document-expense-pagination";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { workspaceRegion } from "@/lib/workspace-region";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ action?: string; entity?: string }>;
+  searchParams: Promise<{ action?: string; entity?: string; q?: string; page?: string }>;
 }) {
   const session = await getSession();
   if (!session || session.role !== "admin") {
@@ -33,19 +37,13 @@ export default async function AdminAuditPage({
     );
   }
 
-  const { action: actionParam, entity: entityParam } = await searchParams;
-  const actionFilter = actionParam?.trim() || "";
-  const entityFilter = entityParam?.trim() || "";
-
-  const rows = await prisma.auditLog.findMany({
-    where: {
-      tenantId: session.tenantId,
-      ...(actionFilter ? { action: actionFilter } : {}),
-      ...(entityFilter ? { entity: entityFilter } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  const params = await searchParams;
+  const filters = auditFilters(params);
+  const [{ rows, pagination }, tenant] = await Promise.all([
+    auditLogPage(session.tenantId, filters, recordPageNumber(params.page) ?? 1),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+  ]);
+  const region = workspaceRegion(tenant?.config);
 
   const entries = await enrichAuditEntries(rows, session.tenantId);
 
@@ -54,15 +52,15 @@ export default async function AdminAuditPage({
       <PageHeader
         title="Audit Log"
         description="Sensitive changes across employees, attendance, leaves, payroll and exits"
-        actions={<AuditFilter action={actionFilter} entity={entityFilter} />}
       />
+      <AuditFilter {...filters} />
       <Card>
         <CardContent className="p-0 pt-0">
           {entries.length === 0 ? (
             <EmptyState
               title="No audit entries"
               description={
-                actionFilter || entityFilter
+                filters.action || filters.entity || filters.q
                   ? "Try clearing the filters."
                   : "Sensitive changes will appear here."
               }
@@ -71,7 +69,7 @@ export default async function AdminAuditPage({
             <Table>
               <THead>
                 <TR>
-                  <TH>Time (IST)</TH>
+                  <TH>Time ({region.timeZone})</TH>
                   <TH>Actor</TH>
                   <TH>Action</TH>
                   <TH>Employee / Entity</TH>
@@ -82,7 +80,7 @@ export default async function AdminAuditPage({
                 {entries.map((e) => (
                   <TR key={e.id}>
                     <TD className="whitespace-nowrap text-[12.5px] text-muted-foreground">
-                      {auditTime(e.createdAt)}
+                      <time dateTime={e.createdAt.toISOString()}>{auditTime(e.createdAt, region)}</time>
                     </TD>
                     <TD className="text-[13px]">
                       {e.actorLabel}
@@ -105,6 +103,7 @@ export default async function AdminAuditPage({
           )}
         </CardContent>
       </Card>
+      <DocumentExpensePagination path="/admin/audit" params={Object.fromEntries(Object.entries(filters).filter(([, value]) => value))} pagination={pagination} label="audit entries" />
     </div>
   );
 }

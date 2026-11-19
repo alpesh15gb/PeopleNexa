@@ -79,6 +79,8 @@ export function PayrollVariance({
       <PayrollNavigation
         active="history"
         canManageSettings={canManageSettings}
+        locationId={locationId}
+        period={current}
       />
       <section className="grid gap-4 rounded-2xl border border-edge bg-card p-5 sm:grid-cols-3">
         <Field label="Location">

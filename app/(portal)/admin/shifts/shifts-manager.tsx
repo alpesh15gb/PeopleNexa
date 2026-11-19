@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { shiftWeeklyOffDays, WEEKDAYS } from "@/lib/shift-weekly-offs";
 
 interface Shift {
   id: string;
@@ -18,12 +19,13 @@ interface Shift {
   graceMinutes: number;
   isNightShift: boolean;
   sundayWeeklyOff: boolean;
+  weeklyOffDays: number[];
   singlePunchHalfDay: boolean;
   isDefault: boolean;
   _count: { employees: number };
 }
 
-export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }: { shifts: Shift[]; unassignedHalfDay: boolean; canManageUnassigned: boolean }) {
+export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { shifts: Shift[]; unassignedHalfDay: boolean; canManageShifts: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
@@ -53,7 +55,7 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }
       endTime: form.get("endTime"),
       graceMinutes: form.get("graceMinutes"),
       isNightShift: form.get("isNightShift") === "on",
-      sundayWeeklyOff: form.get("sundayWeeklyOff") === "on",
+      weeklyOffDays: form.getAll("weeklyOffDays").map(Number),
       singlePunchHalfDay: form.get("singlePunchHalfDay") === "on",
     };
     try {
@@ -95,7 +97,7 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }
 
   return (
     <>
-      {canManageUnassigned && <section className="space-y-3 border-b border-edge p-5">
+      {canManageShifts && <section className="space-y-3 border-b border-edge p-5">
         <h2 className="font-display font-semibold">Employees without a shift</h2>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={unassignedRule} onChange={(e) => setUnassignedRule(e.target.checked)} />Single punch = half day absent for employees without a shift</label>
         <p className="text-xs text-muted-foreground">After the attendance day closes, one punch means half day present and half day absent, without a missing-punch review flag. The missing time stays empty. Assigned, rostered and automatically selected shifts use their own rules. Finalized historical attendance is preserved.</p>
@@ -103,9 +105,9 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }
       </section>}
       <div id="shifts-manager" className="flex scroll-mt-4 items-center justify-between border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">{shifts.length} shifts</p>
-        <Button size="sm" onClick={() => setEditing("new")}>
+        {canManageShifts && <Button size="sm" onClick={() => setEditing("new")}>
           <Plus className="h-3.5 w-3.5" /> New shift
-        </Button>
+        </Button>}
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -130,19 +132,19 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }
             <div className="mt-2 flex items-center justify-between">
               <p className="text-[11.5px] text-muted-foreground">
                 {s.graceMinutes} min grace for late marking
-                {s.sundayWeeklyOff && <span className="block">Sunday weekly off</span>}
+                <span className="block">Weekly days off: {shiftWeeklyOffDays(s).map((day) => WEEKDAYS[day]).join(", ") || "None"}</span>
                 {s.singlePunchHalfDay && <span className="block">Single punch: half day absent</span>}
               </p>
-              <div className="flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
-                <Button size="sm" variant="outline" onClick={() => setEditing(s)}>
+              {canManageShifts && <div className="flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
+                <Button size="sm" variant="outline" aria-label={`Edit ${s.name}`} onClick={() => setEditing(s)}>
                   <Pencil className="h-3 w-3" />
                 </Button>
                 {!s.isDefault && (
-                  <Button size="sm" variant="outline" className="text-rose-300" onClick={() => remove(s)}>
+                  <Button size="sm" variant="outline" aria-label={`Delete ${s.name}`} className="text-rose-300" onClick={() => remove(s)}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 )}
-              </div>
+              </div>}
             </div>
           </div>
         ))}
@@ -180,11 +182,18 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageUnassigned }
               Night shift
             </label>
           </div>
-          <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <input type="checkbox" name="sundayWeeklyOff" defaultChecked={editing && typeof editing === "object" ? editing.sundayWeeklyOff : false} className="h-4 w-4 rounded border-input accent-indigo-500" />
-            Sunday is a weekly off
-          </label>
-          <p className="text-xs text-muted-foreground">The monthly attendance matrix marks Sunday as WO only for this shift. Attendance, holidays and approved leave take priority.</p>
+          <fieldset className="space-y-2">
+            <legend className="text-[13px] font-medium">Weekly days off</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {WEEKDAYS.map((name, day) => (
+                <label key={name} className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                  <input type="checkbox" name="weeklyOffDays" value={day} defaultChecked={typeof editing === "object" && shiftWeeklyOffDays(editing).includes(day)} className="h-4 w-4 rounded border-input accent-indigo-500" />
+                  {name}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">Attendance reports mark these days as weekly off when there is no recorded work, holiday or approved leave.</p>
+          </fieldset>
           <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
             <input type="checkbox" name="singlePunchHalfDay" defaultChecked={editing && typeof editing === "object" ? editing.singlePunchHalfDay : false} className="h-4 w-4 rounded border-input accent-indigo-500" />
             Single punch = half day absent

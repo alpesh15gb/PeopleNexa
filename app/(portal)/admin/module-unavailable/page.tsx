@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Lock } from "lucide-react";
 import { moduleFor } from "@/lib/modules";
 import { PageHeader } from "@/components/ui/card";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export default async function AdminModuleUnavailablePage({
 }: {
   searchParams: Promise<{ m?: string }>;
 }) {
-  const { m } = await searchParams;
+  const [{ m }, session] = await Promise.all([searchParams, requireSession()]);
   const mod = m ? moduleFor(m) : undefined;
 
   return (
@@ -29,7 +30,7 @@ export default async function AdminModuleUnavailablePage({
           </p>
         </div>
         <Link
-          href="/admin"
+          href={session.role === "supervisor" ? "/employee" : "/admin"}
           className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-brand px-4 text-sm font-medium text-white transition-all hover:brightness-110"
         >
           Back to dashboard

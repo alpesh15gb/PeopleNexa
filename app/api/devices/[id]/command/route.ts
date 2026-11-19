@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getEbioserverConfig, getEbioserverPassword, runDeviceCommand } from "@/lib/ebioserver";
+import { istWallClock } from "@/lib/ist";
 
 const ICK_COMMANDS: Record<string, (now: Date) => string> = {
   sync: () => "DATA QUERY ATTLOG StartTime=2000-01-01 00:00:00\tEndTime=2099-12-31 23:59:59",
   reboot: () => "REBOOT",
   clear_logs: () => "CLEAR LOGS",
   set_time: (now) => {
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `SET TIME ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const wallTime = istWallClock(now).toISOString().slice(0, 19).replace("T", " ");
+    return `SET TIME ${wallTime}`;
   },
 };
 

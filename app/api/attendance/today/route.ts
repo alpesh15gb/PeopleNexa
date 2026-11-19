@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSession, requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { addDays } from "@/lib/dates";
-import { istStartOfDay, istDateKey } from "@/lib/ist";
-import { formatTime } from "@/lib/dates";
+import { dayRangeIST } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
 import { attendanceDayForPunch, shiftForEmployeeDay } from "@/lib/reconcile";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { formatWorkspaceTime } from "@/lib/workspace-time";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -12,20 +13,24 @@ export async function GET() {
 
   const employee = await prisma.employee.findFirst({
     where: { id: session.sub, tenantId: session.tenantId },
-    include: { shift: true, branch: true },
+    include: { shift: true, branch: true, tenant: { select: { config: true } } },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const dayStart = await attendanceDayForPunch(employee, new Date());
+  const region = workspaceRegion(employee.tenant.config);
+  const now = new Date();
+  const dayStart = await attendanceDayForPunch(employee, now, region.timeZone);
+  const date = istDateKey(dayStart);
   const record = await prisma.attendance.findFirst({
-    where: { employeeId: employee.id, tenantId: session.tenantId, date: { gte: dayStart, lt: addDays(dayStart, 1) } },
+    where: { employeeId: employee.id, tenantId: session.tenantId, date: { gte: dayStart, lt: dayRangeIST(date).end } },
   });
 
   return NextResponse.json({
-    date: istDateKey(dayStart),
+    date,
     record,
-    shift: await shiftForEmployeeDay(employee, dayStart),
+    shift: await shiftForEmployeeDay(employee, dayStart, region.timeZone),
     branch: employee.branch,
-    now: formatTime(new Date()),
+    now: formatWorkspaceTime(now, region),
+    timeZone: region.timeZone,
   });
 }

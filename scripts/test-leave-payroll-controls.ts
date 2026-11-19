@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { Prisma } from "../generated/prisma/client";
-import { leaveCalendar, leaveEligibilityError, snapshottedLeaveFraction } from "../lib/leave-calendar";
+import { countsAsLeaveDay, leaveCalendar, leaveEligibilityError, parseLeaveDateKey, snapshottedLeaveFraction } from "../lib/leave-calendar";
 import { leavePolicyDraft } from "../lib/configuration";
 import { attendanceSummary } from "../lib/payroll";
 import { attendanceChanged, payrollSourceReview } from "../lib/payroll-source-review";
@@ -24,6 +24,12 @@ async function main() {
   assert.throws(() => leaveCalendar("2026-10-02", "2026-10-05", working, [], true));
   assert.equal(snapshottedLeaveFraction({ calendar: dates }, "2026-10-03"), 0);
   assert.throws(() => snapshottedLeaveFraction({ calendar: dates }, "2026-10-06"));
+  assert.equal(parseLeaveDateKey("2026-10-05")?.toISOString(), "2026-10-05T00:00:00.000Z");
+  assert.equal(parseLeaveDateKey("2026-02-29"), null);
+  assert.equal(countsAsLeaveDay({ calendar: { chargeableDays: { "2026-10-05": 0 } } }, "2026-10-05"), false);
+  assert.equal(countsAsLeaveDay(null, "2026-10-05"), true);
+  assert.equal(leaveEligibilityError({ noticeDays: 1 }, "2026-10-05", 1, null, "", new Date("2026-10-05T02:00:00Z"), "America/New_York"), null);
+  assert.match(leaveEligibilityError({ noticeDays: 1 }, "2026-10-05", 1, null, "", new Date("2026-10-05T02:00:00Z"), "Asia/Kolkata")!, /at least 1/);
   assert.equal(leaveEligibilityError({ requiresReason: true }, "2026-10-05", 1, null, ""), "A reason is required for this leave type.");
   assert.match(leaveEligibilityError({ noticeDays: 3 }, "2026-10-05", 1, null, "test", new Date("2026-10-04"))!, /at least 3/);
   assert.match(leaveEligibilityError({ minServiceDays: 30 }, "2026-10-05", 1, new Date("2026-10-01"), "test")!, /service requirement/);
@@ -55,7 +61,7 @@ async function main() {
   assert.equal(attendanceChanged(summary, { ...summary, workedHours: NaN }), true);
   const unresolved = { leaveRequest: { count: async () => 1 } } as unknown as Prisma.TransactionClient;
   assert.match((await payrollSourceReview(unresolved, "t", "2026-10", []))[0], /pending leave/);
-  const sourceDb = { ...db, leaveRequest: { ...db.leaveRequest, count: async () => 0 } };
+  const sourceDb = { ...db, payrollAdjustment: { findMany: async () => [] }, leaveRequest: { ...db.leaveRequest, count: async () => 0 } };
   assert.deepEqual(await payrollSourceReview(sourceDb as unknown as Prisma.TransactionClient, "t", "2026-10", [{ employeeId: "e", inputSnapshot: { attendance: summary, employee: { joiningDate: null, shiftId: null } }, employee: { id: "e", joiningDate: new Date("2026-10-15"), shiftId: "changed-shift", firstName: "Test", lastName: "Employee" } }]), [], "review keeps explicitly saved null joining date and shift rather than applying later employee edits");
   let locked = true;
   let request: any = { id: "r", employeeId: "e", createdBy: "maker", status: "approved", cancellationRequestedBy: "e", cancellationRequestedAt: new Date(), cancellationReason: "Plan changed", fromDate: new Date("2026-10-02"), toDate: new Date("2026-10-05"), days: 2 };
@@ -72,7 +78,10 @@ async function main() {
   await assert.rejects(() => reviewLeaveCancellation(tx, input), /paid/);
   assert.equal(request.status, "approved", "blocked cancellation retains leave");
   locked = false;
-  await reviewLeaveCancellation(tx, input);
+  await assert.rejects(() => reviewLeaveCancellation(tx, { ...input, expectedRequestedAt: "2026-01-01T00:00:00.000Z" }), /cancellation changed/i);
+  assert.equal(request.status, "approved");
+  assert.equal(audit.length, 0);
+  await reviewLeaveCancellation(tx, { ...input, expectedRequestedAt: request.cancellationRequestedAt.toISOString() });
   assert.equal(request.status, "cancelled");
   assert.equal(request.cancellationRequestedBy, null);
   assert.equal(audit.length, 1);

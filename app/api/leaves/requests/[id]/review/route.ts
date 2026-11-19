@@ -5,7 +5,7 @@ import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee } from "@/lib/notifications";
-import { formatDate } from "@/lib/dates";
+import { formatDateIST } from "@/lib/dates";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { sendWhatsApp } from "@/lib/whatsapp";
 import { leaveRequestEntitlement } from "@/lib/leave-policy";
@@ -32,8 +32,13 @@ export async function POST(
   }
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object" || Array.isArray(body) || (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 2000))) return NextResponse.json({ error: "Invalid review data. Notes must be text of at most 2,000 characters." }, { status: 400 });
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+    (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 2000)) ||
+    (body.expectedCancellationRequestedAt !== undefined && (typeof body.expectedCancellationRequestedAt !== "string" || !Number.isFinite(Date.parse(body.expectedCancellationRequestedAt))))) {
+    return NextResponse.json({ error: "Invalid review data. Notes must be text of at most 2,000 characters." }, { status: 400 });
+  }
   const decision = String(body.status ?? "");
+  const notificationFailed = () => console.warn("[leave] Review saved; notification failed.");
   if (!["approved", "rejected", "cancellation_approved", "cancellation_rejected"].includes(decision)) {
     return NextResponse.json({ error: "Invalid decision." }, { status: 400 });
   }
@@ -84,8 +89,8 @@ export async function POST(
   }
   if (decision.startsWith("cancellation_")) {
     try {
-      await prisma.$transaction((tx) => reviewLeaveCancellation(tx, { tenantId: session.tenantId, id, actorId: session.sub, actorRole: session.role, approve: decision === "cancellation_approved", note: String(body.note ?? "").slice(0, 2000) }), { isolationLevel: "Serializable" });
-      await notifyEmployee(session.tenantId, request.employeeId, "info", "Leave cancellation reviewed", decision === "cancellation_approved" ? "Your leave was cancelled and its balance restored. Regenerate any affected draft payroll before review." : "Your cancellation was rejected. The approved leave remains in effect.");
+      await prisma.$transaction((tx) => reviewLeaveCancellation(tx, { tenantId: session.tenantId, id, actorId: session.sub, actorRole: session.role, approve: decision === "cancellation_approved", note: body.note?.trim() ?? "", expectedRequestedAt: body.expectedCancellationRequestedAt }), { isolationLevel: "Serializable" });
+      await notifyEmployee(session.tenantId, request.employeeId, "info", "Leave cancellation reviewed", decision === "cancellation_approved" ? "Your leave was cancelled and its balance restored." : "Your cancellation was declined. The approved leave remains in effect.").catch(notificationFailed);
       return NextResponse.json({ success: true });
     } catch (error) {
       const code = (error as { code?: string }).code;
@@ -100,7 +105,7 @@ export async function POST(
     );
   }
 
-  const reviewNote = body.note || null;
+  const reviewNote = body.note?.trim() || null;
   const reviewedAt = new Date();
 
   if (decision === "rejected") {
@@ -136,8 +141,8 @@ export async function POST(
       request.employeeId,
       "danger",
       "Leave rejected",
-      `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was rejected.`,
-    );
+      `Your ${updated.leaveType.name} (${formatDateIST(updated.fromDate)} → ${formatDateIST(updated.toDate)}) was rejected.`,
+    ).catch(notificationFailed);
 
     const employee = await prisma.employee.findUnique({
       where: { id: request.employeeId },
@@ -148,8 +153,8 @@ export async function POST(
       select: { firstName: true },
     });
     await sendWhatsApp(session.tenantId, employee?.phone, "leave.rejected", {
-      from: formatDate(updated.fromDate),
-      to: formatDate(updated.toDate),
+      from: formatDateIST(updated.fromDate),
+      to: formatDateIST(updated.toDate),
       admin: admin?.firstName ?? "HR",
       reason: body.note || "—",
     });
@@ -307,15 +312,15 @@ export async function POST(
     request.employeeId,
     "success",
     "Leave approved",
-    `Your ${updated.leaveType.name} (${formatDate(updated.fromDate)} → ${formatDate(updated.toDate)}) was approved.`,
-  );
+    `Your ${updated.leaveType.name} (${formatDateIST(updated.fromDate)} → ${formatDateIST(updated.toDate)}) was approved.`,
+  ).catch(notificationFailed);
 
   await dispatchWebhook(session.tenantId, "leave.approved", {
     requestId: request.id,
     employeeId: request.employeeId,
     leaveType: updated.leaveType.name,
-    fromDate: formatDate(updated.fromDate),
-    toDate: formatDate(updated.toDate),
+    fromDate: formatDateIST(updated.fromDate),
+    toDate: formatDateIST(updated.toDate),
     days: updated.days,
   });
 
@@ -328,8 +333,8 @@ export async function POST(
     select: { firstName: true },
   });
   await sendWhatsApp(session.tenantId, employee?.phone, "leave.approved", {
-    from: formatDate(updated.fromDate),
-    to: formatDate(updated.toDate),
+    from: formatDateIST(updated.fromDate),
+    to: formatDateIST(updated.toDate),
     admin: admin?.firstName ?? "HR",
     reason: body.note || "—",
   });

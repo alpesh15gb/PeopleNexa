@@ -109,6 +109,16 @@
   --scrollbar-thumb: rgba(37, 99, 235, 0.32);
 }
 
+.portal-workspace {
+  --workspace-sidebar: #f1f5fb;
+  background: #f8fafc;
+}
+
+.dark .portal-workspace {
+  --workspace-sidebar: #101825;
+  background: var(--background);
+}
+
 /* ── Dark theme ────────────────────────────────────────────────────────── */
 .dark {
   color-scheme: dark;

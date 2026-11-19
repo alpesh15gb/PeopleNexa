@@ -1,7 +1,11 @@
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { redirect } from "next/navigation";
+import { requireActiveSession } from "@/lib/session";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { PageHeader } from "@/components/ui/card";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { managerLocationId } from "@/lib/location-scope";
+import { cashbookRecords } from "@/lib/cashbook-records";
+import { recordPageNumber, recordPageRedirect, type RecordSearchParams } from "@/lib/document-expense-pagination";
 import { CashbookPanel } from "./cashbook-panel";
 
 export const dynamic = "force-dynamic";
@@ -12,34 +16,30 @@ export const dynamic = "force-dynamic";
 export default async function AdminCashbookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<RecordSearchParams>;
 }) {
-  const session = await requireSession();
-  const { month: monthParam } = await searchParams;
-  const month = monthParam && isMonthKey(monthParam) ? monthParam : monthKey(new Date());
-
-  const [y, m] = month.split("-").map(Number);
-  const gte = new Date(y, m - 1, 1);
-  const lt = new Date(y, m, 1);
-
-  const entries = await prisma.cashbookEntry.findMany({
-    where: { tenantId: session.tenantId, date: { gte, lt } },
-    orderBy: { date: "desc" },
-    take: 200,
-  });
-
-  const cashIn = entries.filter((e) => e.type === "cash_in").reduce((s, e) => s + e.amount, 0);
-  const cashOut = entries.filter((e) => e.type === "cash_out").reduce((s, e) => s + e.amount, 0);
+  const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
+  if (session.role !== "admin" && session.role !== "location_manager") redirect("/employee");
+  const locationId = await managerLocationId(session);
+  if (session.role === "location_manager" && !locationId) {
+    return <PageHeader title="Cashbook" description="Ask a workspace administrator to assign a location to your account." />;
+  }
+  const month = typeof params.month === "string" && isMonthKey(params.month) ? params.month : monthKeyIST();
+  const { entries, summary, pagination } = await cashbookRecords(session.tenantId, locationId, month, recordPageNumber(params.page) ?? 1);
+  const path = "/admin/cashbook";
+  const redirectTo = recordPageRedirect(path, { ...params, month }, pagination);
+  if (redirectTo) redirect(redirectTo);
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Cashbook"
-        description="Cash-in / cash-out ledger — daily cashbook in the style of PagarBook"
+        description="Record cash movements and reconcile monthly totals."
       />
       <CashbookPanel
         month={month}
-        totals={{ cashIn, cashOut, balance: cashIn - cashOut }}
+        totals={summary}
+        totalEntries={pagination.total}
         entries={entries.map((e) => ({
           id: e.id,
           date: e.date.toISOString(),
@@ -51,6 +51,7 @@ export default async function AdminCashbookPage({
           createdAt: e.createdAt.toISOString(),
         }))}
       />
+      <DocumentExpensePagination path={path} params={{ ...params, month }} pagination={pagination} label="entries" />
     </div>
   );
 }

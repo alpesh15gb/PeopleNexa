@@ -42,12 +42,14 @@ export default async function AdminTaxPage() {
       <Card>
         <CardContent className="p-6">
           <TaxReviewPanel
+            actorId={session.sub}
             currentFy={fy}
             declarations={declarations.map((d) => ({
               id: d.id,
               fy: d.fy,
               sections: (d.sections ?? {}) as Record<string, number>,
               status: d.status,
+              updatedAt: d.updatedAt.toISOString(),
               note: d.note,
               employee: d.employee,
             }))}

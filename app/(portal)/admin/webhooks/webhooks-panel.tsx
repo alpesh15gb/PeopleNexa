@@ -14,7 +14,6 @@ interface Endpoint {
   name: string;
   url: string;
   events: string;
-  secret?: string;
   hasSecret?: boolean;
   active: boolean;
   createdAt: Date;

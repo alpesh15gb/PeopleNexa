@@ -19,6 +19,10 @@ export const WEBHOOK_EVENTS = [
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
+export const webhookEndpointSummary = {
+  id: true, name: true, url: true, events: true, active: true, createdAt: true, updatedAt: true,
+} as const;
+
 export async function dispatchWebhook(tenantId: string, event: WebhookEvent, payload: unknown): Promise<void> {
   try {
     const endpoints = await prisma.webhookEndpoint.findMany({
@@ -38,7 +42,7 @@ export async function dispatchWebhook(tenantId: string, event: WebhookEvent, pay
 export async function fireWebhook(url: string, secret: string, event: WebhookEvent, payload: unknown): Promise<void> {
   const body = JSON.stringify({ event, at: new Date().toISOString(), payload });
   const sig = createHmac("sha256", secret).update(body).digest("hex");
-  await fetch(url, {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -46,6 +50,9 @@ export async function fireWebhook(url: string, secret: string, event: WebhookEve
       "X-PeopleNexa-Signature": `sha256=${sig}`,
     },
     body,
+    redirect: "error",
     signal: AbortSignal.timeout(8000),
   });
+  await response.body?.cancel().catch(() => undefined);
+  if (!response.ok) throw new Error(`Webhook receiver responded with HTTP ${response.status}.`);
 }

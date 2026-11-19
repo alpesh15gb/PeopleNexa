@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { parseShiftWeeklyOffDays, shiftWeeklyOffDays } from "@/lib/shift-weekly-offs";
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -13,6 +14,16 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (body.sundayWeeklyOff !== undefined && typeof body.sundayWeeklyOff !== "boolean") return NextResponse.json({ error: "Sunday weekly off must be true or false." }, { status: 400 });
   const shift = await prisma.shift.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!shift) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  let weeklyOffDays: number[] | undefined;
+  if (body.weeklyOffDays !== undefined) {
+    const days = parseShiftWeeklyOffDays(body.weeklyOffDays);
+    if (!days) return NextResponse.json({ error: "Choose valid weekdays from Sunday through Saturday." }, { status: 400 });
+    weeklyOffDays = days;
+  } else if (body.sundayWeeklyOff !== undefined) {
+    const otherDays = shiftWeeklyOffDays(shift).filter((day) => day !== 0);
+    weeklyOffDays = body.sundayWeeklyOff ? [0, ...otherDays] : otherDays;
+  }
 
   try {
     const name = String(body.name ?? shift.name).trim();
@@ -49,7 +60,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         endTime,
         graceMinutes,
         isNightShift: resolvedNightShift,
-        sundayWeeklyOff: body.sundayWeeklyOff ?? shift.sundayWeeklyOff,
+        ...(weeklyOffDays ? { weeklyOffDays, sundayWeeklyOff: weeklyOffDays.includes(0) } : {}),
         singlePunchHalfDay: body.singlePunchHalfDay ?? shift.singlePunchHalfDay,
       },
     });

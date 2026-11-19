@@ -9,8 +9,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
-  const body = await req.json().catch(() => ({}));
-  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  const raw = await req.text();
+  let body;
+  try {
+    body = raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return NextResponse.json({ error: "Enter a valid cancellation reason." }, { status: 400 });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.reason != null && (typeof body.reason !== "string" || body.reason.length > 2000))) {
+    return NextResponse.json({ error: "Enter a cancellation reason of at most 2,000 characters." }, { status: 400 });
+  }
+  const reason = body.reason?.trim() ?? "";
   try {
     const status = await prisma.$transaction(async (tx) => {
       const request = await tx.leaveRequest.findFirst({ where: { id, tenantId: session.tenantId } });

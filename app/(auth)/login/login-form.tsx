@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/toast";
 
 const BLUE_FOCUS = "focus:border-primary focus:ring-ring/25 focus-visible:ring-ring/40";
 
-export function LoginForm() {
+export function LoginForm({ workspace }: { workspace: string | null }) {
   const router = useRouter();
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,6 @@ export function LoginForm() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(slug ? { "X-Tenant-Slug": slug } : {}),
         },
         body: JSON.stringify({
           identifier: form.get("identifier"),
@@ -53,15 +52,16 @@ export function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
       <div className="space-y-4">
-        <Field label="Workspace (optional)" hint="Your workspace subdomain, e.g. acme-corp">
+        {!workspace && <Field label="Workspace" hint="The first part of your workspace address">
           <Input
             name="slug"
+            required
             autoComplete="off"
             spellCheck={false}
             placeholder="your-workspace"
             className={`h-11 ${BLUE_FOCUS}`}
           />
-        </Field>
+        </Field>}
         <Field label="Employee ID or email">
           <Input
             name="identifier"

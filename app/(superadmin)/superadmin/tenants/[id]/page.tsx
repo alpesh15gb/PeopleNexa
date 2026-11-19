@@ -14,6 +14,7 @@ export default async function SuperadminTenantDetailPage({ params }: { params: P
 
   const tenant = await prisma.tenant.findUnique({
     where: { id },
+    omit: { config: true },
     include: {
       _count: { select: { employees: true } },
       modules: { orderBy: { module: "asc" } },

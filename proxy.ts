@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { moduleForPath } from "@/lib/modules";
 import { getTenantAccess } from "@/lib/modules-server";
 
-// Base domain for tenant subdomains, e.g. crk.peoplenexa.in. Overridable via
+// Base domain for tenant subdomains. Overridable via
 // APP_BASE_DOMAIN so staging/alternate domains work without code changes.
 const BASE_DOMAIN = process.env.APP_BASE_DOMAIN ?? "peoplenexa.in";
 
@@ -13,22 +13,18 @@ const PUBLIC_API_PREFIXES = ["/api/health", "/api/auth", "/api/i18n", "/api/cron
 
 /**
  * Resolve the tenant slug from the request host:
- *   crk.peoplenexa.in    → crk   (production)
- *   crk.localhost:3000   → crk   (local dev)
- *   localhost:3000       → crk   (dev fallback → demo tenant)
- *   X-Tenant-Slug header → explicit override (API/testing)
+ *   acme.peoplenexa.in  → acme
+ *   acme.localhost:3000 → acme
  */
 function resolveSlug(request: NextRequest): string | null {
   const host = (request.headers.get("host") ?? "").toLowerCase();
   const hostname = host.split(":")[0];
-  const parts = hostname.split(".");
-  // x-tenant-slug is a local test convenience only. In production it is
-  // client-controlled and must never override the reverse-proxy Host header.
+  const suffix = hostname.endsWith(".localhost") ? ".localhost" : `.${BASE_DOMAIN}`;
+  const hostSlug = hostname.endsWith(suffix) ? hostname.slice(0, -suffix.length) : "";
+  if (hostSlug !== "www" && /^[a-z0-9-]+$/.test(hostSlug)) return hostSlug;
+  // Allow an explicit workspace on the root host in development.
   const header = process.env.NODE_ENV !== "production" ? request.headers.get("x-tenant-slug") : null;
   if (header) return header.trim().toLowerCase();
-  if (hostname.endsWith(`.${BASE_DOMAIN}`) && parts.length >= 3) return parts[0];
-  if (hostname.endsWith(".localhost") && parts.length >= 2) return parts[0];
-  if (hostname === "localhost" || hostname === "127.0.0.1") return "crk";
   return null;
 }
 
@@ -85,8 +81,11 @@ async function proxy(request: NextRequest) {
 
   // ── API routes: attach tenant context; each handler does its own auth. ───
   if (isApiRoute) {
-    if (payload && payload.role !== "superadmin" && !["/api/auth/login", "/api/auth/logout"].includes(pathname)) {
-      const employee = await prisma.employee.findFirst({ where: { id: payload.sub, tenantId: payload.tenantId }, select: { status: true, mustChangePassword: true, sessionVersion: true } }).catch(() => null);
+    if (payload && payload.role !== "superadmin" && !["/api/auth/login", "/api/auth/logout", "/api/auth/register"].includes(pathname)) {
+      const employee = await prisma.employee.findFirst({
+        where: { id: payload.sub, tenantId: payload.tenantId, ...(slug ? { tenant: { slug } } : {}) },
+        select: { status: true, mustChangePassword: true, sessionVersion: true },
+      }).catch(() => null);
       if (!employee || employee.status !== "active" || employee.sessionVersion !== (payload.sessionVersion ?? 0)) return json("unauthorized", 401);
       if (employee.mustChangePassword && pathname !== "/api/auth/change-password") return json("Change your temporary password before continuing.", 403);
     }
@@ -115,6 +114,7 @@ async function proxy(request: NextRequest) {
   // portal forever — proxy considers them authed, the layout can't find them.
   let role: string | null = null;
   let tenantId: string | null = null;
+  let differentWorkspace = false;
   if (payload) {
     try {
       if (payload.role === "superadmin") {
@@ -126,12 +126,15 @@ async function proxy(request: NextRequest) {
       } else {
         const employee = await prisma.employee.findUnique({
           where: { id: payload.sub },
-          select: { role: true, status: true, tenantId: true, mustChangePassword: true, sessionVersion: true },
+          select: { role: true, status: true, tenantId: true, mustChangePassword: true, sessionVersion: true, tenant: { select: { slug: true } } },
         });
         if (employee && employee.status === "active" && employee.tenantId === payload.tenantId && employee.sessionVersion === (payload.sessionVersion ?? 0)) {
-          if (employee.mustChangePassword && pathname !== "/change-password") return NextResponse.redirect(new URL("/change-password", request.url));
-          role = employee.role;
-          tenantId = employee.tenantId;
+          differentWorkspace = Boolean(slug && employee.tenant.slug !== slug);
+          if (!differentWorkspace) {
+            if (employee.mustChangePassword && pathname !== "/change-password") return NextResponse.redirect(new URL("/change-password", request.url));
+            role = employee.role;
+            tenantId = employee.tenantId;
+          }
         }
       }
     } catch {
@@ -152,10 +155,10 @@ async function proxy(request: NextRequest) {
       const res = NextResponse.redirect(new URL("/login", request.url));
       // Invalid, expired, or stale token — clear it so the user can log in
       // fresh instead of being stuck in a redirect loop.
-      if (token) clearSessionCookie(res);
+      if (token && !differentWorkspace) clearSessionCookie(res);
       return res;
     }
-    if (token) {
+    if (token && !differentWorkspace) {
       // Stale cookie on the auth pages themselves: drop it and serve the page.
       return clearSessionCookie(passWithTenant(request, slug));
     }
@@ -168,7 +171,7 @@ async function proxy(request: NextRequest) {
     );
   }
   // Supervisor is admin-lite for their scope: attendance + regularization + punch-details only.
-  if (role === "supervisor" && isAdminRoute && !isDesignationRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization") && !pathname.startsWith("/admin/reports/punch-details")) {
+  if (role === "supervisor" && isAdminRoute && pathname !== "/admin/module-unavailable" && pathname !== "/admin/approvals" && !isDesignationRoute && !pathname.startsWith("/admin/attendance") && !pathname.startsWith("/admin/regularization") && !pathname.startsWith("/admin/reports/punch-details")) {
     return NextResponse.redirect(new URL("/admin/attendance", request.url));
   }
   // Branch manager is scoped to their branch: dashboard + attendance +
@@ -176,6 +179,8 @@ async function proxy(request: NextRequest) {
   if (role === "branch_manager" && isAdminRoute) {
     const allowed =
       pathname === "/admin" ||
+      pathname === "/admin/approvals" ||
+      pathname === "/admin/module-unavailable" ||
       pathname.startsWith("/admin/attendance") ||
       pathname.startsWith("/admin/regularization") ||
        pathname.startsWith("/admin/employees") ||
@@ -188,7 +193,7 @@ async function proxy(request: NextRequest) {
     }
   }
   if (role === "location_manager" && isAdminRoute) {
-    const allowed = pathname === "/admin" || ["attendance", "regularization", "employees", "employee-master", "id-cards", "departments", "designations", "branches", "devices", "leaves", "reports", "payroll", "loans", "expenses", "cashbook", "assets", "documents", "helpdesk", "onboarding", "performance", "policies", "shifts", "rosters", "holidays", "journeys", "exits"].some((segment) => pathname.startsWith(`/admin/${segment}`));
+    const allowed = pathname === "/admin" || pathname === "/admin/approvals" || pathname === "/admin/module-unavailable" || ["attendance", "regularization", "employees", "employee-master", "id-cards", "departments", "designations", "branches", "devices", "leaves", "reports", "payroll", "loans", "expenses", "cashbook", "assets", "documents", "helpdesk", "onboarding", "performance", "policies", "shifts", "rosters", "holidays", "journeys", "exits"].some((segment) => pathname.startsWith(`/admin/${segment}`));
     if (!allowed) return NextResponse.redirect(new URL("/admin", request.url));
   }
   if (isAdminRoute && !isDesignationRoute && role !== "admin" && role !== "supervisor" && role !== "branch_manager" && role !== "location_manager") {
@@ -205,7 +210,7 @@ async function proxy(request: NextRequest) {
     }
     const mod = moduleForPath(pathname);
     if (mod && !access.modules.has(mod)) {
-       const target = role === "admin" || role === "location_manager" ? "/admin" : role === "supervisor" || role === "branch_manager" ? "/admin/attendance" : "/employee";
+      const target = isAdminRoute ? "/admin" : "/employee";
       return NextResponse.redirect(
         new URL(`${target}/module-unavailable?m=${encodeURIComponent(mod)}`, request.url)
       );

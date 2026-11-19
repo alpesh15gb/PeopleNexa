@@ -1,211 +1,169 @@
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
-import { startOfDay, toDateKey, addDays, monthKey, formatDate, formatTime } from "@/lib/dates";
-import { t } from "@/lib/i18n";
-import { getLang } from "@/lib/i18n-server";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import Link from "next/link";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import { Badge, StatusPill } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, PageHeader } from "@/components/ui/card";
+import { Field, Input } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { StatusPill } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/stat";
-import { CalendarClock } from "lucide-react";
+import { holidaysForAttendanceDay } from "@/lib/attendance-tally";
+import { dayRangeIST, isDateKey, isMonthKey } from "@/lib/dates";
+import { getLang } from "@/lib/i18n-server";
+import { t } from "@/lib/i18n";
+import { istDateKey } from "@/lib/ist";
+import { countsAsLeaveDay } from "@/lib/leave-calendar";
+import { prisma } from "@/lib/prisma";
+import { requireActiveSession } from "@/lib/session";
+import { isShiftWeeklyOff } from "@/lib/shift-weekly-offs";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, offsetDateKey } from "@/lib/workspace-time";
+import { attendanceDayForPunch } from "@/lib/reconcile";
+import { timeZoneDayRange } from "@/lib/workspace-time";
+import { TodayAttendance } from "./today-attendance";
 import { CorrectionsPanel } from "./corrections-panel";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmployeeAttendancePage() {
-  const session = await requireSession();
-  const lang = await getLang();
-  const today = startOfDay(new Date());
+function moveMonth(month: string, offset: number) {
+  const date = new Date(`${month}-01T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + offset);
+  return date.toISOString().slice(0, 7);
+}
 
-  const [records, leaves, holidays, corrections] = await Promise.all([
-    prisma.attendance.findMany({
-      where: { employeeId: session.sub, date: { lte: today } },
-      include: { branch: { select: { name: true } }, shift: { select: { name: true } } },
-      orderBy: { date: "desc" },
-      take: 60,
-    }),
-    prisma.leaveRequest.findMany({
-      where: { employeeId: session.sub, status: "approved" },
-      include: { leaveType: true },
-    }),
-    prisma.holiday.findMany({ where: { tenantId: session.tenantId } }),
-    prisma.punchCorrection.findMany({
-      where: { employeeId: session.sub },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
+export default async function EmployeeAttendancePage({ searchParams }: {
+  searchParams: Promise<{ month?: string; view?: string; action?: string; date?: string }>;
+}) {
+  const session = await requireActiveSession();
+  const [lang, employee, query] = await Promise.all([
+    getLang(),
+    prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: {
+      id: true, tenantId: true, branchId: true, shiftId: true, firstName: true, lastName: true, loginOnly: true, joiningDate: true, branch: { select: { name: true, geofenceRadius: true, latitude: true, longitude: true } }, tenant: { select: { config: true } }, shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } },
+    } }),
+    searchParams,
+  ]);
+  if (!employee) return null;
+
+  const region = workspaceRegion(employee.tenant.config);
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const currentMonth = today.slice(0, 7);
+  const requested = typeof query.month === "string" ? query.month : "";
+  const month = isMonthKey(requested) && isDateKey(`${requested}-01`) && requested <= currentMonth ? requested : currentMonth;
+  const from = `${month}-01`;
+  const nextMonth = moveMonth(month, 1);
+  const lastDay = month === currentMonth ? today : offsetDateKey(`${nextMonth}-01`, -1);
+  const bounds = { gte: dayRangeIST(from).start, lt: dayRangeIST(lastDay).end };
+  const joined = employee.joiningDate ? istDateKey(employee.joiningDate) : null;
+  const backdate = ["admin", "supervisor"].includes(session.role) ? null : offsetDateKey(today, -60);
+  const earliestCorrection = joined && (!backdate || joined > backdate) ? joined : backdate;
+  const view = employee.loginOnly ? "entries" : query.view === "corrections" || query.action === "request" ? "corrections" : query.view === "entries" || (requested && query.view !== "today") ? "entries" : "today";
+  const canRequest = !earliestCorrection || earliestCorrection <= today;
+  const scope = { employeeId: session.sub, tenantId: session.tenantId };
+  const showEntries = view === "entries" && !employee.loginOnly;
+  const [records, leaves, holidays, corrections, roster, reviewPunches] = await Promise.all([
+    showEntries ? prisma.attendance.findMany({ where: { ...scope, date: bounds }, include: { shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
+    showEntries ? prisma.leaveRequest.findMany({ where: { ...scope, status: "approved", fromDate: { lt: bounds.lt }, toDate: { gte: bounds.gte } }, select: { fromDate: true, toDate: true, leavePolicySnapshot: true, leaveType: { select: { name: true } } } }) : [],
+    showEntries ? prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: bounds }] } }) : [],
+    view === "today" || employee.loginOnly ? [] : prisma.punchCorrection.findMany({ where: { ...scope, date: bounds }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
+    showEntries ? prisma.rosterAssignment.findMany({ where: { ...scope, date: bounds }, select: { date: true, shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
+    showEntries ? prisma.punch.findMany({
+      where: { ...scope, authStatus: { in: ["pending", "declined"] }, punchTime: { gte: timeZoneDayRange(from, region.timeZone).start, lt: timeZoneDayRange(offsetDateKey(lastDay, 1), region.timeZone).end } },
+      select: { authStatus: true, punchTime: true },
+      orderBy: { punchTime: "desc" },
+    }) : [],
   ]);
 
-  const recordByDay = new Map(records.map((r) => [toDateKey(r.date), r]));
-  const todayRecord = recordByDay.get(toDateKey(today));
-  const leaveByDay = new Map<string, { type: string; color: string }>();
-  for (const l of leaves) {
-    for (let d = l.fromDate; d <= l.toDate; d = addDays(d, 1)) {
-      leaveByDay.set(toDateKey(d), { type: l.leaveType.name, color: l.leaveType.color });
-    }
+  const reviewByDay = new Map<string, { pending: boolean; declined: boolean }>();
+  for (const punch of reviewPunches) {
+    const date = istDateKey(await attendanceDayForPunch(employee, punch.punchTime, region.timeZone));
+    const outcome = reviewByDay.get(date) ?? { pending: false, declined: false };
+    if (punch.authStatus === "pending") outcome.pending = true;
+    if (punch.authStatus === "declined") outcome.declined = true;
+    reviewByDay.set(date, outcome);
   }
-  const holidayByDay = new Map(holidays.map((h) => [toDateKey(h.date), h.name]));
+  const correctionByDay = new Map<string, string>();
+  for (const correction of corrections) {
+    const key = istDateKey(correction.date);
+    if (!correctionByDay.has(key) || correction.status === "pending") correctionByDay.set(key, correction.status);
+  }
+  const recordByDay = new Map(records.map((record) => [istDateKey(record.date), record]));
+  const shiftByDay = new Map(roster.map((entry) => [istDateKey(entry.date), entry.shift]));
+  const leaveRanges = leaves.map((leave) => ({ ...leave, from: istDateKey(leave.fromDate), to: istDateKey(leave.toDate) }));
+  const days = Array.from({ length: Number(lastDay.slice(-2)) }, (_, index) => offsetDateKey(lastDay, -index));
+  const monthLabel = new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${from}T00:00:00Z`));
 
-  // Last 30 days grid
-  const days = Array.from({ length: 30 }, (_, i) => addDays(today, -29 + i));
+  function href(monthKey: string, section = view) {
+    return section === "today" ? "/employee/attendance?view=today" : `/employee/attendance?${new URLSearchParams({ month: monthKey, view: section })}`;
+  }
 
-  const month = monthKey(today);
-  const monthRecords = records.filter((r) => monthKey(r.date) === month);
-  const monthLeaves = leaves.filter((l) => monthKey(l.fromDate) === month);
-  const present = monthRecords.filter((r) => r.status === "present" || r.status === "half_day").length;
-  const late = monthRecords.filter((r) => r.status === "late").length;
-  const onLeave = monthLeaves.reduce((s, l) => s + l.days, 0);
+  const dateParam = typeof query.date === "string" ? query.date : "";
+  const prefill = isDateKey(dateParam) && dateParam >= from && dateParam <= lastDay && (!earliestCorrection || dateParam >= earliestCorrection) ? dateParam : "";
 
   return (
-    <div className="animate-fade-up space-y-6">
-      <PageHeader
-        title={t(lang, "attendance.title")}
-        description={`${month} — ${present + late} ${t(lang, "common.present").toLowerCase()} · ${late} ${t(lang, "common.late").toLowerCase()} · ${onLeave} ${t(lang, "common.onLeave").toLowerCase()}`}
-      />
+    <div className="space-y-5">
+      <PageHeader title={t(lang, "attendance.title")} description={`Time entries and punch corrections · ${region.timeZone}`} />
+      <nav className="flex flex-wrap gap-5 border-b border-edge text-sm" aria-label="My attendance views">
+        {([ ["today", "Today"], ["entries", "Time entries"], ["corrections", "Correction requests"] ] as const).filter(([key]) => key === "entries" || !employee.loginOnly).map(([key, label]) => (
+          <Link key={key} href={href(month, key)} aria-current={view === key ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            {label}
+          </Link>
+        ))}
+      </nav>
+      {view !== "today" && !employee.loginOnly && <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-edge bg-card px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Link href={href(moveMonth(month, -1))} aria-label="Previous month" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-edge hover:bg-tint"><ChevronLeft aria-hidden="true" className="h-4 w-4" /></Link>
+          <h2 className="min-w-32 text-center font-display font-semibold">{monthLabel}</h2>
+          {month < currentMonth && <Link href={href(nextMonth)} aria-label="Next month" className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-edge hover:bg-tint"><ChevronRight aria-hidden="true" className="h-4 w-4" /></Link>}
+        </div>
+        <form action="/employee/attendance" className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="view" value={view} />
+          <Field label="Attendance month"><Input type="month" name="month" max={currentMonth} defaultValue={month} required /></Field>
+          <Button type="submit" variant="outline"><CalendarDays aria-hidden="true" className="h-4 w-4" /> View month</Button>
+        </form>
+      </div>}
 
-      {/* 30-day heat grid — color is redundant: each cell also exposes text via aria + table fallback */}
-      <Card>
-        <CardContent className="p-5">
-          <div
-            role="img"
-            aria-label={`Last 30 days: ${present} present, ${late} late, ${onLeave} on leave this month.`}
-            className="grid grid-cols-6 gap-1.5 sm:grid-cols-10 lg:grid-cols-15"
-          >
-            {days.map((day) => {
-              const key = toDateKey(day);
-              const isToday = key === toDateKey(today);
-              const record = recordByDay.get(key);
-              const leave = leaveByDay.get(key);
-              const holiday = holidayByDay.get(key);
-              let bg = "bg-tint";
-              let statusText = t(lang, "attendance.absent");
-              let title = key;
-              if (holiday) {
-                bg = "bg-violet-500/25";
-                statusText = t(lang, "attendance.holiday", { name: holiday });
-                title = `${key} · ${statusText}`;
-              } else if (leave) {
-                bg = "bg-indigo-500/30";
-                statusText = t(lang, "attendance.onLeaveTitle", { type: leave.type });
-                title = `${key} · ${statusText}`;
-              } else if (record) {
-                bg = record.status === "late" ? "bg-amber-400/50" : record.status === "permission" ? "bg-sky-400/50" : "bg-emerald-400/60";
-                statusText = `${t(lang, `status.${record.status}`)}${record.punchInTime ? " · " + t(lang, "attendance.in").toLowerCase() + " " + formatTime(record.punchInTime) : ""}`;
-                title = `${key} · ${statusText}`;
-              } else if (day.getDay() === 0) {
-                bg = "bg-tint";
-                statusText = t(lang, "attendance.sunday");
-                title = `${key} · ${statusText}`;
-              } else {
-                bg = "bg-rose-400/20";
-                title = `${key} · ${statusText}`;
-              }
-              return (
-                <div
-                  key={key}
-                  title={title}
-                  tabIndex={0}
-                  role="img"
-                  aria-label={title}
-                  className={`relative aspect-square min-h-[28px] rounded-md ${bg} focus-visible:outline-2 focus-visible:outline-primary ${isToday ? "ring-2 ring-indigo-400" : ""}`}
-                >
-                  <span className="sr-only">{title}</span>
-                </div>
-              );
-            })}
-          </div>
-          {/* Screen-reader table fallback for the same 30-day data */}
-          <table className="sr-only">
-            <caption>Attendance for the last 30 days</caption>
-            <tbody>
-              {days.map((day) => {
-                const key = toDateKey(day);
-                const record = recordByDay.get(key);
-                const leave = leaveByDay.get(key);
-                const holiday = holidayByDay.get(key);
-                const text = holiday
-                  ? `Holiday: ${holiday}`
-                  : leave
-                    ? `On leave: ${leave.type}`
-                    : record
-                      ? t(lang, `status.${record.status}`)
-                      : day.getDay() === 0
-                        ? t(lang, "attendance.sunday")
-                        : t(lang, "attendance.absent");
-                return (
-                  <tr key={key}>
-                    <th scope="row">{key}</th>
-                    <td>{text}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="mt-4 flex flex-wrap gap-4 text-[11.5px] text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-emerald-400/60" /> {t(lang, "common.present")}</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-amber-400/50" /> {t(lang, "common.late")}</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-rose-400/20" /> {t(lang, "attendance.absent")}</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-indigo-500/30" /> {t(lang, "common.onLeave")}</span>
-            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-violet-500/25" /> {t(lang, "attendance.legendHoliday")}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Punch corrections */}
-      <CorrectionsPanel
-        corrections={corrections.map((c) => ({
-          id: c.id,
-          date: c.date.toISOString(),
-          currentIn: c.currentIn?.toISOString() ?? null,
-          currentOut: c.currentOut?.toISOString() ?? null,
-          requestedIn: c.requestedIn?.toISOString() ?? null,
-          requestedOut: c.requestedOut?.toISOString() ?? null,
-          reason: c.reason,
-          status: c.status,
-          createdAt: c.createdAt.toISOString(),
-        }))}
-        lang={lang}
-      />
-
-      {/* History table */}
-      <Card>
-        <CardContent className="p-0 pt-0">
-          {records.length === 0 ? (
-            <EmptyState
-              icon={<CalendarClock className="h-5 w-5" />}
-              title={t(lang, "attendance.noRecords")}
-              description={t(lang, "attendance.noRecordsDesc")}
-            />
-          ) : (
-            <Table>
-              <THead>
-                <TR>
-                  <TH>{t(lang, "attendance.date")}</TH>
-                  <TH>{t(lang, "attendance.in")}</TH>
-                  <TH>{t(lang, "attendance.out")}</TH>
-                  <TH className="hidden md:table-cell">{t(lang, "attendance.branchShift")}</TH>
-                  <TH>{t(lang, "attendance.status")}</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {records.map((r) => (
-                  <TR key={r.id}>
-                    <TD className="font-mono text-[13px]">{formatDate(r.date)}</TD>
-                    <TD className="font-mono text-[13px]">{formatTime(r.punchInTime)}</TD>
-                    <TD className="font-mono text-[13px]">{formatTime(r.punchOutTime)}</TD>
-                    <TD className="hidden md:table-cell">
-                      <span className="text-[13px] text-muted-foreground">
-                        {r.branch?.name ?? "—"} · {r.shift?.name ?? "—"}
-                      </span>
-                    </TD>
-                    <TD><StatusPill status={r.status} lang={lang} /></TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {view === "today" ? (
+        <TodayAttendance employee={employee} region={region} lang={lang} now={new Date()} showCorrection={canRequest} />
+      ) : view === "corrections" ? (
+        <Card><CardContent>
+          <CorrectionsPanel key={`${month}-${query.action}-${prefill}`} corrections={corrections} lang={lang} region={region} today={today} earliestDate={earliestCorrection} openOnLoad={query.action === "request" && canRequest} initialDate={prefill} closeHref={href(month, "corrections")} />
+        </CardContent></Card>
+      ) : employee.loginOnly ? (
+        <Card><CardContent><p className="text-sm text-muted-foreground">Attendance entries are available for staff accounts.</p></CardContent></Card>
+      ) : (
+        <Card>
+          <Table>
+            <caption className="sr-only">Daily attendance for {monthLabel}</caption>
+            <THead><TR><TH>{t(lang, "attendance.date")}</TH><TH>{t(lang, "attendance.status")}</TH><TH>{t(lang, "attendance.in")}</TH><TH>{t(lang, "attendance.out")}</TH><TH className="hidden xl:table-cell">Shift</TH><TH>Correction</TH></TR></THead>
+            <TBody>{days.map((day) => {
+              const record = recordByDay.get(day);
+              const shift = shiftByDay.get(day) ?? record?.shift ?? employee.shift;
+              const holiday = holidaysForAttendanceDay(holidays, day)[0];
+              const leave = leaveRanges.find((request) => day >= request.from && day <= request.to && countsAsLeaveDay(request.leavePolicySnapshot, day));
+              const punchReview = reviewByDay.get(day);
+              const correctionStatus = correctionByDay.get(day);
+              const beforeJoining = Boolean(joined && day < joined);
+              const canCorrect = !beforeJoining && (!earliestCorrection || day >= earliestCorrection);
+              return <TR key={day}>
+                <TH scope="row" className="whitespace-nowrap py-3 text-sm font-medium normal-case tracking-normal text-foreground"><time dateTime={day}>{formatCalendarDate(day, region.locale)}</time>{day === today && <span className="ml-1 text-xs text-muted-foreground">Today</span>}</TH>
+                <TD className="whitespace-nowrap">
+                  {record ? <StatusPill status={record.status} lang={lang} /> : holiday ? <Badge tone="violet">{holiday.isHalfDay ? "Half-day holiday" : "Holiday"}</Badge> : leave ? <Badge tone="info">{t(lang, "common.onLeave")}</Badge> : beforeJoining ? <span className="text-muted-foreground">Before joining</span> : isShiftWeeklyOff(shift, day) ? <Badge>{t(lang, "attendance.weeklyOff")}</Badge> : <span className="text-muted-foreground">No entry</span>}
+                  {punchReview?.pending ? <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">Punch awaiting review</span> : punchReview?.declined && <span className="mt-1 block text-xs font-medium text-destructive">Punch declined</span>}
+                  {record?.reviewStatus === "missed_punch" && <span className="mt-1 block text-xs text-muted-foreground">Missing punch</span>}
+                  {record?.reviewStatus === "needs_review" && <span className="mt-1 block text-xs text-muted-foreground">Needs review</span>}
+                  {(holiday || leave) && <span className="mt-1 block text-xs text-muted-foreground">{[holiday?.name, leave?.leaveType.name].filter(Boolean).join(" · ")}</span>}
+                </TD>
+                <TD className="tabular-nums">{formatWorkspaceTime(record?.punchInTime, region)}</TD>
+                <TD className="tabular-nums">{formatWorkspaceTime(record?.punchOutTime, region)}</TD>
+                <TD className="hidden text-muted-foreground xl:table-cell">{shift?.name ?? "—"}</TD>
+                <TD>
+                  {correctionStatus && <Link href={`${href(month, "corrections")}#corrections-${day}`} className="mr-3 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">{correctionStatus === "pending" ? "Pending review" : correctionStatus === "approved" ? "Approved" : "Declined"}</Link>}
+                  {canCorrect && correctionStatus !== "pending" && <Link href={`${href(month, "corrections")}&action=request&date=${day}`} aria-label={`Request correction for ${formatCalendarDate(day, region.locale)}`} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Request</Link>}
+                  {!correctionStatus && !canCorrect && <span className="text-muted-foreground">—</span>}
+                </TD>
+              </TR>;
+            })}</TBody>
+          </Table>
+        </Card>
+      )}
     </div>
   );
 }

@@ -16,6 +16,7 @@ interface Decl {
   fy: string;
   sections: Record<string, number>;
   status: string;
+  updatedAt: string;
   note: string | null;
   employee: {
     id: string;
@@ -27,10 +28,12 @@ interface Decl {
 
 export function TaxReviewPanel({
   currentFy,
+  actorId,
   declarations,
   fys,
 }: {
   currentFy: string;
+  actorId: string;
   declarations: Decl[];
   fys: string[];
 }) {
@@ -53,6 +56,8 @@ export function TaxReviewPanel({
   );
 
   async function review(id: string, action: "verify" | "reject") {
+    const declaration = declarations.find((item) => item.id === id);
+    if (!declaration) return;
     setBusy(id);
     try {
       const res = await fetch(`/api/tax-declarations/${id}`, {
@@ -60,6 +65,7 @@ export function TaxReviewPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
+          updatedAt: declaration.updatedAt,
           note: action === "reject" ? note.trim() : undefined,
         }),
       });
@@ -177,7 +183,7 @@ export function TaxReviewPanel({
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
-                  {d.status !== "verified" && (
+                  {d.status === "submitted" && d.employee.id !== actorId && (
                     <Button
                       size="sm"
                       variant="success"
@@ -187,7 +193,7 @@ export function TaxReviewPanel({
                       <Check className="h-3.5 w-3.5" /> Verify
                     </Button>
                   )}
-                  {d.status !== "rejected" && (
+                  {d.status !== "rejected" && d.employee.id !== actorId && (
                     <Button
                       size="sm"
                       variant="ghost"

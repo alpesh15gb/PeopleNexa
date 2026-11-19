@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { LifeBuoy, Send, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,7 @@ import { EmptyState } from "@/components/ui/stat";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
+import { HelpdeskPagination, type HelpdeskPage } from "@/components/helpdesk-pagination";
 
 type Msg = { id: string; sender: { id: string; firstName: string; lastName: string; role: string }; body: string; createdAt: string };
 type Ticket = {
@@ -28,7 +28,6 @@ const prioTone: Record<string, "neutral" | "info" | "warning" | "danger"> = { lo
 const statusTone: Record<string, "warning" | "info" | "success"> = { open: "warning", in_progress: "info", resolved: "success", closed: "neutral" as never };
 
 export function HelpdeskPanel() {
-  const router = useRouter();
   const toast = useToast();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [employees, setEmployees] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
@@ -39,17 +38,28 @@ export function HelpdeskPanel() {
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<HelpdeskPage | null>(null);
+  const [loadError, setLoadError] = useState("");
 
-  async function load() {
-    const res = await fetch("/api/helpdesk");
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const params = new URLSearchParams({ filter, page: String(page), pageSize: "25" });
+    const res = await fetch(`/api/helpdesk?${params}`, { signal });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Could not load tickets.");
     setTickets(data.tickets);
     setEmployees(data.employees);
     setSummary(data.summary);
-  }
+    setPagination(data.pagination);
+    setLoadError("");
+  }, [filter, page]);
   useEffect(() => {
-    void load();
-  }, []);
+    const controller = new AbortController();
+    void load(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load tickets.");
+    });
+    return () => controller.abort();
+  }, [load]);
 
   async function act(id: string, payload: Record<string, unknown>) {
     const res = await fetch(`/api/helpdesk/${id}`, {
@@ -116,8 +126,6 @@ export function HelpdeskPanel() {
     }
   }
 
-  const filtered = filter === "all" ? tickets : filter === "open" ? tickets.filter((t) => t.status === "open" || t.status === "in_progress") : tickets.filter((t) => t.status === "resolved" || t.status === "closed");
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -128,20 +136,21 @@ export function HelpdeskPanel() {
         </p>
         <div className="flex gap-2">
           {["all", "open", "resolved"].map((f) => (
-            <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium capitalize ${filter === f ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
+            <button key={f} aria-pressed={filter === f} onClick={() => { setFilter(f); setPage(1); setOpenId(null); setReply(""); }} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium capitalize ${filter === f ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
               {f}
             </button>
           ))}
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
+      {tickets.length === 0 && !loadError ? (
         <EmptyState icon={<LifeBuoy className="h-5 w-5" />} title="No tickets" description="Employee-raised support tickets will appear here." />
       ) : (
         <div className="space-y-3">
-          {filtered.map((t) => (
+          {tickets.map((t) => (
             <div key={t.id} className="overflow-hidden rounded-2xl border border-edge bg-card">
-              <button onClick={() => setOpenId(openId === t.id ? null : t.id)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
+              <button aria-expanded={openId === t.id} onClick={() => { setOpenId(openId === t.id ? null : t.id); setReply(""); }} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
                   {t.requester.firstName[0]}{t.requester.lastName[0]}
                 </div>
@@ -168,25 +177,26 @@ export function HelpdeskPanel() {
                     ))}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <select value={t.assignee?.id ?? ""} onChange={(e) => assign(t.id, e.target.value)} className="rounded-lg border border-edge bg-card px-2.5 py-2 text-[12.5px] outline-none">
+                    <select aria-label="Ticket assignee" value={t.assignee?.id ?? ""} onChange={(e) => assign(t.id, e.target.value)} className="rounded-lg border border-edge bg-card px-2.5 py-2 text-[12.5px] outline-none">
                       <option value="">Unassigned</option>
                       {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                     </select>
-                    <Button size="sm" variant={t.status === "open" ? "outline" : "ghost"} onClick={() => changeStatus(t.id, "in_progress")} disabled={t.status === "in_progress" || t.status === "resolved" || t.status === "closed"}>Take / progress</Button>
+                    <Button size="sm" variant="outline" onClick={() => changeStatus(t.id, "in_progress")} disabled={t.status === "in_progress"}>{t.status === "closed" || t.status === "resolved" ? "Reopen" : "Start work"}</Button>
                     <Button size="sm" variant={t.status === "resolved" ? "success" : "outline"} onClick={() => changeStatus(t.id, "resolved")} disabled={t.status === "resolved" || t.status === "closed"}>Resolve</Button>
                     <Button size="sm" variant="ghost" onClick={() => changeStatus(t.id, "closed")} disabled={t.status === "closed"}>Close</Button>
                     <Button size="icon" variant="ghost" onClick={() => del(t.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
                   </div>
-                  <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
-                    <input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply to employee…" className="flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+                  {t.status !== "closed" && <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
+                    <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply to employee…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
                     <Button type="submit" size="sm" loading={busy}><Send className="h-3.5 w-3.5" /> Send</Button>
-                  </form>
+                  </form>}
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+      <HelpdeskPagination pagination={pagination} onPage={(next) => { setPage(next); setOpenId(null); setReply(""); }} />
 
       <ConfirmDialog
         open={confirmTarget !== null}

@@ -9,6 +9,7 @@ import { appendAudit } from "@/lib/audit";
 import { describeFace, verifyFace } from "@/lib/face";
 import { createPunchForEvent } from "@/lib/punch-idempotency";
 import { mobileLocation, mobileSelfieBytes, mobileHoldReason, mobileCaptureTime } from "@/lib/mobile-attendance";
+import { workspaceRegion } from "@/lib/workspace-region";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (priorPunch.authStatus === "declined") return NextResponse.json({ error: "This punch was declined by a reviewer. Refresh attendance before submitting another attempt." }, { status: 409 });
     if (priorPunch.authStatus === "pending") return NextResponse.json({ success: true, duplicate: true, pendingApproval: true, holdReason: priorPunch.holdReason });
     const tenant = await prisma.tenant.findUnique({ where: { id: employee.tenantId } });
-    const result = await reconcileEmployeeDay(tenant ?? { id: employee.tenantId, config: null }, employee, await attendanceDayForPunch(employee, priorPunch.punchTime), { finalize: false });
+    const result = await reconcileEmployeeDay(tenant ?? { id: employee.tenantId, config: null }, employee, await attendanceDayForPunch(employee, priorPunch.punchTime, workspaceRegion(tenant?.config).timeZone), { finalize: false });
     return NextResponse.json({ success: true, duplicate: true, action: priorPunch.inOutHint === "unknown" ? result.action === "created" ? "in" : "out" : priorPunch.inOutHint });
   }
 
@@ -251,7 +252,7 @@ export async function POST(req: NextRequest) {
   const result = await reconcileEmployeeDay(
     tenant ?? { id: employee.tenantId, config: null },
     { id: employee.id, shiftId: employee.shiftId, tenantId: employee.tenantId, branchId: employee.branchId },
-    await attendanceDayForPunch(employee, punch.punchTime),
+    await attendanceDayForPunch(employee, punch.punchTime, workspaceRegion(tenant?.config).timeZone),
     { finalize: false }
   );
 

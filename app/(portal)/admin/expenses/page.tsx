@@ -1,42 +1,71 @@
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import Link from "next/link";
+import { requireActiveSession } from "@/lib/session";
+import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat";
 import { Wallet, Hourglass, CheckCircle2, Banknote } from "lucide-react";
 import { ExpensesPanel } from "./expenses-panel";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { recordPageNumber, recordPagination, recordPageRedirect, type RecordSearchParams } from "@/lib/document-expense-pagination";
+import { expenseSummary } from "@/lib/expense-records";
+import { pendingApprovalFilters } from "@/lib/approval-workspace";
+import { supportsIndiaPayroll, workspaceRegion } from "@/lib/workspace-region";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminExpensesPage() {
-  const session = await requireSession();
+export default async function AdminExpensesPage({ searchParams }: { searchParams: Promise<RecordSearchParams> }) {
+  const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
+  if (session.role !== "admin" && session.role !== "location_manager") redirect("/employee/expenses");
+  const locationId = await managerLocationId(session);
+  const reviewOnly = params.review === "approvals";
+  const where = reviewOnly ? (await pendingApprovalFilters(session)).expense ?? { id: { in: [] } } : {
+    tenantId: session.tenantId,
+    ...(session.role === "location_manager" ? { employee: employeeLocationScope(locationId ?? "__unassigned_location__") } : {}),
+  };
 
-  const [claims, pending, approved, settled] = await Promise.all([
-    prisma.expenseClaim.findMany({
-      where: { tenantId: session.tenantId },
-      include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    }),
-    prisma.expenseClaim.count({ where: { tenantId: session.tenantId, status: "pending" } }),
-    prisma.expenseClaim.count({ where: { tenantId: session.tenantId, status: "approved" } }),
-    prisma.expenseClaim.count({ where: { tenantId: session.tenantId, status: "settled" } }),
+  const [{ total: totalClaims, byStatus }, tenant] = await Promise.all([
+    expenseSummary(where),
+    prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { config: true } }),
   ]);
+  const path = "/admin/expenses";
+  const pagination = recordPagination(totalClaims, recordPageNumber(params.page) ?? 1);
+  const redirectTo = recordPageRedirect(path, params, pagination);
+  if (redirectTo) redirect(redirectTo);
 
-  const pendingAmount = claims.filter((c) => c.status === "pending").reduce((s, c) => s + c.amount, 0);
-  const settledAmount = claims.filter((c) => c.status === "settled").reduce((s, c) => s + c.amount, 0);
+  const claims = await prisma.expenseClaim.findMany({
+    where,
+    include: { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pagination.offset,
+    take: pagination.pageSize,
+  });
+
+  const pending = byStatus.get("pending");
+  const approved = byStatus.get("approved");
+  const settled = byStatus.get("settled");
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title="Expenses & Claims" description="Reimbursement claims from your team" />
+      <PageHeader
+        title={reviewOnly ? "Pending expense claims" : "Expenses & Claims"}
+        description="Reimbursement claims from your team"
+        actions={reviewOnly && <Link href={path} className="text-sm font-medium text-primary hover:underline">View all claims</Link>}
+      />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Pending" value={pending} sub={`₹${pendingAmount.toLocaleString("en-IN")} awaiting review`} icon={<Hourglass className="h-4.5 w-4.5" />} tone="amber" />
-        <StatCard label="Approved" value={approved} icon={<CheckCircle2 className="h-4.5 w-4.5" />} tone="sky" />
-        <StatCard label="Settled" value={settled} sub={`₹${settledAmount.toLocaleString("en-IN")} paid out`} icon={<Banknote className="h-4.5 w-4.5" />} tone="emerald" />
-        <StatCard label="Total claims" value={claims.length} icon={<Wallet className="h-4.5 w-4.5" />} tone="indigo" />
+        <StatCard label="Pending" value={pending?._count._all ?? 0} sub={`₹${(pending?._sum.amount ?? 0).toLocaleString("en-IN")} awaiting review`} icon={<Hourglass className="h-4.5 w-4.5" />} tone="amber" />
+        {!reviewOnly && <>
+        <StatCard label="Approved" value={approved?._count._all ?? 0} icon={<CheckCircle2 className="h-4.5 w-4.5" />} tone="sky" />
+        <StatCard label="Settled" value={settled?._count._all ?? 0} sub={`₹${(settled?._sum.amount ?? 0).toLocaleString("en-IN")} marked settled`} icon={<Banknote className="h-4.5 w-4.5" />} tone="emerald" />
+        <StatCard label="Total claims" value={totalClaims} icon={<Wallet className="h-4.5 w-4.5" />} tone="indigo" />
+        </>}
       </div>
       <Card>
         <CardContent className="p-0">
-          <ExpensesPanel
+          <ExpensesPanel key={pagination.page}
+            actorId={session.sub}
+            canUsePayroll={supportsIndiaPayroll(workspaceRegion(tenant.config))}
             claims={claims.map((c) => ({
               id: c.id,
               title: c.title,
@@ -57,6 +86,7 @@ export default async function AdminExpensesPage() {
           />
         </CardContent>
       </Card>
+      <DocumentExpensePagination path={path} params={params} pagination={pagination} label="claims" />
     </div>
   );
 }

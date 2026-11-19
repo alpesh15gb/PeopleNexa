@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 
-type Device = { id: string; name: string; serialNumber: string; locationCode: string | null; allowed: boolean; commandStatus?: string; lastCommandAt?: string | null; lastError?: string | null };
+type Device = { id: string; name: string; serialNumber: string; locationCode: string | null; allowed: boolean; commandStatus?: string; lastCommandAt?: string | null; lastError?: string | null; recorded: boolean; retryableBlock: boolean };
 type Result = { deviceId: string; name: string; allowed: boolean; status: "sent" | "failed" | "unchanged"; error?: string };
 type ProvisionResult = { locationCode: string; status: "sent" | "failed"; lastError?: string | null; error?: string };
 
@@ -21,6 +21,7 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
   const [results, setResults] = useState<Result[]>([]);
   const [provisionResults, setProvisionResults] = useState<ProvisionResult[]>([]);
   const [inactive, setInactive] = useState(false);
+  const [accessAvailable, setAccessAvailable] = useState(false);
   const [canSyncTopology, setCanSyncTopology] = useState(false);
   const [topologyInstruction, setTopologyInstruction] = useState("");
 
@@ -38,6 +39,7 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
            setSelected(data.deviceIds ?? []);
            setMode(data.mode === "restricted" ? "restricted" : "all");
             setInactive(data.mode === "blocked");
+            setAccessAvailable(Boolean(data.accessAvailable && data.deviceCode));
             setProvisionResults(data.provisionResults ?? []);
             setCanSyncTopology(Boolean(data.canSyncTopology));
             setTopologyInstruction(data.topologyInstruction ?? "");
@@ -59,6 +61,30 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
 
   const provisionedDevices = mode === "all" ? devices : devices.filter((device) => selected.includes(device.id));
   const unmappedDevices = provisionedDevices.filter((device) => !device.locationCode);
+  const hasRetryableBlocks = devices.some((device) => device.retryableBlock);
+
+  async function retryBlocks() {
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/employees/${employeeId}/device-access`, { method: "PATCH" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not retry device blocks.");
+      const nextResults: Result[] = data.results ?? [];
+      setResults(nextResults);
+      const byDevice = new Map(nextResults.map((result) => [result.deviceId, result]));
+      setDevices((current) => current.map((device) => {
+        const result = byDevice.get(device.id);
+        if (!result) return device;
+        return { ...device, allowed: false, commandStatus: result.status, lastError: result.error ?? null, retryableBlock: result.status === "failed" };
+      }));
+      const failed = nextResults.filter((result) => result.status === "failed").length;
+      toast(failed ? "error" : "success", failed ? `${failed} block command(s) failed. Review the results below.` : nextResults.length ? "Block commands sent to eBio." : "No block commands are ready to retry. Reopen Device access to refresh.");
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not retry device blocks.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -86,16 +112,28 @@ export function EmployeeDeviceAccess({ employeeId }: { employeeId: string }) {
     }
   }
 
-  return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Fingerprint className="h-3.5 w-3.5" /> Device access</Button><Modal open={open} onClose={() => setOpen(false)} title="Biometric device access" description="Choose whether this employee may use every active device or only selected devices.">
+  return <><Button size="sm" variant="outline" onClick={() => setOpen(true)}><Fingerprint className="h-3.5 w-3.5" /> Device access</Button><Modal open={open} onClose={() => !saving && setOpen(false)} title="Biometric device access">
     {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading active devices...</div> : <div className="space-y-4">
-      {inactive ? <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">This employee is inactive and is blocked on all active eBio devices. Activate the employee, then explicitly select and save access here. Activation alone does not unblock machines.</p> : <><div className="space-y-2 rounded-xl border border-edge p-3"><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> <span><strong>Allow all active devices</strong><span className="block text-xs text-muted-foreground">No device restriction is applied.</span></span></label><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "restricted"} onChange={() => setMode("restricted")} /> <span><strong>Restrict to selected devices</strong><span className="block text-xs text-muted-foreground">Employee is blocked on every unselected device.</span></span></label></div>
+      {inactive ? <div className="space-y-3">
+        <p className="rounded-xl border border-edge p-3 text-sm">Inactive employees require blocked device access. A sent command means eBio accepted the request. Verify the block on the device.</p>
+        {devices.length > 0 ? <ul className="max-h-[45vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge text-sm">
+          {devices.map((device) => <li key={device.id} className="p-3">
+            <p className="font-medium">{device.name}</p>
+            <p className={device.commandStatus === "failed" ? "text-destructive" : "text-muted-foreground"}>
+              {!device.recorded || device.allowed ? "Awaiting a recorded block command" : device.commandStatus === "sent" ? "Block sent to eBio" : device.commandStatus === "failed" ? "Block failed" : "Block pending"}
+              {device.lastError && ` · ${device.lastError}`}
+            </p>
+          </li>)}
+        </ul> : <p className="text-sm text-muted-foreground">No active eBio devices are available.</p>}
+        {hasRetryableBlocks && !accessAvailable && <p className="text-sm text-muted-foreground">Confirm the employee’s device code and eBioserver connection before retrying.</p>}
+      </div> : <><div className="space-y-2 rounded-xl border border-edge p-3"><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> <span><strong>Allow all active devices</strong><span className="block text-xs text-muted-foreground">No device restriction is applied.</span></span></label><label className="flex cursor-pointer gap-3 text-sm"><input type="radio" checked={mode === "restricted"} onChange={() => setMode("restricted")} /> <span><strong>Restrict to selected devices</strong><span className="block text-xs text-muted-foreground">Employee is blocked on every unselected device.</span></span></label></div>
        {unmappedDevices.length > 0 && <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-warning"><p className="font-medium">eBio location mapping is missing for {unmappedDevices.map((device) => device.name).join(", ")}.</p><p className="mt-1 text-warning/90">{topologyInstruction}</p>{canSyncTopology && <a href="/admin/settings" className="mt-2 inline-flex items-center gap-1 font-medium underline"><Link2 className="h-3.5 w-3.5" /> Open eBioserver topology sync</a>}</div>}
        {mode === "all" && devices.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">Devices and eBio locations</p>{devices.map((device) => <p key={device.id} className={`mt-1 ${device.locationCode ? "text-muted-foreground" : "text-destructive"}`}>{device.name}: {device.locationCode ? `eBio location ${device.locationCode}` : "eBio location mapping missing"}</p>)}</div>}
        {mode === "restricted" && (devices.length ? <div className="max-h-[45vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">{devices.map((device) => <label key={device.id} className="flex cursor-pointer items-start gap-3 p-3 hover:bg-tint"><input type="checkbox" checked={selected.includes(device.id)} onChange={() => toggle(device.id)} className="mt-1 h-4 w-4 accent-primary" /><span className="min-w-0 flex-1"><span className="block text-sm font-medium">{device.name}</span><span className="block font-mono text-xs text-muted-foreground">{device.serialNumber}</span><span className={`mt-1 block text-xs ${device.locationCode ? "text-muted-foreground" : "text-destructive"}`}>{device.locationCode ? `eBio location: ${device.locationCode}` : "eBio location mapping missing"}</span>{device.commandStatus && <span className={`mt-1 block text-xs ${device.commandStatus === "failed" ? "text-destructive" : "text-muted-foreground"}`}>Last action: {device.allowed ? "Unblock" : "Block"} — {device.commandStatus}{device.lastError ? ` - ${device.lastError}` : ""}</span>}</span></label>)}</div> : <p className="rounded-xl border border-dashed border-edge p-6 text-center text-sm text-muted-foreground">No active eBio devices are available for this employee.</p>)}</>}
       {provisionResults.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">eBio location provisioning</p>{provisionResults.map((result) => <p key={result.locationCode} className={`mt-1 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{result.locationCode}: {result.status}{result.error ?? result.lastError ? ` - ${result.error ?? result.lastError}` : ""}</p>)}</div>}
       {!inactive && <p className="text-xs text-muted-foreground">Requested access: {provisionedDevices.length} allowed, {devices.length - provisionedDevices.length} blocked. Saving sends changed or failed commands only. If location provisioning fails, affected machines receive a block request. Sent means accepted by eBio; check execution in eBio and test on the machine.</p>}
       {results.length > 0 && <div className="rounded-xl border border-edge bg-tint/30 p-3 text-sm"><p className="font-medium">Command results</p>{results.map((result) => <p key={result.deviceId} className={`mt-1 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{result.name}: {result.allowed ? "Unblock" : "Block"} — {result.status === "unchanged" ? "unchanged (not resent)" : result.status === "sent" ? "sent to eBio (execution not verified)" : "failed"}{result.error ? ` - ${result.error}` : ""}</p>)}</div>}
-        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setOpen(false)}>Close</Button>{!inactive && <Button type="button" onClick={save} loading={saving} disabled={!devices.length || (mode === "restricted" && !selected.length)}>Save device access</Button>}</div>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" disabled={saving} onClick={() => setOpen(false)}>Close</Button>{inactive ? hasRetryableBlocks && <Button type="button" onClick={retryBlocks} loading={saving} disabled={!accessAvailable}>Retry device blocks</Button> : <Button type="button" onClick={save} loading={saving} disabled={!devices.length || (mode === "restricted" && !selected.length)}>Save device access</Button>}</div>
     </div>}
   </Modal></>;
 }

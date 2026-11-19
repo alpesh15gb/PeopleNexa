@@ -2,7 +2,7 @@ import { istDateKey } from "./ist";
 
 export const AUTHORIZED_PUNCH_STATUSES = ["auto", "approved"] as const;
 
-/** Raw Punch rows that count toward real-time presence for an IST day. */
+/** Raw Punch rows that count toward real-time presence in the supplied window. */
 export function authorizedPunchDayFilter(start: Date, end: Date) {
   return {
     punchTime: { gte: start, lt: end },
@@ -21,20 +21,20 @@ type RawPunchPresenceRow = { employeeId: string; punchTime: Date; authStatus: st
 export function dailyPresentEmployeeCounts(
   attendanceRows: Iterable<AttendancePresenceRow>,
   punchRows: Iterable<RawPunchPresenceRow>,
+  punchDateKey: (date: Date) => string = istDateKey,
 ) {
   const employeeIdsByDay = new Map<string, Set<string>>();
-  const add = (day: Date, employeeId: string) => {
-    const key = istDateKey(day);
+  const add = (key: string, employeeId: string) => {
     const employeeIds = employeeIdsByDay.get(key) ?? new Set<string>();
     employeeIds.add(employeeId);
     employeeIdsByDay.set(key, employeeIds);
   };
 
   for (const row of attendanceRows) {
-    if (row.status === "present" || row.status === "late" || row.status === "half_day") add(row.date, row.employeeId);
+    if (row.status === "present" || row.status === "late" || row.status === "half_day") add(istDateKey(row.date), row.employeeId);
   }
   for (const row of punchRows) {
-    if ((AUTHORIZED_PUNCH_STATUSES as readonly string[]).includes(row.authStatus)) add(row.punchTime, row.employeeId);
+    if ((AUTHORIZED_PUNCH_STATUSES as readonly string[]).includes(row.authStatus)) add(punchDateKey(row.punchTime), row.employeeId);
   }
 
   return new Map([...employeeIdsByDay].map(([day, employeeIds]) => [day, employeeIds.size]));

@@ -37,8 +37,10 @@ interface Loan {
 export function LoansPanel({
   loans,
   employees,
+  canManageExisting,
 }: {
   loans: Loan[];
+  canManageExisting: boolean;
   employees: {
     id: string;
     firstName: string;
@@ -108,7 +110,10 @@ export function LoansPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "closed" }),
       });
-      if (!res.ok) return toast("error", "Failed to close");
+      if (!res.ok) {
+        const result = await res.json().catch(() => null);
+        return toast("error", result?.error ?? "Failed to close");
+      }
       toast("success", "Loan marked as closed");
       setClosing(null);
       router.refresh();
@@ -130,7 +135,8 @@ export function LoansPanel({
       method: "DELETE",
     });
     if (!res.ok) {
-      toast("error", "Failed to delete");
+      const result = await res.json().catch(() => null);
+      toast("error", result?.error ?? "Failed to delete");
       setDeleting(false);
       return;
     }
@@ -243,7 +249,7 @@ export function LoansPanel({
                   </TD>
                   <TD>
                     <div className="flex items-center justify-end gap-1">
-                      {l.status === "active" && (
+                      {canManageExisting && l.status === "active" && (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -257,7 +263,7 @@ export function LoansPanel({
                           />
                         </Button>
                       )}
-                      <Button
+                      {canManageExisting && !l.lastDeductedMonth && l.amount === l.outstanding && <Button
                         size="sm"
                         variant="ghost"
                         className="text-rose-300"
@@ -266,7 +272,7 @@ export function LoansPanel({
                         onClick={() => removeLoan(l.id)}
                       >
                         <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-                      </Button>
+                      </Button>}
                     </div>
                   </TD>
                 </TR>
@@ -316,7 +322,7 @@ export function LoansPanel({
               </div>
             </dl>
             <div className="mt-3 flex gap-2">
-              {loan.status === "active" && (
+              {canManageExisting && loan.status === "active" && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -325,13 +331,13 @@ export function LoansPanel({
                   Mark closed
                 </Button>
               )}
-              <Button
+              {canManageExisting && !loan.lastDeductedMonth && loan.amount === loan.outstanding && <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => void removeLoan(loan.id)}
               >
                 Delete
-              </Button>
+              </Button>}
             </div>
           </article>
         ))}

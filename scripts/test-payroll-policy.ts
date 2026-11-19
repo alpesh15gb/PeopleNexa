@@ -1,10 +1,42 @@
 import assert from "node:assert/strict";
-import { payrollConfigFromSnapshot, resolvePayrollPolicy } from "../lib/payroll-policy";
-import { computePayroll, type AttendanceSummary } from "../lib/payroll";
+import { canUsePayrollPolicyFallback, newWorkspacePayrollSettings, payrollConfigFromSnapshot, resolvePayrollPolicy } from "../lib/payroll-policy";
+import { computePayroll, getPayrollConfig, payrollRunUsesShiftWeeklyOffs, type AttendanceSummary } from "../lib/payroll";
+import { payrollPolicyDraft } from "../lib/configuration";
+import { payrollPolicyEditorBaseline } from "../lib/payroll-policy-editor";
 
 const payload = (multiplier: number) => ({ monthlyDivisor: 30, deductLossOfPay: false, overtimeMultiplier: multiplier, overtimeBasis: "fixed_hourly" as const, statutory: { pfEnabled: false, pfWageCeiling: 9999, esicEnabled: false, esicGrossCeiling: 19999, professionalTaxEnabled: false, professionalTaxState: "Karnataka", labourWelfareFundEnabled: true, tdsEnabled: false, tdsRegime: "old" as const } });
 const record = (overrides: Partial<{ id: string; locationId: string | null; version: number; active: boolean; effectiveFrom: Date; effectiveTo: Date | null; payload: unknown }> = {}) => ({ id: "tenant-v1", locationId: null, version: 1, active: true, effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), effectiveTo: null, payload: payload(2), ...overrides });
 const tenantConfig = { payroll: { otMultiplier: 1.5, deductAbsentDays: true, pf: { enabled: true, wageCeiling: 15000 } } };
+
+const newWorkspace = newWorkspacePayrollSettings();
+assert.equal(newWorkspace.payrollUsesShiftWeeklyOffs, true);
+const starterConfig = getPayrollConfig(newWorkspace);
+assert.equal(starterConfig.lateFinePerLateDay, 0);
+assert.deepEqual(starterConfig.pt, { enabled: false, state: "" });
+assert.equal(starterConfig.pf.enabled || starterConfig.esic.enabled || starterConfig.tds.enabled || starterConfig.lwf.enabled, false);
+assert.equal(canUsePayrollPolicyFallback(newWorkspace, true), false, "acknowledgement cannot activate an unpublished new-tenant policy");
+assert.equal(canUsePayrollPolicyFallback(tenantConfig, true), true, "existing workspaces retain their explicit fallback");
+assert.equal(canUsePayrollPolicyFallback(tenantConfig, false), false);
+assert.equal(getPayrollConfig({}).pt.state, "Gujarat", "historical metadata is unchanged for previously created workspaces");
+const newDraft = record({ id: "new-policy", locationId: "loc-1", active: false, payload: payrollPolicyEditorBaseline(starterConfig) });
+assert.equal(resolvePayrollPolicy([newDraft], newWorkspace, "loc-1", "2026-06").configurationId, null);
+const publishedPolicy = resolvePayrollPolicy([{ ...newDraft, active: true }], newWorkspace, "loc-1", "2026-06");
+assert.equal(publishedPolicy.configurationId, "new-policy");
+assert.equal(publishedPolicy.appliedRules.payrollConfig.pt.enabled, false);
+assert.equal(publishedPolicy.appliedRules.useShiftWeeklyOffs, true, "new workspaces default to shift weekly offs");
+
+const optIn = record({ id: "opt-in", effectiveFrom: new Date("2026-07-01T00:00:00Z"), payload: { ...payload(2), attendanceTreatment: { useShiftWeeklyOffs: true } } });
+const legacyLocation = record({ id: "location-v1", locationId: "loc-1" });
+const locationOptOut = record({ id: "location-v2", locationId: "loc-1", version: 2, effectiveFrom: new Date("2026-08-01T00:00:00Z"), payload: { ...payload(2), attendanceTreatment: { useShiftWeeklyOffs: false } } });
+assert.equal(resolvePayrollPolicy([optIn, legacyLocation], tenantConfig, "loc-1", "2026-06").appliedRules.useShiftWeeklyOffs, false, "existing workspace keeps legacy before the effective month");
+assert.equal(resolvePayrollPolicy([{ ...optIn, active: false }, legacyLocation], tenantConfig, "loc-1", "2026-07").appliedRules.useShiftWeeklyOffs, false, "a working copy does not change generation");
+assert.equal(resolvePayrollPolicy([optIn, legacyLocation], tenantConfig, "loc-1", "2026-07").appliedRules.useShiftWeeklyOffs, true, "existing location policy inherits the effective workspace choice");
+assert.equal(resolvePayrollPolicy([optIn, legacyLocation, locationOptOut], tenantConfig, "loc-1", "2026-08").appliedRules.useShiftWeeklyOffs, false, "an explicit location choice wins");
+assert.equal(payrollPolicyDraft({ ...payload(2), attendanceTreatment: { useShiftWeeklyOffs: "true" } }), null);
+
+assert.equal(payrollRunUsesShiftWeeklyOffs(null, true), true, "a new run takes the effective setting");
+assert.equal(payrollRunUsesShiftWeeklyOffs({ inputSnapshot: { attendance: {} } }, true), false, "adding people to a legacy draft preserves its method");
+assert.equal(payrollRunUsesShiftWeeklyOffs({ inputSnapshot: { attendance: { weeklyOffDates: [] } } }, false), true, "an empty captured calendar still identifies shift weekly-off treatment");
 
 const fallback = resolvePayrollPolicy([], tenantConfig, "loc-1", "2026-06");
 assert.equal(fallback.configurationId, null, "missing policy uses Tenant.config");

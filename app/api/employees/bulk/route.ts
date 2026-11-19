@@ -6,10 +6,14 @@ import { appendAudit } from "@/lib/audit";
 import { optionalEmployeeEmail, optionalEmployeePosition } from "@/lib/employee-input";
 import { ensureDesignations, normalizeDesignationName } from "@/lib/designation";
 import { employeeImportStatus, assertEmployeeImportStatusChange } from "@/lib/employee-import-status";
+import { EMPLOYEE_IMPORT_MAX_ROWS } from "@/lib/employee-import-csv";
+import { nextEmployeeNumber } from "@/lib/employee-number";
+import { reportingManagerCreatesCycle } from "@/lib/employee-reporting-line";
+import { employeeLocationScope } from "@/lib/location-scope";
+import { optionalDateInput } from "@/lib/dates";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_ROWS = 2500;
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
@@ -117,31 +121,36 @@ function assignmentName(value: unknown): string {
   return value != null ? String(value).trim() : "";
 }
 
-async function resolveBranch(tenantId: string, value: string, locationId?: string | null): Promise<string | null> {
+async function resolveBranch(db: Prisma.TransactionClient, tenantId: string, value: string, locationId?: string | null) {
   if (!value) return null;
-  const existing = await prisma.branch.findFirst({
+  const byId = await db.branch.findFirst({ where: { id: value, tenantId }, select: { id: true, locationId: true } });
+  if (byId) {
+    if (locationId && byId.locationId !== locationId) throw new Error("Select a branch in your assigned location.");
+    return byId;
+  }
+  const existing = await db.branch.findFirst({
     where: { tenantId, ...(locationId ? { locationId } : {}), OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
-    select: { id: true },
+    select: { id: true, locationId: true },
   });
-  if (existing) return existing.id;
+  if (existing) return existing;
   const base = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 16) || "BRANCH";
   let code = base;
   for (let suffix = 2; ; suffix++) {
-    const clash = await prisma.branch.findFirst({ where: { tenantId, code }, select: { id: true } });
+    const clash = await db.branch.findFirst({ where: { tenantId, code }, select: { id: true } });
     if (!clash) break;
     code = `${base.slice(0, 16)}${suffix}`.slice(0, 20);
   }
-  return (await prisma.branch.create({ data: { tenantId, name: value, code, locationId: locationId ?? null } })).id;
+  return db.branch.create({ data: { tenantId, name: value, code, locationId: locationId ?? null }, select: { id: true, locationId: true } });
 }
 
-async function resolveDepartment(tenantId: string, value: string): Promise<string | null> {
+async function resolveDepartment(db: Prisma.TransactionClient, tenantId: string, value: string): Promise<string | null> {
   if (!value) return null;
-  const existing = await prisma.department.findFirst({
+  const existing = await db.department.findFirst({
     where: { tenantId, OR: [{ id: value }, { name: { equals: value, mode: "insensitive" } }] },
     select: { id: true },
   });
   if (existing) return existing.id;
-  return (await prisma.department.create({ data: { tenantId, name: value } })).id;
+  return (await db.department.create({ data: { tenantId, name: value } })).id;
 }
 
 export async function POST(req: NextRequest) {
@@ -162,9 +171,9 @@ export async function POST(req: NextRequest) {
   if (rows.length === 0) {
     return NextResponse.json({ error: "No rows to import." }, { status: 400 });
   }
-  if (rows.length > MAX_ROWS) {
+  if (rows.length > EMPLOYEE_IMPORT_MAX_ROWS) {
     return NextResponse.json(
-      { error: `Too many rows (max ${MAX_ROWS}).` },
+      { error: `Too many rows (max ${EMPLOYEE_IMPORT_MAX_ROWS}).` },
       { status: 400 }
     );
   }
@@ -173,14 +182,6 @@ export async function POST(req: NextRequest) {
     : null;
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
 
-  const [count, tenant] = await Promise.all([
-    prisma.employee.count({ where: { tenantId: session.tenantId } }),
-    prisma.tenant.findUnique({
-      where: { id: session.tenantId },
-      select: { seats: true },
-    }),
-  ]);
-  const seats = tenant?.seats ?? 0;
   let created = 0;
   const inactiveEmployeeIds = new Set<string>();
   const warnings: string[] = [];
@@ -189,29 +190,22 @@ export async function POST(req: NextRequest) {
   const createdEmployees: Array<{ id: string; employeeNumber: string; name: string }> = [];
   const updatedEmployees: Array<{ id: string; employeeNumber: string; name: string }> = [];
   const seenInBatch = new Set<string>();
+  const changedEmployeeIds = new Set<string>();
   for (let i = 0; i < rows.length; i++) {
     const raw = rows[i] as BulkRow;
     const email = optionalEmployeeEmail(raw?.email);
     try {
       const employeeNumberInput = raw?.employeeNumber ? String(raw.employeeNumber).trim() : "";
       const deviceCodeInput = raw?.deviceCode ? String(raw.deviceCode).trim() : "";
-      const rowKey = deviceCodeInput || employeeNumberInput || email;
-      if (!rowKey) throw new Error("Provide Device Code or Employee Code to identify the employee.");
-      if (seenInBatch.has(rowKey)) throw new Error("Duplicate Device Code or Employee Code in this file.");
-      seenInBatch.add(rowKey);
-      const existingForRow = await prisma.employee.findFirst({
-        where: {
-          tenantId: session.tenantId,
-          ...(locationId ? { branch: { locationId } } : {}),
-          OR: [
-            ...(deviceCodeInput ? [{ deviceCode: deviceCodeInput }] : []),
-            ...(employeeNumberInput ? [{ employeeNumber: employeeNumberInput }] : []),
-            ...(email ? [{ email }] : []),
-          ],
-        },
-      });
+      const inputKeys = [
+        ...(deviceCodeInput ? [`device:${deviceCodeInput}`] : []),
+        ...(employeeNumberInput ? [`employee:${employeeNumberInput.toLowerCase()}`] : []),
+        ...(email ? [`email:${email}`] : []),
+      ];
+      if (!inputKeys.length) throw new Error("Provide an employee code, device code or work email.");
+      if (inputKeys.some((key) => seenInBatch.has(key))) throw new Error("This employee identifier appears more than once in the file.");
+      inputKeys.forEach((key) => seenInBatch.add(key));
       const firstName = String(raw?.firstName ?? "").trim();
-      if (!firstName && !existingForRow) throw new Error("First name is required for a new employee.");
       if (firstName.length > 100) throw new Error("First name must be at most 100 characters.");
       const bulkLastRaw = raw?.lastName !== undefined && raw?.lastName !== null ? String(raw.lastName) : "";
       const bulkLastName = bulkLastRaw.trim();
@@ -234,13 +228,11 @@ export async function POST(req: NextRequest) {
       const workBasisRate = raw?.workBasisRate != null && raw.workBasisRate !== "" ? Number(raw.workBasisRate) : null;
       if (workBasisRate != null && (!Number.isFinite(workBasisRate) || workBasisRate < 0)) throw new Error("Work-basis rate must be a non-negative number.");
 
-      let joiningDate: Date | null = null;
-      if (raw?.joiningDate) {
-        const d = new Date(String(raw.joiningDate));
-        if (Number.isNaN(d.getTime())) throw new Error("Joining date is invalid.");
-        const rangeErr = joiningDateRangeError(d);
+      const joiningDate = optionalDateInput(raw?.joiningDate);
+      if (joiningDate === "invalid") throw new Error("Joining date is invalid.");
+      if (joiningDate) {
+        const rangeErr = joiningDateRangeError(joiningDate);
         if (rangeErr) throw new Error(rangeErr);
-        joiningDate = d;
       }
 
       let bulkPhone: string | null = null;
@@ -280,45 +272,54 @@ export async function POST(req: NextRequest) {
       const shiftId = raw?.shiftId ? String(raw.shiftId).trim() : "";
       const managerId = raw?.managerId ? String(raw.managerId).trim() : "";
 
-      const [branchId, departmentId, shift, manager] = await Promise.all([
-        resolveBranch(session.tenantId, branchValue, locationId),
-        resolveDepartment(session.tenantId, departmentValue),
-        shiftId
-          ? prisma.shift.findFirst({
-              where: { id: shiftId, tenantId: session.tenantId },
-              select: { id: true },
-            })
-          : null,
-        managerId ? prisma.employee.findFirst({ where: { id: managerId, tenantId: session.tenantId }, select: { id: true } }) : null,
-      ]);
-      if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
-      if (managerId && !manager) throw new Error("Manager not found in this workspace.");
-      if (locationId && !branchId) throw new Error("A branch in your assigned location is required.");
-
       const payMode = raw?.payMode ? String(raw.payMode).trim() || "monthly" : "monthly";
       if (!PAY_MODES.has(payMode)) {
         throw new Error("Pay mode must be one of monthly, daily, weekly, hourly, work_basis.");
       }
       const selectedStatus = employeeImportStatus(raw?.status);
       const status = selectedStatus ?? "active";
-      const employeeNumber = employeeNumberInput || deviceCodeInput || `EMP-${String(count + i + 1).padStart(3, "0")}`;
-      if (!employeeNumber || employeeNumber.length > 100) throw new Error("Employee number must be 1–100 characters.");
+      const requestedCode = employeeNumberInput || deviceCodeInput;
+      if (requestedCode.length > 100) throw new Error("Employee number must be at most 100 characters.");
       const deviceCode = deviceCodeInput || null;
       if (deviceCode && deviceCode.length > 100) throw new Error("Device Code must be at most 100 characters.");
 
       const outcome = await prisma.$transaction(async (tx) => {
-        await ensureDesignations(tx, session.tenantId, position ? [position] : []);
-        if (existingForRow) {
-          const current = await tx.employee.findUniqueOrThrow({ where: { id: existingForRow.id } });
+        const tenantId = session.tenantId;
+        const matches = await tx.employee.findMany({ where: { tenantId, OR: [
+          ...(deviceCodeInput ? [{ deviceCode: deviceCodeInput }] : []),
+          ...(employeeNumberInput ? [{ employeeNumber: { equals: employeeNumberInput, mode: "insensitive" as const } }] : []),
+          ...(email ? [{ email }] : []),
+        ] }, take: 2 });
+        if (matches.length > 1) throw new Error("The employee code, device code and email identify different employees.");
+        const current = matches[0];
+        if (current) {
+          if (changedEmployeeIds.has(current.id)) throw new Error("This employee appears more than once in the file.");
+          if (locationId && !await tx.employee.findFirst({ where: { id: current.id, tenantId, ...employeeLocationScope(locationId) }, select: { id: true } })) throw new Error("An employee with these identifiers is outside your assigned location.");
           assertEmployeeImportStatusChange(session, current, selectedStatus);
-          const currentStructure = existingForRow.salaryStructure && typeof existingForRow.salaryStructure === "object" && !Array.isArray(existingForRow.salaryStructure)
-            ? existingForRow.salaryStructure as Record<string, unknown>
+          if (current.loginOnly || ["admin", "branch_manager", "location_manager"].includes(current.role)) throw new Error("Edit manager and login-only accounts individually.");
+          if (deviceCodeInput && deviceCodeInput !== current.deviceCode && current.deviceAccessEnabled) throw new Error("Review biometric device access before changing the device code.");
+        } else if (!firstName) throw new Error("First name is required for a new employee.");
+
+        const [branch, departmentId, shift, manager] = await Promise.all([
+          resolveBranch(tx, tenantId, branchValue, locationId),
+          resolveDepartment(tx, tenantId, departmentValue),
+          shiftId ? tx.shift.findFirst({ where: { id: shiftId, tenantId }, select: { id: true } }) : null,
+          managerId ? tx.employee.findFirst({ where: { id: managerId, tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) }, select: { id: true } }) : null,
+        ]);
+        if (shiftId && !shift) throw new Error("Shift not found in this workspace.");
+        if (managerId && !manager) throw new Error("Select an active reporting manager in your scope.");
+        if (locationId && !branch && !current?.branchId) throw new Error("A branch in your assigned location is required.");
+        if (current && managerId && current.managerId !== managerId && await reportingManagerCreatesCycle(tx, tenantId, current.id, managerId)) throw new Error("This manager assignment would create a reporting cycle.");
+        await ensureDesignations(tx, session.tenantId, position ? [position] : []);
+        if (current) {
+          const currentStructure = current.salaryStructure && typeof current.salaryStructure === "object" && !Array.isArray(current.salaryStructure)
+            ? current.salaryStructure as Record<string, unknown>
             : {};
           await tx.employee.update({
-            where: { id: existingForRow.id },
+            where: { id: current.id, tenantId },
             data: {
-              employeeNumber: employeeNumberInput || existingForRow.employeeNumber,
-              deviceCode: deviceCodeInput || existingForRow.deviceCode,
+              employeeNumber: employeeNumberInput || current.employeeNumber,
+              deviceCode: deviceCodeInput || current.deviceCode,
               ...(firstName ? { firstName } : {}),
               ...(bulkLastRaw !== "" && bulkLastName ? { lastName: bulkLastName } : {}),
               ...(email ? { email } : {}),
@@ -326,18 +327,25 @@ export async function POST(req: NextRequest) {
               ...(position ? { position } : {}),
               ...(raw?.salary != null && raw.salary !== "" ? { salary } : {}),
               ...(joiningDate ? { joiningDate } : {}),
-              ...(branchId ? { branchId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
+              ...(branch ? { branchId: branch.id, locationId: branch.locationId } : {}), ...(departmentId ? { departmentId } : {}), ...(shiftId ? { shiftId } : {}), ...(managerId ? { managerId } : {}),
               ...(raw?.payMode ? { payMode } : {}), ...(raw?.workBasisRate != null && raw.workBasisRate !== "" ? { workBasisRate } : {}), ...(selectedStatus ? { status } : {}),
               ...(bankName ? { bankName } : {}), ...(bulkPan ? { pan: bulkPan } : {}), ...(bulkUan ? { uan: bulkUan } : {}), ...(bulkIfsc ? { ifscCode: bulkIfsc } : {}), ...(bulkAccount ? { accountNumber: bulkAccount } : {}),
               ...(Object.keys(salaryStructure).length ? { salaryStructure: { ...currentStructure, ...salaryStructure } as Prisma.InputJsonValue } : {}),
+              ...(selectedStatus && selectedStatus !== current.status ? { sessionVersion: { increment: 1 } } : {}),
             },
           });
           if (selectedStatus && selectedStatus !== current.status) {
             await tx.auditLog.create({ data: { tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: `employee.status.${status}`, entity: "Employee", entityId: current.id, summary: "Employee status changed through CSV import", before: { status: current.status }, after: { status, source: "employee_upload" } } });
           }
-          return { action: "updated" as const, id: existingForRow.id, employeeNumber: employeeNumberInput || existingForRow.employeeNumber, name: `${firstName || existingForRow.firstName} ${bulkLastName || existingForRow.lastName}`.trim() };
+          return { action: "updated" as const, id: current.id, employeeNumber: employeeNumberInput || current.employeeNumber, name: `${firstName || current.firstName} ${bulkLastName || current.lastName}`.trim() };
         }
-        if (count + created >= seats) throw new Error(`Seat limit reached (${seats}).`);
+        const [count, tenant] = await Promise.all([
+          tx.employee.count({ where: { tenantId, loginOnly: false } }),
+          tx.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { seats: true } }),
+        ]);
+        if (count >= tenant.seats) throw new Error(`Seat limit reached (${tenant.seats}).`);
+        if (requestedCode && await tx.employee.findFirst({ where: { tenantId, employeeNumber: { equals: requestedCode, mode: "insensitive" } }, select: { id: true } })) throw new Error("An employee with this employee code already exists.");
+        const employeeNumber = requestedCode || await nextEmployeeNumber(tx, tenantId, "EMP", count + 1);
         const employee = await tx.employee.create({
           data: {
             tenantId: session.tenantId,
@@ -352,7 +360,8 @@ export async function POST(req: NextRequest) {
             position,
             salary,
             joiningDate,
-            branchId: branchId || null,
+            branchId: branch?.id ?? null,
+            locationId: branch?.locationId ?? null,
             departmentId: departmentId || null,
             shiftId: shiftId || null,
             payMode,
@@ -368,11 +377,16 @@ export async function POST(req: NextRequest) {
           },
         });
         return { action: "created" as const, id: employee.id, employeeNumber: employee.employeeNumber, name: `${employee.firstName} ${employee.lastName}`.trim() };
-      });
+      }, { isolationLevel: "Serializable" });
+      changedEmployeeIds.add(outcome.id);
       if (outcome.action === "created") { created++; createdEmployees.push(outcome); }
       else { updated++; updatedEmployees.push(outcome); }
       if (selectedStatus === "inactive") inactiveEmployeeIds.add(outcome.id);
     } catch (err: unknown) {
+      if ((err as { code?: string })?.code === "P2034") {
+        failed.push({ email: email || `(row ${i + 1})`, error: "Employee records changed during import. Retry this row." });
+        continue;
+      }
       if (
         typeof err === "object" &&
         err !== null &&

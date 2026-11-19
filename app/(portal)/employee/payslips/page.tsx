@@ -2,44 +2,44 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/card";
 import { PayslipsPanel } from "./payslips-panel";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
+import { personalPayslipStatus, personalPayslipWhere } from "@/lib/personal-payslips";
+import { workspaceRegion } from "@/lib/workspace-region";
 
 export const dynamic = "force-dynamic";
 
 export default async function EmployeePayslipsPage() {
   const session = await requireSession();
   const lang = await getLang();
-  const employee = await prisma.employee.findUnique({
-    where: { id: session.sub },
-    select: { firstName: true, lastName: true },
-  });
-  const raw = await prisma.payslip.findMany({
-    // Drafts, including historical standalone drafts, are not employee-visible.
-    where: { employeeId: session.sub, status: { in: ["finalized", "paid"] } },
-    orderBy: { month: "desc" },
-    select: {
-      id: true,
-      month: true,
-      status: true,
-      documentSnapshot: true,
-    },
-  });
-  // Employee-facing values are exclusively the frozen, PDF-equivalent document.
-  const payslips = raw.flatMap((p) => {
-    const document = documentSnapshotForResponse(p.documentSnapshot);
-    return document ? [{ id: p.id, month: p.month, status: p.status, document }] : [];
+  const [raw, tenant] = await Promise.all([
+    prisma.payslip.findMany({
+      where: personalPayslipWhere(session.tenantId, session.sub),
+      orderBy: [{ month: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, month: true, status: true, documentSnapshot: true, payrollRun: { select: { status: true } }, grossEarnings: true, deductions: true, netSalary: true },
+    }),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+  ]);
+  const payslips = raw.map((row) => {
+    const document = documentSnapshotForResponse(row.documentSnapshot);
+    return {
+      id: row.id,
+      month: row.month,
+      status: personalPayslipStatus(row.status, row.payrollRun?.status),
+      totals: document?.totals ?? { gross: row.grossEarnings, deductions: row.deductions, net: row.netSalary },
+      details: document ? {
+        name: document.employee.name,
+        days: document.days,
+        components: document.components.filter((component) => component.visibleOnPayslip && component.category !== "employer_benefit"),
+      } : null,
+    };
   });
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader title={t(lang, "payslips.title")} description={t(lang, "payslips.desc")} />
-      <Card>
-        <CardContent className="p-0 pt-0">
-          <PayslipsPanel payslips={payslips} name={`${employee?.firstName ?? ""} ${employee?.lastName ?? ""}`.trim()} lang={lang} />
-        </CardContent>
-      </Card>
+      <PayslipsPanel payslips={payslips} locale={workspaceRegion(tenant?.config).locale} lang={lang} />
     </div>
   );
 }

@@ -286,7 +286,7 @@ export function SalaryRevisions({
                   )}
                 {["draft", "submitted", "approved"].includes(
                   revision.status,
-                ) && (
+                ) && (revision.status !== "approved" || canApprove) && (
                   <Button
                     size="sm"
                     variant="ghost"

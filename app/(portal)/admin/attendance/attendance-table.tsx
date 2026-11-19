@@ -3,15 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ListChecks, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
+import { ListChecks, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { StatusPill, Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import { Input } from "@/components/ui/input";
+import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime } from "@/lib/workspace-time";
 
 interface PunchRow {
   id: string;
@@ -23,6 +25,7 @@ interface PunchRow {
 
 interface Row {
   employeeId: string;
+  canEdit: boolean;
   employeeNumber: string;
   name: string;
   department: string;
@@ -41,94 +44,103 @@ interface Row {
   leave: { type: string; color: string } | null;
 }
 
-const IST_OFFSET_MS = 5.5 * 3600 * 1000;
-const pad = (n: number) => String(n).padStart(2, "0");
-const fmtIST = (iso: string) => {
-  const d = new Date(new Date(iso).getTime() + IST_OFFSET_MS);
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-};
-const fmtISTFull = (iso: string) => {
-  const d = new Date(new Date(iso).getTime() + IST_OFFSET_MS);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-};
-
-export function AttendanceTable({ rows, date, branchId, query, status: statusFilter, page, pageSize, totalEmployees, totalPages }: { rows: Row[]; date: string; branchId: string; query: string; status: string; page: number; pageSize: number; totalEmployees: number; totalPages: number }) {
+export function AttendanceTable({ rows, date, branchId, query, status: statusFilter, page, pageSize, totalEmployees, totalPages, region }: { rows: Row[]; date: string; branchId: string; query: string; status: string; page: number; pageSize: number; totalEmployees: number; totalPages: number; region: WorkspaceRegion }) {
   const router = useRouter();
   const toast = useToast();
-  const [editing, setEditing] = useState<string | null>(null);
+  const [statusTarget, setStatusTarget] = useState<Row | null>(null);
+  const [statusError, setStatusError] = useState("");
+  const [punchError, setPunchError] = useState("");
+  const [punchBusy, setPunchBusy] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
-  const [correction, setCorrection] = useState<Row["record"] | null>(null);
+  const [correction, setCorrection] = useState<Row | null>(null);
   const [newTime, setNewTime] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  async function save(recordId: string) {
+  function punchDateTime(iso: string) {
+    const punch = new Date(iso);
+    return `${formatCalendarDate(dateKeyInTimeZone(punch, region.timeZone), region.locale)} ${formatWorkspaceTime(punch, region)}`;
+  }
+
+  function openStatus(row: Row) {
+    setStatusTarget(row);
+    setStatus(row.record?.status ?? "");
+    setOverrideReason("");
+    setStatusError("");
+  }
+
+  async function saveStatus() {
+    if (!statusTarget || !status || !overrideReason.trim() || saving) return;
     setSaving(true);
+    setStatusError("");
+    const record = statusTarget.record;
     try {
-      const res = await fetch(`/api/attendance/${recordId}`, {
-        method: "PUT",
+      const res = await fetch(record ? `/api/attendance/${record.id}` : "/api/attendance", {
+        method: record ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, note: overrideReason }),
+        body: JSON.stringify({ employeeId: statusTarget.employeeId, date, status, note: overrideReason }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to update");
-        return;
-      }
-      toast("success", "Attendance status updated");
-      setEditing(null);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatusError(data.error ?? "The attendance status could not be saved."); return; }
+      toast("success", record ? "Attendance status updated." : "Attendance status recorded.");
+      setStatusTarget(null);
       router.refresh();
+    } catch {
+      setStatusError("The save could not be confirmed. Check daily attendance before trying again.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function refreshRecord(recordId: string) {
-    const res = await fetch(`/api/attendance/${recordId}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.record) setCorrection(data.record);
-    }
+  function openPunches(row: Row) {
+    setCorrection(row);
+    setNewTime("");
+    setPunchError("");
+  }
+
+  function applyPunchResult(record: { punches: PunchRow[] | null; reviewStatus: string | null } | null) {
+    setCorrection((row) => row?.record && record ? { ...row, record: { ...row.record, ...record } } : null);
     router.refresh();
   }
 
   async function addPunch() {
-    if (!correction) return;
-    if (!newTime) {
-      toast("error", "Pick a time first");
-      return;
+    if (!correction?.record || !correction.canEdit || !newTime || punchBusy) return;
+    setPunchBusy(true);
+    setPunchError("");
+    try {
+      const res = await fetch(`/api/attendance/${correction.record.id}/punches`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ time: newTime }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) { setPunchError(data.error ?? "The punch could not be added."); return; }
+      toast("success", "Punch added and attendance updated.");
+      setNewTime("");
+      applyPunchResult(data.record);
+    } catch {
+      setPunchError("The save could not be confirmed. Check the punch list before trying again.");
+    } finally {
+      setPunchBusy(false);
     }
-    const res = await fetch(`/api/attendance/${correction.id}/punches`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ time: newTime.replace("T", " ") }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      toast("error", data.error ?? "Failed to add punch");
-      return;
-    }
-    toast("success", "Punch added — day re-derived");
-    setNewTime("");
-    await refreshRecord(correction.id);
   }
 
   async function deletePunch(punchId: string) {
-    if (!correction) return;
+    if (!correction?.record || !correction.canEdit || deleteBusy) return;
     setDeleteBusy(true);
+    setPunchError("");
     try {
-      const res = await fetch(`/api/attendance/${correction.id}/punches?punchId=${punchId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        toast("error", data.error ?? "Failed to delete punch");
-        return;
-      }
-      toast("success", "Punch removed — day re-derived");
-      setDeleteTarget(null);
-      await refreshRecord(correction.id);
+      const res = await fetch(`/api/attendance/${correction.record.id}/punches?punchId=${punchId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) { setPunchError(data.error ?? "The punch could not be deleted."); return; }
+      toast("success", "Punch removed and attendance updated.");
+      applyPunchResult(data.record);
+    } catch {
+      setPunchError("The save could not be confirmed. Check the punch list before trying again.");
     } finally {
+      setDeleteTarget(null);
       setDeleteBusy(false);
     }
   }
@@ -206,15 +218,6 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                     <Badge className="border-transparent" style={{ background: `${row.leave.color}22`, color: row.leave.color }}>
                       On leave · {row.leave.type}
                     </Badge>
-                  ) : row.record && editing === row.employeeId ? (
-                    <div className="space-y-2"><Select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 w-32 text-xs">
-                      {["present", "late", "permission", "absent", "half_day"].map((s) => (
-                        <option key={s} value={s}>
-                          {s.replace("_", " ")}
-                        </option>
-                      ))}
-                    </Select>
-                    <Input aria-label="Reason for attendance override" placeholder="Reason required" maxLength={2000} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></div>
                   ) : (
                     <div className="flex items-center gap-2">
                       <StatusPill status={statusNow} />
@@ -225,29 +228,14 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                   )}
                 </TD>
                 <TD>
-                  {editing === row.employeeId ? (
-                    <div className="flex items-center gap-1.5">
-                      <Button size="icon" variant="success" loading={saving} disabled={!overrideReason.trim()} aria-label={`Save status for ${row.name}`} onClick={() => save(row.record!.id)}>
-                        <Save className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="icon" variant="ghost" aria-label={`Cancel editing ${row.name}`} onClick={() => setEditing(null)}>
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      {row.record ? (
-                        <>
-                          <Button size="icon" variant="ghost" title="View / correct punches" aria-label={`View punches for ${row.name ?? row.employeeId}`} onClick={() => setCorrection(row.record!)}>
-                            <ListChecks aria-hidden="true" className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button size="icon" variant="ghost" title="Edit status" aria-label={`Edit status for ${row.name ?? row.employeeId}`} onClick={() => { setEditing(row.employeeId); setStatus(row.record!.status); setOverrideReason(""); }}>
-                            <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
-                          </Button>
-                        </>
-                      ) : null}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {row.record && <Button size="icon" variant="ghost" title="View punches" aria-label={`View punches for ${row.name}`} onClick={() => openPunches(row)}>
+                      <ListChecks aria-hidden="true" className="h-4 w-4" />
+                    </Button>}
+                    {row.canEdit && <Button size="icon" variant="ghost" title={row.record ? "Edit status" : "Record status"} aria-label={`${row.record ? "Edit" : "Record"} status for ${row.name}`} onClick={() => openStatus(row)}>
+                      {row.record ? <Pencil aria-hidden="true" className="h-4 w-4" /> : <Plus aria-hidden="true" className="h-4 w-4" />}
+                    </Button>}
+                  </div>
                 </TD>
               </TR>
             );
@@ -267,20 +255,34 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
         </div>
       )}
 
+      <Modal open={Boolean(statusTarget)} onClose={() => !saving && setStatusTarget(null)} title={statusTarget?.record ? "Edit attendance status" : "Record attendance status"} description={statusTarget ? `${statusTarget.name} · ${formatCalendarDate(date, region.locale)}` : undefined}>
+        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void saveStatus(); }}>
+          {statusError && <p role="alert" className="text-sm text-destructive">{statusError}</p>}
+          <Field label="Status"><Select value={status} onChange={(event) => setStatus(event.target.value)} required>
+            <option value="">Choose a status</option><option value="present">Present</option><option value="late">Late</option><option value="permission">Permission</option><option value="absent">Absent</option><option value="half_day">Half day</option>
+          </Select></Field>
+          <Field label="Reason"><Textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} maxLength={2000} required /></Field>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={saving} onClick={() => setStatusTarget(null)}>Cancel</Button>
+            <Button type="submit" loading={saving} disabled={!status || !overrideReason.trim()}>Save status</Button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Punch correction modal */}
       <Modal
         open={Boolean(correction)}
-        onClose={() => setCorrection(null)}
-        title="Correct punches"
-        description={`${date} · every change re-derives the day from its punches`}
+        onClose={() => !punchBusy && !deleteBusy && setCorrection(null)}
+        title={correction?.canEdit ? "Review and edit punches" : "Recorded punches"}
+        description={correction ? `${correction.name} · ${formatCalendarDate(date, region.locale)} · ${region.timeZone}` : undefined}
         size="md"
       >
         <div className="space-y-3">
-          {!correction?.punches || correction.punches.length === 0 ? (
+          {!correction?.record?.punches || correction.record.punches.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">No punches recorded for this day.</p>
           ) : (
-            correction.punches.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 rounded-xl border border-edge bg-tint px-3.5 py-2.5">
+            correction.record.punches.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-edge bg-tint px-3.5 py-2.5">
                 <span
                   className={
                     p.type === "in"
@@ -292,35 +294,36 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
                 >
                   {p.type}
                 </span>
-                <span className="font-mono text-[13px]">{fmtISTFull(p.time)} IST</span>
+                <span className="font-mono text-[13px]">{punchDateTime(p.time)}</span>
                 <span className="text-[11px] capitalize text-muted-foreground">{p.source}{p.deviceSn ? ` · ${p.deviceSn}` : ""}</span>
-                <button
+                {correction.canEdit && <button
                   onClick={() => setDeleteTarget(p.id)}
-                  aria-label={`Delete punch at ${fmtISTFull(p.time)}`}
+                  aria-label={`Delete punch at ${punchDateTime(p.time)}`}
                   className="ml-auto flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-300"
                   title="Delete punch"
                 >
                   <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-                </button>
+                </button>}
               </div>
             ))
           )}
 
-          <div className="flex items-center gap-2 pt-2">
-            <Input
+          {punchError && <p role="alert" className="text-sm text-destructive">{punchError}</p>}
+          {correction?.canEdit && <div className="flex flex-wrap items-end gap-2 pt-2">
+            <Field label="Local punch date and time"><Input
               type="datetime-local"
               value={newTime}
               onChange={(e) => setNewTime(e.target.value)}
               className="font-mono"
-            />
-            <Button size="sm" variant="outline" onClick={addPunch}>
+            /></Field>
+            <Button size="sm" variant="outline" loading={punchBusy} disabled={!newTime || deleteBusy} onClick={addPunch}>
               <Plus className="h-3.5 w-3.5" /> Add punch
             </Button>
-          </div>
+          </div>}
 
-          {correction?.reviewStatus && (
+          {correction?.record?.reviewStatus && (
             <p className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3.5 py-2.5 text-[12.5px] text-amber-400">
-              Flagged: {correction.reviewStatus === "missed_punch" ? "probable missed punch-out — add the missing time" : "implausible span — check the punches"}
+              Flagged: {correction.record.reviewStatus === "missed_punch" ? "probable missed punch-out — add the missing time" : "implausible span — check the punches"}
             </p>
           )}
         </div>

@@ -9,6 +9,7 @@ import { profilePictureValue } from "@/lib/profile-picture";
 import { employeeHistory } from "@/lib/employee-history";
 import { optionalEmployeeEmail, optionalEmployeePosition, shouldProvisionEmployeeLogin } from "@/lib/employee-input";
 import { optionalDateInput } from "@/lib/dates";
+import { nextEmployeeNumber } from "@/lib/employee-number";
 
 const select = {
   id: true,
@@ -136,7 +137,11 @@ export async function GET() {
     }
     const employees = await prisma.employee.findMany({
       where: { tenantId: session.tenantId, branchId: manager.branchId },
-      select: safeSelect,
+      select: {
+        ...safeSelect,
+        salary: false, bankName: false, accountNumber: false, ifscCode: false,
+        pan: false, uan: false, esiIpNumber: false, workBasisRate: false,
+      },
       orderBy: { createdAt: "asc" },
     });
     return NextResponse.json({ employees });
@@ -168,7 +173,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Enter a valid employee record." }, { status: 400 });
     const history = employeeHistory(body.history);
     if ("error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
     // Location managers create staff only inside their assigned location, with
@@ -209,7 +215,7 @@ export async function POST(req: NextRequest) {
     if (photo.error) return NextResponse.json({ error: photo.error }, { status: 400 });
     let email = optionalEmployeeEmail(body.email);
     const position = optionalEmployeePosition(body.position);
-    if (position && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: position, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation from Designation Master." }, { status: 400 });
+    if (position && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: position, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation." }, { status: 400 });
     const firstName = body.firstName != null ? String(body.firstName).trim() : "";
     const lastNameRaw = body.lastName !== undefined && body.lastName !== null ? String(body.lastName) : "";
     const lastName = lastNameRaw.trim();
@@ -242,7 +248,7 @@ export async function POST(req: NextRequest) {
       if (deviceCodeExists) return NextResponse.json({ error: "An employee with this Device Code already exists." }, { status: 409 });
     }
     if (requestedEmployeeCode) {
-      const employeeCodeExists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: requestedEmployeeCode }, select: { id: true } });
+      const employeeCodeExists = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: { equals: requestedEmployeeCode, mode: "insensitive" } }, select: { id: true } });
       if (employeeCodeExists) return NextResponse.json({ error: "An employee with this Employee Code already exists." }, { status: 409 });
     }
 
@@ -272,13 +278,11 @@ export async function POST(req: NextRequest) {
     if (workBasisRate != null && (!Number.isFinite(workBasisRate) || workBasisRate < 0)) {
       return NextResponse.json({ error: "Work-basis rate must be a non-negative number." }, { status: 400 });
     }
-    let joiningDate: Date | null = null;
-    if (body.joiningDate) {
-      const d = new Date(body.joiningDate);
-      if (Number.isNaN(d.getTime())) return NextResponse.json({ error: "Joining date is invalid." }, { status: 400 });
-      const rangeErr = joiningDateRangeError(d);
+    const joiningDate = optionalDateInput(body.joiningDate);
+    if (joiningDate === "invalid") return NextResponse.json({ error: "Joining date is invalid." }, { status: 400 });
+    if (joiningDate) {
+      const rangeErr = joiningDateRangeError(joiningDate);
       if (rangeErr) return NextResponse.json({ error: rangeErr }, { status: 400 });
-      joiningDate = d;
     }
 
     const payMode = body.payMode != null && String(body.payMode).trim() !== "" ? String(body.payMode).trim() : "monthly";
@@ -332,35 +336,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Reporting manager must belong to your assigned location." }, { status: 403 });
     }
 
-    const [count, tenant] = await Promise.all([
-      prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } }),
-      prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true } }),
-    ]);
-    const seats = tenant?.seats ?? 0;
-    // Login-only manager accounts don't occupy employee seats.
-    if (!loginOnly && count >= seats) {
-      return NextResponse.json(
-        { error: `Seat limit reached (${seats} seats on your current plan). Please contact your account manager to upgrade.` },
-        { status: 403 }
-      );
-    }
+    const loginCreated = shouldProvisionEmployeeLogin(email, password);
+    const passwordHash = loginCreated ? await hashPassword(password) : null;
     let employee;
     try {
-      const numberPrefix = loginOnly ? "MGR" : "EMP";
-      const numberBase = loginOnly
-        ? await prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: true } })
-        : count;
-      employee = await prisma.employee.create({
+      const result = await prisma.$transaction(async (tx) => {
+        const [count, tenant] = await Promise.all([
+          tx.employee.count({ where: { tenantId: session.tenantId, loginOnly } }),
+          tx.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { seats: true } }),
+        ]);
+        if (!loginOnly && count >= tenant.seats) return { error: `Seat limit reached (${tenant.seats} seats on your current plan).`, status: 403 } as const;
+        const requestedCode = requestedEmployeeCode ?? (loginOnly ? null : deviceCode);
+        if (requestedCode && await tx.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: { equals: requestedCode, mode: "insensitive" } }, select: { id: true } })) return { error: "An employee with this Employee Code already exists.", status: 409 } as const;
+        const employeeNumber = requestedCode ?? await nextEmployeeNumber(tx, session.tenantId, loginOnly ? "MGR" : "EMP", count + 1);
+        const created = await tx.employee.create({
         data: {
           tenantId: session.tenantId,
-          employeeNumber: requestedEmployeeCode ?? (loginOnly ? `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}` : deviceCode ?? `${numberPrefix}-${String(numberBase + 1).padStart(3, "0")}`),
+          employeeNumber,
           deviceCode: loginOnly ? null : deviceCode,
           firstName,
           lastName,
           email: email || null,
           phone,
-          password: shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : null,
-          mustChangePassword: shouldProvisionEmployeeLogin(email, password),
+          password: passwordHash,
+          mustChangePassword: loginCreated,
           role: loginOnly ? "branch_manager" : "employee",
           loginOnly,
           position: loginOnly ? null : position,
@@ -390,7 +389,11 @@ export async function POST(req: NextRequest) {
             workExperience: loginOnly ? undefined : { create: history.experience },
         },
         select,
-      });
+        });
+        return { employee: created } as const;
+      }, { isolationLevel: "Serializable" });
+      if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+      employee = result.employee;
     } catch (err: unknown) {
       // Concurrent creates can collide on EMP-NNN or exceed seats — surface 409 so the UI can retry.
       if (typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002") {
@@ -399,6 +402,7 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ error: "Employee number clash — please retry." }, { status: 409 });
       }
+      if ((err as { code?: string })?.code === "P2034") return NextResponse.json({ error: "Employee records changed. Retry creation." }, { status: 409 });
       throw err;
     }
     await dispatchWebhook(session.tenantId, "employee.created", {
@@ -408,7 +412,7 @@ export async function POST(req: NextRequest) {
       lastName: employee.lastName,
       email: employee.email,
     });
-    return NextResponse.json({ employee, loginCreated: shouldProvisionEmployeeLogin(email, password) }, { status: 201 });
+    return NextResponse.json({ employee, loginCreated }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create employee." }, { status: 500 });
   }

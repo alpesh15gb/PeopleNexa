@@ -1,12 +1,14 @@
 import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
+import { reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay, shiftWindow, pairPunches, type PunchMode } from "@/lib/reconcile";
 import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { formatDateIST } from "@/lib/dates";
+import { workspaceRegion } from "@/lib/workspace-region";
 import { appendAudit } from "@/lib/audit";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 
 /** PATCH — admin/supervisor/branch/location managers approve or reject a pending correction. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -17,6 +19,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const status = body.status;
+  if (body.reviewNote != null && (typeof body.reviewNote !== "string" || body.reviewNote.length > 2000)) {
+    return NextResponse.json({ error: "Enter a review note of up to 2,000 characters." }, { status: 400 });
+  }
   if (status !== "approved" && status !== "rejected") {
     return NextResponse.json({ error: "status must be approved or rejected." }, { status: 400 });
   }
@@ -56,28 +61,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
   if (correction.status !== "pending") {
     return NextResponse.json({ error: "This correction was already reviewed." }, { status: 400 });
-  }
-
-  // Face gate (additive): approving a day that contains a face-rejected
-  // punch is an identity override, so only an explicit admin may do it.
-  // Reads Punch.faceStatus (real column) via the correction's IST day window.
-  if (status === "approved" && session.role !== "admin") {
-    const dayStart = istStartOfDay(correction.date);
-    const flagged = await prisma.punch.findFirst({
-      where: {
-        tenantId: session.tenantId,
-        employeeId: correction.employeeId,
-        faceStatus: "rejected",
-        punchTime: { gte: dayStart, lt: new Date(dayStart.getTime() + 86400000) },
-      },
-      select: { id: true },
-    });
-    if (flagged) {
-      return NextResponse.json(
-        { error: "Face-rejected punches require an admin to approve." },
-        { status: 403 }
-      );
-    }
   }
 
   if (status === "rejected") {
@@ -128,8 +111,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     return NextResponse.json({ error: "The employee no longer exists." }, { status: 404 });
   }
 
-  const attendanceShift = await shiftForEmployeeDay(employee, correction.date);
-  const { start: windowStart, end: windowEnd } = shiftWindow(istStartOfDay(correction.date), attendanceShift);
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
+  const { timeZone } = workspaceRegion(tenant?.config);
+  const attendanceShift = await shiftForEmployeeDay(employee, correction.date, timeZone);
+  const { start: windowStart, end: windowEnd } = shiftWindow(istStartOfDay(correction.date), attendanceShift, timeZone);
   // Validate requested times: in < out, within the shift window, not future.
   const now = new Date();
   if (correction.requestedIn && correction.requestedOut && correction.requestedIn.getTime() >= correction.requestedOut.getTime()) {
@@ -145,22 +130,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
   }
 
-  const punches = await prisma.punch.findMany({
-    where: { employeeId: correction.employeeId, punchTime: { gte: windowStart, lt: windowEnd } },
-    orderBy: { punchTime: "asc" },
-    select: { id: true, punchTime: true, inOutHint: true },
-  });
-  const firstId = punches[0]?.id ?? null;
-  const lastId = punches[punches.length - 1]?.id ?? null;
-  // Lone-punch type: a single punch with hint "out" is a real out (missed in),
-  // otherwise treat it as the "in" (first_last pairs a lone punch as in).
-  const loneIsOut = punches.length === 1 && punches[0].inOutHint === "out";
-
-  // Apply punch edits atomically so concurrent approvals can't interleave
-  // creates and leave duplicate out punches. The correction row is claimed
-  // FIRST (pending → approved); count==0 means a concurrent reviewer won.
-  // Reconciliation runs after the transaction commits (it reads the
-  // committed punch ledger).
+  // Claim, edit, and reconcile within one transaction so the reviewed request
+  // and attendance ledger always become visible together.
   const reviewNote = body.reviewNote ? String(body.reviewNote).trim() : null;
   const reviewedAt = new Date();
   try {
@@ -175,130 +146,73 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         err.code = "CLAIM_CONFLICT";
         throw err;
       }
-    if (correction.requestedIn && correction.requestedOut && punches.length === 1) {
-      if (loneIsOut) {
-        // Lone out + both corrections → that punch is the "out"; the "in" is missing.
-        await tx.punch.update({
-          where: { id: firstId! },
-          data: { punchTime: correction.requestedOut },
-        });
-        await tx.punch.create({
-          data: {
-            tenantId: session.tenantId,
-            employeeId: correction.employeeId,
-            source: "correction",
-            punchTime: correction.requestedIn,
-            inOutHint: "in",
-          },
-        });
-      } else {
-        // A single recorded punch plus both corrections → that punch is the "in";
-        // the "out" is genuinely missing, so add it as a new corrected punch.
-        await tx.punch.update({
-          where: { id: firstId! },
-          data: { punchTime: correction.requestedIn },
-        });
-        await tx.punch.create({
-          data: {
-            tenantId: session.tenantId,
-            employeeId: correction.employeeId,
-            source: "correction",
-            punchTime: correction.requestedOut,
-            inOutHint: "out",
-          },
-        });
+      const punchWindow = { tenantId: session.tenantId, employeeId: correction.employeeId, punchTime: { gte: windowStart, lt: windowEnd } };
+      if (session.role !== "admin" && await tx.punch.findFirst({
+        where: { ...punchWindow, faceStatus: "rejected" },
+        select: { id: true },
+      })) {
+        throw Object.assign(new Error("Face-rejected punches require an admin to approve."), { code: "FACE_REVIEW_REQUIRED" });
       }
-    } else {
-      if (correction.requestedIn) {
-        // With a lone out punch, the requested in is new — don't overwrite the out.
-        if (firstId && !loneIsOut) {
-          await tx.punch.update({ where: { id: firstId }, data: { punchTime: correction.requestedIn } });
-        } else {
-          await tx.punch.create({
-            data: {
-              tenantId: session.tenantId,
-              employeeId: correction.employeeId,
-              source: "correction",
-              punchTime: correction.requestedIn,
-              inOutHint: "in",
-            },
-          });
-        }
+      const authorizedWindow = { ...punchWindow, authStatus: { in: ["auto", "approved"] } };
+      const punches = await tx.punch.findMany({
+        where: authorizedWindow,
+        orderBy: [{ punchTime: "asc" }, { id: "asc" }],
+        select: { id: true, inOutHint: true, punchTime: true, source: true, deviceId: true },
+      });
+      const config = tenant?.config as { punches?: { mode?: PunchMode } } | null;
+      const paired = pairPunches(punches, config?.punches?.mode ?? "first_last", new Map());
+      const recordedIn = paired.find((entry) => entry.type === "in");
+      const recordedOut = paired.findLast((entry) => entry.type === "out");
+      const nextIn = correction.requestedIn ?? (recordedIn ? new Date(recordedIn.time) : null);
+      const nextOut = correction.requestedOut ?? (recordedOut ? new Date(recordedOut.time) : null);
+      if (nextIn && nextOut && nextIn >= nextOut) {
+        throw Object.assign(new Error("Clock-in must be before clock-out. Ask the employee to submit the correct times."), { code: "INVALID_SPAN" });
       }
-      if (correction.requestedOut) {
-        // With a lone punch, that punch is the "in" — the requested out is new.
-        // Exception: the lone punch is already an "out", so update it in place
-        // instead of creating a duplicate out.
-        if (lastId && (lastId !== firstId || loneIsOut)) {
-          await tx.punch.update({ where: { id: lastId }, data: { punchTime: correction.requestedOut } });
-        } else {
-          await tx.punch.create({
-            data: {
-              tenantId: session.tenantId,
-              employeeId: correction.employeeId,
-              source: "correction",
-              punchTime: correction.requestedOut,
-              inOutHint: "out",
-            },
-          });
-        }
+      for (const [hint, time, entry] of [
+        ["in", correction.requestedIn, recordedIn],
+        ["out", correction.requestedOut, recordedOut],
+      ] as const) {
+        if (!time) continue;
+        if (entry) await tx.punch.update({ where: { id: entry.id }, data: { punchTime: time } });
+        else await tx.punch.create({ data: {
+          tenantId: session.tenantId, employeeId: correction.employeeId, source: "correction", punchTime: time, inOutHint: hint,
+        } });
       }
-    }
 
-    // A reviewed correction is authoritative. Reopen a previously finalized
-    // derived row so reconciliation cannot return the old locked values.
-    await tx.attendance.updateMany({
-      where: {
-        tenantId: session.tenantId,
-        employeeId: correction.employeeId,
-        date: { gte: windowStart, lt: windowEnd },
-      },
-      data: { finalized: false, reviewStatus: null },
-    });
+      // A reviewed correction is authoritative. Reopen a previously finalized
+      // derived row so reconciliation cannot return the old locked values.
+      await tx.attendance.updateMany({
+        where: {
+          tenantId: session.tenantId,
+          employeeId: correction.employeeId,
+          date: correction.date,
+        },
+        data: { finalized: false, reviewStatus: null },
+      });
 
-    // Post-mutation guard: the resulting punch ledger must sort to a
-    // positive span (first < last). Throwing rolls the whole tx back.
-    const after = await tx.punch.findMany({
-      where: { employeeId: correction.employeeId, punchTime: { gte: windowStart, lt: windowEnd } },
-      orderBy: { punchTime: "asc" },
-      select: { punchTime: true },
-    });
-    if (after.length >= 2) {
-      const first = after[0].punchTime.getTime();
-      const last = after[after.length - 1].punchTime.getTime();
-      if (!(first < last) || !(last - first > 0)) {
-        const err = new Error("INVALID_SPAN") as Error & { code?: string };
-        err.code = "INVALID_SPAN";
-        throw err;
+      const result = await reconcileEmployeeDay(
+        tenant ?? { id: session.tenantId, config: null },
+        employee,
+        correction.date,
+        { finalize: isFinalizable(correction.date, undefined, attendanceShift, undefined, undefined, timeZone) },
+        tx,
+      );
+      if ((correction.requestedIn && +correction.requestedIn !== result.inAt?.getTime()) ||
+          (correction.requestedOut && +correction.requestedOut !== result.outAt?.getTime())) {
+        throw Object.assign(new Error("The requested times do not match the resulting clock-in and clock-out. Check the existing punches and work schedule before reviewing this request."), { code: "INVALID_SPAN" });
       }
-    } else if (correction.requestedIn && correction.requestedOut) {
-      const err = new Error("INVALID_SPAN") as Error & { code?: string };
-      err.code = "INVALID_SPAN";
-      throw err;
-    }
     }, { isolationLevel: "Serializable" });
   } catch (e) {
     const code = (e as { code?: string })?.code;
     const message = e instanceof Error ? e.message : "";
-    if (code === "PAYROLL_LOCKED" || code === "P2034") return NextResponse.json({ error: code === "P2034" ? "Payroll or attendance changed. Refresh and try again." : (e as Error).message }, { status: 409 });
+    if (code === "FACE_REVIEW_REQUIRED") return NextResponse.json({ error: message }, { status: 403 });
+    if (code === "PAYROLL_LOCKED" || isTransactionWriteConflict(e)) return NextResponse.json({ error: code === "PAYROLL_LOCKED" ? message : "Payroll or attendance changed. Refresh and try again." }, { status: 409 });
     if (code === "CLAIM_CONFLICT" || message === "CLAIM_CONFLICT") {
       return NextResponse.json({ error: "This correction was already reviewed." }, { status: 409 });
     }
-    if (code === "INVALID_SPAN" || message === "INVALID_SPAN") {
-      return NextResponse.json({ error: "Corrected punches result in an invalid span (in must be before out)." }, { status: 400 });
-    }
+    if (code === "INVALID_SPAN") return NextResponse.json({ error: message }, { status: 400 });
     throw e;
   }
-
-  // Re-run reconciliation so status / late minutes / overtime reflect the
-  // corrected times and the day locks at its corrected values.
-  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId } });
-  await reconcileEmployeeDay(
-    tenant ?? { id: session.tenantId, config: null },
-    employee,
-    correction.date,
-    { finalize: isFinalizable(correction.date, undefined, attendanceShift) }
-  );
 
   const updated = await prisma.punchCorrection.findUnique({ where: { id } });
   if (!updated) return NextResponse.json({ error: "Correction not found" }, { status: 404 });

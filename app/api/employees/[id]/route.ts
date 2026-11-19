@@ -1,7 +1,7 @@
 import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { internalEmployeeEmail, passwordError } from "@/lib/ess-login";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -11,33 +11,7 @@ import { employeeHistory } from "@/lib/employee-history";
 import { enforceEbioEmployeeAccess } from "@/lib/ebioserver";
 import { optionalEmployeeEmail, optionalEmployeePosition, shouldProvisionEmployeeLogin } from "@/lib/employee-input";
 import { optionalDateInput } from "@/lib/dates";
-
-/**
- * Walk the manager chain starting at `newManagerId` to ensure assigning it
- * to `employeeId` wouldn't create a cycle (self or descendant). Uses a
- * visited set so a pre-existing loop in the chain can't slip past a depth
- * cutoff or spin forever.
- */
-async function wouldCreateManagerCycle(
-  employeeId: string,
-  newManagerId: string,
-  tenantId: string
-): Promise<boolean> {
-  const visited = new Set<string>();
-  let current: string | null = newManagerId;
-  while (current) {
-    if (current === employeeId) return true;
-    if (visited.has(current)) return true;
-    visited.add(current);
-    const row: { managerId: string | null } | null = await prisma.employee.findFirst({
-      where: { id: current, tenantId },
-      select: { managerId: true },
-    });
-    if (!row?.managerId) return false;
-    current = row.managerId;
-  }
-  return false;
-}
+import { reportingManagerCreatesCycle } from "@/lib/employee-reporting-line";
 
 const PAY_MODES = new Set(["monthly", "daily", "weekly", "hourly", "work_basis"]);
 const LICENSE_TYPES = new Set(["learner", "permanent", "commercial", "international"]);
@@ -112,7 +86,8 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "Enter a valid employee update." }, { status: 400 });
   const history = body.history === undefined ? null : employeeHistory(body.history);
   if (history && "error" in history) return NextResponse.json({ error: history.error }, { status: 400 });
   const nextAadhaarNumber = body.aadhaarNumber === undefined ? undefined : (body.aadhaarNumber == null || String(body.aadhaarNumber).trim() === "" ? null : String(body.aadhaarNumber).replace(/[\s-]/g, ""));
@@ -147,6 +122,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!manager?.branchId || employee.branchId !== manager.branchId) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
+    if (employee.loginOnly || ["admin", "branch_manager", "location_manager"].includes(employee.role)) {
+      return NextResponse.json({ error: "Only workspace administrators can edit manager accounts." }, { status: 403 });
+    }
+    if (body.password !== undefined) return NextResponse.json({ error: "Only workspace or location administrators can reset employee credentials." }, { status: 403 });
     ownBranchId = manager.branchId;
     for (const k of [
       "salary",
@@ -218,14 +197,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (requestedStatus === "inactive" && employee.status === "active") {    if (session.sub === id) {
       return NextResponse.json({ error: "You cannot deactivate your own account." }, { status: 400 });
     }
-    if (employee.role === "admin") {
-      const activeAdmins = await prisma.employee.count({
-        where: { tenantId: session.tenantId, role: "admin", status: "active" },
-      });
-      if (activeAdmins <= 1) {
-        return NextResponse.json({ error: "Cannot deactivate the last active admin." }, { status: 400 });
-      }
-    }
   }
   // Role changes (admin-only: branch_manager callers have "role" stripped
   // above). The update below previously ignored body.role entirely, so branch
@@ -242,14 +213,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
     if (id === session.sub && nextRole !== employee.role) {
       return NextResponse.json({ error: "You cannot change your own role." }, { status: 400 });
-    }
-    if (employee.role === "admin" && nextRole !== "admin") {
-      const activeAdmins = await prisma.employee.count({
-        where: { tenantId: session.tenantId, role: "admin", status: "active" },
-      });
-      if (activeAdmins <= 1) {
-        return NextResponse.json({ error: "Cannot demote the last active admin." }, { status: 400 });
-      }
     }
   }
 
@@ -276,18 +239,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
   const nextPosition = body.position !== undefined ? optionalEmployeePosition(body.position) : employee.position;
-  if (body.position !== undefined && nextPosition && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: nextPosition, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation from Designation Master." }, { status: 400 });
+  if (body.position !== undefined && nextPosition && nextPosition !== employee.position && !(await prisma.designation.findFirst({ where: { tenantId: session.tenantId, name: nextPosition, active: true }, select: { id: true } }))) return NextResponse.json({ error: "Select an active designation." }, { status: 400 });
   if (nextPosition && nextPosition.length > 100) {
     return NextResponse.json({ error: "Position must be at most 100 characters." }, { status: 400 });
   }
-  const nextEmployeeNumber = body.employeeNumber !== undefined ? String(body.employeeNumber).trim() : employee.employeeNumber;
-  const nextDeviceCode = body.deviceCode !== undefined ? String(body.deviceCode).trim() || null : employee.deviceCode;
+  const nextEmployeeNumber = body.employeeNumber !== undefined ? String(body.employeeNumber ?? "").trim() : employee.employeeNumber;
+  const nextDeviceCode = body.deviceCode !== undefined ? String(body.deviceCode ?? "").trim() || null : employee.deviceCode;
   if (!nextEmployeeNumber || nextEmployeeNumber.length > 100) return NextResponse.json({ error: "Employee Code must be 1–100 characters." }, { status: 400 });
   if (nextDeviceCode && nextDeviceCode.length > 100) return NextResponse.json({ error: "Device Code must be at most 100 characters." }, { status: 400 });
-  if (nextEmployeeNumber !== employee.employeeNumber) {
-    const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, employeeNumber: nextEmployeeNumber, NOT: { id } }, select: { id: true } });
-    if (duplicate) return NextResponse.json({ error: "An employee with this Employee Code already exists." }, { status: 409 });
-  }
   if (nextDeviceCode && nextDeviceCode !== employee.deviceCode) {
     const duplicate = await prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode: nextDeviceCode, NOT: { id } }, select: { id: true } });
     if (duplicate) return NextResponse.json({ error: "An employee with this Device Code already exists." }, { status: 409 });
@@ -307,10 +266,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Work-basis rate must be a non-negative number." }, { status: 400 });
     }
   }
-  if (body.joiningDate) {
-    const d = new Date(body.joiningDate);
-    if (Number.isNaN(d.getTime())) return NextResponse.json({ error: "Joining date is invalid." }, { status: 400 });
-    const rangeErr = joiningDateRangeError(d);
+  const joiningDate = body.joiningDate === undefined ? employee.joiningDate : optionalDateInput(body.joiningDate);
+  if (joiningDate === "invalid") return NextResponse.json({ error: "Joining date is invalid." }, { status: 400 });
+  if (body.joiningDate !== undefined && joiningDate) {
+    const rangeErr = joiningDateRangeError(joiningDate);
     if (rangeErr) return NextResponse.json({ error: rangeErr }, { status: 400 });
   }
 
@@ -381,28 +340,22 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   const wantDept = body.departmentId !== undefined ? (body.departmentId || null) : employee.departmentId;
   const wantShift = body.shiftId !== undefined ? (body.shiftId || null) : employee.shiftId;
   const wantManager = body.managerId !== undefined ? (body.managerId || null) : employee.managerId;
-  const [branch, department, shift, manager] = await Promise.all([
+  const [branch, department, shift] = await Promise.all([
     wantBranch ? prisma.branch.findFirst({ where: { id: String(wantBranch), tenantId: session.tenantId }, select: { id: true, locationId: true } }) : null,
     wantDept ? prisma.department.findFirst({ where: { id: String(wantDept), tenantId: session.tenantId }, select: { id: true } }) : null,
     wantShift ? prisma.shift.findFirst({ where: { id: String(wantShift), tenantId: session.tenantId }, select: { id: true } }) : null,
-    wantManager ? prisma.employee.findFirst({ where: { id: String(wantManager), tenantId: session.tenantId, status: "active" }, select: { id: true, branchId: true, branch: { select: { locationId: true } } } }) : null,
   ]);
   if (wantBranch && !branch) return NextResponse.json({ error: "Branch not found in this workspace." }, { status: 400 });
   if (wantDept && !department) return NextResponse.json({ error: "Department not found in this workspace." }, { status: 400 });
   if (wantShift && !shift) return NextResponse.json({ error: "Shift not found in this workspace." }, { status: 400 });
-  if (wantManager && !manager) return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
-  if (session.role === "branch_manager" && wantManager && manager && manager.branchId !== ownBranchId) {
-    return NextResponse.json({ error: "Manager not found in this workspace." }, { status: 400 });
-  }
+  const changingManager = wantManager !== employee.managerId;
   if (session.role === "location_manager" && ownLocationId) {
     if (wantBranch && branch?.locationId !== ownLocationId) {
       return NextResponse.json({ error: "Branch must belong to your assigned location." }, { status: 403 });
     }
-    if (wantManager && manager?.branch?.locationId !== ownLocationId) {
-      return NextResponse.json({ error: "Reporting manager must belong to your assigned location." }, { status: 403 });
-    }
+    if (body.branchId !== undefined && employee.branchId && !wantBranch) return NextResponse.json({ error: "Select a branch in your assigned location." }, { status: 403 });
   }
-  if (wantManager && String(wantManager) === id) {
+  if (changingManager && wantManager === id) {
     return NextResponse.json({ error: "An employee cannot be their own manager." }, { status: 400 });
   }
   // A branch manager must belong to a branch (login also blocks branch-less
@@ -414,37 +367,55 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
   if (nextRole === "branch_manager" && (!email || (!employee.password && !password))) {
     return NextResponse.json({ error: "A branch manager requires an email and password." }, { status: 400 });
   }
-  if (wantManager) {
-    const cycle = await wouldCreateManagerCycle(id, String(wantManager), session.tenantId);
-    if (cycle) {
-      return NextResponse.json({ error: "This manager assignment would create a reporting cycle." }, { status: 400 });
-    }
+  const resetsCredential = shouldProvisionEmployeeLogin(email, password);
+  if (body.expectedUpdatedAt !== undefined) {
+    const expected = typeof body.expectedUpdatedAt === "string" ? new Date(body.expectedUpdatedAt) : null;
+    if (!expected || Number.isNaN(expected.getTime())) return NextResponse.json({ error: "Employee record revision is invalid." }, { status: 400 });
+    if (expected.getTime() !== employee.updatedAt.getTime()) return NextResponse.json({ error: "Employee details changed. Reopen the editor before saving." }, { status: 409 });
   }
-
+  const nextHash = resetsCredential ? await hashPassword(password) : employee.password;
   let updated;
   try {
-    updated = await prisma.employee.update({
-    where: { id },
+    const result = await prisma.$transaction(async (tx) => {
+      if (changingManager && wantManager) {
+        const manager = await tx.employee.findFirst({ where: {
+          id: String(wantManager), tenantId: session.tenantId, status: "active", loginOnly: false,
+          ...(ownLocationId ? employeeLocationScope(ownLocationId) : {}), ...(ownBranchId ? { branchId: ownBranchId } : {}),
+        }, select: { id: true } });
+        if (!manager) return { error: "Select an active reporting manager in your scope.", status: 400 } as const;
+        if (await reportingManagerCreatesCycle(tx, session.tenantId, id, manager.id)) return { error: "This manager assignment would create a reporting cycle.", status: 400 } as const;
+      }
+      if (nextEmployeeNumber !== employee.employeeNumber && await tx.employee.findFirst({
+        where: { tenantId: session.tenantId, id: { not: id }, employeeNumber: { equals: nextEmployeeNumber, mode: "insensitive" } }, select: { id: true },
+      })) return { error: "An employee with this Employee Code already exists.", status: 409 } as const;
+      if (employee.role === "admin" && employee.status === "active" && (nextRole !== "admin" || requestedStatus === "inactive")) {
+        const otherAdmins = await tx.employee.count({ where: { tenantId: session.tenantId, id: { not: id }, role: "admin", status: "active" } });
+        if (otherAdmins === 0) return { error: "Keep at least one active workspace administrator.", status: 400 } as const;
+      }
+      const updatedEmployee = await tx.employee.update({
+    where: { id, tenantId: session.tenantId, updatedAt: employee.updatedAt, ...(ownLocationId ? employeeLocationScope(ownLocationId) : {}), ...(ownBranchId ? { branchId: ownBranchId } : {}) },
     data: {
        employeeNumber: nextEmployeeNumber,
        deviceCode: nextDeviceCode,
        firstName: nextFirstName,
       lastName: nextLastName,
       email,
-      ...(shouldProvisionEmployeeLogin(email, password) ? { mustChangePassword: true, sessionVersion: { increment: 1 } } : {}),
-      password: email ? (shouldProvisionEmployeeLogin(email, password) ? await hashPassword(password) : employee.password) : null,
+      ...(resetsCredential ? { mustChangePassword: true } : {}),
+      ...(resetsCredential || requestedStatus !== employee.status || nextRole !== employee.role ? { sessionVersion: { increment: 1 } } : {}),
+      password: email ? nextHash : null,
       phone: nextPhone,
       position: nextPosition,
       role: nextRole,
-      salary: body.salary != null && body.salary !== "" ? Number(body.salary) : body.salary === "" ? null : employee.salary,
+      salary: body.salary === undefined ? employee.salary : body.salary == null || body.salary === "" ? null : Number(body.salary),
       status: requestedStatus,
-      joiningDate: body.joiningDate ? new Date(body.joiningDate) : employee.joiningDate,
+      joiningDate,
       branchId: body.branchId !== undefined ? (body.branchId || null) : employee.branchId,
+      ...(body.branchId !== undefined && wantBranch !== employee.branchId && !employee.loginOnly && employee.role !== "location_manager" ? { locationId: branch?.locationId ?? null } : {}),
       departmentId: body.departmentId !== undefined ? (body.departmentId || null) : employee.departmentId,
       shiftId: body.shiftId !== undefined ? (body.shiftId || null) : employee.shiftId,
       managerId: body.managerId !== undefined ? body.managerId || null : employee.managerId,
       salaryStructure: body.salaryStructure !== undefined ? body.salaryStructure || null : employee.salaryStructure,
-      bankName: body.bankName ?? employee.bankName,
+      bankName: body.bankName === undefined ? employee.bankName : String(body.bankName ?? "").trim() || null,
       accountNumber: nextAccount,
       ifscCode: nextIfsc,
       pan: nextPan,
@@ -469,7 +440,11 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
          workExperience: { deleteMany: {}, create: history.experience },
        } : {}),
     },
-    });
+      });
+      return { employee: updatedEmployee } as const;
+    }, { isolationLevel: "Serializable" });
+    if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+    updated = result.employee;
   } catch (err: unknown) {
     if (typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002") {
       if (p2002Targets(err).includes("email")) {
@@ -477,6 +452,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       }
        return NextResponse.json({ error: "Employee Code or Device Code already exists — please retry." }, { status: 409 });
     }
+    if (["P2025", "P2034"].includes((err as { code?: string })?.code ?? "")) return NextResponse.json({ error: "Employee details changed. Refresh and retry." }, { status: 409 });
     throw err;
   }
   const pickAuditFields = (r: typeof employee) => ({
@@ -506,11 +482,13 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     before: pickAuditFields(employee),
     after: pickAuditFields(updated),
   });
+  let deviceWarning: string | null = null;
   if (updated.status !== employee.status && updated.status === "inactive") {
     // Reactivation restores employment only. Existing device policy remains
     // explicit so status changes never broaden biometric access.
-    const results = await enforceEbioEmployeeAccess(session.tenantId, updated.id, false);
-    const failed = results.filter((result) => result.status === "failed");
+    const results = await enforceEbioEmployeeAccess(session.tenantId, updated.id, false).catch(() => null);
+    const failed = results?.filter((result) => result.status === "failed") ?? [];
+    if (!results || failed.length) deviceWarning = "Review failed or pending biometric blocks in Device access.";
     await appendAudit({
       tenantId: session.tenantId,
       actorId: session.sub,
@@ -518,11 +496,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       action: "employee.device_access.block",
       entity: "Employee",
       entityId: updated.id,
-      summary: `${updated.firstName} ${updated.lastName}: block sent to ${results.length} active eBio device(s)${failed.length ? `; ${failed.length} failed` : ""}`,
+      summary: results ? `Submitted ${results.length} device blocks` : "Could not submit device blocks",
       after: { allowed: false, results },
     });
   }
-  return NextResponse.json({ employee: updated });
+  const { password: _password, sessionVersion: _sessionVersion, legacyImportData: _legacyImportData, ...publicEmployee } = updated;
+  return NextResponse.json({ employee: session.role === "branch_manager" ? { id, updatedAt: updated.updatedAt, ...pickAuditFields(updated) } : publicEmployee, deviceWarning }, { status: deviceWarning ? 207 : 200 });
 }
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -544,18 +523,15 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   if (employee.role === "admin") {
     return NextResponse.json({ error: "Cannot delete an admin account." }, { status: 400 });
   }
-  const [payslipCount, loanCount, adjustmentCount, attendanceCount] = await Promise.all([
-    prisma.payslip.count({ where: { employeeId: id, tenantId: session.tenantId } }),
-    prisma.employeeLoan.count({ where: { employeeId: id, tenantId: session.tenantId } }),
-    prisma.payrollAdjustment.count({ where: { employeeId: id, tenantId: session.tenantId } }),
-    prisma.attendance.count({ where: { employeeId: id, tenantId: session.tenantId } }),
-  ]);
-  if (payslipCount + loanCount + adjustmentCount + attendanceCount > 0) {
-    return NextResponse.json(
-      { error: "This employee has payroll or attendance history and cannot be deleted. Please offboard them via Exits instead." },
-      { status: 400 }
-    );
-  }
-  await prisma.employee.delete({ where: { id } });
+  const removed = await prisma.employee.deleteMany({ where: {
+    id, tenantId: session.tenantId, updatedAt: employee.updatedAt,
+    ...(locationId ? employeeLocationScope(locationId) : {}),
+    payslips: { none: {} }, loans: { none: {} }, payrollAdjustments: { none: {} }, attendance: { none: {} },
+    punches: { none: {} }, corrections: { none: {} }, leaveRequests: { none: {} },
+    expenseClaims: { none: {} }, assetAssignments: { none: {} }, documents: { none: {} },
+    onboardingTasks: { none: {} }, exitRequests: { none: {} }, transfers: { none: {} }, reviews: { none: {} },
+    ticketsRequested: { none: {} }, ticketMessages: { none: {} }, team: { none: {} },
+  } });
+  if (!removed.count) return NextResponse.json({ error: "This employee has linked records or the record changed. Refresh and use the exit workflow to retain employee history." }, { status: 409 });
   return NextResponse.json({ success: true });
 }

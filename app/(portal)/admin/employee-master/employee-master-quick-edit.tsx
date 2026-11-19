@@ -1,4 +1,6 @@
 "use client";
+
+import { useRouteAction } from "@/components/use-route-action";
 import { EssLoginAccess } from "@/components/ess-login-access";
 
 import {
@@ -262,36 +264,27 @@ function CustomSelectField({
   onChange,
   options,
   emptyMessage,
-  controlled = false,
 }: {
   label: string;
   value: unknown;
-  onChange?: (value: string) => void;
+  onChange: (value: string) => void;
   options: string[];
   emptyMessage?: string;
-  controlled?: boolean;
 }) {
-  const text = stringValue(value);
-  const [uncontrolledValue, setUncontrolledValue] = useState(text);
+  const current = stringValue(value);
   const [customSelected, setCustomSelected] = useState(
-    () => options.length === 0 || (Boolean(text) && !options.includes(text)),
+    () => options.length === 0 || (Boolean(current) && !options.includes(current)),
   );
-  const current = controlled ? text : uncontrolledValue;
   const custom = customSelected || (Boolean(current) && !options.includes(current));
-  const update = (next: string) => {
-    if (controlled) onChange?.(next);
-    else setUncontrolledValue(next);
-  };
   return (
     <div className="space-y-3">
       <Field label={label}>
         <select
-          name={label === "Position" && !custom ? "position" : undefined}
           value={custom ? "__custom__" : current}
           onChange={(event) => {
             const next = event.target.value;
             setCustomSelected(next === "__custom__");
-            update(next === "__custom__" ? "" : next);
+            onChange(next === "__custom__" ? "" : next);
           }}
           className={inputClass}
         >
@@ -310,11 +303,7 @@ function CustomSelectField({
       </Field>
       {custom && (
         <Field label={`Custom ${label.toLowerCase()}`}>
-          <Input
-            name={label === "Position" ? "position" : undefined}
-            value={current}
-            onChange={(event) => update(event.target.value)}
-          />
+          <Input value={current} onChange={(event) => onChange(event.target.value)} />
         </Field>
       )}
     </div>
@@ -403,6 +392,8 @@ function MaskedInput({
 function EmployeeFields({
   employee,
   includeCodes = false,
+  includeDeviceCode = true,
+  includeIdentity = true,
   controlled,
   setControlled,
   positionChoices,
@@ -410,6 +401,8 @@ function EmployeeFields({
 }: {
   employee: EmployeeForm;
   includeCodes?: boolean;
+  includeDeviceCode?: boolean;
+  includeIdentity?: boolean;
   controlled?: Row;
   setControlled?: (key: string, value: string) => void;
   positionChoices?: string[];
@@ -456,7 +449,7 @@ function EmployeeFields({
           />
         </Field>
       )}
-      {includeCodes && (
+      {includeCodes && includeDeviceCode && (
         <Field label="Device code">
           <Input
             name="deviceCode"
@@ -469,7 +462,7 @@ function EmployeeFields({
       )}
       <Field
         label="Work email"
-        hint="Optional. Employees can sign in using their employee code."
+        hint="Optional. Employees with portal access can use their employee code to sign in."
       >
         <Input
           name="email"
@@ -489,14 +482,19 @@ function EmployeeFields({
         />
       </Field>
       {positionOptions ? (
-        <CustomSelectField
-          label="Position"
-          value={controlled ? controlled.position : employee.position}
-          onChange={(next) => setControlled?.("position", next)}
-          options={positionOptions}
-          emptyMessage="No saved positions are available in your permitted scope. Enter a custom position."
-          controlled={Boolean(controlled)}
-        />
+        <Field label="Position" hint={!positionOptions.length ? "Add designations before assigning positions." : undefined}>
+          <select
+            name="position"
+            className={inputClass}
+            value={value("position")}
+            onChange={controlled ? (event) => setControlled?.("position", event.target.value) : undefined}
+            defaultValue={controlled ? undefined : (employee.position ?? "")}
+          >
+            <option value="">Unassigned</option>
+            {employee.position && !positionOptions.includes(employee.position) && <option value={employee.position}>{employee.position}</option>}
+            {positionOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </Field>
       ) : (
         <Field label="Position">
           <Input
@@ -516,6 +514,7 @@ function EmployeeFields({
           defaultValue={controlled ? undefined : employee.joiningDate}
         />
       </Field>
+      {includeIdentity && <>
       <MaskedInput
         label="Aadhaar number"
         name="aadhaarNumber"
@@ -546,6 +545,7 @@ function EmployeeFields({
           controlled || !canEditPan ? undefined : (employee.pan ?? "")
         }
       />
+      </>}
     </>
   );
 }
@@ -645,7 +645,6 @@ function TextField({
         value={value}
         onChange={onChange}
         options={lookups.subdepartments}
-        controlled
       />
     );
   return (
@@ -749,10 +748,12 @@ function OfficialLookupFields({
   core,
   updateCore,
   employeeId,
+  canEditPayMode,
 }: {
   core: Row;
   updateCore: (key: string, value: string) => void;
   employeeId: string;
+  canEditPayMode: boolean;
 }) {
   const lookups = useContext(EmployeeMasterLookupsContext);
   return (
@@ -790,13 +791,13 @@ function OfficialLookupFields({
           }))}
         emptyMessage="No eligible active employees are available in your permitted scope"
       />
-      <SelectField
+      {canEditPayMode && <SelectField
         label="Pay mode"
         value={core.payMode}
         onChange={(value) => updateCore("payMode", value)}
         placeholder="Select pay mode"
         options={payModes}
-      />
+      />}
     </>
   );
 }
@@ -804,9 +805,11 @@ function OfficialLookupFields({
 function LicenseFields({
   core,
   updateCore,
+  canResetPassword,
 }: {
   core: Row;
   updateCore: (key: string, value: string) => void;
+  canResetPassword: boolean;
 }) {
   return (
     <>
@@ -860,7 +863,7 @@ function LicenseFields({
         onChange={(value) => updateCore("drivingLicenseExpiresAt", value)}
       />
       </>}
-      <Field
+      {canResetPassword && <Field
         label="Set or reset password"
         hint="Optional temporary password. Leave blank to keep the current password; setting it requires a change at next login."
       >
@@ -870,7 +873,7 @@ function LicenseFields({
           value={stringValue(core.password)}
           onChange={(event) => updateCore("password", event.target.value)}
         />
-      </Field>
+      </Field>}
     </>
   );
 }
@@ -947,6 +950,7 @@ function Editor({
   onClose,
   canEditEmail,
   canEditPan = true,
+  canIssueEssLogin = false,
   lookups = emptyLookups,
   mode = "sections",
 }: {
@@ -955,6 +959,7 @@ function Editor({
   onClose: () => void;
   canEditEmail: boolean;
   canEditPan?: boolean;
+  canIssueEssLogin?: boolean;
   lookups?: EmployeeMasterLookups;
   mode?: "sections" | "wizard" | "continuation";
 }) {
@@ -969,6 +974,9 @@ function Editor({
   const [saving, setSaving] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  const originalCore = useRef<Row | null>(null);
+  const originalMaster = useRef<Master | null>(null);
+  const recordRevision = useRef<string | undefined>(undefined);
   const wizard = mode !== "sections";
   const canSkip = mode === "continuation";
 
@@ -996,6 +1004,9 @@ function Editor({
         // Belt and braces: a prefilled password field would be re-submitted on
         // save and re-hashed, locking the employee out.
         delete normalized.password;
+        originalCore.current = normalized;
+        originalMaster.current = normalized;
+        recordRevision.current = typeof normalized.updatedAt === "string" ? normalized.updatedAt : undefined;
         setMaster(normalized);
         setCore(normalized);
         setLoadedLookups(nextLookups);
@@ -1064,7 +1075,8 @@ function Editor({
     setSaving(true);
     try {
       const profile = { ...(master.profile ?? {}) };
-      for (const address of ["currentAddress", "permanentAddress"] as const) {
+      const changed = (key: keyof Master) => JSON.stringify(master[key]) !== JSON.stringify(originalMaster.current?.[key]);
+      if (changed("profile")) for (const address of ["currentAddress", "permanentAddress"] as const) {
         const value = addressForSave(profile[address]);
         const label =
           address === "currentAddress"
@@ -1119,36 +1131,43 @@ function Editor({
         ...(canEditPan && core.pan !== undefined
           ? { pan: core.pan || null }
           : {}),
-        ...(core.password ? { password: core.password } : {}),
+        ...(canEditPan && core.password ? { password: core.password } : {}),
       };
       if (canEditEmail) corePayload.email = core.email;
-      const coreResponse = await fetch(`/api/employees/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(corePayload),
-      });
-      const coreData = await coreResponse.json().catch(() => ({}));
-      if (!coreResponse.ok)
-        throw new Error(coreData.error ?? "Could not update official details.");
-      const masterResponse = await fetch(`/api/employees/${id}/master`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profile,
-          employment: master.employmentProfile ?? {},
-          dependents: rows("dependents"),
-          education: rows("education"),
-          workExperience: rows("workExperience"),
-          references: rows("references"),
-          bankAccounts: rows("bankAccounts"),
-          documents: rows("documents"),
-        }),
-      });
-      const masterData = await masterResponse.json().catch(() => ({}));
-      if (!masterResponse.ok)
-        throw new Error(
-          masterData.error ?? "Could not update employee master.",
-        );
+      if (JSON.stringify(core) !== JSON.stringify(originalCore.current)) {
+        const coreResponse = await fetch(`/api/employees/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...corePayload, expectedUpdatedAt: recordRevision.current }),
+        });
+        const coreData = await coreResponse.json().catch(() => ({}));
+        if (!coreResponse.ok) throw new Error(coreData.error ?? "Could not update official details.");
+        originalCore.current = core;
+        recordRevision.current = coreData.employee?.updatedAt;
+        if (coreData.deviceWarning) toast("info", coreData.deviceWarning);
+      }
+      const currentDocuments = rows("documents");
+      const savedDocuments = originalMaster.current?.documents ?? [];
+      const initialDocuments = new Map(savedDocuments.map((row) => [row.id, row]));
+      const currentIds = new Set(currentDocuments.map((row) => row.id));
+      const changedDocuments = currentDocuments.filter((row) => !row.id || JSON.stringify(row) !== JSON.stringify(initialDocuments.get(row.id)));
+      const removedDocuments = savedDocuments.filter((row) => row.id && !currentIds.has(row.id)).map(({ id, updatedAt }) => ({ id, updatedAt }));
+      const masterPayload = {
+        ...(changed("profile") ? { profile } : {}),
+        ...(changed("employmentProfile") ? { employment: master.employmentProfile ?? {} } : {}),
+        ...Object.fromEntries((["dependents", "education", "workExperience", "references"] as const)
+          .filter(changed).map((key) => [key, rows(key)])),
+        ...(canEditPan && changed("bankAccounts") ? { bankAccounts: rows("bankAccounts") } : {}),
+        ...(changedDocuments.length ? { documents: changedDocuments } : {}),
+        ...(removedDocuments.length ? { removedDocuments } : {}),
+      };
+      if (Object.keys(masterPayload).length) {
+        const masterResponse = await fetch(`/api/employees/${id}/master`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...masterPayload, expectedUpdatedAt: recordRevision.current }),
+        });
+        const masterData = await masterResponse.json().catch(() => ({}));
+        if (!masterResponse.ok) throw new Error(masterData.error ?? "Could not update employee master.");
+      }
       toast("success", "Employee master saved");
       onClose();
       router.refresh();
@@ -1195,7 +1214,7 @@ function Editor({
         title={canSkip ? "Add master details" : "Employee master editor"}
         description={canSkip ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in guided steps."}
       >
-        {canEditEmail && <div className="mb-4"><EssLoginAccess key={id} employeeId={id} /></div>}
+        {canIssueEssLogin && <div className="mb-4"><EssLoginAccess key={id} employeeId={id} /></div>}
         {loading ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
             Loading employee master and available options...
@@ -1231,7 +1250,7 @@ function Editor({
                 aria-label="Employee master sections"
                 className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4"
               >
-                {sections.map(([key, label, Icon]) => (
+                {sections.filter(([key]) => key !== "banking" || canEditPan).map(([key, label, Icon]) => (
                   <button
                     key={key}
                     type="button"
@@ -1350,7 +1369,6 @@ function Editor({
                       onChange={(value) => updateGroup("employmentProfile", "subDepartment", value)}
                       options={loadedLookups.subdepartmentsByDepartment[stringValue(core.departmentId)] ?? []}
                       emptyMessage={core.departmentId ? "No subdepartments exist for this department. Enter a custom value if needed." : "Select a department to view its subdepartments. Enter a custom value if needed."}
-                      controlled
                     />
                     <TextField
                       label="Grade"
@@ -1359,7 +1377,7 @@ function Editor({
                         updateGroup("employmentProfile", "grade", value)
                       }
                     />
-                    <TextField
+                    {canEditPan && <><TextField
                       label="CTC"
                       type="number"
                       value={employment.ctc}
@@ -1384,7 +1402,7 @@ function Editor({
                           value,
                         )
                       }
-                    />
+                    /></>}
                   </div>
                 </section>
               )}
@@ -1751,7 +1769,7 @@ function Editor({
                   )}
                 </Collection>
               )}
-              {(active === "banking" || (wizard && active === "records")) && (
+              {canEditPan && (active === "banking" || (wizard && active === "records")) && (
                 <Collection
                   title="Bank accounts"
                   rows={rows("bankAccounts")}
@@ -1896,13 +1914,14 @@ function Editor({
                     core={core}
                     updateCore={updateCore}
                     employeeId={id}
+                    canEditPayMode={canEditPan}
                   />
-                  <EmploymentStatusField core={core} updateCore={updateCore} />
+                  {canEditPan && <EmploymentStatusField core={core} updateCore={updateCore} />}
                 </div>
               )}
               {((!wizard && active === "official") || (wizard && active === "records")) && (
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <LicenseFields core={core} updateCore={updateCore} />
+                  <LicenseFields core={core} updateCore={updateCore} canResetPassword={canEditPan} />
                 </div>
               )}
               {wizard ? (
@@ -2005,12 +2024,14 @@ export function EmployeeMasterQuickEdit({
   canEditEmail,
   canEditMaster,
   canEditPan = true,
+  canIssueEssLogin = false,
   ...lookups
 }: {
   employee: EmployeeForm & { id: string };
   canEditEmail: boolean;
   canEditMaster: boolean;
   canEditPan?: boolean;
+  canIssueEssLogin?: boolean;
 } & EmployeeMasterLookups) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2067,6 +2088,7 @@ export function EmployeeMasterQuickEdit({
             initial={employee}
             canEditEmail={canEditEmail}
             canEditPan={canEditPan}
+            canIssueEssLogin={canIssueEssLogin}
             lookups={lookups}
             mode="wizard"
             onClose={() => setOpen(false)}
@@ -2102,13 +2124,17 @@ export function EmployeeMasterQuickEdit({
 
 export function EmployeeMasterCreate({
   branches,
+  departments,
   positions,
   requireBranch,
+  showDevices,
   canEditPan = true,
 }: {
   branches: Array<{ id: string; name: string }>;
+  departments: Array<{ id: string; name: string }>;
   positions: string[];
   requireBranch: boolean;
+  showDevices: boolean;
   canEditPan?: boolean;
 }) {
   return (
@@ -2117,7 +2143,9 @@ export function EmployeeMasterCreate({
     >
       <EmployeeMasterCreateContent
         branches={branches}
+        departments={departments}
         requireBranch={requireBranch}
+        showDevices={showDevices}
         canEditPan={canEditPan}
       />
     </EmployeeMasterLookupsContext.Provider>
@@ -2126,14 +2154,18 @@ export function EmployeeMasterCreate({
 
 function EmployeeMasterCreateContent({
   branches,
+  departments,
   requireBranch,
+  showDevices,
   canEditPan = true,
 }: {
   branches: Array<{ id: string; name: string }>;
+  departments: Array<{ id: string; name: string }>;
   requireBranch: boolean;
+  showDevices: boolean;
   canEditPan?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useRouteAction("create");
   const [created, setCreated] = useState<EmployeeForm | null>(null);
   const [editCreated, setEditCreated] = useState(false);
   // Set once the flow moves past master data, so the "add details now?" prompt
@@ -2224,7 +2256,7 @@ function EmployeeMasterCreateContent({
     setEditCreated(false);
     setDeviceStepStarted(true);
     const target = created;
-    if (!target?.deviceCode) {
+    if (!showDevices || !target?.deviceCode) {
       finishLater();
       return;
     }
@@ -2239,8 +2271,8 @@ function EmployeeMasterCreateContent({
   };
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
     const form = new FormData(event.currentTarget);
+    setSaving(true);
     try {
       const response = await fetch("/api/employees", {
         method: "POST",
@@ -2255,9 +2287,8 @@ function EmployeeMasterCreateContent({
           position: form.get("position"),
           joiningDate: form.get("joiningDate") || null,
           branchId: form.get("branchId") || null,
+          departmentId: form.get("departmentId") || null,
           password: form.get("password"),
-          aadhaarNumber: form.get("aadhaarNumber"),
-          pan: form.get("pan"),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2273,13 +2304,7 @@ function EmployeeMasterCreateContent({
       const loginMessage = data.loginCreated
         ? "Portal login created."
         : "No portal login was requested.";
-      // Master data comes next; the device step runs after it, not here.
-      toast(
-        "success",
-        employee.deviceCode
-          ? `Employee created. ${loginMessage}`
-          : `Employee created. ${loginMessage} Add a Device Code before configuring biometric access.`,
-      );
+      toast("success", `Employee created. ${loginMessage}`);
     } catch (error) {
       toast(
         "error",
@@ -2359,7 +2384,7 @@ function EmployeeMasterCreateContent({
         open={open}
         onClose={() => setOpen(false)}
         title="Add employee"
-        description="Create the core record before completing the full master profile."
+        description="Start with the employee’s basic work details. You can complete their profile later."
       >
         <form onSubmit={create} className="grid gap-4 sm:grid-cols-2">
           <EmployeeFields
@@ -2372,13 +2397,14 @@ function EmployeeMasterCreateContent({
               joiningDate: "",
             }}
             includeCodes
-            canEditPan={canEditPan}
+            includeDeviceCode={false}
+            includeIdentity={false}
           />
-          <Field
-            label="Initial password"
-            hint="Optional temporary password. An internal email is generated if needed."
-          >
-            <Input name="password" type="password" minLength={1} maxLength={72} />
+          <Field label="Department">
+            <select name="departmentId" className={inputClass}>
+              <option value="">Unassigned</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+            </select>
           </Field>
           <Field label="Branch">
             <select
@@ -2396,6 +2422,15 @@ function EmployeeMasterCreateContent({
               ))}
             </select>
           </Field>
+          <details className="col-span-full rounded-lg border border-edge p-3">
+            <summary className="cursor-pointer text-sm font-medium">Optional setup</summary>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <Field label="Temporary portal password" hint="Set a password to enable sign-in with the employee code.">
+                <Input name="password" type="password" autoComplete="new-password" minLength={1} maxLength={72} />
+              </Field>
+              {showDevices && <Field label="Device code" hint="Use the employee’s biometric enrollment ID."><Input name="deviceCode" maxLength={100} /></Field>}
+            </div>
+          </details>
           <div className="col-span-full flex justify-end gap-2">
             <Button
               type="button"
@@ -2551,14 +2586,14 @@ function EmployeeMasterCreateContent({
           open
           onClose={startDeviceStep}
           title="Add employee details now?"
-          description="The core employee record is saved. Add address, profile, employment, bank and document records now, or continue straight to biometric device setup."
+          description="Add personal details, employment history, bank accounts, or documents to the employee record."
         >
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="ghost" onClick={startDeviceStep}>
-              {created.deviceCode ? "Skip to device setup" : "Finish later"}
+              {showDevices && created.deviceCode ? "Skip to device setup" : "Finish later"}
             </Button>
             <Button type="button" onClick={() => setEditCreated(true)}>
-              Continue to Employee Master
+              Complete employee record
             </Button>
           </div>
         </Modal>
@@ -2569,6 +2604,7 @@ function EmployeeMasterCreateContent({
           initial={created}
           canEditEmail
           canEditPan={canEditPan}
+          canIssueEssLogin={!requireBranch}
           mode="continuation"
           onClose={startDeviceStep}
         />

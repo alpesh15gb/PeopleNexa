@@ -4,11 +4,16 @@ import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { isMonthKey } from "@/lib/dates";
-import { readAttendanceWorkbook, previewPayrollAttendance, reviewAttendanceRows, nextPayrollMonth, type PayrollAttendanceRow } from "@/lib/payroll-attendance-import";
+import { payrollAttendanceTemplate, readAttendanceWorkbook, previewPayrollAttendance, reviewAttendanceRows, nextPayrollMonth, type PayrollAttendanceRow } from "@/lib/payroll-attendance-import";
 import { readPayrollWorkbook, savePayrollWorkbook, removePayrollWorkbook } from "@/lib/payroll-attendance-storage";
 import { manualUploadId } from "@/lib/payroll-manual-source";
 
 export const runtime = "nodejs";
+
+function previewVersion(sheet: string | null, rows: unknown) {
+  return createHash("sha256").update(JSON.stringify([sheet, rows])).digest("hex");
+}
+
 async function context(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || !["admin", "location_manager"].includes(session.role)) return { error: "Forbidden", status: 403 } as const;
@@ -21,6 +26,9 @@ async function context(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const ctx = await context(req);
   if ("error" in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+  if (req.nextUrl.searchParams.get("template") === "1") {
+    return new NextResponse(new Uint8Array(payrollAttendanceTemplate(ctx.month)), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="payroll-attendance-${ctx.month}.xlsx"`, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
+  }
   const id = req.nextUrl.searchParams.get("id");
   const where = { tenantId: ctx.session.tenantId, locationId: ctx.locationId, month: ctx.month };
   if (!id) {
@@ -35,7 +43,7 @@ export async function GET(req: NextRequest) {
     const bytes = await readPayrollWorkbook(upload.storageKey);
     return new NextResponse(new Uint8Array(bytes), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="attendance-original.xlsx"; filename*=UTF-8''${encodeURIComponent(upload.fileName)}`, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
   }
-  return NextResponse.json({ upload: { id: upload.id, fileName: upload.fileName, sheet: upload.sheet, rows: upload.rows, reviewedRows: upload.reviewedRows, reviewedAt: upload.reviewedAt }, sheets: readAttendanceWorkbook(await readPayrollWorkbook(upload.storageKey)).SheetNames });
+  return NextResponse.json({ upload: { id: upload.id, fileName: upload.fileName, sheet: upload.sheet, rows: upload.rows, reviewedRows: upload.reviewedRows, reviewedAt: upload.reviewedAt, previewVersion: upload.rows ? previewVersion(upload.sheet, upload.rows) : undefined }, sheets: readAttendanceWorkbook(await readPayrollWorkbook(upload.storageKey)).SheetNames });
 }
 export async function POST(req: NextRequest) {
   const ctx = await context(req);
@@ -52,19 +60,22 @@ export async function POST(req: NextRequest) {
       } catch (error) { await removePayrollWorkbook(storageKey); throw error; }
     }
     const body = await req.json();
+    const format = body.format ?? "standard";
+    if (format !== "standard" && format !== "legacy") throw new Error("Choose a supported workbook format.");
     const upload = await prisma.payrollAttendanceImport.findFirst({ where: { id: String(body.id ?? ""), tenantId: ctx.session.tenantId, locationId: ctx.locationId, month: ctx.month } });
     if (!upload) throw new Error("Upload not found.");
     if (upload.reviewedAt) throw new Error("Reviewed uploads are immutable. Upload a new workbook for corrections.");
     const employees = await prisma.employee.findMany({ where: { tenantId: ctx.session.tenantId, loginOnly: false, ...employeeLocationScope(ctx.locationId) }, select: { id: true, employeeNumber: true, firstName: true, lastName: true, status: true, joiningDate: true, payMode: true } });
     const sheet = String(body.sheet ?? "");
-    const rows = previewPayrollAttendance(readAttendanceWorkbook(await readPayrollWorkbook(upload.storageKey)), sheet, ctx.month, employees);
+    const rows = previewPayrollAttendance(readAttendanceWorkbook(await readPayrollWorkbook(upload.storageKey)), sheet, ctx.month, employees, format);
     const monthStart = new Date(`${ctx.month}-01T00:00:00+05:30`);
     const monthEnd = new Date(`${nextPayrollMonth(ctx.month)}-01T00:00:00+05:30`);
     const approvedLeaves = await prisma.leaveRequest.findMany({ where: { tenantId: ctx.session.tenantId, employeeId: { in: rows.flatMap(row => row.employeeId ? [row.employeeId] : []) }, status: "approved", fromDate: { lt: monthEnd }, toDate: { gte: monthStart } }, select: { employeeId: true } });
-    for (const row of rows) if (approvedLeaves.some(leave => leave.employeeId === row.employeeId)) row.issues.push("PeopleNexa has approved leave in this month. Verify it against this worksheet; manual L days remain unpaid.");
-    const updated = await prisma.payrollAttendanceImport.updateMany({ where: { id: upload.id, reviewedAt: null }, data: { sheet, rows } });
-    if (!updated.count) throw new Error("This upload has already been reviewed.");
-    return NextResponse.json({ rows });
+    const employeesWithApprovedLeave = new Set(approvedLeaves.map(leave => leave.employeeId));
+    for (const row of rows) if (row.employeeId && employeesWithApprovedLeave.has(row.employeeId)) row.issues.push(format === "legacy" ? "PeopleNexa has approved leave in this month. Verify it against this worksheet. Legacy L days are treated as unpaid." : "PeopleNexa has approved leave in this month. Verify the paid and unpaid leave marks against approved requests.");
+    const [stored] = await prisma.payrollAttendanceImport.updateManyAndReturn({ where: { id: upload.id, reviewedAt: null }, data: { sheet, rows }, select: { rows: true } });
+    if (!stored) throw new Error("This upload has already been reviewed.");
+    return NextResponse.json({ rows, previewVersion: previewVersion(sheet, stored.rows) });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to read workbook." }, { status: 400 }); }
 }
 export async function PATCH(req: NextRequest) {
@@ -76,11 +87,12 @@ export async function PATCH(req: NextRequest) {
     if (body.confirmScope !== true) throw new Error("Confirm the worksheet belongs to the selected payroll month and location.");
     const upload = await prisma.payrollAttendanceImport.findFirst({ where: { id: String(body.id ?? ""), tenantId: ctx.session.tenantId, locationId: ctx.locationId, month: ctx.month } });
     if (!upload?.rows || upload.reviewedAt) throw new Error("Preview an unreviewed upload first.");
+    if (body.previewVersion !== previewVersion(upload.sheet, upload.rows)) throw new Error("Preview changed. Reload and review again.");
     const rows = reviewAttendanceRows(upload.rows as unknown as PayrollAttendanceRow[], body.decisions);
     await prisma.$transaction(async tx => {
       const locked = await tx.payrollAttendanceImport.updateMany({ where: { id: upload.id, reviewedAt: null, sheet: upload.sheet, rows: { equals: upload.rows! } }, data: { reviewedRows: rows, reviewedAt: new Date(), reviewedBy: ctx.session.sub } });
       if (locked.count !== 1) throw new Error("Preview changed. Reload and review again.");
-      await tx.auditLog.create({ data: { tenantId: ctx.session.tenantId, actorId: ctx.session.sub, actorRole: ctx.session.role, action: "payroll_attendance.reviewed", entity: "PayrollAttendanceImport", entityId: upload.id, summary: `Reviewed ${rows.filter(row => !row.excluded).length} payroll attendance rows; ${rows.filter(row => row.excluded).length} excluded.`, after: { sourceHash: upload.sourceHash, sheet: upload.sheet } } });
+      await tx.auditLog.create({ data: { tenantId: ctx.session.tenantId, actorId: ctx.session.sub, actorRole: ctx.session.role, action: "payroll_attendance.reviewed", entity: "PayrollAttendanceImport", entityId: upload.id, summary: `Reviewed ${rows.filter(row => !row.excluded).length} payroll attendance rows; ${rows.filter(row => row.excluded).length} excluded.`, after: { sourceHash: upload.sourceHash, sheet: upload.sheet, format: rows[0]?.format ?? "legacy" } } });
     });
     return NextResponse.json({ reviewedRows: rows });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Review failed." }, { status: 400 }); }

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey } from "@/lib/dates";
+import { optionalDateInput } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 
 /** GET — tasks for the tenant (admins see all grouped, employees see their own). */
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
@@ -22,76 +22,49 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ tasks });
 }
 
-const DEFAULT_TASKS = [
-  "Submit PAN card",
-  "Submit Aadhaar card",
-  "Open & verify bank account",
-  "Share bank account details (bank file)",
-  "Provide joining documents (offer letter, education certs)",
-  "Issue ID card / access badge",
-  "Assign laptop & assets",
-  "Add to company WhatsApp / HR group",
-  "Set up payroll & statutory (PF/ESIC) enrollment",
-  "Complete first-day orientation & policy acknowledgement",
-];
-
-/** POST — create onboarding tasks (admin only). */
+/** POST — create onboarding tasks within the administrator's employee scope. */
 export async function POST(req: NextRequest) {
   try {
     const session = await requireActiveSession().catch(() => null);
     if (!session || (session.role !== "admin" && session.role !== "location_manager")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => null);
     const locationId = await managerLocationId(session);
     if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-    const employeeId = String(body.employeeId ?? "");
-    const names: string[] = Array.isArray(body.names)
-      ? body.names.map((s: unknown) => String(s ?? "").trim()).filter(Boolean)
-      : typeof body.names === "string"
-        ? body.names.split("\n").map((s: string) => s.trim()).filter(Boolean)
-        : [];
+    const employeeId = typeof body?.employeeId === "string" ? body.employeeId.trim() : "";
+    const inputNames: unknown[] = Array.isArray(body?.names) ? body.names : typeof body?.names === "string" ? body.names.split("\n") : [];
+    if (!inputNames.every((name): name is string => typeof name === "string")) return NextResponse.json({ error: "Task names must be text." }, { status: 400 });
+    const names = inputNames.map((name) => name.trim()).filter(Boolean);
     if (!employeeId) return NextResponse.json({ error: "Select an employee." }, { status: 400 });
     if (names.length === 0) return NextResponse.json({ error: "Add at least one task." }, { status: 400 });
     if (names.length > 50) return NextResponse.json({ error: "Maximum 50 tasks at once." }, { status: 400 });
     if (names.some((n) => n.length > 200))
       return NextResponse.json({ error: "Each task must be 200 characters or less." }, { status: 400 });
 
-    const employee = await prisma.employee.findFirst({
-       where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
-      select: { id: true, status: true },
-    });
-    if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
-    if (employee.status !== "active")
-      return NextResponse.json({ error: "Cannot assign tasks to an inactive employee." }, { status: 400 });
-
-    let dueBy: Date | null = null;
-    if (body.dueBy) {
-      dueBy = fromDateKey(String(body.dueBy));
-      if (Number.isNaN(dueBy.getTime())) return NextResponse.json({ error: "Invalid due date." }, { status: 400 });
-    }
-    const existing = await prisma.onboardingTask.findMany({
-      where: { tenantId: session.tenantId, employeeId, name: { in: names } },
-      select: { name: true },
-    });
-    const existingNames = new Set(existing.map((task) => task.name));
-    const newNames = names.filter((name) => !existingNames.has(name));
-    if (newNames.length === 0) return NextResponse.json({ success: true, created: 0, skipped: names.length });
-    const created = await prisma.onboardingTask.createMany({
-      data: newNames.map((name) => ({
-        tenantId: session.tenantId,
-        employeeId,
-        name,
-        status: "pending",
-        dueBy,
-        createdBy: session.sub,
-      })),
-      skipDuplicates: true,
-    });
-    return NextResponse.json({ success: true, created: created.count, skipped: names.length - created.count });
-  } catch {
+    const dueBy = optionalDateInput(body.dueBy);
+    if (dueBy === "invalid") return NextResponse.json({ error: "Invalid due date." }, { status: 400 });
+    const result = await prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.findFirst({
+        where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
+        select: { status: true, loginOnly: true },
+      });
+      if (!employee) return { error: "Employee not found.", status: 404 } as const;
+      if (employee.status !== "active" || employee.loginOnly) return { error: "Onboarding tasks require an active staff account.", status: 400 } as const;
+      const { count } = await tx.onboardingTask.createMany({
+        data: [...new Set(names)].map((name) => ({ tenantId: session.tenantId, employeeId, name, status: "pending", dueBy, createdBy: session.sub })),
+        skipDuplicates: true,
+      });
+      if (count) await tx.auditLog.create({ data: {
+        tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "onboarding.assign", entity: "Employee", entityId: employeeId,
+        summary: "Assigned onboarding tasks", after: { count },
+      } });
+      return { count } as const;
+    }, { isolationLevel: "Serializable" });
+    if ("error" in result) return NextResponse.json({ error: result.error }, { status: result.status });
+    return NextResponse.json({ success: true, created: result.count, skipped: names.length - result.count });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2034") return NextResponse.json({ error: "Employee onboarding changed. Refresh and try again." }, { status: 409 });
     return NextResponse.json({ error: "Failed to create tasks." }, { status: 500 });
   }
 }
-
-/** Template helper for the UI. */

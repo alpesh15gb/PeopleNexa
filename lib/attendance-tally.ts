@@ -1,3 +1,12 @@
+import { istDateKey } from "./ist";
+
+export function holidaysForAttendanceDay<T extends { date: Date; isRecurring: boolean }>(holidays: T[], dateKey: string): T[] {
+  return holidays.filter((holiday) => {
+    const holidayKey = istDateKey(holiday.date);
+    return holiday.isRecurring ? holidayKey.slice(5) === dateKey.slice(5) : holidayKey === dateKey;
+  });
+}
+
 export type AttendanceTally = {
   total: number;
   marked: number;

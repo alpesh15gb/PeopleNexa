@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { PoliciesPanel } from "./policies-panel";
@@ -6,8 +6,8 @@ import { PoliciesPanel } from "./policies-panel";
 export const dynamic = "force-dynamic";
 
 export default async function PoliciesPage() {
-  const session = await getSession();
-  if (!session || (session.role !== "admin" && session.role !== "location_manager")) redirect("/login");
+  const session = await requireActiveSession();
+  if (session.role !== "admin") redirect("/employee/policies");
 
   const policies = await prisma.policy.findMany({
     where: { tenantId: session.tenantId, active: true },

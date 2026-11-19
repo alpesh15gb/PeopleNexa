@@ -1,6 +1,9 @@
 import { prisma } from "./prisma";
 import { attendanceDayForPunch, shiftForEmployeeDay, shiftWindow, FINALIZE_GRACE_HOURS } from "./reconcile";
 import { minutesOfDay } from "./dates";
+import { istDateKey } from "./ist";
+import { workspaceRegion } from "./workspace-region";
+import { workspaceWallTime } from "./workspace-time";
 
 export function dutyTrackingActive(record: { punchInTime: Date | null; punchOutTime: Date | null } | null, now: Date, window: { start: Date; end: Date }, pendingOut = false) {
   return Boolean(record?.punchInTime && record.punchInTime <= now && !record.punchOutTime && !pendingOut && now >= window.start && now <= window.end);
@@ -21,17 +24,18 @@ export function dutyTrackingActive(record: { punchInTime: Date | null; punchOutT
 export async function trackingState(tenantId: string, employeeId: string) {
   const employee = await prisma.employee.findUnique({
     where: { id: employeeId },
-    include: { shift: true },
+    include: { shift: true, tenant: { select: { config: true } } },
   });
   if (!employee || employee.tenantId !== tenantId || employee.status !== "active" || employee.loginOnly) {
     return { active: false, reason: "no_employee" as const, record: null, window: null };
   }
 
   const now = new Date();
-  const workDay = await attendanceDayForPunch(employee, now);
-  const shift = await shiftForEmployeeDay(employee, workDay);
-  const { start, end: fallbackEnd } = shiftWindow(workDay, shift);
-  const end = shift ? new Date(workDay.getTime() + minutesOfDay(shift.endTime) * 60000 + (shift.isNightShift || minutesOfDay(shift.endTime) <= minutesOfDay(shift.startTime) ? 86400000 : 0)) : fallbackEnd;
+  const { timeZone } = workspaceRegion(employee.tenant.config);
+  const workDay = await attendanceDayForPunch(employee, now, timeZone);
+  const shift = await shiftForEmployeeDay(employee, workDay, timeZone);
+  const { start, end: fallbackEnd } = shiftWindow(workDay, shift, timeZone);
+  const end = shift ? workspaceWallTime(istDateKey(workDay), minutesOfDay(shift.endTime) + (shift.isNightShift || minutesOfDay(shift.endTime) <= minutesOfDay(shift.startTime) ? 1440 : 0), timeZone) : fallbackEnd;
   const graceMs = FINALIZE_GRACE_HOURS * 3600 * 1000;
   const inWindow = now.getTime() >= start.getTime() && now.getTime() <= end.getTime() + graceMs;
 

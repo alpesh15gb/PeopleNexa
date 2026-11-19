@@ -14,7 +14,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const n = Number(req.nextUrl.searchParams.get("limit") ?? 100);
   const take = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), 500) : 100;
   const logs = await prisma.realtimeLog.findMany({
-    where: { realtimeDeviceId: id },
+    where: { realtimeDeviceId: id, tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
     take,
   });

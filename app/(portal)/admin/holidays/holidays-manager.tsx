@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, relativeDay, toDateKey } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
 
 interface Holiday {
   id: string;
@@ -17,7 +19,7 @@ interface Holiday {
   isHalfDay: boolean;
 }
 
-export function HolidaysManager({ holidays }: { holidays: Holiday[] }) {
+export function HolidaysManager({ holidays, region }: { holidays: Holiday[]; region: WorkspaceRegion }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -69,9 +71,9 @@ export function HolidaysManager({ holidays }: { holidays: Holiday[] }) {
     }
   }
 
-  const today = toDateKey(new Date());
-  const upcoming = holidays.filter((h) => toDateKey(h.date) >= today);
-  const past = holidays.filter((h) => toDateKey(h.date) < today);
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const upcoming = holidays.filter((h) => h.isRecurring || istDateKey(h.date) >= today);
+  const past = holidays.filter((h) => !h.isRecurring && istDateKey(h.date) < today);
 
   return (
     <>
@@ -118,8 +120,8 @@ export function HolidaysManager({ holidays }: { holidays: Holiday[] }) {
                   )}
                 </div>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">
-                  {formatDate(h.date)}
-                  <span className="ml-1.5 capitalize text-muted-foreground/60">({relativeDay(h.date)})</span>
+                  {h.isRecurring ? new Intl.DateTimeFormat(region.locale, { month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${istDateKey(h.date)}T00:00:00Z`)) : formatCalendarDate(istDateKey(h.date), region.locale)}
+                  {istDateKey(h.date) === today && <span className="ml-1.5 text-muted-foreground">(Today)</span>}
                 </p>
               </div>
               <Button size="icon" variant="ghost" className="text-rose-300 opacity-0 transition-opacity hover:bg-rose-500/10 group-hover:opacity-100" onClick={() => remove(h.id)}>

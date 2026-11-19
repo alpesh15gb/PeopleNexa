@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { tallyDailyAttendance } from "../lib/attendance-tally";
+import { holidaysForAttendanceDay, tallyDailyAttendance } from "../lib/attendance-tally";
 import { dailyPresentEmployeeCounts } from "../lib/attendance-presence";
 
 const punchIn = new Date("2026-10-02T03:30:00.000Z");
@@ -37,5 +37,13 @@ const dailyPresence = dailyPresentEmployeeCounts(
   ],
 );
 assert.equal(dailyPresence.get("2026-10-02"), 4, "daily present is deduplicated and includes authorized raw punches without changing absent status");
+
+const annualHalfDay = { date: new Date("2025-10-01T18:30:00Z"), isRecurring: true, isHalfDay: true };
+const oneTimeHoliday = { date: new Date("2026-10-01T18:30:00Z"), isRecurring: false, isHalfDay: false };
+const anotherDay = { date: new Date("2025-10-02T18:30:00Z"), isRecurring: true, isHalfDay: false };
+const holidayFixtures = [annualHalfDay, oneTimeHoliday, anotherDay];
+assert.deepEqual(holidaysForAttendanceDay(holidayFixtures, "2026-10-02"), [annualHalfDay, oneTimeHoliday]);
+assert.deepEqual(holidaysForAttendanceDay(holidayFixtures, "2027-10-02"), [annualHalfDay]);
+assert.deepEqual(holidaysForAttendanceDay(holidayFixtures, "2026-10-03"), [anotherDay]);
 
 console.log("attendance tally tests passed");

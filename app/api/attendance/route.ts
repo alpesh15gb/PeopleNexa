@@ -2,9 +2,14 @@ import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { dayRangeIST, isDateKey, todayKey } from "@/lib/dates";
+import { dayRangeIST, isDateKey } from "@/lib/dates";
 import { istStartOfDay, parseIST } from "@/lib/ist";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone } from "@/lib/workspace-time";
+import { attendanceEmployeeScope } from "@/lib/attendance-drilldown";
+import { holidaysForAttendanceDay } from "@/lib/attendance-tally";
 import { finalizeEligibleDays, shiftForEmployeeDay } from "@/lib/reconcile";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 
 const MANUAL_STATUSES = ["present", "late", "permission", "absent", "half_day"];
 
@@ -38,13 +43,16 @@ export async function GET(req: NextRequest) {
   // the rest.
   await finalizeEligibleDays(session.tenantId, 100);
 
-  const dateKey = req.nextUrl.searchParams.get("date") || todayKey();
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const { timeZone } = workspaceRegion(tenant?.config);
+  const dateKey = req.nextUrl.searchParams.get("date") || dateKeyInTimeZone(new Date(), timeZone);
   if (!isDateKey(dateKey)) return NextResponse.json({ error: "date must use a real YYYY-MM-DD calendar date." }, { status: 400 });
   const { start: dayStart, end: dayEnd } = dayRangeIST(dateKey);
+  const employeeScope = attendanceEmployeeScope({ tenantId: session.tenantId, branchId, locationId });
 
-  const [employees, records, leaves, holidays] = await Promise.all([
+  const [employees, records, leaves, holidayCandidates] = await Promise.all([
     prisma.employee.findMany({
-       where: { tenantId: session.tenantId, status: "active", ...(locationId ? { branch: { locationId } } : {}), ...(branchId ? { branchId } : {}) },
+      where: employeeScope,
       select: {
         id: true,
         employeeNumber: true,
@@ -56,7 +64,7 @@ export async function GET(req: NextRequest) {
       orderBy: { employeeNumber: "asc" },
     }),
     prisma.attendance.findMany({
-       where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}) },
+      where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope },
       include: {
         employee: { select: { id: true, firstName: true, lastName: true } },
         branch: { select: { name: true } },
@@ -69,12 +77,13 @@ export async function GET(req: NextRequest) {
         status: "approved",
         fromDate: { lt: dayEnd },
         toDate: { gte: dayStart },
-        ...(branchId ? { employee: { branchId } } : locationId ? { employee: { branch: { locationId } } } : {}),
+        employee: employeeScope,
       },
       include: { employee: { select: { id: true } }, leaveType: true },
     }),
-    prisma.holiday.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd } } }),
+    prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: { gte: dayStart, lt: dayEnd } }] } }),
   ]);
+  const holidays = holidaysForAttendanceDay(holidayCandidates, dateKey);
 
   const leaveByEmployee = new Map(leaves.map((l) => [l.employee.id, l]));
   const recordByEmployee = new Map(records.map((r) => [r.employee.id, r]));
@@ -99,6 +108,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     date: dateKey,
+    timeZone,
     isHoliday: holidays.length > 0,
     holidays: holidays.map((h) => h.name),
     counts,
@@ -138,14 +148,16 @@ export async function POST(req: NextRequest) {
   if (!dayStart || isNaN(dayStart.getTime())) {
     return NextResponse.json({ error: "A valid date (YYYY-MM-DD) is required." }, { status: 400 });
   }
-  const now = new Date();
-  if (dayStart.getTime() > istStartOfDay(now).getTime()) {
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const { timeZone } = workspaceRegion(tenant?.config);
+  const today = dayRangeIST(dateKeyInTimeZone(new Date(), timeZone)).start;
+  if (dayStart > today) {
     return NextResponse.json({ error: "Cannot create attendance for a future date." }, { status: 400 });
   }
 
   const employee = await prisma.employee.findFirst({
     where: { id: employeeId, tenantId: session.tenantId },
-    select: { id: true, tenantId: true, status: true, joiningDate: true, branchId: true, shiftId: true, branch: { select: { locationId: true } } },
+    select: { id: true, tenantId: true, status: true, loginOnly: true, joiningDate: true, branchId: true, shiftId: true, branch: { select: { locationId: true } } },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
   if (session.role === "branch_manager") {
@@ -161,8 +173,8 @@ export async function POST(req: NextRequest) {
     const manager = await prisma.employee.findFirst({ where: { id: session.sub, tenantId: session.tenantId }, select: { locationId: true } });
     if (!manager?.locationId || employee.branch?.locationId !== manager.locationId) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
   }
-  if (employee.status !== "active") {
-    return NextResponse.json({ error: "Only active employees can be marked." }, { status: 403 });
+  if (employee.status !== "active" || employee.loginOnly) {
+    return NextResponse.json({ error: "Attendance can be recorded for active staff accounts only." }, { status: 403 });
   }
   if (employee.joiningDate) {
     const joinStart = istStartOfDay(new Date(employee.joiningDate));
@@ -187,7 +199,7 @@ export async function POST(req: NextRequest) {
         tenantId: session.tenantId,
         employeeId,
         branchId: employee.branchId ?? null,
-        shiftId: (await shiftForEmployeeDay(employee, dayStart))?.id ?? null,
+        shiftId: (await shiftForEmployeeDay(employee, dayStart, timeZone))?.id ?? null,
         date: dayStart,
         status,
         note,
@@ -200,7 +212,8 @@ export async function POST(req: NextRequest) {
     }, { isolationLevel: "Serializable" });
     return NextResponse.json({ record }, { status: 201 });
   } catch (e) {
-    if ((e as { code?: string })?.code === "PAYROLL_LOCKED" || (e as { code?: string })?.code === "P2034") return NextResponse.json({ error: (e as Error).message }, { status: 409 });
+    if ((e as { code?: string })?.code === "PAYROLL_LOCKED") return NextResponse.json({ error: (e as Error).message }, { status: 409 });
+    if (isTransactionWriteConflict(e)) return NextResponse.json({ error: "Attendance or payroll changed during this save. Refresh and try again." }, { status: 409 });
     if ((e as { code?: string })?.code === "P2002") {
       return NextResponse.json({ error: "An attendance record already exists for this day." }, { status: 409 });
     }

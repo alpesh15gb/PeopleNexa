@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { monthKeyIST, isMonthKey } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
@@ -36,19 +36,25 @@ export async function POST(req: NextRequest) {
   const employeeId = String(body.employeeId ?? "");
   const type = body.type === "loan" ? "loan" : "advance";
   const amount = Number(body.amount);
-  const emiCount = Math.max(1, Math.min(Number(body.emiCount) || 1, 60));
+  const emiCount = type === "advance" ? 1 : Number(body.emiCount ?? 1);
   const startMonth = String(body.startMonth ?? monthKeyIST(new Date()));
   const note = body.note ? String(body.note).slice(0, 200) : null;
 
   if (!employeeId || !Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ error: "Employee and a positive amount are required." }, { status: 400 });
   }
+  if (!Number.isInteger(emiCount) || emiCount < 1 || emiCount > 60) {
+    return NextResponse.json({ error: "Use a whole number of instalments from 1 to 60." }, { status: 400 });
+  }
+  if (Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) {
+    return NextResponse.json({ error: "Enter an amount with at most two decimal places." }, { status: 400 });
+  }
   if (!isMonthKey(startMonth)) {
     return NextResponse.json({ error: "Invalid startMonth. Use YYYY-MM." }, { status: 400 });
   }
 
   const employee = await prisma.employee.findFirst({
-    where: { id: employeeId, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) },
+    where: { id: employeeId, tenantId: session.tenantId, status: "active", loginOnly: false, ...(locationId ? employeeLocationScope(locationId) : {}) },
   });
   if (!employee) return NextResponse.json({ error: "Employee not found" }, { status: 404 });
 
@@ -56,10 +62,6 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(emiAmount) || (type === "loan" && emiCount > 1 && emiAmount <= 0)) {
     return NextResponse.json({ error: "Invalid EMI amount." }, { status: 400 });
   }
-  if (!Number.isFinite(amount)) {
-    return NextResponse.json({ error: "Invalid outstanding amount." }, { status: 400 });
-  }
-
   const loan = await prisma.employeeLoan.create({
     data: {
       tenantId: session.tenantId,

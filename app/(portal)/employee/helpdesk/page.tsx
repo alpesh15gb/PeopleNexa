@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { LifeBuoy, Plus, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { HelpdeskPagination, type HelpdeskPage } from "@/components/helpdesk-pagination";
 
 type Msg = { id: string; sender: { id: string; firstName: string; lastName: string; role: string }; body: string; createdAt: string };
 type Ticket = {
@@ -17,6 +18,7 @@ type Ticket = {
   priority: string;
   status: string;
   createdAt: string;
+  isRequester: boolean;
   messages: Msg[];
 };
 
@@ -29,16 +31,27 @@ export default function EmployeeHelpdeskPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<HelpdeskPage | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [form, setForm] = useState({ subject: "", description: "", category: "general", priority: "medium" });
 
-  async function load() {
-    const res = await fetch("/api/helpdesk");
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const params = new URLSearchParams({ view: "personal", page: String(page), pageSize: "25" });
+    const res = await fetch(`/api/helpdesk?${params}`, { signal });
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Could not load your tickets.");
     setTickets(data.tickets);
-  }
+    setPagination(data.pagination);
+    setLoadError("");
+  }, [page]);
   useEffect(() => {
-    void load();
-  }, []);
+    const controller = new AbortController();
+    void load(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load your tickets.");
+    });
+    return () => controller.abort();
+  }, [load]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -54,7 +67,8 @@ export default function EmployeeHelpdeskPage() {
       toast("success", "Ticket raised — the team has been notified.");
       setCreating(false);
       setForm({ subject: "", description: "", category: "general", priority: "medium" });
-      await load();
+      if (page === 1) await load();
+      else setPage(1);
     } catch (err) {
       toast("error", err instanceof Error ? err.message : "Failed");
     } finally {
@@ -125,16 +139,17 @@ export default function EmployeeHelpdeskPage() {
         </form>
       )}
 
-      {tickets.length === 0 ? (
+      {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
+      {tickets.length === 0 && !loadError ? (
         <EmptyState icon={<LifeBuoy className="h-5 w-5" />} title="No tickets" description="Raise your first support ticket above." />
       ) : (
         <div className="space-y-3">
           {tickets.map((t) => (
             <div key={t.id} className="overflow-hidden rounded-2xl border border-edge bg-card">
-              <button onClick={() => setOpenId(openId === t.id ? null : t.id)} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
+              <button aria-expanded={openId === t.id} onClick={() => { setOpenId(openId === t.id ? null : t.id); setReply(""); }} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-medium">{t.subject}</p>
-                  <p className="text-[11.5px] text-muted-foreground">{t.category} · {formatDate(new Date(t.createdAt))}</p>
+                  <p className="text-[11.5px] text-muted-foreground">{!t.isRequester && "Assigned to you · "}{t.category} · {formatDate(new Date(t.createdAt))}</p>
                 </div>
                 <Badge tone={tone[t.status] ?? "neutral"} className="capitalize">{t.status.replace("_", " ")}</Badge>
               </button>
@@ -151,7 +166,7 @@ export default function EmployeeHelpdeskPage() {
                   </div>
                   {t.status !== "closed" && (
                     <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
-                      <input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply…" className="flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+                      <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
                       <Button type="submit" size="sm" loading={busy}><Send className="h-3.5 w-3.5" /></Button>
                     </form>
                   )}
@@ -161,6 +176,7 @@ export default function EmployeeHelpdeskPage() {
           ))}
         </div>
       )}
+      <HelpdeskPagination pagination={pagination} onPage={(next) => { setPage(next); setOpenId(null); setReply(""); }} />
     </div>
   );
 }

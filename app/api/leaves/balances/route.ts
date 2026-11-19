@@ -3,17 +3,15 @@ import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
 import {
   calculateLeaveBalance,
   importedLeaveOpening,
-  selectLeaveAllocation,
   isEarnedLeave,
   leaveBalanceScope,
   leaveBalanceSource,
   policyHasUnlimitedEntitlement,
 } from "@/lib/leave-balance";
-import {
-  leavePolicyDraft,
-  resolveConfiguration,
-  configurationEffectiveAtISTDay,
-} from "@/lib/configuration";
+import { configurationEffectiveAtISTDay } from "@/lib/configuration";
+import { resolveLeavePolicy } from "@/lib/leave-policy";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone } from "@/lib/workspace-time";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { managerLocationId } from "@/lib/location-scope";
@@ -36,15 +34,18 @@ export async function GET(request: NextRequest) {
       { status: 403 },
     );
 
-  const query = request.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const query = (request.nextUrl.searchParams.get("q") ?? "").trim().slice(0, 100);
   const leaveTypeId = request.nextUrl.searchParams.get("leaveTypeId") || null;
   const sourceFilter =
     request.nextUrl.searchParams.get("source") === "imported"
       ? "imported"
       : null;
   const requestedPage = Number(request.nextUrl.searchParams.get("page") ?? "1");
-  const page =
-    Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const preferredPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const clock = new Date();
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const todayKey = dateKeyInTimeZone(clock, workspaceRegion(tenant?.config).timeZone);
+  const now = configurationEffectiveAtISTDay(new Date(`${todayKey}T00:00:00Z`));
   const where = {
     tenantId: session.tenantId,
     status: "active",
@@ -76,14 +77,16 @@ export async function GET(request: NextRequest) {
             some: {
               tenantId: session.tenantId,
               ...(leaveTypeId ? { leaveTypeId } : {}),
-              periodEnd: { lte: new Date() },
+              periodEnd: { lte: clock },
             },
           },
         }
       : {}),
   };
-  const [total, employees, types] = await Promise.all([
-    prisma.employee.count({ where }),
+  const total = await prisma.employee.count({ where });
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(preferredPage, pages);
+  const [employees, types] = await Promise.all([
     prisma.employee.findMany({
       where,
       select: {
@@ -94,14 +97,13 @@ export async function GET(request: NextRequest) {
         locationId: true,
         branch: { select: { name: true, locationId: true } },
       },
-      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { id: "asc" }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     prisma.leaveType.findMany({
       where: {
         tenantId: session.tenantId,
-        ...(leaveTypeId ? { id: leaveTypeId } : {}),
       },
       select: {
         id: true,
@@ -115,11 +117,16 @@ export async function GET(request: NextRequest) {
     }),
   ]);
   const employeeIds = employees.map((employee) => employee.id);
-  await prisma.$transaction(
-    (tx) => refreshEarnedLeaveBalances(tx, session.tenantId, employeeIds),
-    { isolationLevel: "Serializable" },
-  );
-  const now = configurationEffectiveAtISTDay(new Date());
+  let balanceRefreshPending = false;
+  try {
+    await prisma.$transaction(
+      (tx) => refreshEarnedLeaveBalances(tx, session.tenantId, employeeIds, clock),
+      { isolationLevel: "Serializable" },
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code !== "P2034") throw error;
+    balanceRefreshPending = true;
+  }
   const [requests, allocations, imports, policyRecords] = await Promise.all([
     prisma.leaveRequest.findMany({
       where: {
@@ -150,14 +157,14 @@ export async function GET(request: NextRequest) {
           OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
         },
       },
-      include: { policyPeriod: { select: { id: true, locationId: true } } },
+      include: { policyPeriod: { select: { configurationId: true } } },
     }),
     prisma.leaveBalanceImportEntry.findMany({
       where: {
         tenantId: session.tenantId,
         employeeId: { in: employeeIds },
         ...(leaveTypeId ? { leaveTypeId } : {}),
-        periodEnd: { lte: now },
+        periodEnd: { lte: clock },
       },
       orderBy: { periodEnd: "desc" },
     }),
@@ -179,13 +186,15 @@ export async function GET(request: NextRequest) {
     .map((employee) => ({
       employee: { ...employee, location: employee.branch?.name ?? null },
       balances: types
+        .filter((type) => !leaveTypeId || type.id === leaveTypeId)
         .map((type) => {
           const employeeLocationId =
             employee.branch?.locationId ?? employee.locationId;
-          const allocation = selectLeaveAllocation(
-            allocations.filter((item) => item.employeeId === employee.id),
-            type.id,
-            employeeLocationId,
+          const policy = resolveLeavePolicy(policyRecords, employeeLocationId, now, type.code);
+          const allocation = policy && allocations.find((item) =>
+            item.employeeId === employee.id &&
+            item.leaveTypeId === type.id &&
+            item.policyPeriod.configurationId === policy.configurationId,
           );
           const imported = imports.find(
             (item) =>
@@ -217,14 +226,13 @@ export async function GET(request: NextRequest) {
             Boolean(allocation),
             imported?.available,
           );
-          const credited = imported ? 0 : 0;
           const unlimitedEntitlement = allocation
             ? policyHasUnlimitedEntitlement(allocation.policySnapshot)
             : !imported && type.unlimitedEntitlement;
           const available = calculateLeaveBalance({
             cap,
             opening,
-            credited,
+            credited: 0,
             used,
             pending,
             unlimitedEntitlement,
@@ -234,14 +242,7 @@ export async function GET(request: NextRequest) {
             Boolean(imported),
             unlimitedEntitlement,
           );
-          const policy = resolveConfiguration(
-            policyRecords.filter((record) => leavePolicyDraft(record.payload)),
-            employeeLocationId,
-            now,
-          );
-          const rule = leavePolicyDraft(policy?.payload)?.leaveTypes.find(
-            (item) => item.code === type.code,
-          );
+          const rule = policy?.rules;
           const fixedEarnedLeaveWarning = Boolean(
             rule &&
             isEarnedLeave(type.code, type.name) &&
@@ -251,7 +252,7 @@ export async function GET(request: NextRequest) {
           return {
             leaveType: type,
             opening,
-            credited,
+            credited: allocation ? cap ?? 0 : imported?.credited ?? 0,
             used,
             pending,
             available,
@@ -309,6 +310,7 @@ export async function GET(request: NextRequest) {
     page,
     pageSize: PAGE_SIZE,
     total,
-    pages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    pages,
+    balanceRefreshPending,
   });
 }

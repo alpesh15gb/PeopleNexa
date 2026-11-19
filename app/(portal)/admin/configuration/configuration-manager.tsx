@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
-  DASHBOARD_WIDGETS,
+  dashboardLayout,
+  defaultDashboardWidgets,
+  resolveConfiguration,
   type DashboardWidgetKey,
   type DashboardWidgetSize,
 } from "@/lib/configuration";
@@ -46,6 +48,7 @@ type ConfigurationRecord = {
   effectiveTo: Date | null;
   activatedBy: string | null;
   activatedAt: Date | null;
+  locationId: string | null;
   location: { name: string } | null;
   payload: unknown;
 };
@@ -55,6 +58,7 @@ type Widget = {
   order: number;
   size: DashboardWidgetSize;
 };
+export type ConfigurationSection = "all" | "company" | "locations" | "dashboard" | "id-cards";
 const labels: Record<DashboardWidgetKey, string> = {
   total_employees: "Total employees",
   present: "Present",
@@ -65,30 +69,34 @@ const labels: Record<DashboardWidgetKey, string> = {
   pending_leave_requests: "Leave requests",
   attendance_trend: "Attendance trend",
   device_attendance: "Biometric attendance",
-  project_attendance: "Project attendance",
+  project_attendance: "Attendance by branch",
   todays_attendance: "Today's attendance",
-  driving_license_expiry: "License expiry",
+  driving_license_expiry: "Driving license expiry",
   birthdays: "Birthdays",
   anniversaries: "Anniversaries",
   new_joiners: "New joiners",
   departments: "Departments",
   gender_ratio: "Gender ratio",
+  on_leave: "On leave",
 };
-const defaultWidgets = (): Widget[] =>
-  DASHBOARD_WIDGETS.map((key, order) => ({
-    key,
-    order,
-    enabled: true,
-    size:
-      key.includes("attendance") || key === "pending_leaves"
-        ? "wide"
-        : "standard",
-  }));
+
+function editableDashboardWidgets(records: ConfigurationRecord[], locationId: string | null) {
+  const defaults = defaultDashboardWidgets();
+  const active = resolveConfiguration(records.filter((record) => record.kind === "dashboard" && dashboardLayout(record.payload)), locationId);
+  const saved = dashboardLayout(active?.payload);
+  if (!saved) return defaults;
+  const keys = new Set(saved.widgets.map((widget) => widget.key));
+  return [...saved.widgets, ...defaults.filter((widget) => !keys.has(widget.key)).map((widget) => ({ ...widget, enabled: false }))]
+    .map((widget, order) => ({ ...widget, order }));
+}
 
 export function ConfigurationManager({
   tenant,
   locations,
   records,
+  section,
+  showPayroll,
+  showLeave,
 }: {
   tenant: {
     name: string;
@@ -99,6 +107,9 @@ export function ConfigurationManager({
   };
   locations: Location[];
   records: ConfigurationRecord[];
+  section: ConfigurationSection;
+  showPayroll: boolean;
+  showLeave: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -107,7 +118,7 @@ export function ConfigurationManager({
   const [idCardScope, setIdCardScope] = useState("");
   const [idCardFormKey, setIdCardFormKey] = useState(0);
   const [dashboardScope, setDashboardScope] = useState("");
-  const [widgets, setWidgets] = useState<Widget[]>(defaultWidgets);
+  const [widgets, setWidgets] = useState<Widget[]>(() => editableDashboardWidgets(records, null));
   const [preview, setPreview] = useState(false);
   async function request(method: string, body: unknown) {
     const response = await fetch("/api/configuration", {
@@ -226,15 +237,23 @@ export function ConfigurationManager({
         widget.key === key ? { ...widget, ...changes } : widget,
       ),
     );
+  const moveWidget = (from: number, to: number) => setWidgets((current) => {
+    const reordered = [...current];
+    const [widget] = reordered.splice(from, 1);
+    reordered.splice(to, 0, widget);
+    return reordered.map((item, order) => ({ ...item, order }));
+  });
   const profile = tenant.profile;
   const selected = locations.find((location) => location.id === locationId);
   const templates = records.filter((record) => record.kind === "id_card");
   const layouts = records.filter((record) => record.kind === "dashboard");
+  const showCompany = section === "all" || section === "company";
+  const showLocations = section === "all" || section === "locations";
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-2">
-        <ProfileCard
-          title="Company master profile"
+      {(showCompany || showLocations) && <div className={section === "all" ? "grid items-start gap-6 xl:grid-cols-2" : "grid gap-6"}>
+        {showCompany && <ProfileCard
+          title="Company profile"
           profile={profile}
           fallback={{
             legalName: tenant.name,
@@ -244,13 +263,15 @@ export function ConfigurationManager({
           }}
           onSubmit={(event) => saveProfile(event, "tenant-profile")}
           busy={busy}
-        />
-        <Card>
+        />}
+        {showLocations && <Card id="location-profiles" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Location master profile</CardTitle>
+            <CardTitle>Location profiles</CardTitle>
+            <Link href="/admin/locations" className="shrink-0 text-sm font-medium text-primary hover:underline">Manage locations</Link>
           </CardHeader>
           <CardContent>
             <Select
+              aria-label="Location profile to edit"
               value={locationId}
               onChange={(event) => setLocationId(event.target.value)}
             >
@@ -277,18 +298,16 @@ export function ConfigurationManager({
               </p>
             )}
           </CardContent>
-        </Card>
-      </div>
-      <Card>
+        </Card>}
+      </div>}
+      {(section === "all" || section === "dashboard") && <Card id="dashboard-layouts" className="scroll-mt-24">
         <CardHeader>
           <CardTitle>Dashboard layouts</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex gap-3 rounded-xl border border-sky-400/20 bg-sky-500/5 p-3 text-[13px] text-muted-foreground">
             <ShieldAlert className="h-5 w-5 shrink-0 text-primary" />
-            Drafts and preview never affect users. Only an explicitly activated
-            valid layout is used; a location layout overrides the tenant layout,
-            otherwise the dashboard remains unchanged.
+            Publish a layout to apply it to the dashboard. An active location layout takes precedence over the workspace layout.
           </div>
           <form onSubmit={createDashboard} className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
@@ -339,18 +358,13 @@ export function ConfigurationManager({
                         />
                       </td>
                       <td className="p-3">
-                        <Input
+                        <Select
                           aria-label={`${labels[widget.key]} order`}
-                          type="number"
-                          min="0"
-                          max={DASHBOARD_WIDGETS.length - 1}
                           value={widget.order}
-                          onChange={(event) =>
-                            updateWidget(widget.key, {
-                              order: Number(event.target.value),
-                            })
-                          }
-                        />
+                          onChange={(event) => moveWidget(widget.order, Number(event.target.value))}
+                        >
+                          {widgets.map((item) => <option key={item.key} value={item.order}>{item.order + 1}</option>)}
+                        </Select>
                       </td>
                       <td className="p-3">
                         <Select
@@ -373,6 +387,9 @@ export function ConfigurationManager({
               </table>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setWidgets(editableDashboardWidgets(records, dashboardScope || null))}>
+                Load active layout
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -382,7 +399,7 @@ export function ConfigurationManager({
                 {preview ? "Hide preview" : "Preview draft"}
               </Button>
               <Button type="submit" loading={busy}>
-                <Plus className="h-4 w-4" /> Create vNext
+                <Plus className="h-4 w-4" /> Save draft
               </Button>
             </div>
           </form>
@@ -409,25 +426,20 @@ export function ConfigurationManager({
           )}
           <ConfigurationList
             records={layouts}
-            empty="No dashboard layouts yet. The existing dashboard remains unchanged."
+            empty="The workspace uses the default dashboard."
             busy={busy}
             onToggle={toggle}
           />
         </CardContent>
-      </Card>
-      <Card>
+      </Card>}
+      {(section === "all" || section === "id-cards") && <Card id="id-card-templates" className="scroll-mt-24">
         <CardHeader>
           <CardTitle>ID-card templates</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="flex gap-3 rounded-xl border border-amber-400/20 bg-amber-500/5 p-3 text-[13px] text-muted-foreground">
             <ShieldAlert className="h-5 w-5 shrink-0 text-amber-500" />
-            Uploaded artwork is used exactly as designed: logo, watermark and
-            the location footer stay untouched, and only the photo and employee
-            details print into the middle zone. Choose the clean panel only when
-            the artwork's middle area is too busy to read over. A valid active
-            location template overrides the tenant template; without either,
-            cards retain `public/id-cards/1.png` and `2.png`.
+            Upload front and back artwork. A location template overrides the workspace template. Use the clean content panel when text needs more contrast against the artwork.
           </div>
           <form onSubmit={createTemplate} className="grid gap-3 md:grid-cols-2">
             <Field label="Scope">
@@ -473,7 +485,7 @@ export function ConfigurationManager({
             </Field>
             <div className="flex items-end">
               <Button type="submit" loading={busy}>
-                <Plus className="h-4 w-4" /> Create vNext
+                <Plus className="h-4 w-4" /> Save template draft
               </Button>
             </div>
           </form>
@@ -484,13 +496,13 @@ export function ConfigurationManager({
             onToggle={toggle}
           />
         </CardContent>
-      </Card>
-      <Card>
+      </Card>}
+      {section === "all" && (showPayroll || showLeave) && <Card>
         <CardHeader>
           <CardTitle>Payroll & leave settings</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Link
+          {showPayroll && <Link
             href="/admin/payroll/configuration"
             className="rounded-xl border border-edge p-5 hover:bg-tint"
           >
@@ -499,8 +511,8 @@ export function ConfigurationManager({
               Pay schedule, salary structure, deductions and contributions. Save
               progress and apply changes from one workspace.
             </p>
-          </Link>
-          <Link
+          </Link>}
+          {showLeave && <Link
             href="/admin/leaves/policies"
             className="rounded-xl border border-edge p-5 hover:bg-tint"
           >
@@ -509,9 +521,9 @@ export function ConfigurationManager({
               Allowances, approvals, earned leave, carry forward and employee
               balance allocation.
             </p>
-          </Link>
+          </Link>}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }
@@ -609,7 +621,7 @@ function ProfileCard({
   busy: boolean;
 }) {
   return (
-    <Card>
+    <Card id="company-profile" className="scroll-mt-24">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>

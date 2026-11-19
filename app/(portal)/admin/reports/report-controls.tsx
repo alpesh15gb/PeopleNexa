@@ -24,6 +24,8 @@ export function ReportControls({
   effectiveMonth,
   effectiveBranchId,
   effectiveDepartmentId,
+  showAttendance,
+  showPeople,
 }: {
   type: string;
   departments: { id: string; name: string }[];
@@ -32,14 +34,16 @@ export function ReportControls({
   effectiveMonth: string;
   effectiveBranchId: string;
   effectiveDepartmentId: string;
+  showAttendance: boolean;
+  showPeople: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const departmentId = searchParams.get("departmentId") ?? effectiveDepartmentId;
   const branchId = searchParams.get("branchId") ?? effectiveBranchId;
-  const deviceDate = searchParams.get("date") ?? effectiveDate;
-  const deviceMonth = searchParams.get("month") ?? effectiveMonth;
+  const deviceDate = effectiveDate;
+  const deviceMonth = effectiveMonth;
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -51,15 +55,17 @@ export function ReportControls({
   }
 
   function reset() {
-    startTransition(() => router.push("/admin/reports"));
+    startTransition(() => router.push(`/admin/reports?type=${encodeURIComponent(type)}`));
   }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1">
-        {TYPES.map((t) => (
+        {TYPES.filter((report) => report.key === "inactive-employees" ? showPeople : showAttendance).map((t) => (
           <button
             key={t.key}
+            type="button"
+            aria-pressed={type === t.key}
             onClick={() => update({ type: t.key })}
             className={`rounded-full px-4 py-2 text-[13px] font-medium transition-all ${
               type === t.key

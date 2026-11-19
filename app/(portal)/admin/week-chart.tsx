@@ -1,42 +1,32 @@
-"use client";
-
 export function WeekChart({ data }: { data: { day: string; label: string; present: number; late: number; absent: number }[] }) {
-  const max = Math.max(...data.map((d) => d.present + d.late + d.absent), 1);
-  const summary = data.map((d) => `${d.label}: ${d.present} present, ${d.late} late, ${d.absent} absent`).join("; ");
+  const max = Math.max(0, ...data.map((day) => day.present + day.late + day.absent));
+  if (max === 0) {
+    return <p className="py-6 text-center text-sm text-muted-foreground">No attendance activity this month.</p>;
+  }
+
   return (
     <div>
-      <div role="img" aria-label={`Attendance trend: ${summary}`} className="flex h-24 items-end gap-1">
+      <div role="region" aria-label="Attendance chart" tabIndex={0} className="overflow-x-auto rounded-md pb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+       <div aria-hidden="true" className="flex min-w-max items-end gap-1">
         {data.map((d) => {
           const total = d.present + d.late + d.absent;
-          const tip = `${d.label}: ${d.present} present, ${d.late} late, ${d.absent} absent`;
+          const tip = `${d.label} · ${d.present} present · ${d.late} late · ${d.absent} absent`;
           return (
-            <div key={d.day} title={tip} className="group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-              <span aria-hidden="true" className="flex h-4 items-center rounded-md border border-edge bg-card px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-foreground shadow-sm">{total}</span>
-              <div className="flex w-full flex-col-reverse items-center gap-px" style={{ height: `${Math.max((total / max) * 100, 4)}%` }}>
-                <div
-                  aria-hidden="true"
-                  className="w-full rounded-t-md bg-rose-600 transition-all dark:bg-rose-400"
-                  style={{ height: `${d.absent ? Math.max((d.absent / max) * 100, 3) : 0}%` }}
-                />
-                <div
-                  aria-hidden="true"
-                  className="w-full rounded-t-md bg-amber-600 transition-all dark:bg-amber-400"
-                  style={{ height: `${d.late ? Math.max((d.late / max) * 100, 3) : 0}%` }}
-                />
-                <div
-                  aria-hidden="true"
-                  className="w-full rounded-t-md bg-emerald-600 transition-all dark:bg-emerald-400"
-                  style={{ height: `${d.present ? Math.max((d.present / max) * 100, 3) : 0}%` }}
-                />
+            <div key={d.day} title={tip} className="flex min-w-9 flex-1 flex-col items-center justify-end gap-1 px-0.5">
+              <span className="text-[10px] font-semibold tabular-nums text-foreground">{total || "\u00a0"}</span>
+              <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-md" style={{ height: (total / max) * 96 }}>
+                <div className="bg-emerald-600 dark:bg-emerald-400" style={{ flex: d.present }} />
+                <div className="bg-amber-600 dark:bg-amber-400" style={{ flex: d.late }} />
+                <div className="bg-rose-600 dark:bg-rose-400" style={{ flex: d.absent }} />
               </div>
-              <span className="max-w-full truncate text-[10px] text-muted-foreground">{d.label}</span>
+              <span className="text-[10px] text-muted-foreground">{d.label}</span>
             </div>
           );
         })}
+       </div>
       </div>
-      {/* Screen-reader data table for the same week */}
       <table className="sr-only">
-        <caption>Weekly attendance breakdown</caption>
+        <caption>Attendance by day this month</caption>
         <thead>
           <tr>
             <th scope="col">Day</th>

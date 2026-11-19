@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
 import { MODULES } from "@/lib/modules";
-import { invalidateTenantAccess } from "@/lib/modules-server";
 
 /** PUT with { modules: string[] } — the set of modules that should be enabled. */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -33,7 +32,6 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       )
     );
 
-    invalidateTenantAccess(id);
     const modules = await prisma.tenantModule.findMany({
       where: { tenantId: id },
       select: { module: true, enabled: true },

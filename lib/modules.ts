@@ -128,6 +128,8 @@ export const moduleFor = (key: string): ModuleDef | undefined => MODULES.find((m
 const ROUTE_MODULES: Array<[string, string]> = [
   ["/admin/attendance", "attendance"],
   ["/admin/employees", "employees"],
+  ["/admin/employee-master", "employees"],
+  ["/admin/id-cards", "employees"],
   ["/admin/leaves", "leaves"],
   ["/admin/holidays", "holidays"],
   ["/admin/shifts", "shifts"],
@@ -155,6 +157,9 @@ const ROUTE_MODULES: Array<[string, string]> = [
   ["/admin/helpdesk", "helpdesk"],
   ["/admin/policies", "policies"],
   ["/employee/attendance", "attendance"],
+  ["/employee/face-id", "attendance"],
+  ["/employee/onboarding", "onboarding"],
+  ["/employee/exits", "exit"],
   ["/employee/documents", "documents"],
   ["/employee/performance", "performance"],
   ["/employee/helpdesk", "helpdesk"],
@@ -165,6 +170,7 @@ const ROUTE_MODULES: Array<[string, string]> = [
   ["/employee/tax", "payroll"],
   ["/employee/expenses", "expenses"],
   ["/api/attendance", "attendance"],
+  ["/api/employees/org-chart", "orgchart"],
   ["/api/employees", "employees"],
   ["/api/leaves", "leaves"],
   ["/api/holidays", "holidays"],
@@ -175,6 +181,7 @@ const ROUTE_MODULES: Array<[string, string]> = [
   ["/api/realtime-devices", "devices"],
   ["/api/realtime", "devices"],
   ["/api/payroll", "payroll"],
+  ["/api/tax-declarations", "payroll"],
   ["/api/loans", "payroll"],
   ["/api/expenses", "expenses"],
   ["/api/cashbook", "expenses"],
@@ -193,7 +200,6 @@ const ROUTE_MODULES: Array<[string, string]> = [
   ["/api/exits", "exit"],
   ["/api/webhooks", "platform"],
   ["/api/device-health", "platform"],
-  ["/api/employees/org-chart", "orgchart"],
 ];
 
 /** Which module (if any) a path belongs to. */

@@ -6,6 +6,8 @@ import {
   shouldProvisionEmployeeLogin,
 } from "../lib/employee-input";
 import { optionalDateInput } from "../lib/dates";
+import { EMPLOYEE_IMPORT_MAX_ROWS, parseEmployeeImportCsv } from "../lib/employee-import-csv";
+import { ylrWorkbookImportEnabled } from "../lib/employee-legacy-import";
 import {
   shouldShowSpouseDetails,
   updateMaritalStatus,
@@ -68,4 +70,14 @@ assert.match(masterPage, /EmployeeMasterImportExport/, "Employee Master exposes 
 assert.match(importExport, /\/api\/employees\/export/, "employee export remains available from Employee Master");
 assert.match(importExport, /\/api\/employees\/bulk/, "employee bulk import remains available from Employee Master");
 
-console.log("employee master position/licence workflow tests passed");
+assert.equal(ylrWorkbookImportEnabled(null), false);
+assert.equal(ylrWorkbookImportEnabled({ legacyYlrWorkbookImport: "true" }), false);
+assert.equal(ylrWorkbookImportEnabled({ legacyYlrWorkbookImport: true }), true);
+assert.deepEqual(parseEmployeeImportCsv('\uFEFFemployeeNumber,firstName,status\r\nE-01,"Jo, ""Jo""",\r\n'), [
+  { employeeNumber: "E-01", firstName: 'Jo, "Jo"', status: "" },
+]);
+assert.throws(() => parseEmployeeImportCsv('email,firstName\nwork@example.com,"unfinished'), /closing quote/);
+assert.throws(() => parseEmployeeImportCsv("employeeNumber,employeeNumber\nE-01,E-02"), /unique header/);
+assert.throws(() => parseEmployeeImportCsv(`employeeNumber\n${Array.from({ length: EMPLOYEE_IMPORT_MAX_ROWS + 1 }, (_, index) => `E-${index}`).join("\n")}`), /up to 2500/);
+
+console.log("employee master workflow, CSV validation and legacy opt-in tests passed");

@@ -48,7 +48,7 @@ export default async function PayrollVariancePage({
       ? assignedLocationId
       : locations.some((location) => location.id === params.location)
         ? params.location!
-        : null;
+        : !params.location && locations.length === 1 ? locations[0].id : null;
   const runs = await prisma.payrollRun.findMany({
     where: {
       tenantId: session.tenantId,

@@ -51,12 +51,12 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
           </div>
           <div className="flex-1">
             <p className="font-display text-[15px] font-bold">
-              {allDone ? "All done — welcome to the team! 🎉" : `${done} of ${tasks.length} tasks completed`}
+              {allDone ? "Checklist complete" : `${done} of ${tasks.length} tasks completed`}
             </p>
             <p className="text-[12.5px] text-muted-foreground">
               {allDone
-                ? "HR will see your completed checklist. Check your documents and payslips whenever you like."
-                : "Tick tasks off as you finish them — HR tracks your progress."}
+                ? "HR can see your completed checklist."
+                : "Select a task to update its status."}
             </p>
           </div>
           <div className="text-right">
@@ -75,7 +75,7 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
           </div>
           <p className="font-display text-sm font-semibold">No tasks assigned yet</p>
           <p className="max-w-xs text-[13px] text-muted-foreground">
-            Your HR team hasn't added your onboarding checklist yet — check back soon.
+            Your checklist will appear here once HR assigns it.
           </p>
         </div>
       ) : (
@@ -85,6 +85,7 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
               key={t.id}
               onClick={() => toggle(t)}
               disabled={busy === t.id}
+              aria-pressed={t.status === "done"}
               className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
                 t.status === "done"
                   ? "border-emerald-400/20 bg-emerald-500/[0.05]"

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 type HealthDevice = { id: string; status: string; lastSeenAt: Date | null };
 
 /** Shared status-only polling; attendance imports are never triggered here. */
-export function useLiveEbioDevices<T extends HealthDevice>(devices: T[]) {
+export function useLiveEbioDevices<T extends HealthDevice>(devices: T[], pollEbio = true) {
   const [currentDevices, setCurrentDevices] = useState(devices);
   const [now, setNow] = useState(() => Date.now());
 
@@ -15,7 +15,7 @@ export function useLiveEbioDevices<T extends HealthDevice>(devices: T[]) {
     let refreshing = false;
     const controller = new AbortController();
     async function refresh() {
-      if (refreshing || disposed) return;
+      if (!pollEbio || refreshing || disposed) return;
       refreshing = true;
       try {
         const response = await fetch("/api/devices/ebio-health", {
@@ -43,18 +43,18 @@ export function useLiveEbioDevices<T extends HealthDevice>(devices: T[]) {
     }
     const onFocus = () => { setNow(Date.now()); void refresh(); };
     void refresh();
-    const pollTimer = window.setInterval(() => void refresh(), 15_000);
+    const pollTimer = pollEbio ? window.setInterval(() => void refresh(), 15_000) : null;
     // Expire the last confirmed heartbeat even during slow/failed source requests.
     const clockTimer = window.setInterval(() => setNow(Date.now()), 1_000);
     window.addEventListener("focus", onFocus);
     return () => {
       disposed = true;
       controller.abort();
-      window.clearInterval(pollTimer);
+      if (pollTimer !== null) window.clearInterval(pollTimer);
       window.clearInterval(clockTimer);
       window.removeEventListener("focus", onFocus);
     };
-  }, []);
+  }, [pollEbio]);
 
   return { devices: currentDevices, now };
 }

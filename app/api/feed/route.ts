@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { notifyAdmins } from "@/lib/notifications";
 
 /** GET — feed posts with comments (tenant-wide). */
 export async function GET() {
@@ -40,13 +39,22 @@ export async function POST(req: NextRequest) {
   if (text.length > 2000) return NextResponse.json({ error: "Post is too long." }, { status: 400 });
 
   const isAnnouncement = Boolean(body.isAnnouncement) && session.role === "admin";
-  const post = await prisma.orgPost.create({
-    data: { tenantId: session.tenantId, authorId: session.sub, body: text, isAnnouncement },
+  const post = await prisma.$transaction(async (tx) => {
+    const created = await tx.orgPost.create({
+      data: { tenantId: session.tenantId, authorId: session.sub, body: text, isAnnouncement },
+    });
+    if (!isAnnouncement) return created;
+    const recipients = await tx.employee.findMany({
+      where: { tenantId: session.tenantId, status: "active", id: { not: session.sub } },
+      select: { id: true },
+    });
+    if (recipients.length) {
+      await tx.notification.createMany({
+        data: recipients.map((employee) => ({ tenantId: session.tenantId, employeeId: employee.id, type: "info", title: "New announcement", message: text.slice(0, 120) })),
+      });
+    }
+    return created;
   });
-
-  if (isAnnouncement) {
-    await notifyAdmins(session.tenantId, "info", "New announcement", text.slice(0, 120));
-  }
 
   return NextResponse.json({ post }, { status: 201 });
 }

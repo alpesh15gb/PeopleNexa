@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { parseIST, istStartOfDay } from "@/lib/ist";
+import { istStartOfDay } from "@/lib/ist";
 import { notifyAdmins } from "@/lib/notifications";
-import { formatDateIST } from "@/lib/dates";
+import { dayRangeIST, formatDateIST, isDateKey } from "@/lib/dates";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, parseWorkspaceWallTime } from "@/lib/workspace-time";
+import { shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
 
 /** POST — employee raises a correction for a day. */
 export async function POST(req: NextRequest) {
@@ -11,27 +14,19 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  // Parse all dates as IST wall-clock (devices/clients report IST, not UTC).
-  const dateRaw = String(body.date ?? "").trim();
-  let dayStart: Date | null = null;
-  const dayMatch = dateRaw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (dayMatch) {
-    dayStart = parseIST(`${dayMatch[1]} 00:00:00`);
-  } else if (dateRaw) {
-    const parsed = parseIST(dateRaw);
-    dayStart = parsed ? istStartOfDay(parsed) : null;
-  }
+  const dateKey = String(body.date ?? "").trim().slice(0, 10);
+  if (!isDateKey(dateKey)) return NextResponse.json({ error: "A valid date is required." }, { status: 400 });
+  const { start: dayStart } = dayRangeIST(dateKey);
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const { timeZone } = workspaceRegion(tenant?.config);
   const requestedInRaw = body.requestedIn ? String(body.requestedIn).trim() : "";
   const requestedOutRaw = body.requestedOut ? String(body.requestedOut).trim() : "";
-  const requestedIn = requestedInRaw ? parseIST(requestedInRaw) : null;
-  const requestedOut = requestedOutRaw ? parseIST(requestedOutRaw) : null;
+  const requestedIn = requestedInRaw ? parseWorkspaceWallTime(requestedInRaw, timeZone) : null;
+  const requestedOut = requestedOutRaw ? parseWorkspaceWallTime(requestedOutRaw, timeZone) : null;
   const reason = String(body.reason ?? "").trim();
 
-  if (!dayStart || isNaN(dayStart.getTime())) {
-    return NextResponse.json({ error: "A date is required." }, { status: 400 });
-  }
-  if (!reason) {
-    return NextResponse.json({ error: "Please explain why you need this correction." }, { status: 400 });
+  if (!reason || reason.length > 2000) {
+    return NextResponse.json({ error: "Enter a correction reason of up to 2,000 characters." }, { status: 400 });
   }
   if (requestedInRaw && !requestedIn) {
     return NextResponse.json({ error: "Invalid corrected in-time." }, { status: 400 });
@@ -48,7 +43,8 @@ export async function POST(req: NextRequest) {
   }
   // No future dates or punches.
   const now = new Date();
-  if (dayStart.getTime() > istStartOfDay(now).getTime()) {
+  const today = dayRangeIST(dateKeyInTimeZone(now, timeZone)).start;
+  if (dayStart > today) {
     return NextResponse.json({ error: "Cannot request a correction for a future date." }, { status: 400 });
   }
   if ((requestedIn && requestedIn.getTime() > now.getTime()) || (requestedOut && requestedOut.getTime() > now.getTime())) {
@@ -58,26 +54,36 @@ export async function POST(req: NextRequest) {
   // Guard against pre-joining + excessive backdate.
   const requester = await prisma.employee.findFirst({
     where: { id: session.sub, tenantId: session.tenantId },
-    select: { id: true, joiningDate: true, loginOnly: true },
+    select: { id: true, joiningDate: true, loginOnly: true, tenantId: true, branchId: true, shiftId: true },
   });
-  if (requester?.loginOnly) {
+  if (!requester) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+  if (requester.loginOnly) {
     return NextResponse.json({ error: "Manager logins cannot request corrections." }, { status: 403 });
   }
-  if (requester?.joiningDate) {
+  if (requester.joiningDate) {
     const joinStart = istStartOfDay(new Date(requester.joiningDate));
     if (dayStart.getTime() < joinStart.getTime()) {
       return NextResponse.json({ error: "Cannot request a correction before your joining date." }, { status: 400 });
     }
   }
   if (session.role !== "admin" && session.role !== "supervisor") {
-    const backdateMs = istStartOfDay(now).getTime() - dayStart.getTime();
+    const backdateMs = today.getTime() - dayStart.getTime();
     if (backdateMs > 60 * 24 * 3600 * 1000) {
       return NextResponse.json({ error: "Corrections older than 60 days need admin assistance." }, { status: 400 });
     }
   }
+  const shift = await shiftForEmployeeDay(requester, dayStart, timeZone);
+  const window = shiftWindow(dayStart, shift, timeZone);
+  if ([requestedIn, requestedOut].some((punch) => punch && (punch < window.start || punch >= window.end))) {
+    return NextResponse.json({ error: "The corrected times must fall within the selected attendance day's shift window." }, { status: 400 });
+  }
   const attendance = await prisma.attendance.findUnique({
     where: { employeeId_date: { employeeId: session.sub, date: dayStart } },
   });
+  if ((requestedIn && !requestedOut && attendance?.punchOutTime && requestedIn >= attendance.punchOutTime) ||
+      (requestedOut && !requestedIn && attendance?.punchInTime && requestedOut <= attendance.punchInTime)) {
+    return NextResponse.json({ error: "Clock-in must be before clock-out. Correct both times if both recorded punches are wrong." }, { status: 400 });
+  }
   // Allow absent-day corrections: no Attendance row just means there is
   // nothing recorded yet — store date only with null current punches.
   // (PunchCorrection has no required attendanceId; date is the link.)
@@ -132,7 +138,7 @@ export async function POST(req: NextRequest) {
     "info",
     "Punch correction requested",
     `An employee requested a punch correction for ${formatDateIST(dayStart)}.`
-  );
+  ).catch((error) => console.warn("[attendance correction] notification failed:", error));
 
   return NextResponse.json({ correction }, { status: 201 });
 }

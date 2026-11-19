@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { configurationEffectiveAtISTDay, payrollPolicyDraft, resolveConfiguration } from "@/lib/configuration";
 import { employeeLocationScope, payrollOperationLocationId } from "@/lib/location-scope";
 import { payrollMonthAnchor, payrollMonthEnd } from "@/lib/payroll-component-assignments";
-import { isFinalizedInOnlyDay, recoveredMissingOutStatus } from "@/lib/payroll-recovery";
+import { isFinalizedInOnlyDay, legacyMessComponentCodes, recoveredMissingOutStatus } from "@/lib/payroll-recovery";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -27,11 +27,11 @@ export async function POST(request: NextRequest) {
 
   if (action === "mess_backdate") {
     const policies = await prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "payroll_policy", active: true, OR: [{ locationId: scope.locationId }, { locationId: null }] }, select: { payload: true } });
-    const messCodes = new Set(policies.flatMap((record) => payrollPolicyDraft(record.payload)?.components ?? []).filter((component) => component.applicability === "assigned_employees" && /mess/i.test(`${component.code} ${component.label}`)).map((component) => component.code));
+    const messCodes = legacyMessComponentCodes(policies);
     // The legacy workbook importer gave an assignment its import-day effective
     // date. Limit recovery to that precise signal, while allowing an older
     // import to be repaired for the selected historical payroll month.
-    const candidates = messCodes.size ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, componentCode: { in: [...messCodes] }, active: true, effectiveTo: null, effectiveFrom: { gt: end } }, include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true } } }, orderBy: { effectiveFrom: "asc" } }) : [];
+    const candidates = messCodes.length ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, componentCode: { in: messCodes }, active: true, effectiveTo: null, effectiveFrom: { gt: end } }, include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true } } }, orderBy: { effectiveFrom: "asc" } }) : [];
     const legacyImported = candidates.filter((candidate) => candidate.createdAt.getUTCFullYear() === candidate.effectiveFrom.getUTCFullYear() && candidate.createdAt.getUTCMonth() === candidate.effectiveFrom.getUTCMonth() && candidate.createdAt.getUTCDate() === candidate.effectiveFrom.getUTCDate());
     const candidateCounts = new Map<string, number>(); for (const candidate of legacyImported) candidateCounts.set(candidate.employeeId, (candidateCounts.get(candidate.employeeId) ?? 0) + 1);
     const sameMonthAssignments = legacyImported.length ? await prisma.payrollComponentAssignment.findMany({ where: { tenantId: session.tenantId, locationId: scope.locationId, employeeId: { in: legacyImported.map((candidate) => candidate.employeeId) }, componentCode: { in: [...messCodes] }, active: true, effectiveFrom: { gte: start, lte: end } }, select: { id: true, employeeId: true } }) : [];

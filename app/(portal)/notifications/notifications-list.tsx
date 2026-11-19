@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { t, type Lang } from "@/lib/i18n";
 import { EmptyState } from "@/components/ui/stat";
 import { formatDateTime } from "@/lib/dates";
+import { useState } from "react";
+import { useToast } from "@/components/ui/toast";
 
 interface Notif {
   id: string;
@@ -29,14 +31,22 @@ function formatWhen(dateStr: string | Date) {
 
 export function NotificationsList({ notifications, lang = "en" }: { notifications: Notif[]; lang?: Lang }) {
   const router = useRouter();
+  const toast = useToast();
+  const [pending, setPending] = useState<string | null>(null);
 
   async function markRead(id: string) {
-    await fetch("/api/notifications/mark-read", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    router.refresh();
+    setPending(id);
+    try {
+      const response = await fetch("/api/notifications/mark-read", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error("Could not mark the notification as read.");
+      router.refresh();
+    } catch {
+      toast("error", "Could not mark the notification as read.");
+    } finally {
+      setPending(null);
+    }
   }
 
   if (notifications.length === 0) {
@@ -75,6 +85,7 @@ export function NotificationsList({ notifications, lang = "en" }: { notification
           {!n.isRead && (
             <button
               onClick={() => markRead(n.id)}
+              disabled={pending !== null}
               title={t(lang, "notifications.markRead")}
               aria-label={`${t(lang, "notifications.markRead")}: ${n.title}`}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground"

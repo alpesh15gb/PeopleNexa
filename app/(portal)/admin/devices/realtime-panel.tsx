@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Fingerprint,
   Plus,
@@ -22,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { formatDateTime } from "@/lib/dates";
 import { deviceStatusMetadata, realtimeDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
 import { DeviceStatusBadge, DeviceStatusLegend } from "@/components/devices/device-status";
+import { useRouteAction } from "@/components/use-route-action";
 
 export interface RealtimeRow {
   id: string;
@@ -33,7 +35,7 @@ export interface RealtimeRow {
   ipAddress: string | null;
   status: string;
   lastSeenAt: Date | null;
-  linkedCount: number;
+  linkedDeviceIds: string[];
   logCount: number;
   createdAt: Date;
 }
@@ -50,10 +52,15 @@ interface RtLog {
 
 export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webhookPath: string | null }) {
   const toast = useToast();
+  const router = useRouter();
   const [devices, setDevices] = useState(rows);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addOpen, setAddOpen] = useRouteAction("add");
+  const nameField = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [confirmRotation, setConfirmRotation] = useState<RealtimeRow | null>(null);
+  const [rotatingKey, setRotatingKey] = useState(false);
+  const [rotatedKey, setRotatedKey] = useState<string | null>(null);
   const [logsFor, setLogsFor] = useState<RealtimeRow | null>(null);
   const [logs, setLogs] = useState<RtLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -62,12 +69,15 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
   const [confirmDelete, setConfirmDelete] = useState<RealtimeRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
+  const [query, setQuery] = useState("");
+  useEffect(() => { setDevices(rows); }, [rows]);
 
   const now = Date.now();
   const stateOf = (d: RealtimeRow) => realtimeDeviceHealthState(d.status, d.lastSeenAt ? new Date(d.lastSeenAt) : null, now);
   const onlineCount = devices.filter((d) => stateOf(d) === "online").length;
   const visibleDevices = devices
     .filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
+    .filter((d) => `${d.name} ${d.serialNumber} ${d.productName ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
 
   async function addDevice(e: React.FormEvent<HTMLFormElement>) {
@@ -106,7 +116,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
       } catch {
         /* clipboard unavailable */
       }
-      toast("success", `${data.device.name} added — API key copied, paste it into the machine`);
+      toast("success", `${data.device.name} registered. Save the displayed API key before closing.`);
       setDevices((prev) => [
         ...prev,
         {
@@ -119,11 +129,12 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
           ipAddress: data.device.ipAddress ?? null,
           status: data.device.status,
           lastSeenAt: null,
-          linkedCount: 0,
+          linkedDeviceIds: [],
           logCount: 0,
           createdAt: new Date(data.device.createdAt),
         },
       ]);
+      router.refresh();
     } catch {
       toast("error", "Something went wrong.");
     } finally {
@@ -153,6 +164,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
     try {
       const res = await fetch(`/api/realtime-devices/${d.id}/logs?limit=100`);
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not load logs.");
       setLogs(Array.isArray(data.logs) ? data.logs : []);
     } catch {
       toast("error", "Could not load logs");
@@ -175,14 +187,16 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
         return;
       }
       toast("success", "Linked devices updated");
-      setDevices((prev) => prev.map((x) => (x.id === linkFor.id ? { ...x, linkedCount: linkSel.length } : x)));
+      setDevices((prev) => prev.map((x) => (x.id === linkFor.id ? { ...x, linkedDeviceIds: linkSel } : x)));
       setLinkFor(null);
+      router.refresh();
     } catch {
       toast("error", "Something went wrong.");
     }
   }
 
   async function rotateKey(d: RealtimeRow) {
+    setRotatingKey(true);
     try {
       const res = await fetch(`/api/realtime-devices/${d.id}`, {
         method: "PATCH",
@@ -194,14 +208,21 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
         toast("error", data.error ?? "Failed to rotate key");
         return;
       }
-      try {
-        await navigator.clipboard.writeText(String(data.device.apiKey));
-      } catch {
-        /* ignore */
-      }
-      toast("success", "New API key copied — update the machine, old key stops working immediately");
+      setConfirmRotation(null);
+      setRotatedKey(data.device.apiKey);
     } catch {
       toast("error", "Something went wrong.");
+    } finally {
+      setRotatingKey(false);
+    }
+  }
+
+  async function copyKey(key: string) {
+    try {
+      await navigator.clipboard.writeText(key);
+      toast("success", "API key copied.");
+    } catch {
+      toast("error", "Select and copy the key manually.");
     }
   }
 
@@ -218,6 +239,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
       toast("success", `${d.name} deleted`);
       setDevices((prev) => prev.filter((x) => x.id !== d.id));
       setConfirmDelete(null);
+      router.refresh();
     } catch {
       toast("error", "Something went wrong.");
     } finally {
@@ -243,7 +265,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
       <div className="card-surface overflow-hidden rounded-2xl">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-4">
           <div>
-            <p className="text-[13.5px] font-semibold">Realtime devices</p>
+            <h2 className="text-base font-semibold">Registered Realtime devices</h2>
             <p className="text-[12px] text-muted-foreground">
               Cloud push to{" "}
               <span className="font-mono text-[11px]">{webhookPath ?? "/api/realtime/webhook/<code>/record"}</span>{" "}
@@ -252,6 +274,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
             </p>
             <DeviceStatusLegend realtime />
           </div>
+          <Input type="search" aria-label="Search Realtime devices" placeholder="Name, serial or model" value={query} onChange={(event) => setQuery(event.target.value)} className="w-full sm:w-56" />
           <label className="text-[12px] text-muted-foreground">
             <span className="sr-only">Filter Realtime devices by status</span>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground">
@@ -281,9 +304,9 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                 <TR>
                   <TD colSpan={7} className="py-12 text-center">
                     <Fingerprint className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-                    <p className="text-[13.5px] font-medium">{devices.length === 0 ? "No Realtime devices yet" : "No devices match this status"}</p>
+                    <p className="text-[13.5px] font-medium">{devices.length === 0 ? "No Realtime devices yet" : "No devices match these filters"}</p>
                     <p className="mt-1 text-[12.5px] text-muted-foreground">
-                      Add a Pro1100B / F500-class unit with its serial — an API key is issued for the machine.
+                      {devices.length === 0 ? "Register a supported device with its serial number to issue an API key." : "Change the search or status filter."}
                     </p>
                   </TD>
                 </TR>
@@ -313,7 +336,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                     <TD>
                       <DeviceStatusBadge state={state} />
                     </TD>
-                    <TD className="hidden text-[13px] text-muted-foreground md:table-cell">{d.linkedCount}</TD>
+                    <TD className="hidden text-[13px] text-muted-foreground md:table-cell">{d.linkedDeviceIds.length}</TD>
                     <TD className="text-[13px] text-muted-foreground">{d.logCount}</TD>
                     <TD className="hidden text-[12.5px] text-muted-foreground lg:table-cell">
                       {d.lastSeenAt ? `${formatDateTime(new Date(d.lastSeenAt))} IST` : deviceStatusMetadata(state)}
@@ -325,7 +348,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                           <ScrollText aria-hidden="true" className="h-4 w-4" />
                         </button>
                         <button aria-label={`Link ${d.name}`} title="Link devices"
-                          onClick={() => { setLinkSel([]); setLinkFor(d); }}
+                          onClick={() => { setLinkSel(d.linkedDeviceIds); setLinkFor(d); }}
                           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground">
                           <Link2 aria-hidden="true" className="h-4 w-4" />
                         </button>
@@ -340,7 +363,7 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
                           {d.status === "inactive" ? <RotateCcw aria-hidden="true" className="h-4 w-4" /> : <RefreshCw aria-hidden="true" className="h-4 w-4" />}
                         </button>
                         <button aria-label={`Rotate key for ${d.name}`} title="Rotate API key"
-                          onClick={() => rotateKey(d)}
+                          onClick={() => setConfirmRotation(d)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-tint hover:text-foreground">
                           <KeyRound aria-hidden="true" className="h-4 w-4" />
                         </button>
@@ -361,13 +384,14 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
 
       <Modal
         open={addOpen}
-        onClose={() => setAddOpen(false)}
+        onClose={() => { if (!saving) { setNewKey(null); setAddOpen(false); } }}
         title="Add Realtime device"
+        initialFocus={nameField}
         description="WSS / FK-Web cloud unit — an X-API-Key is issued to paste into the machine"
       >
         <form onSubmit={addDevice} className="space-y-4">
           <Field label="Device name">
-            <Input name="name" required placeholder="Delhi office — Realtime" />
+            <Input ref={nameField} name="name" required placeholder="Main office" />
           </Field>
           <Field label="Serial number" hint="Sticker / Menu → System Info, e.g. RSS2025...">
             <Input name="serialNumber" required placeholder="Device serial number" className="font-mono" />
@@ -390,12 +414,13 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
           {newKey && (
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5">
               <p className="text-[12px] font-semibold text-emerald-300">API key — copy now, shown once</p>
-              <p className="mt-1 break-all font-mono text-[12px] text-foreground">{newKey}</p>
+              <Input readOnly aria-label="New device API key" value={newKey} className="mt-2 font-mono" onFocus={(event) => event.target.select()} />
+              <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => copyKey(newKey)}>Copy key</Button>
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button type="submit" loading={saving}>Add device</Button>
+            <Button type="button" variant="ghost" disabled={saving} onClick={() => { setNewKey(null); setAddOpen(false); }}>{newKey ? "Done" : "Cancel"}</Button>
+            {!newKey && <Button type="submit" loading={saving}>Add device</Button>}
           </div>
         </form>
       </Modal>
@@ -461,6 +486,10 @@ export function RealtimePanel({ rows, webhookPath }: { rows: RealtimeRow[]; webh
         )}
       </Modal>
 
+      <ConfirmDialog open={confirmRotation !== null} title="Rotate the API key?" description="The current key will stop working immediately. Update the device with the new key after rotation." confirmLabel="Rotate key" busy={rotatingKey} onCancel={() => !rotatingKey && setConfirmRotation(null)} onConfirm={() => confirmRotation && rotateKey(confirmRotation)} />
+      <Modal open={rotatedKey !== null} onClose={() => setRotatedKey(null)} title="New device API key" description="Save this key before closing and install it on the device.">
+        {rotatedKey && <div className="space-y-3"><Input readOnly aria-label="Rotated device API key" value={rotatedKey} className="font-mono" onFocus={(event) => event.target.select()} /><Button onClick={() => copyKey(rotatedKey)}>Copy key</Button></div>}
+      </Modal>
       <ConfirmDialog
         open={Boolean(confirmDelete)}
         title={`Delete ${confirmDelete?.name ?? "device"}?`}

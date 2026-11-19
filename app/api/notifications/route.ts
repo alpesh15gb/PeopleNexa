@@ -6,15 +6,18 @@ export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const limit = Math.min(Number(req.nextUrl.searchParams.get("limit") ?? 50), 100);
+  const requested = Number(req.nextUrl.searchParams.get("limit") ?? 50);
+  if (!Number.isSafeInteger(requested) || requested < 1) return NextResponse.json({ error: "Invalid notification limit." }, { status: 400 });
+  const limit = Math.min(requested, 100);
+  const where = { tenantId: session.tenantId, employeeId: session.sub };
   const notifications = await prisma.notification.findMany({
-    where: { employeeId: session.sub },
-    orderBy: [{ isRead: "asc" }, { createdAt: "desc" }],
+    where,
+    orderBy: [{ isRead: "asc" }, { createdAt: "desc" }, { id: "desc" }],
     take: limit,
   });
 
   const unread = await prisma.notification.count({
-    where: { employeeId: session.sub, isRead: false },
+    where: { ...where, isRead: false },
   });
 
   return NextResponse.json({ notifications, unread });

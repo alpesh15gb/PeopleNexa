@@ -449,6 +449,7 @@ model Shift {
   graceMinutes Int      @default(15) // punch-in grace before late
   isNightShift Boolean  @default(false)
   sundayWeeklyOff Boolean @default(false)
+  weeklyOffDays Int[]   @default([]) // Sunday = 0 through Saturday = 6
   singlePunchHalfDay Boolean @default(false)
   isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())

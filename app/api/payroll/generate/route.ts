@@ -7,11 +7,12 @@ import {
   employeeLocationScope,
   payrollOperationLocationId,
 } from "@/lib/location-scope";
-import { resolvePayrollPolicy } from "@/lib/payroll-policy";
+import { canUsePayrollPolicyFallback, requiresPublishedPayrollPolicy, resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { resolveSalaryRevision } from "@/lib/salary-revisions";
 import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
 import { payrollGenerationTotals, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
 import type { ReviewedAttendanceRow } from "@/lib/payroll-attendance-import";
+import { supportsIndiaPayroll, workspaceRegion } from "@/lib/workspace-region";
 
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -200,6 +201,9 @@ export async function POST(req: NextRequest) {
         },
       }),
     ]);
+  if (!supportsIndiaPayroll(workspaceRegion(tenant?.config))) {
+    return NextResponse.json({ error: "Built-in payroll generation requires an India workspace with INR currency." }, { status: 409 });
+  }
   if (selectionMode === "selected") {
     const found = new Set(employees.map((employee) => employee.id));
     const invalidIds = selectedEmployeeIds.filter((id) => !found.has(id));
@@ -289,11 +293,12 @@ export async function POST(req: NextRequest) {
       ).configurationId,
   );
   // A fallback tenant config is legacy behavior, never an invisible operating policy.
-  if (policyFailures.length && !legacyAcknowledged) {
+  if (policyFailures.length && !canUsePayrollPolicyFallback(tenant?.config, legacyAcknowledged)) {
     return NextResponse.json(
       {
-        error:
-          "No effective published payroll policy exists for this scope and period.",
+        error: requiresPublishedPayrollPolicy(tenant?.config)
+          ? "Review and publish payroll settings for this location and pay month before generating payroll."
+          : "No effective published payroll policy exists for this scope and period.",
         preflight: {
           eligible: withSalary.length,
           missingSalary: missingSalary.map((employee) => employee.id),

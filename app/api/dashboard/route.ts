@@ -1,282 +1,149 @@
 import { NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { addDays, dayRangeIST, monthKeyIST } from "@/lib/dates";
-import { istStartOfDay, istDateKey } from "@/lib/ist";
+import { dayRangeIST } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import { employeeLocationScope } from "@/lib/location-scope";
+import { getTenantAccess } from "@/lib/modules-server";
 import { tallyDailyAttendance } from "@/lib/attendance-tally";
 import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, offsetDateKey, timeZoneDayRange } from "@/lib/workspace-time";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const today = istStartOfDay(new Date());
-  const range = { gte: today, lt: addDays(today, 1) };
+  const tenantId = session.tenantId;
+  const [{ modules }, tenant] = await Promise.all([
+    getTenantAccess(tenantId),
+    prisma.tenant.findUnique({ where: { id: tenantId }, select: { config: true } }),
+  ]);
+  const { timeZone } = workspaceRegion(tenant?.config);
+  const toPunchDateKey = (date: Date) => dateKeyInTimeZone(date, timeZone);
+  const todayKey = toPunchDateKey(new Date());
+  const month = todayKey.slice(0, 7);
+  const { start, end } = dayRangeIST(todayKey);
+  const range = { gte: start, lt: end };
+  const canReadAttendance = modules.has("attendance");
+  const canReadLeave = modules.has("leaves");
 
-  if (session.role === "branch_manager") {
-    const manager = await prisma.employee.findFirst({
-      where: { id: session.sub, tenantId: session.tenantId },
-      select: { branchId: true },
+  if (session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager") {
+    const manager = session.role === "admin" ? null : await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId },
+      select: { branchId: true, locationId: true },
     });
-    if (!manager?.branchId) {
-      return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
-    }
-    const branchId = manager.branchId;
-    const [employees, attendance, departments, pendingLeaves, weekRecords, weekPunches, todayPunches] = await Promise.all([
-      prisma.employee.findMany({
-        where: { tenantId: session.tenantId, status: "active", loginOnly: false, branchId },
-        select: {
-          id: true,
-          tenantId: true,
-          employeeNumber: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-          role: true,
-          status: true,
-          position: true,
-          joiningDate: true,
-          profilePicture: true,
-          lastLoginAt: true,
-          createdAt: true,
-          updatedAt: true,
-          managerId: true,
-          payMode: true,
-          workBasisRate: true,
-          branchId: true,
-          departmentId: true,
-          shiftId: true,
-        },
-      }),
-      prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: range, employee: { branchId, status: "active", loginOnly: false } },
+    const branchId = session.role === "branch_manager" ? manager?.branchId : null;
+    const locationId = session.role === "location_manager" ? manager?.locationId : null;
+    if (session.role === "branch_manager" && !branchId) return NextResponse.json({ error: "no branch assigned" }, { status: 403 });
+    if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+
+    const people = {
+      tenantId, status: "active", loginOnly: false,
+      ...(branchId ? { branchId } : {}),
+      ...(locationId ? employeeLocationScope(locationId) : {}),
+    };
+    const attendanceScope = { tenantId, employee: people };
+    const pendingScope = { ...attendanceScope, status: "pending" };
+    const firstDay = offsetDateKey(todayKey, -6);
+    const weekStart = dayRangeIST(firstDay).start;
+    const weekPunchStart = timeZoneDayRange(firstDay, timeZone).start;
+    const todayPunchWindow = timeZoneDayRange(todayKey, timeZone);
+
+    const [employees, attendance, departments, pendingLeaves, pendingCount, approvedLeaves, weekRecords, weekPunches] = await Promise.all([
+      modules.has("employees") || canReadAttendance
+        ? prisma.employee.findMany({ where: people, select: { id: true } })
+        : [],
+      canReadAttendance ? prisma.attendance.findMany({
+        where: { ...attendanceScope, date: range },
         include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
-      }),
-      prisma.department.findMany({
-        where: { tenantId: session.tenantId },
-        include: { _count: { select: { employees: { where: { branchId, status: "active", loginOnly: false } } } } },
-      }),
-      prisma.leaveRequest.findMany({
-        where: { tenantId: session.tenantId, status: "pending", employee: { branchId } },
+      }) : [],
+      modules.has("employees") ? prisma.department.findMany({
+        where: { tenantId },
+        include: { _count: { select: { employees: { where: people } } } },
+      }) : [],
+      canReadLeave ? prisma.leaveRequest.findMany({
+        where: pendingScope,
         include: { employee: { select: { firstName: true, lastName: true } }, leaveType: true },
-        orderBy: { appliedAt: "desc" },
+        orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
         take: 10,
-      }),
-      prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { branchId, status: "active", loginOnly: false } },
+      }) : [],
+      canReadLeave ? prisma.leaveRequest.count({ where: pendingScope }) : 0,
+      canReadLeave ? prisma.leaveRequest.findMany({
+        where: { ...attendanceScope, status: "approved", fromDate: { lt: end }, toDate: { gte: start } },
+        select: { employeeId: true },
+      }) : [],
+      canReadAttendance ? prisma.attendance.findMany({
+        where: { ...attendanceScope, date: { gte: weekStart, lt: end } },
         select: { employeeId: true, date: true, status: true },
-      }),
-      prisma.punch.findMany({
-        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(addDays(today, -6), addDays(today, 1)), employee: { branchId, status: "active", loginOnly: false } },
-        select: { employeeId: true, punchTime: true, authStatus: true },
-      }),
-      prisma.punch.findMany({
-        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { branchId, status: "active", loginOnly: false } },
-        select: { employeeId: true, punchTime: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
-      }),
+      }) : [],
+      canReadAttendance ? prisma.punch.findMany({
+        where: { ...attendanceScope, ...authorizedPunchDayFilter(weekPunchStart, todayPunchWindow.end) },
+        select: { employeeId: true, punchTime: true, authStatus: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
+        orderBy: [{ punchTime: "asc" }, { id: "asc" }],
+      }) : [],
     ]);
 
-    const approvedLeaves = await prisma.leaveRequest.findMany({
-      where: {
-        tenantId: session.tenantId,
-        status: "approved",
-        fromDate: { lt: addDays(today, 1) },
-        toDate: { gte: today },
-        employee: { branchId, status: "active", loginOnly: false },
-      },
-      select: { employeeId: true },
-    });
-    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
-    const attendanceEmployeeIds = new Set(attendance.map((record) => record.employeeId));
-    const dashboardAttendance = [...attendance, ...todayPunches.filter((punch) => !attendanceEmployeeIds.has(punch.employeeId)).map((punch) => ({
-      id: `punch-${punch.employeeId}`,
-      employeeId: punch.employeeId,
-      punchInTime: punch.punchTime,
-      punchOutTime: null,
-      status: "present",
-      employee: punch.employee,
-    }))];
-
-    const presentByDay = dailyPresentEmployeeCounts(weekRecords, weekPunches);
-    const week: { day: string; present: number; late: number; absent: number }[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const day = addDays(today, -i);
-      const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
-      week.push({
-        day: istDateKey(day),
-        present: presentByDay.get(istDateKey(day)) ?? 0,
-        late: recs.filter((r) => r.status === "late").length,
-        absent: recs.filter((r) => r.status === "absent").length,
+    const todayPunches = weekPunches.filter((punch) => punch.punchTime >= todayPunchWindow.start);
+    const counts = tallyDailyAttendance(employees.map((person) => person.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
+    const withRecord = new Set(attendance.map((record) => record.employeeId));
+    const earlyPunches = [];
+    for (const punch of todayPunches) {
+      if (withRecord.has(punch.employeeId)) continue;
+      withRecord.add(punch.employeeId);
+      earlyPunches.push({
+        id: `punch-${punch.employeeId}`, employeeId: punch.employeeId, punchInTime: punch.punchTime,
+        punchOutTime: null, status: "present", employee: punch.employee,
       });
     }
 
+    const presentByDay = dailyPresentEmployeeCounts(weekRecords, weekPunches, toPunchDateKey);
+    const week = canReadAttendance ? Array.from({ length: 7 }, (_, index) => {
+      const day = offsetDateKey(firstDay, index);
+      const records = weekRecords.filter((record) => istDateKey(record.date) === day);
+      const late = records.filter((record) => record.status === "late").length;
+      return { day, present: presentByDay.get(day) ?? 0, late, absent: records.filter((record) => record.status === "absent").length };
+    }) : [];
+
     return NextResponse.json({
       summary: {
-        totalEmployees: counts.total,
-        present: counts.livePresent,
-        late: counts.late,
-        permission: counts.permission,
-        absent: counts.liveAbsent,
-        halfDay: counts.halfDay,
-        onLeave: counts.onLeave,
-        noRecord: counts.noRecord,
-        pendingLeaves: pendingLeaves.length,
+        totalEmployees: modules.has("employees") ? counts.total : 0,
+        present: counts.livePresent, late: counts.late, permission: counts.permission, absent: counts.absent,
+        halfDay: counts.halfDay, onLeave: counts.onLeave, noRecord: canReadAttendance ? counts.noRecord : 0,
+        pendingLeaves: pendingCount,
       },
-      departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),
-      attendance: dashboardAttendance,
+      departments: departments.map((department) => ({ name: department.name, count: department._count.employees })),
+      attendance: [...attendance, ...earlyPunches],
       week,
       pendingLeaves,
     });
   }
 
-  if (session.role === "admin") {
-    const [employees, attendance, departments, pendingLeaves, weekRecords, weekPunches, todayPunches] = await Promise.all([
-      prisma.employee.findMany({
-        where: { tenantId: session.tenantId, status: "active", loginOnly: false },
-        select: {
-          id: true,
-          tenantId: true,
-          employeeNumber: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-          role: true,
-          status: true,
-          position: true,
-          joiningDate: true,
-          profilePicture: true,
-          lastLoginAt: true,
-          createdAt: true,
-          updatedAt: true,
-          managerId: true,
-          payMode: true,
-          workBasisRate: true,
-          branchId: true,
-          departmentId: true,
-          shiftId: true,
-        },
-      }),
-      prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: range, employee: { status: "active", loginOnly: false } },
-        include: { employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
-      }),
-      prisma.department.findMany({
-        where: { tenantId: session.tenantId },
-        include: { _count: { select: { employees: { where: { status: "active", loginOnly: false } } } } },
-      }),
-      prisma.leaveRequest.findMany({
-        where: { tenantId: session.tenantId, status: "pending" },
-        include: { employee: { select: { firstName: true, lastName: true } }, leaveType: true },
-        orderBy: { appliedAt: "desc" },
-        take: 10,
-      }),
-      prisma.attendance.findMany({
-        where: { tenantId: session.tenantId, date: { gte: addDays(today, -6), lte: today }, employee: { status: "active", loginOnly: false } },
-        select: { employeeId: true, date: true, status: true },
-      }),
-      prisma.punch.findMany({
-        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(addDays(today, -6), addDays(today, 1)), employee: { status: "active", loginOnly: false } },
-        select: { employeeId: true, punchTime: true, authStatus: true },
-      }),
-      prisma.punch.findMany({
-        where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(today, addDays(today, 1)), employee: { status: "active", loginOnly: false } },
-        select: { employeeId: true, punchTime: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
-      }),
-    ]);
-
-    const approvedLeaves = await prisma.leaveRequest.findMany({
-      where: {
-        tenantId: session.tenantId,
-        status: "approved",
-        fromDate: { lt: addDays(today, 1) },
-        toDate: { gte: today },
-        employee: { status: "active", loginOnly: false },
-      },
-      select: { employeeId: true },
-    });
-    const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
-    const attendanceEmployeeIds = new Set(attendance.map((record) => record.employeeId));
-    const dashboardAttendance = [...attendance, ...todayPunches.filter((punch) => !attendanceEmployeeIds.has(punch.employeeId)).map((punch) => ({
-      id: `punch-${punch.employeeId}`,
-      employeeId: punch.employeeId,
-      punchInTime: punch.punchTime,
-      punchOutTime: null,
-      status: "present",
-      employee: punch.employee,
-    }))];
-
-    const presentByDay = dailyPresentEmployeeCounts(weekRecords, weekPunches);
-    const week: { day: string; present: number; late: number; absent: number }[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const day = addDays(today, -i);
-      const recs = weekRecords.filter((r) => istDateKey(r.date) === istDateKey(day));
-      week.push({
-        day: istDateKey(day),
-        present: presentByDay.get(istDateKey(day)) ?? 0,
-        late: recs.filter((r) => r.status === "late").length,
-        absent: recs.filter((r) => r.status === "absent").length,
-      });
-    }
-
-    return NextResponse.json({
-      summary: {
-        totalEmployees: counts.total,
-        present: counts.livePresent,
-        late: counts.late,
-        permission: counts.permission,
-        absent: counts.liveAbsent,
-        halfDay: counts.halfDay,
-        onLeave: counts.onLeave,
-        noRecord: counts.noRecord,
-        pendingLeaves: pendingLeaves.length,
-      },
-      departments: departments.map((d) => ({ name: d.name, count: d._count.employees })),
-      attendance: dashboardAttendance,
-      week,
-      pendingLeaves,
-    });
-  }
-
-  // Employee view
   const employee = await prisma.employee.findFirst({
-    where: { id: session.sub, tenantId: session.tenantId },
-    include: { shift: true, branch: true },
+    where: { id: session.sub, tenantId },
+    select: { id: true, shift: true, branch: true },
   });
   if (!employee) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  const monthStart = dayRangeIST(`${monthKeyIST(today)}-01`).start;
-  const [todayRecord, monthRecords, balances, pendingRequests] = await Promise.all([
-    prisma.attendance.findFirst({
-      where: { employeeId: employee.id, tenantId: session.tenantId, date: range },
-      orderBy: { date: "desc" },
-    }),
-    prisma.attendance.findMany({
-      where: { employeeId: employee.id, tenantId: session.tenantId, date: { gte: monthStart, lt: addDays(today, 1) } },
-    }),
-    prisma.leaveRequest.groupBy({
+  const self = { employeeId: employee.id, tenantId };
+  const [todayRecord, monthCount, balances, pendingRequests] = await Promise.all([
+    canReadAttendance ? prisma.attendance.findFirst({ where: { ...self, date: range }, orderBy: { date: "desc" } }) : null,
+    canReadAttendance ? prisma.attendance.count({ where: { ...self, date: { gte: dayRangeIST(`${month}-01`).start, lt: end } } }) : 0,
+    canReadLeave ? prisma.leaveRequest.groupBy({
       by: ["leaveTypeId", "status"],
-      where: { employeeId: employee.id, tenantId: session.tenantId, status: { in: ["approved", "pending"] } },
+      where: { ...self, status: { in: ["approved", "pending"] } },
       _count: true,
-    }),
-    prisma.leaveRequest.findMany({
-      where: { employeeId: employee.id, tenantId: session.tenantId, status: "pending" },
+    }) : [],
+    canReadLeave ? prisma.leaveRequest.findMany({
+      where: { ...self, status: "pending" },
       include: { leaveType: true },
       orderBy: { appliedAt: "desc" },
-    }),
+    }) : [],
   ]);
 
   return NextResponse.json({
-    today: {
-      date: istDateKey(today),
-      record: todayRecord,
-      shift: employee.shift,
-      branch: employee.branch,
-      month: monthKeyIST(today),
-      monthCount: monthRecords.length,
-    },
-    balances: balances.map((b) => ({ leaveTypeId: b.leaveTypeId, status: b.status, used: b._count })),
+    today: { date: todayKey, record: todayRecord, shift: employee.shift, branch: employee.branch, month, monthCount },
+    balances: balances.map((balance) => ({ leaveTypeId: balance.leaveTypeId, status: balance.status, used: balance._count })),
     pendingRequests,
   });
 }

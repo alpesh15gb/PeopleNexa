@@ -445,23 +445,23 @@ export function AssetsPanel({
                 <TD><StatusPill status={a.status} /></TD>
                 <TD className="sticky right-0 z-10 bg-card">
                   <div className="flex items-center gap-2">
-                    {a.status === "available" ? (
-                      <Button size="sm" variant="outline" onClick={() => { setAssigning(a); setAssignEmp(""); setAssignNote(""); }}>
-                        <ArrowRightLeft className="h-3.5 w-3.5" /> Assign
-                      </Button>
-                    ) : a.status === "assigned" ? (
+                    {a.assignee ? (
                       <Button size="sm" variant="ghost" onClick={() => returnAsset(a)}>
                         <Undo2 className="h-3.5 w-3.5" /> Return
                       </Button>
+                    ) : a.status === "available" ? (
+                      <Button size="sm" variant="outline" onClick={() => { setAssigning(a); setAssignEmp(""); setAssignNote(""); }}>
+                        <ArrowRightLeft className="h-3.5 w-3.5" /> Assign
+                      </Button>
                     ) : null}
-                    {(["available", "maintenance"] as string[]).includes(a.status) && <Button size="icon" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
+                    {!a.assignee && (["available", "maintenance"] as string[]).includes(a.status) && <Button size="icon" variant="ghost" onClick={() => { setMaintaining(a); setMaintenanceForm({ type: "service", description: "", provider: "", cost: "", performedAt: todayKey(), nextDueDate: a.maintenanceDue ? String(a.maintenanceDue).slice(0, 10) : "", status: a.status === "maintenance" ? "in_progress" : "completed", notes: "" }); }} aria-label={`Record maintenance for ${a.name}`}><Wrench className="h-3.5 w-3.5" /></Button>}
                     <Button size="icon" variant="ghost" loading={historyBusy && history?.asset.id === a.id} aria-label={`View history for ${a.name}`} onClick={() => openHistory(a)}>
                       <History className="h-3.5 w-3.5" />
                     </Button>
                     <Button size="icon" variant="ghost" aria-label={`Edit ${a.name}`} onClick={() => openEdit(a)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="icon" variant="ghost" aria-label={`Delete ${a.name}`} onClick={() => setDeleting(a)}>
+                    <Button size="icon" variant="ghost" aria-label={`Delete ${a.name}`} disabled={Boolean(a.assignee)} onClick={() => setDeleting(a)}>
                       <Trash2 className="h-3.5 w-3.5 text-rose-300" />
                     </Button>
                   </div>
@@ -493,7 +493,7 @@ export function AssetsPanel({
             </Field>
             <Field label="Status">
               <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                {STATUSES.map((s) => (
+                {STATUSES.filter((status) => status !== "assigned" || editing?.status === "assigned").map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </Select>

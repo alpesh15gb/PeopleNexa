@@ -1,4 +1,10 @@
-import type { PayrollAttendanceTreatment } from "./configuration";
+import { payrollPolicyDraft, type PayrollAttendanceTreatment } from "./configuration";
+
+export function legacyMessComponentCodes(policies: { payload: unknown }[]) {
+  return [...new Set(policies.flatMap(({ payload }) => payrollPolicyDraft(payload)?.components ?? [])
+    .filter((component) => component.applicability === "assigned_employees" && /mess/i.test(`${component.code} ${component.label}`))
+    .map((component) => component.code))];
+}
 
 export function recoveredMissingOutStatus(treatment: PayrollAttendanceTreatment["missingOutPunch"], currentStatus: string): string {
   if (treatment === "half_day") return "half_day";

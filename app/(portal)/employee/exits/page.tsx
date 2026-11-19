@@ -8,7 +8,9 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { StatusPill } from "@/components/ui/badge";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { formatDate, todayKey } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import { DEFAULT_WORKSPACE_REGION, formatRegionalMoney, type WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
 
 interface ExitRequest {
   id: string;
@@ -30,22 +32,30 @@ interface ExitRequest {
   } | null;
 }
 
-const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
-
 export default function EmployeeExitsPage() {
   const router = useRouter();
   const toast = useToast();
   const [requests, setRequests] = useState<ExitRequest[]>([]);
+  const [region, setRegion] = useState<WorkspaceRegion>(DEFAULT_WORKSPACE_REGION);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   async function load() {
-    const res = await fetch("/api/exits");
-    const data = await res.json();
-    if (res.ok) setRequests(data.requests ?? []);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/exits?scope=self");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not load exit requests.");
+      setRequests(data.requests ?? []);
+      if (data.region) setRegion(data.region);
+      setLoadError("");
+    } catch {
+      setLoadError("Could not load your exit requests. Try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -57,7 +67,8 @@ export default function EmployeeExitsPage() {
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
-    const form = new FormData(e.currentTarget);
+    const formElement = e.currentTarget;
+    const form = new FormData(formElement);
     try {
       const res = await fetch("/api/exits", {
         method: "POST",
@@ -74,9 +85,11 @@ export default function EmployeeExitsPage() {
         return;
       }
       toast("success", "Exit request submitted — HR has been notified");
-      e.currentTarget.reset();
+      formElement.reset();
       await load();
       router.refresh();
+    } catch {
+      toast("error", "Could not submit the exit request. Try again.");
     } finally {
       setSaving(false);
     }
@@ -105,7 +118,9 @@ export default function EmployeeExitsPage() {
     }
   }
 
-  const today = todayKey();
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const displayDate = (value: string) => formatCalendarDate(istDateKey(new Date(value)), region.locale);
+  const money = (value: number) => formatRegionalMoney(value, region);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -119,6 +134,7 @@ export default function EmployeeExitsPage() {
         </div>
       </div>
 
+      {loadError && <div role="alert" className="flex items-center gap-3 text-sm"><p>{loadError}</p><Button size="sm" variant="outline" onClick={load}>Retry</Button></div>}
       {open ? (
         <div className="card-surface rounded-2xl border border-edge p-6">
           <div className="flex items-center justify-between">
@@ -129,11 +145,11 @@ export default function EmployeeExitsPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl bg-tint px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Resigned on</p>
-              <p className="mt-0.5 font-mono text-[14px] font-semibold">{formatDate(new Date(open.resignationDate))}</p>
+              <p className="mt-0.5 font-mono text-[14px] font-semibold">{displayDate(open.resignationDate)}</p>
             </div>
             <div className="rounded-xl bg-tint px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Last working day</p>
-              <p className="mt-0.5 font-mono text-[14px] font-semibold">{formatDate(new Date(open.lastWorkingDay))}</p>
+              <p className="mt-0.5 font-mono text-[14px] font-semibold">{displayDate(open.lastWorkingDay)}</p>
             </div>
           </div>
           {open.note && (
@@ -147,7 +163,7 @@ export default function EmployeeExitsPage() {
             </Button>
           )}
         </div>
-      ) : (
+      ) : !loading && !loadError && (
         <div className="card-surface rounded-2xl border border-edge p-6">
           <p className="font-display text-[15px] font-semibold">Raise an exit request</p>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
@@ -155,14 +171,14 @@ export default function EmployeeExitsPage() {
           </p>
           <form onSubmit={submit} className="mt-5 space-y-4">
             <Field label="Reason for leaving">
-              <Textarea name="reason" required placeholder="e.g. Better opportunity, relocation, higher studies…" />
+              <Textarea name="reason" required maxLength={2000} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Resignation date">
                 <Input name="resignationDate" type="date" required max={today} />
               </Field>
-              <Field label="Last working day" hint="Typically 30 days after resignation">
-                <Input name="lastWorkingDay" type="date" required min={today} />
+              <Field label="Proposed last working day" hint="Use the notice period in your employment terms.">
+                <Input name="lastWorkingDay" type="date" required />
               </Field>
             </div>
             <div className="flex justify-end">
@@ -179,7 +195,7 @@ export default function EmployeeExitsPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
                   <p className="font-display text-[14px] font-semibold">
-                    {formatDate(new Date(r.resignationDate))} → {formatDate(new Date(r.lastWorkingDay))}
+                    {displayDate(r.resignationDate)} → {displayDate(r.lastWorkingDay)}
                   </p>
                   <StatusPill status={r.status} />
                 </div>
@@ -189,19 +205,19 @@ export default function EmployeeExitsPage() {
                 <div className="mt-4 grid gap-3 rounded-2xl border border-edge bg-card-2 p-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Earned salary ({r.fAndF.earnedDays}d)</p>
-                    <p className="mt-0.5 font-mono text-[14px] font-semibold">{inr(r.fAndF.earnedSalary)}</p>
+                    <p className="mt-0.5 font-mono text-[14px] font-semibold">{money(r.fAndF.earnedSalary)}</p>
                   </div>
                   <div>
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Notice shortfall ({r.fAndF.noticeShortfallDays}d)</p>
-                    <p className="mt-0.5 font-mono text-[14px] font-semibold text-rose-300">−{inr(r.fAndF.noticeDeduction)}</p>
+                    <p className="mt-0.5 font-mono text-[14px] font-semibold text-rose-300">−{money(r.fAndF.noticeDeduction)}</p>
                   </div>
                   <div>
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Loan recovery</p>
-                    <p className="mt-0.5 font-mono text-[14px] font-semibold text-rose-300">−{inr(r.fAndF.loanOutstanding)}</p>
+                    <p className="mt-0.5 font-mono text-[14px] font-semibold text-rose-300">−{money(r.fAndF.loanOutstanding)}</p>
                   </div>
                   <div>
                     <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Final settlement</p>
-                    <p className="mt-0.5 font-mono text-[16px] font-bold text-emerald-300">{inr(r.fAndF.finalAmount)}</p>
+                    <p className="mt-0.5 font-mono text-[16px] font-bold text-emerald-300">{money(r.fAndF.finalAmount)}</p>
                   </div>
                 </div>
               )}
@@ -210,7 +226,7 @@ export default function EmployeeExitsPage() {
         </div>
       )}
 
-      {!loading && requests.length === 0 && !open && (
+      {!loading && !loadError && requests.length === 0 && !open && (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <PartyPopper className="h-7 w-7 text-muted-foreground/40" />
           <p className="text-[13px] text-muted-foreground">No exit requests yet.</p>

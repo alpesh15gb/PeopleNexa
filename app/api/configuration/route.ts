@@ -10,7 +10,7 @@ import {
   payrollPolicyDraft,
   resolveConfiguration,
 } from "@/lib/configuration";
-import { calendarDaysInPayrollMonth } from "@/lib/payroll";
+import { calendarDaysInPayrollMonth, workspaceUsesShiftWeeklyOffs } from "@/lib/payroll";
 import { resolvePayrollPolicy } from "@/lib/payroll-policy";
 import { payrollScheduleExample } from "@/lib/payroll-policy-editor";
 import { loadBrandLogo, safeLogoUrl } from "@/lib/company-branding";
@@ -1196,6 +1196,9 @@ async function policyPreview({
     sampleMonth,
   );
   const current = resolved.appliedRules.payrollConfig;
+  const inheritedWeeklyOffs = locationId
+    ? resolvePayrollPolicy(policyRecords.filter((record) => record.locationId === null), tenant?.config, null, sampleMonth).appliedRules.useShiftWeeklyOffs
+    : workspaceUsesShiftWeeklyOffs(tenant?.config);
   const sampleDays = calendarDaysInPayrollMonth(sampleMonth);
   const currentDivisor =
     current.salaryDivisorMethod === "calendar_days"
@@ -1245,6 +1248,7 @@ async function policyPreview({
       `₹30,000 × (${proposedDivisor} − 2) ÷ ${proposedDivisor} = ₹${proposedSample.salaryAfterLop.toLocaleString("en-IN")}`,
     ],
     ["Deduct loss of pay", current.deductAbsentDays, proposed.deductLossOfPay],
+    ["Respect shift weekly offs", resolved.appliedRules.useShiftWeeklyOffs, proposed.attendanceTreatment.useShiftWeeklyOffs ?? inheritedWeeklyOffs],
     ["OT multiplier", current.otMultiplier, proposed.overtimeMultiplier],
     [
       "Named components",

@@ -15,12 +15,13 @@ export default async function AdminShiftsPage() {
     orderBy: { createdAt: "asc" },
   });
   const unassignedHalfDay = await unassignedSinglePunchHalfDay(session.tenantId);
+  const canManageShifts = session.role === "admin";
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Shifts"
-        description="Define working hours and late-grace rules"
+        description="Set working hours, weekly days off and late-arrival rules."
       />
       <Card>
         <CardContent className="p-0">
@@ -28,19 +29,19 @@ export default async function AdminShiftsPage() {
             <div className="border-b border-edge">
               <EmptyState
                 title="No shifts yet"
-                description="Create a shift so employees can clock in against it."
-                action={
+                description={canManageShifts ? "Create a shift to define employees’ scheduled work hours." : "Ask a workspace admin to add a shift."}
+                action={canManageShifts ? (
                   <a
                     href="#shifts-manager"
                     className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-indigo-500"
                   >
                     Create shift
                   </a>
-                }
+                ) : undefined}
               />
             </div>
           )}
-          <ShiftsManager shifts={shifts} unassignedHalfDay={unassignedHalfDay} canManageUnassigned={session.role === "admin"} />
+          <ShiftsManager shifts={shifts} unassignedHalfDay={unassignedHalfDay} canManageShifts={canManageShifts} />
         </CardContent>
       </Card>
     </div>

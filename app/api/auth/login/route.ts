@@ -32,11 +32,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Employee ID or email and password are required." }, { status: 400 });
     }
 
-    // The tenant is implied by the subdomain the user arrived on (x-tenant-slug
-    // is set by middleware.ts from the host). This keeps crk's users out of
-    // any other tenant. Fall back to body.slug (sent by the login form's
-    // optional workspace input) when the header is missing.
+    // Prefer the workspace resolved from the host. The root sign-in page
+    // supplies the workspace entered in the form.
     const slug = (req.headers.get("x-tenant-slug") ?? String(body.slug ?? "").toLowerCase().trim())?.toLowerCase().trim() || null;
+    if (!slug) {
+      return NextResponse.json({ success: false, error: "Enter your workspace subdomain." }, { status: 400 });
+    }
     const tenant = slug
       ? await prisma.tenant.findUnique({ where: { slug } })
       : null;

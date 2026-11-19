@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { WebhooksPanel } from "./webhooks-panel";
+import { webhookEndpointSummary } from "@/lib/webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export default async function AdminWebhooksPage() {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
+    select: webhookEndpointSummary,
   });
 
   return (

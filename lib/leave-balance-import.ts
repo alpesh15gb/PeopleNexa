@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { dayRangeIST } from "@/lib/dates";
+import { dayRangeIST, isDateKey, isMonthKey } from "@/lib/dates";
 
 export const KEYSTONE_MANIPUR_2026_LEAVE_LEDGER = "keystone-manipur-2026-leave-ledger-v1";
 export const PEOPLE_NEXA_LEAVE_BALANCE_FLAT = "peoplenexa-leave-balance-flat-v1";
@@ -197,6 +197,12 @@ function csvNumber(value: string, column: string, errors: string[]) {
 }
 
 export function parseLeaveBalanceFlatCsv(source: string, selectedThroughMonth: string): ParsedLeaveLedger {
+  const firstDay = `${selectedThroughMonth}-01`;
+  if (!isMonthKey(selectedThroughMonth) || !isDateKey(firstDay)) throw new Error("Choose a valid cutoff month (YYYY-MM).");
+  const lastDay = new Date(`${firstDay}T00:00:00Z`);
+  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1, 0);
+  const periodEnd = dayRangeIST(lastDay.toISOString().slice(0, 10)).end;
+
   const csvRows = csvCells(source.replace(/^\uFEFF/, ""));
   if (!csvRows.length) throw new Error("CSV is empty.");
   if (csvRows[0].length !== LEAVE_BALANCE_FLAT_HEADERS.length || csvRows[0].some((header, index) => header !== LEAVE_BALANCE_FLAT_HEADERS[index])) throw new Error(`CSV headers must exactly be: ${LEAVE_BALANCE_FLAT_HEADERS.join(", ")}.`);
@@ -228,8 +234,5 @@ export function parseLeaveBalanceFlatCsv(source: string, selectedThroughMonth: s
     rows.push({ sourceRow: Number(sourceRowText) || line + 1, employeeNumber, employeeName, designation, joiningDate, openingBalance, workedDays, credited: creditedValue, availed: availedValue, available: availableValue, errors: rowErrors });
   }
   if (!rows.length) errors.push("No data rows were found in the CSV.");
-  const monthIndex = ledgerMonths().findIndex((month) => month.value === selectedThroughMonth);
-  if (monthIndex < 0) errors.push("Selected cutoff month must be in 2026.");
-  const periodEnd = dayRangeIST(`${selectedThroughMonth}-${String(new Date(Date.UTC(2026, monthIndex + 1, 0)).getUTCDate()).padStart(2, "0")}`).end;
   return { schemaProfile: PEOPLE_NEXA_LEAVE_BALANCE_FLAT, throughMonth: selectedThroughMonth, periodEnd, rows, errors };
 }

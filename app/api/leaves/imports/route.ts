@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendAudit } from "@/lib/audit";
-import { canConfirmLeaveBalanceImport, matchLeaveLedgerEmployee, parseKeystoneLeaveLedger, parseLeaveBalanceFlatCsv } from "@/lib/leave-balance-import";
+import { canConfirmLeaveBalanceImport, LEAVE_BALANCE_FLAT_HEADERS, matchLeaveLedgerEmployee, parseKeystoneLeaveLedger, parseLeaveBalanceFlatCsv } from "@/lib/leave-balance-import";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -10,9 +10,17 @@ async function adminSession() {
   return session?.role === "admin" ? session : null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await adminSession();
   if (!session) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (request.nextUrl.searchParams.get("template") === "flat") {
+    return new NextResponse(`${LEAVE_BALANCE_FLAT_HEADERS.join(",")}\r\n`, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": 'attachment; filename="leave-balance-template.csv"',
+      },
+    });
+  }
   const batches = await prisma.leaveBalanceImportBatch.findMany({
     where: { tenantId: session.tenantId },
     include: { leaveType: { select: { name: true, code: true } }, _count: { select: { entries: true } } },
@@ -32,13 +40,18 @@ export async function POST(request: NextRequest) {
   const report = form?.get("report") === "true";
   const reviewedExceptions = form?.get("reviewedExceptions") === "true";
   const acknowledgedExceptionCount = Number(form?.get("acknowledgedExceptionCount"));
+  const format = form?.get("format");
   if (!(file instanceof File) || !/\.(xlsx|csv)$/i.test(file.name)) return NextResponse.json({ error: "Choose a .xlsx ledger or canonical .csv export." }, { status: 400 });
+  const isCsv = /\.csv$/i.test(file.name);
+  if (format != null && format !== (isCsv ? "csv" : "legacy")) {
+    return NextResponse.json({ error: "The file extension does not match the selected format." }, { status: 400 });
+  }
   const leaveType = await prisma.leaveType.findFirst({ where: { id: leaveTypeId, tenantId: session.tenantId }, select: { id: true, name: true, code: true } });
   if (!leaveType) return NextResponse.json({ error: "Choose a leave type in this tenant." }, { status: 400 });
 
   const bytes = await file.arrayBuffer();
   let ledger;
-  try { ledger = /\.csv$/i.test(file.name) ? parseLeaveBalanceFlatCsv(await file.text(), throughMonth) : await parseKeystoneLeaveLedger(bytes, throughMonth); }
+  try { ledger = isCsv ? parseLeaveBalanceFlatCsv(await file.text(), throughMonth) : await parseKeystoneLeaveLedger(bytes, throughMonth); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not read this workbook." }, { status: 400 }); }
   const sourceHash = createHash("sha256").update(Buffer.from(bytes)).digest("hex");
   const employees = await prisma.employee.findMany({

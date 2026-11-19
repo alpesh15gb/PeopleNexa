@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { WEBHOOK_EVENTS, dispatchWebhook } from "@/lib/webhooks";
+import { WEBHOOK_EVENTS, webhookEndpointSummary } from "@/lib/webhooks";
 
 /** GET — list the tenant's webhook endpoints. */
 export async function GET() {
@@ -13,15 +13,7 @@ export async function GET() {
   const endpoints = await prisma.webhookEndpoint.findMany({
     where: { tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      name: true,
-      url: true,
-      events: true,
-      active: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: webhookEndpointSummary,
   });
   // Never leak the signing secret on list — callers only learn whether one exists.
   return NextResponse.json({ endpoints: endpoints.map((e) => ({ ...e, hasSecret: true })) });
@@ -69,6 +61,7 @@ function validateWebhookUrl(raw: string): string | null {
     return "URL is invalid.";
   }
   if (parsed.protocol !== "https:") return "URL must start with https://";
+  if (parsed.username || parsed.password) return "Do not embed credentials in the webhook URL.";
   if (isBlockedWebhookHost(parsed.hostname))
     return "URL host is not allowed (private/loopback/metadata hosts are blocked).";
   return null;
@@ -102,6 +95,7 @@ export async function POST(req: NextRequest) {
       secret: randomBytes(24).toString("hex"),
       active: true,
     },
+    select: { ...webhookEndpointSummary, secret: true },
   });
   return NextResponse.json({ endpoint }, { status: 201 });
 }
@@ -126,13 +120,14 @@ export async function PUT(req: NextRequest) {
     if (urlError) return NextResponse.json({ error: urlError }, { status: 400 });
   }
   const updated = await prisma.webhookEndpoint.update({
-    where: { id },
+    where: { id, tenantId: session.tenantId },
     data: {
       ...(body.name ? { name: String(body.name).trim() } : {}),
       ...(body.url ? { url: String(body.url).trim() } : {}),
       ...(events.length > 0 ? { events: events.join(",") } : {}),
       ...(typeof body.active === "boolean" ? { active: body.active } : {}),
     },
+    select: webhookEndpointSummary,
   });
   return NextResponse.json({ endpoint: updated });
 }

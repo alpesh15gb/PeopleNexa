@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { RegisterForm } from "./register-form";
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = {
   title: "Create your company | PeopleNexa",
@@ -10,9 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default async function RegisterPage() {
-  const session = await getSession();
-  if (session) redirect(session.role === "admin" || session.role === "branch_manager" || session.role === "location_manager" ? "/admin" : session.role === "supervisor" ? "/admin/attendance" : "/employee");
-
   return (
     <div className="animate-fade-up motion-reduce:animate-none">
       <div className="mb-7">

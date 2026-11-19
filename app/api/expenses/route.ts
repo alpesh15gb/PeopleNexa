@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyAdmins } from "@/lib/notifications";
 import { dispatchWebhook } from "@/lib/webhooks";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { expenseSummary } from "@/lib/expense-records";
+import { recordApiPaging, recordPagination } from "@/lib/document-expense-pagination";
 
 const CATEGORIES = ["travel", "food", "fuel", "mobile", "medical", "other"];
 
@@ -12,7 +14,8 @@ export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const body = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ error: "An expense claim object is required." }, { status: 400 });
   const title = String(body.title ?? "").trim();
   const category = String(body.category ?? "travel");
   const amount = Number(body.amount);
@@ -48,7 +51,7 @@ export async function POST(req: NextRequest) {
     "info",
     "New expense claim",
     `₹${amount} — ${title} (${category})`
-  );
+  ).catch(() => console.error("Could not notify admins of submitted expense", claim.id));
 
   await dispatchWebhook(session.tenantId, "expense.created", {
     claimId: claim.id,
@@ -62,26 +65,37 @@ export async function POST(req: NextRequest) {
 }
 
 /** GET — employees see their own; admins see all + summary. */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
-  const where = locationId ? { tenantId: session.tenantId, employee: employeeLocationScope(locationId) } : session.role === "admin" ? { tenantId: session.tenantId } : { employeeId: session.sub };
-  const [claims, pending, approved, settled] = await Promise.all([
-    prisma.expenseClaim.findMany({
-      where,
-      include: (session.role === "admin" || session.role === "location_manager")
-        ? { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } }
-        : undefined,
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    }),
-    prisma.expenseClaim.count({ where: { ...where, status: "pending" } }),
-    prisma.expenseClaim.count({ where: { ...where, status: "approved" } }),
-    prisma.expenseClaim.count({ where: { ...where, status: "settled" } }),
-  ]);
+  const requested = recordApiPaging(request.nextUrl.searchParams, 200);
+  if (!requested) return NextResponse.json({ error: "Use a positive integer page and a pageSize from 1 to 200." }, { status: 400 });
+  const where = {
+    tenantId: session.tenantId,
+    ...(locationId ? { employee: employeeLocationScope(locationId) } : session.role === "admin" ? {} : { employeeId: session.sub }),
+  };
+  const { total, byStatus } = await expenseSummary(where);
+  const pagination = recordPagination(total, requested.page, requested.pageSize);
+  const claims = await prisma.expenseClaim.findMany({
+    where,
+    include: (session.role === "admin" || session.role === "location_manager")
+      ? { employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } }
+      : undefined,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pagination.offset,
+    take: pagination.pageSize,
+  });
 
-  return NextResponse.json({ claims, summary: { pending, approved, settled } });
+  return NextResponse.json({
+    claims,
+    summary: {
+      pending: byStatus.get("pending")?._count._all ?? 0,
+      approved: byStatus.get("approved")?._count._all ?? 0,
+      settled: byStatus.get("settled")?._count._all ?? 0,
+    },
+    pagination,
+  });
 }

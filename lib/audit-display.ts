@@ -1,5 +1,6 @@
 import type { AuditLog } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
 
 export function readableAuditCode(value: string): string {
   const labels: Record<string, string> = {
@@ -12,8 +13,8 @@ export function readableAuditCode(value: string): string {
   };
   return labels[value] ?? value.replace(/[._]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
-export function auditTime(value: Date): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(value);
+export function auditTime(value: Date, region?: WorkspaceRegion): string {
+  return new Intl.DateTimeFormat(region?.locale ?? "en-GB", { timeZone: region?.timeZone ?? "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(value);
 }
 type Identity = { id: string; firstName: string; lastName: string; employeeNumber: string | null };
 export function auditEmployeeLabel(employee: Identity): string {

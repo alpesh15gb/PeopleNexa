@@ -29,6 +29,13 @@ const csv = [
 const flat = parseLeaveBalanceFlatCsv(csv, "2026-02");
 assert.equal(flat.errors.length, 0);
 assert.deepEqual(flat.rows[0].errors, []);
+const leapMonth = parseLeaveBalanceFlatCsv(csv.replace("2026-02", "2028-02"), "2028-02");
+assert.deepEqual(leapMonth.errors, []);
+assert.deepEqual(leapMonth.rows[0].errors, []);
+assert.equal(leapMonth.periodEnd.toISOString(), "2028-02-29T18:30:00.000Z");
+const december = parseLeaveBalanceFlatCsv(csv.replace("2026-02", "2027-12"), "2027-12");
+assert.equal(december.periodEnd.toISOString(), "2027-12-31T18:30:00.000Z");
+assert.throws(() => parseLeaveBalanceFlatCsv(csv, "2027-13"), /valid cutoff month/);
 assert.match(parseLeaveBalanceFlatCsv(csv.replace(",5,6", ",4,6"), "2026-02").rows[0].errors.join(" "), /must reconcile/);
 
 const activeEmployees = [

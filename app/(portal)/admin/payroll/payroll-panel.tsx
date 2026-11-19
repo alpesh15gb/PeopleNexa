@@ -14,6 +14,7 @@ import {
   Wallet,
   Users,
   CircleAlert,
+  RefreshCw,
 } from "lucide-react";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -25,14 +26,14 @@ import { formatMoney } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import type { PayslipDocumentSnapshot } from "@/lib/payslip-document";
 import { payrollGenerationReason, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
+import { canApprovePayrollRun, payrollScopeHref } from "@/lib/payroll-work-queue";
 
 type Employee = {
   id: string;
   employeeNumber: string;
   firstName: string;
   lastName: string;
-  accountNumber: string | null;
-  ifscCode: string | null;
+  hasBankDetails: boolean;
   department: { name: string } | null;
 };
 type Payslip = {
@@ -43,6 +44,7 @@ type Payslip = {
   status: string;
   adjustments: { label: string; amount: number }[] | null;
   document: PayslipDocumentSnapshot | null;
+  canRecalculate: boolean;
 };
 type Row = { employee: Employee; payslip: Payslip | null };
 type Payroll = {
@@ -97,6 +99,13 @@ export function PayrollPanel({
   generated,
   notIncludedCount,
   canManageSettings,
+  payrollSettingsRequired,
+  generationUnavailableReason,
+  attendanceSource,
+  workbookUploadId,
+  preparation,
+  actorId,
+  canRecoverLegacyMess,
   payroll,
   provenance,
 }: {
@@ -110,6 +119,13 @@ export function PayrollPanel({
   generated: number;
   notIncludedCount: number;
   canManageSettings: boolean;
+  payrollSettingsRequired: boolean;
+  generationUnavailableReason: string | null;
+  attendanceSource: "recorded" | "workbook" | null;
+  workbookUploadId: string | null;
+  preparation: { eligible: number; missingSalary: number } | null;
+  actorId: string;
+  canRecoverLegacyMess: boolean;
   payroll: Payroll | null;
   provenance: { source: string } | null;
 }) {
@@ -121,7 +137,14 @@ export function PayrollPanel({
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [details, setDetails] = useState<Row | null>(null);
+  const [detailsEmployeeId, setDetailsEmployeeId] = useState<string | null>(null);
+  const details = rows.find((row) => row.employee.id === detailsEmployeeId) ?? null;
+  const canGenerate = Boolean(locationId && !payrollSettingsRequired && !generationUnavailableReason);
+  const [sourceChoice, setSourceChoice] = useState<"recorded" | "workbook">("recorded");
+  const isWorkbookSource = attendanceSource === "workbook" || (!payroll && sourceChoice === "workbook");
+  const canGenerateRecorded = canGenerate && !isWorkbookSource && Boolean(payroll || preparation?.eligible !== 0);
+  const canAddEmployees = canGenerateRecorded && payroll?.status === "draft";
+  const waitingForApproval = payroll?.status === "reviewed" && !canApprovePayrollRun(payroll.createdBy, actorId);
   const [bank, setBank] = useState("generic");
   const [selectionMode, setSelectionMode] = useState<
     "all_eligible" | "selected"
@@ -129,6 +152,8 @@ export function PayrollPanel({
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [sourceIssues, setSourceIssues] = useState<string[]>([]);
+  const [inputsChecked, setInputsChecked] = useState(false);
+  const [confirmationError, setConfirmationError] = useState("");
   const [generationIssues, setGenerationIssues] = useState<PayrollGenerationResult[]>([]);
   const [recovery, setRecovery] = useState<
     "mess_backdate" | "attendance_reprocess" | null
@@ -139,14 +164,21 @@ export function PayrollPanel({
   useEffect(() => {
     setSelectedEmployeeIds([]);
     setSelectionMode("all_eligible");
+    setSourceChoice("recorded");
     setPickerOpen(false);
     setSourceIssues([]);
+    setInputsChecked(false);
     setGenerationIssues([]);
-    setDetails(null);
+    setDetailsEmployeeId(null);
     setConfirmation(null);
     setSearch("");
     setOnlyIssues(false);
   }, [month, locationId]);
+  useEffect(() => {
+    setSourceIssues([]);
+    setInputsChecked(false);
+  }, [payroll?.id, payroll?.status]);
+  useEffect(() => setConfirmationError(""), [confirmation]);
   const blockers = [
     ...rows
       .filter(({ payslip }) => payslip && (
@@ -164,15 +196,6 @@ export function PayrollPanel({
         employeeId: employee.id,
         message: "Net pay is below zero.",
       })),
-    ...rows
-      .filter(
-        ({ payslip, employee }) =>
-          payslip && (!employee.accountNumber || !employee.ifscCode),
-      )
-      .map(({ employee }) => ({
-        employeeId: employee.id,
-        message: "Bank details are missing.",
-      })),
     ...(payroll?.members ?? [])
       .filter((member) => member.exception)
       .map((member) => ({
@@ -180,14 +203,19 @@ export function PayrollPanel({
         message: member.exception!,
       })),
   ];
+  const payoutWarnings = rows
+    .filter(({ payslip, employee }) => payslip && !employee.hasBankDetails)
+    .map(({ employee }) => ({ employeeId: employee.id, message: "Bank details are missing." }));
+  const issues = [...blockers, ...payoutWarnings];
   const issueFor = (employeeId: string) =>
-    blockers.find((issue) => issue.employeeId === employeeId)?.message;
+    issues.find((issue) => issue.employeeId === employeeId)?.message;
   const changeScope = (nextMonth = month, nextLocation = locationId) => {
     const query = new URLSearchParams({ period: nextMonth });
     if (nextLocation) query.set("location", nextLocation);
     router.push(`/admin/payroll?${query}`);
   };
   async function create(addToDraft = false) {
+    if (!canGenerateRecorded) return;
     if (selectionMode === "selected" && !selectedEmployeeIds.length)
       return toast("error", "Select at least one eligible employee.");
     setBusy("create");
@@ -241,12 +269,48 @@ export function PayrollPanel({
       setBusy(null);
     }
   }
+  async function recalculateDraft(payslipId: string) {
+    setBusy("recalculate");
+    try {
+      const response = await fetch(`/api/payroll/${encodeURIComponent(payslipId)}/regenerate`, { method: "POST" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error ?? "Could not recalculate this payslip.");
+      }
+      toast("success", "Draft payslip recalculated.");
+      setSourceIssues([]);
+      setInputsChecked(false);
+      router.refresh();
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not recalculate this payslip.");
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function checkPayrollInputs() {
+    if (!payroll || !locationId) return;
+    setBusy("check-inputs");
+    setInputsChecked(false);
+    try {
+      const response = await fetch(`/api/payroll/runs/${encodeURIComponent(payroll.id)}/preflight?${new URLSearchParams({ locationId })}`, { cache: "no-store" });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(result?.issues)) throw new Error(result?.error ?? "Could not check payroll inputs.");
+      setSourceIssues(result.issues);
+      setInputsChecked(true);
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not check payroll inputs.");
+    } finally {
+      setBusy(null);
+    }
+  }
   async function transition(
     status: string,
     evidence: Record<string, unknown> = {},
   ) {
     if (!payroll) return;
     setBusy(status);
+    setConfirmationError("");
+    setInputsChecked(false);
     try {
       const response = await fetch(`/api/payroll/runs/${payroll.id}`, {
         method: "PATCH",
@@ -255,7 +319,13 @@ export function PayrollPanel({
       });
       const data = await response.json();
       if (!response.ok) {
-        setSourceIssues(Array.isArray(data.preflight) ? data.preflight : [data.error ?? "Could not update monthly payroll."]);
+        const error = data.error ?? "Could not update monthly payroll.";
+        if (confirmation === status && !Array.isArray(data.preflight)) {
+          setConfirmationError(error);
+          return;
+        }
+        if (confirmation === status) setConfirmation(null);
+        setSourceIssues(Array.isArray(data.preflight) ? data.preflight : [error]);
         return toast("error", "Payroll needs attention. Review the issues shown on this page.");
       }
       setSourceIssues([]);
@@ -263,7 +333,9 @@ export function PayrollPanel({
       toast("success", "Monthly payroll updated.");
       router.refresh();
     } catch {
-      toast("error", "Could not connect. Please try again.");
+      const message = "Could not confirm the update. Refresh to check the run before retrying.";
+      if (confirmation === status) setConfirmationError(message);
+      else toast("error", message);
     } finally {
       setBusy(null);
     }
@@ -351,7 +423,7 @@ export function PayrollPanel({
   const state = !locationId
     ? "Not started"
     : !payroll
-      ? "Not started"
+      ? (generationUnavailableReason ? "Payroll generation unavailable" : payrollSettingsRequired ? "Payroll settings required" : "Not started")
       : missingTerminalPayslips
         ? "Payroll record needs attention"
         : payroll.status === "cancelled"
@@ -363,7 +435,7 @@ export function PayrollPanel({
               : payroll.status === "draft"
                 ? "Draft ready for review"
                 : payroll.status === "reviewed"
-                  ? "Ready to approve"
+                  ? (waitingForApproval ? "Awaiting independent approval" : "Ready to approve")
                   : payroll.status === "approved"
                     ? "Ready to finalize"
                     : payroll.status === "finalized"
@@ -372,14 +444,14 @@ export function PayrollPanel({
   const action = !locationId
     ? null
     : !payroll
-      ? { label: `Create preview`, onClick: () => create(), busy: "create" }
+      ? (canGenerateRecorded ? { label: "Create draft payroll", onClick: () => create(), busy: "create" } : null)
       : payroll.status === "draft"
         ? {
             label: "Complete review",
             onClick: () => transition("reviewed"),
             busy: "reviewed",
           }
-        : payroll.status === "reviewed"
+        : payroll.status === "reviewed" && !waitingForApproval
           ? {
               label: "Approve payroll",
               onClick: () => transition("approved"),
@@ -398,7 +470,7 @@ export function PayrollPanel({
                   busy: "paid",
                 }
               : null;
-  const issueCount = new Set(blockers.map((issue) => issue.employeeId)).size;
+  const issueCount = new Set(issues.map((issue) => issue.employeeId)).size;
   const filteredRows = rows.filter((row) => {
     const query = search.trim().toLowerCase();
     return (
@@ -433,14 +505,14 @@ export function PayrollPanel({
           {canManageSettings && (
             <Button
               variant="outline"
-              onClick={() => router.push("/admin/payroll/configuration")}
+              onClick={() => router.push(payrollScopeHref("/admin/payroll/configuration", { locationId, period: month }))}
             >
               <Settings2 aria-hidden="true" className="h-4 w-4" />
               Settings
             </Button>
           )}
         </header>
-        <PayrollNavigation active="payroll" canManageSettings={canManageSettings} />
+        <PayrollNavigation active="payroll" canManageSettings={canManageSettings} locationId={locationId} period={month} />
         <section
           aria-label="Payroll period"
           className="flex flex-wrap items-end gap-4 rounded-2xl border border-edge bg-card p-4"
@@ -503,8 +575,47 @@ export function PayrollPanel({
             {payroll?.status ?? "Not started"}
           </Badge>
         </section>
-        {sourceIssues.length > 0 && <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5"><h2 className="font-semibold">Resolve before continuing</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul><p className="mt-3 text-sm text-muted-foreground">For reviewed or approved runs, use Advanced tools to return to draft. Correct the inputs and regenerate affected payslips.</p></section>}
-        {locationId && <ManualAttendancePanel key={`${locationId}:${month}:${payroll?.id ?? "new"}`} month={month} locationId={locationId} runId={payroll?.id} includedEmployeeIds={rows.filter(row => row.payslip).map(row => row.employee.id)} editable={!payroll || payroll.status === "draft"} />}
+        {locationId && !payroll && (
+          <fieldset className="rounded-2xl border border-edge bg-card p-5">
+            <legend className="px-2 font-semibold">Attendance source</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
+                <input className="mt-1" type="radio" name="attendance-source" checked={!isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("recorded")} />
+                <span><strong className="block text-sm">Recorded attendance</strong><span className="mt-1 block text-sm text-muted-foreground">Use attendance and approved leave in PeopleNexa.</span></span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
+                <input className="mt-1" type="radio" name="attendance-source" checked={isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("workbook")} />
+                <span><strong className="block text-sm">Attendance workbook</strong><span className="mt-1 block text-sm text-muted-foreground">Upload daily attendance marks and review the worksheet before calculation.</span></span>
+              </label>
+            </div>
+            {preparation && !isWorkbookSource && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                {preparation.eligible} {preparation.eligible === 1 ? "employee has" : "employees have"} a recorded salary for this month.
+                {preparation.missingSalary > 0 && <> {preparation.missingSalary} {preparation.missingSalary === 1 ? "needs" : "need"} a salary in <a className="font-medium text-primary underline" href="/admin/employee-master">Employees</a>.</>}
+              </p>
+            )}
+          </fieldset>
+        )}
+        {attendanceSource && payroll && (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-edge bg-card p-4 text-sm">
+            <div>
+              <p className="font-semibold">{attendanceSource === "workbook" ? "Reviewed workbook" : "Recorded attendance"}</p>
+              <p className="mt-1 text-muted-foreground">{payroll.status === "draft" ? "The draft uses this source for every payslip." : "Attendance source recorded for this run."}</p>
+            </div>
+            {payroll.status === "draft" && canGenerate && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => setConfirmation("cancelled")}>Change source by cancelling draft</Button>}
+          </div>
+        )}
+        {sourceIssues.length > 0 && (
+          <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5">
+            <h2 className="font-semibold">Resolve before continuing</h2>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+            {payroll?.status === "draft" && <a href="#payroll-employee-review" className="mt-3 inline-block text-sm font-medium text-primary underline">Find a draft payslip</a>}
+            {payroll && ["reviewed", "approved"].includes(payroll.status) && <Button className="mt-3" variant="outline" disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>}
+          </section>
+        )}
+        {inputsChecked && sourceIssues.length === 0 && <p role="status" className="rounded-xl border border-edge bg-card p-4 text-sm">Attendance and adjustments match the recorded payslips.</p>}
+        {generationUnavailableReason && payroll?.status === "draft" && <p className="text-sm text-muted-foreground">{generationUnavailableReason}</p>}
+        {locationId && isWorkbookSource && <ManualAttendancePanel key={`${locationId}:${month}:${payroll?.id ?? "new"}`} month={month} locationId={locationId} runId={payroll?.id} runUploadId={workbookUploadId} includedEmployeeIds={rows.filter(row => row.payslip).map(row => row.employee.id)} editable={!payroll || payroll.status === "draft"} canGenerate={canGenerate} />}
         {generationIssues.length > 0 && (
           <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
             <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>
@@ -565,11 +676,15 @@ export function PayrollPanel({
                     : blockers.length
                       ? `${issueCount} employee${issueCount === 1 ? " needs" : "s need"} attention. Check the issues below before continuing.`
                       : !payroll
-                        ? "Create a salary preview. You can review every employee before approving."
+                        ? (generationUnavailableReason ?? (payrollSettingsRequired
+                          ? "An administrator needs to publish payroll settings for this location and month."
+                          : isWorkbookSource ? "Review the worksheet above, then generate a draft from the reviewed upload."
+                            : preparation?.eligible === 0 ? "Add a salary for at least one employee in this location and month before creating a draft."
+                              : "Create a draft, then check the inputs and review employee payslips."))
                         : payroll.status === "draft"
                           ? "Check employee salaries below, then complete your review."
                           : payroll.status === "reviewed"
-                            ? "Review is complete. Approve the totals when you are ready."
+                            ? waitingForApproval ? "A different authorized reviewer must approve this run." : "Review is complete. Approve the totals when you are ready."
                             : payroll.status === "approved"
                               ? "Finalize to lock salaries and prepare the bank file."
                               : payroll.status === "finalized"
@@ -590,6 +705,22 @@ export function PayrollPanel({
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
               </Button>
             )}
+            {payroll && ["draft", "reviewed", "approved"].includes(payroll.status) && (
+              <Button variant="outline" loading={busy === "check-inputs"} disabled={Boolean(busy)} onClick={() => void checkPayrollInputs()}>
+                Check payroll inputs
+              </Button>
+            )}
+            {payroll && ["cancelled", "reversed"].includes(payroll.status) && (
+              <Button variant="outline" onClick={() => changeScope()}>
+                Return to monthly payroll
+              </Button>
+            )}
+            {!payroll && payrollSettingsRequired && !generationUnavailableReason && canManageSettings && locationId && (
+              <Button onClick={() => router.push(`/admin/payroll/configuration?${new URLSearchParams({ location: locationId, period: month })}`)}>
+                Review payroll settings
+                <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           {action && blockers.length > 0 && ["reviewed", "approved"].includes(action.busy) && (
             <p id="payroll-action-blockers" className="mt-4 text-sm text-muted-foreground">
@@ -601,10 +732,11 @@ export function PayrollPanel({
           )}
           {payroll?.status === "reviewed" && (
             <p className="mt-4 text-sm text-muted-foreground">
-              Approval requires a different administrator from the person who created this payroll.
+              Approval requires a different authorized reviewer from the person who created this payroll.
+              {waitingForApproval && <a className="ml-2 font-medium text-primary underline" href={payrollScopeHref("/admin/payroll/queue", { locationId, period: month, stage: "reviewed" })}>Open approval queue</a>}
             </p>
           )}
-          {locationId && !payroll && (
+          {!payroll && canGenerateRecorded && (
             <fieldset className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-primary/15 pt-4">
               <legend className="sr-only">Employees to include</legend>
               <label className="flex min-h-11 items-center gap-2 text-sm">
@@ -684,14 +816,14 @@ export function PayrollPanel({
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               {issueCount
-                ? "Resolve issues before approval"
+                ? "Check payroll issues and payout details"
                 : payroll
                   ? "No employee issues flagged"
                   : "Checks run when the preview is created"}
             </p>
           </div>
         </section>
-        {blockers.length > 0 && (
+        {issues.length > 0 && (
           <section
             id="payroll-issues"
             aria-label="Payroll issues"
@@ -699,7 +831,7 @@ export function PayrollPanel({
           >
             <h2 className="font-semibold">Needs your attention</h2>
             <ul className="mt-3 space-y-2">
-              {blockers.map((issue, index) => {
+              {issues.map((issue, index) => {
                 const row = rows.find(
                   (item) => item.employee.id === issue.employeeId,
                 );
@@ -732,7 +864,7 @@ export function PayrollPanel({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setDetails(row)}
+                        onClick={() => setDetailsEmployeeId(row.employee.id)}
                       >
                         View details
                       </Button>
@@ -744,7 +876,7 @@ export function PayrollPanel({
           </section>
         )}
         {payroll && (
-          <section className="overflow-hidden rounded-2xl border border-edge bg-card">
+          <section id="payroll-employee-review" className="scroll-mt-24 overflow-hidden rounded-2xl border border-edge bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge p-5">
               <div>
                 <h2 className="font-semibold">Employee review</h2>
@@ -753,7 +885,7 @@ export function PayrollPanel({
                   payslip for the full breakdown.
                 </p>
               </div>
-              {payroll.status === "draft" && (
+              {canAddEmployees && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -845,7 +977,7 @@ export function PayrollPanel({
                     className="w-full"
                     variant="outline"
                     size="sm"
-                    onClick={() => setDetails(row)}
+                    onClick={() => setDetailsEmployeeId(row.employee.id)}
                   >
                     View payslip
                     <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
@@ -912,7 +1044,7 @@ export function PayrollPanel({
                           variant="ghost"
                           size="sm"
                           aria-label={`View payslip for ${name(row.employee)}`}
-                          onClick={() => setDetails(row)}
+                          onClick={() => setDetailsEmployeeId(row.employee.id)}
                         >
                           View
                           <ArrowRight
@@ -1020,13 +1152,15 @@ export function PayrollPanel({
             <div className="mt-4 flex flex-wrap gap-2">
               {canManageSettings && locationId && (
                 <>
-                  <Button
-                    variant="outline"
-                    loading={busy === "mess_backdate"}
-                    onClick={() => void previewRecovery("mess_backdate")}
-                  >
-                    Preview Mess plan recovery
-                  </Button>
+                  {canRecoverLegacyMess && (
+                    <Button
+                      variant="outline"
+                      loading={busy === "mess_backdate"}
+                      onClick={() => void previewRecovery("mess_backdate")}
+                    >
+                      Preview legacy Mess plan recovery
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     loading={busy === "attendance_reprocess"}
@@ -1036,7 +1170,7 @@ export function PayrollPanel({
                   </Button>
                 </>
               )}
-              {payroll?.status === "draft" && (
+              {canAddEmployees && (
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -1112,8 +1246,7 @@ export function PayrollPanel({
           {confirmation === "paid" ? (
             <>
               <p className="text-sm text-muted-foreground">
-                Record a payment you have already made. This does not transfer
-                money.
+                Record the payment after completing it outside PeopleNexa.
               </p>
               <Field label="Payment method">
                 <Select name="paymentMethod" required>
@@ -1151,6 +1284,7 @@ export function PayrollPanel({
               continuing.
             </p>
           )}
+          {confirmationError && <p role="alert" className="rounded-lg border border-warning/30 p-3 text-sm">{confirmationError}</p>}
           <div className="flex justify-end gap-2">
             <Button
               type="button"
@@ -1175,10 +1309,13 @@ export function PayrollPanel({
         </form>
       </Modal>
       <EmployeeModal
+        key={`${payroll?.id ?? "none"}:${detailsEmployeeId ?? "closed"}`}
         row={details}
         payrollId={payroll?.id ?? null}
         month={month}
-        onClose={() => setDetails(null)}
+        recalculating={busy === "recalculate"}
+        onRecalculate={recalculateDraft}
+        onClose={() => setDetailsEmployeeId(null)}
       />
       {recovery && (
         <Modal
@@ -1218,6 +1355,7 @@ export function PayrollPanel({
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         locationId={locationId}
+        runId={payroll?.status === "draft" ? payroll.id : undefined}
         month={month}
         selectedIds={selectedEmployeeIds}
         onChange={setSelectedEmployeeIds}
@@ -1241,6 +1379,7 @@ function EmployeePicker({
   open,
   onClose,
   locationId,
+  runId,
   month,
   selectedIds,
   onChange,
@@ -1251,6 +1390,7 @@ function EmployeePicker({
   open: boolean;
   onClose: () => void;
   locationId: string | null;
+  runId?: string;
   month: string;
   selectedIds: string[];
   onChange: (ids: string[]) => void;
@@ -1266,18 +1406,28 @@ function EmployeePicker({
     total: number;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     if (!open || !locationId) return;
     const controller = new AbortController();
+    setLoading(true);
+    setData(null);
+    setError("");
     const timer = window.setTimeout(async () => {
-      setLoading(true);
       try {
         const response = await fetch(
-          `/api/payroll/employees?${new URLSearchParams({ locationId, month, page: String(page), search })}`,
+          `/api/payroll/employees?${new URLSearchParams({ locationId, month, page: String(page), search, ...(runId ? { runId } : {}) })}`,
           { signal: controller.signal },
         );
         const next = await response.json();
-        if (response.ok) setData(next);
+        if (!response.ok) throw new Error(next.error ?? "Could not load employees.");
+        setData(next);
+      } catch (failure) {
+        if (!controller.signal.aborted) {
+          setData(null);
+          setError(failure instanceof Error ? failure.message : "Could not load employees.");
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -1286,7 +1436,7 @@ function EmployeePicker({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [open, locationId, month, page, search]);
+  }, [open, locationId, runId, month, page, search, retry]);
   if (!open) return null;
   const visibleEligible =
     data?.employees.filter((employee) => employee.eligible) ?? [];
@@ -1339,6 +1489,10 @@ function EmployeePicker({
         placeholder="Code, name, department, or designation"
         className="mt-1 h-11 w-full rounded-xl border border-input bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
+      {error && <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        {error}
+        <Button size="sm" variant="outline" onClick={() => setRetry((attempt) => attempt + 1)}>Retry</Button>
+      </div>}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input
@@ -1585,13 +1739,18 @@ function EmployeeModal({
   row,
   payrollId,
   month,
+  recalculating,
+  onRecalculate,
   onClose,
 }: {
   row: Row | null;
   payrollId: string | null;
   month: string;
+  recalculating: boolean;
+  onRecalculate: (payslipId: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const [confirmRecalculation, setConfirmRecalculation] = useState(false);
   if (!row) return null;
   const document = row.payslip?.document;
   const enhanced = document?.totals.earnedGross !== undefined;
@@ -1606,7 +1765,7 @@ function EmployeeModal({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={() => { if (!recalculating) onClose(); }}
       title={name(row.employee)}
       description={row.employee.employeeNumber}
       size={enhanced ? "lg" : "md"}
@@ -1720,16 +1879,36 @@ function EmployeeModal({
         </>
       )}
       {row.payslip && payrollId && (
-        <Button
-          variant="outline"
-          className="mt-4 w-full"
-          onClick={() => {
-            window.location.href = `/api/payroll/payslips?${new URLSearchParams({ month, employeeIds: row.employee.id, runId: payrollId })}`;
-          }}
-        >
-          <Download aria-hidden="true" className="h-4 w-4" />
-          Download payslip
-        </Button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            disabled={recalculating}
+            onClick={() => {
+              window.location.href = `/api/payroll/payslips?${new URLSearchParams({ month, employeeIds: row.employee.id, runId: payrollId })}`;
+            }}
+          >
+            <Download aria-hidden="true" className="h-4 w-4" />
+            Download payslip
+          </Button>
+          {row.payslip.canRecalculate && !confirmRecalculation && (
+            <Button variant="outline" onClick={() => setConfirmRecalculation(true)}>
+              <RefreshCw aria-hidden="true" className="h-4 w-4" />
+              Recalculate draft
+            </Button>
+          )}
+        </div>
+      )}
+      {row.payslip?.canRecalculate && confirmRecalculation && (
+        <div className="mt-4 rounded-xl border border-edge bg-tint p-4">
+          <p className="text-sm">Recalculate this draft from updated attendance and adjustments using its recorded payroll policy?</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="outline" disabled={recalculating} onClick={() => setConfirmRecalculation(false)}>Cancel</Button>
+            <Button loading={recalculating} onClick={async () => {
+              await onRecalculate(row.payslip!.id);
+              setConfirmRecalculation(false);
+            }}>Recalculate payslip</Button>
+          </div>
+        </div>
       )}
     </Modal>
   );

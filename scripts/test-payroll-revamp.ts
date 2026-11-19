@@ -16,7 +16,9 @@ assert.match(bankExport, /const slipStatus = run\.status === "paid" \? "paid" : 
 assert.match(bankExport, /payrollRunId: runId/);
 assert.match(bankExport, /status: slipStatus/);
 assert.doesNotMatch(bankExport, /statusParam/);
-assert.equal([...complianceExport.matchAll(/financialExportPayslipFilter\(\)/g)].length, 3, "all compliance exports use the financial run-state filter");
+assert.match(complianceExport, /const indiaHistory = await prisma\.payslip\.findFirst\(\{ where: \{ tenantId: session\.tenantId, \.\.\.employeeScope, \.\.\.financialExportPayslipFilter\(\) \}/, "the history exception is scoped to exportable India payroll");
+const complianceReports = complianceExport.slice(complianceExport.indexOf('if (type === "ecr")'));
+assert.equal([...complianceReports.matchAll(/financialExportPayslipFilter\(\)/g)].length, 3, "all compliance reports use the financial run-state filter");
 assert.match(tallyExport, /financialExportPayslipFilter\(\)/, "Tally uses the financial run-state filter");
 assert.match(reporting, /FINANCIAL_HISTORY_RUN_STATUSES/, "financial exports permit finalized and paid runs");
 assert.match(reporting, /payrollRunId: null, status: "paid"/, "only explicitly paid legacy slips are exported");

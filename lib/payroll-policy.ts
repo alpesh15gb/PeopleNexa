@@ -1,5 +1,28 @@
 import { payrollPolicyDraft, resolveConfiguration } from "./configuration";
-import { getPayrollConfig, type PayrollConfig } from "./payroll";
+import { getPayrollConfig, workspaceUsesShiftWeeklyOffs, type PayrollConfig } from "./payroll";
+
+export function newWorkspacePayrollSettings() {
+  return {
+    requirePublishedPayrollPolicy: true,
+    payrollUsesShiftWeeklyOffs: true,
+    payroll: {
+      lateFinePerLateDay: 0,
+      pf: { enabled: false },
+      esic: { enabled: false },
+      pt: { enabled: false, state: "" },
+      lwf: { enabled: false },
+      tds: { enabled: false },
+    },
+  };
+}
+
+export function requiresPublishedPayrollPolicy(tenantConfig: unknown) {
+  return Boolean(tenantConfig && typeof tenantConfig === "object" && "requirePublishedPayrollPolicy" in tenantConfig && tenantConfig.requirePublishedPayrollPolicy === true);
+}
+
+export function canUsePayrollPolicyFallback(tenantConfig: unknown, legacyAcknowledged: boolean) {
+  return legacyAcknowledged && !requiresPublishedPayrollPolicy(tenantConfig);
+}
 
 type PayrollPolicyRecord = {
   id: string;
@@ -20,6 +43,7 @@ export type PayrollPolicySnapshot = {
     jurisdiction: string | null;
     profile: string;
     payrollConfig: PayrollConfig;
+    useShiftWeeklyOffs: boolean;
   };
 };
 
@@ -29,10 +53,15 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
   const valid = records.filter((record) => payrollPolicyDraft(record.payload));
   // Use midday UTC for the payroll month's calendar date, avoiding IST midnight
   // conversion from placing the first day in the preceding UTC date.
-  const policy = resolveConfiguration(valid, locationId, new Date(`${month}-01T12:00:00.000Z`));
+  const date = new Date(`${month}-01T12:00:00.000Z`);
+  const policy = resolveConfiguration(valid, locationId, date);
   const draft = policy && payrollPolicyDraft(policy.payload);
+  const companyPolicy = policy?.locationId ? resolveConfiguration(valid, null, date) : null;
+  const useShiftWeeklyOffs = draft?.attendanceTreatment.useShiftWeeklyOffs
+    ?? payrollPolicyDraft(companyPolicy?.payload)?.attendanceTreatment.useShiftWeeklyOffs
+    ?? workspaceUsesShiftWeeklyOffs(tenantConfig);
   if (!policy || !draft) {
-    return { configurationId: null, configurationVersion: null, appliedRules: { source: "tenant_config", locationId, jurisdiction: legacy.pt.state || null, profile: "Tenant configuration fallback", payrollConfig: legacy } };
+    return { configurationId: null, configurationVersion: null, appliedRules: { source: "tenant_config", locationId, jurisdiction: legacy.pt.state || null, profile: "Tenant configuration fallback", payrollConfig: legacy, useShiftWeeklyOffs } };
   }
 
   const payrollConfig: PayrollConfig = {
@@ -50,7 +79,7 @@ export function resolvePayrollPolicy(records: PayrollPolicyRecord[], tenantConfi
     earnedSalaryRounding: draft.earnedSalaryRounding,
     earnedSalaryAggregation: draft.earnedSalaryAggregation,
   };
-  return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: policy.locationId ? "location_override" : "tenant_policy", locationId: policy.locationId, jurisdiction: payrollConfig.pt.state || null, profile: policy.locationId ? "Location payroll policy override" : "Tenant payroll policy", payrollConfig } };
+  return { configurationId: policy.id, configurationVersion: policy.version, appliedRules: { source: policy.locationId ? "location_override" : "tenant_policy", locationId: policy.locationId, jurisdiction: payrollConfig.pt.state || null, profile: policy.locationId ? "Location payroll policy override" : "Tenant payroll policy", payrollConfig, useShiftWeeklyOffs } };
 }
 
 export function payrollConfigFromSnapshot(snapshot: unknown): PayrollConfig | null {

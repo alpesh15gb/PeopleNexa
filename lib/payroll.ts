@@ -1,7 +1,8 @@
 import { snapshottedLeaveFraction } from "./leave-calendar";
-import { resolveManualPayrollSource, manualUploadId } from "./payroll-manual-source";
+import { resolveManualPayrollSource, manualUploadId, validateManualPayrollSource } from "./payroll-manual-source";
 import { attendanceRequiresReview } from "./attendance-validation";
 import { payrollLeaveDay } from "./payroll-leave-day";
+import { isShiftWeeklyOff } from "./shift-weekly-offs";
 import { prisma } from "./prisma";
 import type { Prisma } from "../generated/prisma/client";
 import { istStartOfDay, parseIST } from "./ist";
@@ -185,6 +186,30 @@ export interface AttendanceSummary {
   overtimeHours: number;
   workingDays: number;
   workedHours: number; // actual hours clocked (used for hourly pay)
+  weeklyOffDates?: string[];
+  halfDaysWorkedOnWeeklyOff?: number;
+}
+
+export function workspaceUsesShiftWeeklyOffs(tenantConfig: unknown) {
+  return !!tenantConfig && typeof tenantConfig === "object" &&
+    "payrollUsesShiftWeeklyOffs" in tenantConfig && tenantConfig.payrollUsesShiftWeeklyOffs === true;
+}
+
+export function snapshottedPayrollWeeklyOffDates(attendance: unknown): string[] | undefined {
+  if (!attendance || typeof attendance !== "object" || !("weeklyOffDates" in attendance)) return undefined;
+  const { weeklyOffDates } = attendance;
+  return Array.isArray(weeklyOffDates) && weeklyOffDates.every((day) => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)) ? weeklyOffDates : undefined;
+}
+
+export function payrollRunUsesShiftWeeklyOffs(firstPayslip: { inputSnapshot: unknown } | null, effectiveSetting: boolean) {
+  if (!firstPayslip) return effectiveSetting;
+  const input = firstPayslip.inputSnapshot as { attendance?: unknown } | null;
+  return snapshottedPayrollWeeklyOffDates(input?.attendance) !== undefined;
+}
+
+export function unpaidAttendanceDays(summary: AttendanceSummary) {
+  const unpaidHalfDays = summary.halfDays - (summary.halfDaysWorkedOnWeeklyOff ?? 0);
+  return summary.absentDays + unpaidHalfDays * 0.5 + (summary.unpaidLeaveDays ?? 0);
 }
 
 export async function attendanceSummary(
@@ -193,7 +218,31 @@ export async function attendanceSummary(
   month: string,
   includeOvertime = true,
   db: Prisma.TransactionClient = prisma,
+  weeklyOffs?: "resolve_from_shifts" | readonly string[],
 ): Promise<AttendanceSummary> {
+  const inputs = await loadPayrollAttendance(tenantId, employee, month, db);
+  return summarizePayrollAttendance(employee, inputs, includeOvertime, weeklyOffs);
+}
+
+export async function comparePayrollAttendanceSchedules(
+  tenantId: string,
+  employee: { id: string; shiftId: string | null; joiningDate?: Date | null },
+  month: string,
+  db: Prisma.TransactionClient = prisma,
+) {
+  const inputs = await loadPayrollAttendance(tenantId, employee, month, db);
+  return {
+    legacy: summarizePayrollAttendance(employee, inputs, false),
+    scheduled: summarizePayrollAttendance(employee, inputs, false, "resolve_from_shifts"),
+  };
+}
+
+async function loadPayrollAttendance(
+  tenantId: string,
+  employee: { id: string; shiftId: string | null },
+  month: string,
+  db: Prisma.TransactionClient,
+) {
   const { start, end } = monthRange(month);
   const [records, leaves, holidays, shift, rosters] = await Promise.all([
     db.attendance.findMany({
@@ -245,7 +294,15 @@ export async function attendanceSummary(
       include: { shift: true },
     }),
   ]);
+  return { start, end, records, leaves, holidays, shift, rosters };
+}
 
+function summarizePayrollAttendance(
+  employee: { id: string; joiningDate?: Date | null },
+  { start, end, records, leaves, holidays, shift, rosters }: Awaited<ReturnType<typeof loadPayrollAttendance>>,
+  includeOvertime: boolean,
+  weeklyOffs?: "resolve_from_shifts" | readonly string[],
+): AttendanceSummary {
   const recordByDay = new Map(records.map((r) => [istDayStartKey(r.date), r]));
   const holidaySet = new Set(holidays.map((h) => istDayStartKey(h.date)));
   const recurringHolidaySet = new Set(
@@ -271,6 +328,7 @@ export async function attendanceSummary(
   const rosterByDay = new Map(
     rosters.map((r) => [istDayStartKey(r.date), r.shift]),
   );
+  const weeklyOffDates = new Set(weeklyOffs === "resolve_from_shifts" ? [] : weeklyOffs);
 
   const unresolved = records.filter(attendanceRequiresReview);
   if (unresolved.length) throw new Error(`Payroll blocked for employee ${employee.id}: resolve attendance requiring review on ${unresolved.map((r) => new Date(r.date.getTime() + 5.5 * 3600000).toISOString().slice(0, 10)).join(", ")} before calculating pay.`);
@@ -300,8 +358,10 @@ export async function attendanceSummary(
   };
 
   for (let d = start; d < end; d = new Date(d.getTime() + 24 * 3600 * 1000)) {
-    const istDay = new Date(d.getTime() + 5.5 * 3600 * 1000);
     const key = istDayStartKey(d);
+    if (weeklyOffs === "resolve_from_shifts" && isShiftWeeklyOff(rosterByDay.get(key) ?? shift, key)) {
+      weeklyOffDates.add(key);
+    }
     if (employee.joiningDate && key < istDayStartKey(employee.joiningDate))
       continue;
     const leave = leaves.find(
@@ -343,21 +403,22 @@ export async function attendanceSummary(
       continue;
     }
 
-    summary.workingDays++;
     const rec = recordByDay.get(key);
-    if (!rec) {
+    const weeklyOff = weeklyOffDates.has(key);
+    if (!weeklyOff) summary.workingDays++;
+    if (rec?.status === "present" || rec?.status === "permission") summary.presentDays++;
+    else if (rec?.status === "late") summary.lateDays++;
+    else if (rec?.status === "half_day") {
+      summary.halfDays++;
+      if (weeklyOff) summary.halfDaysWorkedOnWeeklyOff = (summary.halfDaysWorkedOnWeeklyOff ?? 0) + 1;
+    } else if (!weeklyOff) {
       summary.absentDays++;
-      continue;
     }
-    if (rec.status === "present") summary.presentDays++;
-    else if (rec.status === "late") summary.lateDays++;
-    else if (rec.status === "half_day") summary.halfDays++;
-    else if (rec.status === "permission") summary.presentDays++;
-    else summary.absentDays++;
 
     accumulateHours(key, rec);
   }
 
+  if (weeklyOffs !== undefined) summary.weeklyOffDates = [...weeklyOffDates];
   return summary;
 }
 
@@ -816,10 +877,7 @@ export function computePayroll(
     config.salaryDivisorMethod === "calendar_days"
       ? calendarDaysInPayrollMonth(month)
       : (config.monthlyDivisor ?? 26);
-  const unpaidDayFractions =
-    summary.absentDays +
-    summary.halfDays * 0.5 +
-    (summary.unpaidLeaveDays ?? 0);
+  const unpaidDayFractions = unpaidAttendanceDays(summary);
   const appliedLopDays =
     config.deductAbsentDays && mode === "monthly"
       ? Math.min(Math.max(unpaidDayFractions, 0), divisorUsed)
@@ -1411,18 +1469,25 @@ export async function generatePayslipForEmployee(
       const manualSource = manualUpload
         ? await resolveManualPayrollSource(tx, tenantId, employee.locationId, month, manualUpload, employee.id)
         : null;
-      if (manualSource && employee.payMode === "hourly") throw new Error("Manual day marks cannot be used for hourly payroll.");
-      if (manualSource && !config.deductAbsentDays && (manualSource.summary.absentDays || manualSource.summary.unpaidLeaveDays)) throw new Error("Publish a payroll policy with unpaid-day deduction enabled before using L or blank unpaid days.");
-      if (payrollRunId) {
-        const first = await tx.payslip.findFirst({ where: { payrollRunId }, select: { inputSnapshot: true } });
-        if (first && manualUploadId(first.inputSnapshot) !== (manualUpload ?? null)) throw new Error("A payroll run must use one attendance source. Cancel the draft before replacing its source.");
-      }
+      if (manualSource) validateManualPayrollSource(manualSource, employee.payMode, config.deductAbsentDays);
+      const firstPayslip = payrollRunId ? await tx.payslip.findFirst({
+        where: { payrollRunId },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { inputSnapshot: true },
+      }) : null;
+      if (firstPayslip && manualUploadId(firstPayslip.inputSnapshot) !== (manualUpload ?? null)) throw new Error("A payroll run must use one attendance source. Cancel the draft before replacing its source.");
+      const useShiftWeeklyOffs = !manualSource && payrollRunUsesShiftWeeklyOffs(
+        firstPayslip,
+        policySnapshot?.appliedRules.useShiftWeeklyOffs ?? workspaceUsesShiftWeeklyOffs(tenantConfig),
+      );
+      const appliedRules = policySnapshot ? { ...policySnapshot.appliedRules, useShiftWeeklyOffs } : undefined;
       const summary = manualSource?.summary ?? await attendanceSummary(
         tenantId,
         employee,
         month,
         true,
         tx,
+        useShiftWeeklyOffs ? "resolve_from_shifts" : undefined,
       );
 
       const [loans, adjustments, taxDecl, tenant] = await Promise.all([
@@ -1536,10 +1601,7 @@ export async function generatePayslipForEmployee(
               result.lateDays +
               result.halfDays * 0.5 +
               result.paidLeaveDays,
-            lop:
-              result.absentDays +
-              result.halfDays * 0.5 +
-              result.unpaidLeaveDays,
+            lop: unpaidAttendanceDays(summary),
           },
           components: documentComponents(result),
           totals: {
@@ -1592,7 +1654,7 @@ export async function generatePayslipForEmployee(
             netSalary: result.netSalary,
             payrollConfigurationId: policySnapshot?.configurationId,
             payrollConfigurationVersion: policySnapshot?.configurationVersion,
-            payrollPolicyRules: policySnapshot?.appliedRules as unknown as
+            payrollPolicyRules: appliedRules as unknown as
               Prisma.InputJsonValue | undefined,
             inputSnapshot: {
               version: 2,
@@ -1634,6 +1696,7 @@ export async function generatePayslipForEmployee(
                 ifscCode: employee.ifscCode ?? null,
               },
               attendance: summary,
+              adjustmentInputs: adjustments,
               loanAllocations,
               componentAssignments: componentAssignments.map((assignment) => ({
                 id: assignment.id,
@@ -1641,9 +1704,10 @@ export async function generatePayslipForEmployee(
                 effectiveFrom: assignment.effectiveFrom.toISOString(),
                 effectiveTo: assignment.effectiveTo?.toISOString() ?? null,
               })),
-              policy: policySnapshot?.appliedRules ?? {
+              policy: appliedRules ?? {
                 source: "tenant_config",
                 payrollConfig: config,
+                useShiftWeeklyOffs,
               },
               result,
             } as unknown as Prisma.InputJsonValue,

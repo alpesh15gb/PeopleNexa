@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createPortal } from "react-dom";
 import { Bell, CheckCheck, Info, CheckCircle2, AlertTriangle, XCircle, Inbox, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 interface Notif {
   id: string;
@@ -34,6 +35,7 @@ function timeAgo(dateStr: string) {
 }
 
 export function NotificationsBell() {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState({ left: 16, top: 76, width: 320, maxHeight: 400 });
@@ -73,10 +75,12 @@ export function NotificationsBell() {
   const [items, setItems] = useState<Notif[]>([]);
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [markingRead, setMarkingRead] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/notifications?limit=8");
+      if (!res.ok) return;
       const data = await res.json();
       setItems(data.notifications ?? []);
       setUnread(data.unread ?? 0);
@@ -94,13 +98,23 @@ export function NotificationsBell() {
   }, [load]);
 
   async function markAll() {
-    await fetch("/api/notifications/mark-read", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ all: true }),
-    });
-    setUnread(0);
-    setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    if (markingRead) return;
+    setMarkingRead(true);
+    try {
+      const response = await fetch("/api/notifications/mark-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true }),
+      });
+      if (!response.ok) throw new Error("Could not mark notifications as read.");
+      setUnread(0);
+      setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      await load();
+    } catch {
+      toast("error", "Could not mark notifications as read.");
+    } finally {
+      setMarkingRead(false);
+    }
   }
 
   return (
@@ -132,7 +146,7 @@ export function NotificationsBell() {
               <p className="font-display text-sm font-semibold">Notifications</p>
               <div className="flex items-center gap-3">
               {unread > 0 && (
-                <button onClick={markAll} className="flex cursor-pointer items-center gap-1 rounded-md text-[11.5px] font-medium text-primary transition-colors duration-200 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                <button onClick={markAll} disabled={markingRead} className="flex cursor-pointer items-center gap-1 rounded-md text-[11.5px] font-medium text-primary transition-colors duration-200 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:opacity-50">
                   <CheckCheck className="h-3.5 w-3.5" /> Mark all read
                 </button>
               )}

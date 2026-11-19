@@ -4,28 +4,30 @@ import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { ExpensesPanel } from "./expenses-panel";
+import { redirect } from "next/navigation";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { recordPageNumber, recordPagination, recordPageRedirect, type RecordSearchParams } from "@/lib/document-expense-pagination";
+import { expenseSummary } from "@/lib/expense-records";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmployeeExpensesPage() {
-  const session = await requireSession();
-  const lang = await getLang();
+export default async function EmployeeExpensesPage({ searchParams }: { searchParams: Promise<RecordSearchParams> }) {
+  const [session, lang, params] = await Promise.all([requireSession(), getLang(), searchParams]);
+  const where = { tenantId: session.tenantId, employeeId: session.sub };
 
-  const [claims, summary] = await Promise.all([
-    prisma.expenseClaim.findMany({
-      where: { employeeId: session.sub },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    }),
-    prisma.expenseClaim.groupBy({
-      by: ["status"],
-      where: { employeeId: session.sub },
-      _count: true,
-      _sum: { amount: true },
-    }),
-  ]);
+  const { total, byStatus } = await expenseSummary(where);
+  const path = "/employee/expenses";
+  const pagination = recordPagination(total, recordPageNumber(params.page) ?? 1);
+  const redirectTo = recordPageRedirect(path, params, pagination);
+  if (redirectTo) redirect(redirectTo);
 
-  const byStatus = new Map(summary.map((s) => [s.status, s]));
+  const claims = await prisma.expenseClaim.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: pagination.offset,
+    take: pagination.pageSize,
+  });
+
   const settledAmount = byStatus.get("settled")?._sum.amount ?? 0;
 
   return (
@@ -36,7 +38,7 @@ export default async function EmployeeExpensesPage() {
       />
       <Card>
         <CardContent className="p-0">
-          <ExpensesPanel
+          <ExpensesPanel key={pagination.page}
             claims={claims.map((c) => ({
               id: c.id,
               title: c.title,
@@ -44,13 +46,16 @@ export default async function EmployeeExpensesPage() {
               amount: c.amount,
               description: c.description,
               receiptUrl: c.receiptUrl,
+              reviewNote: c.reviewNote,
               status: c.status,
               createdAt: c.createdAt.toISOString(),
             }))}
+            totalClaims={total}
             lang={lang}
           />
         </CardContent>
       </Card>
+      <DocumentExpensePagination path={path} params={params} pagination={pagination} label="claims" />
     </div>
   );
 }

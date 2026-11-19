@@ -3,7 +3,8 @@ import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
 import { PLANS, MODULES } from "@/lib/modules";
 import { getEffectivePlan } from "@/lib/plans-server";
-import { invalidateTenantAccess } from "@/lib/modules-server";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
+import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -11,6 +12,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     const { id } = await ctx.params;
     const tenant = await prisma.tenant.findUnique({
       where: { id },
+      omit: { config: true },
       include: {
         _count: { select: { employees: true } },
         modules: { orderBy: { module: "asc" } },
@@ -32,23 +34,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   try {
     const sa = await requireSuperAdmin();
     const { id } = await ctx.params;
-    const body = await req.json();
-
-    const tenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!tenant) return NextResponse.json({ error: "Tenant not found." }, { status: 404 });
-
-    const data: Record<string, unknown> = {};
+    const body = (await req.json().catch(() => null)) ?? {};
+    const data: Prisma.TenantUpdateInput = {};
     if (body.name !== undefined) data.name = String(body.name).trim();
+    if (data.name === "") return NextResponse.json({ error: "Workspace name is required." }, { status: 400 });
     if (body.email !== undefined) data.email = body.email ? String(body.email) : null;
     if (body.phone !== undefined) data.phone = body.phone ? String(body.phone) : null;
-    if (body.status !== undefined && ["active", "suspended"].includes(body.status)) data.status = body.status;
-    if (body.plan !== undefined) {
-      if (!PLANS.some((p) => p.key === body.plan)) {
-        return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
-      }
-      data.plan = body.plan;
-      // Changing plan applies its default seat count unless one is given.
-      if (body.seats === undefined) data.seats = (await getEffectivePlan(body.plan)).seats;
+    if (body.status !== undefined) {
+      if (!["active", "suspended"].includes(body.status)) return NextResponse.json({ error: "Unknown workspace status." }, { status: 400 });
+      data.status = body.status;
     }
     if (body.seats !== undefined) {
       const seats = Number(body.seats);
@@ -58,41 +52,52 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.seats = seats;
     }
     if (body.subscriptionExpiry !== undefined) {
-      data.subscriptionExpiry = body.subscriptionExpiry ? new Date(body.subscriptionExpiry) : null;
+      const expiry = body.subscriptionExpiry ? new Date(body.subscriptionExpiry) : null;
+      if (expiry && !Number.isFinite(expiry.getTime())) return NextResponse.json({ error: "Enter a valid subscription expiration date." }, { status: 400 });
+      data.subscriptionExpiry = expiry;
     }
+    if (body.plan !== undefined && !PLANS.some(({ key }) => key === body.plan)) {
+      return NextResponse.json({ error: "Unknown plan." }, { status: 400 });
+    }
+    const newPlan = body.plan !== undefined ? await getEffectivePlan(body.plan) : null;
 
-    // Any license-field change is recorded in the License history.
-    const licenseChanged =
-      (data.plan !== undefined && data.plan !== tenant.plan) ||
-      (data.seats !== undefined && data.seats !== tenant.seats) ||
-      (data.subscriptionExpiry !== undefined &&
-        String(data.subscriptionExpiry ?? "") !== String(tenant.subscriptionExpiry ?? ""));
-
-    const updated = await prisma.tenant.update({
-      where: { id },
-      data,
-    });
-
-    if (licenseChanged) {
-      await prisma.license.create({
-        data: {
-          tenantId: id,
-          plan: updated.plan,
-          seats: updated.seats,
-          expiresAt: updated.subscriptionExpiry,
-          note: body.licenseNote || `License updated by super admin`,
-          createdBy: sa.sub,
-        },
+    const updated = await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUnique({ where: { id }, select: { plan: true, seats: true, subscriptionExpiry: true } });
+      if (!tenant) return null;
+      const changedPlan = newPlan && newPlan.key !== tenant.plan ? newPlan : null;
+      const result = await tx.tenant.update({
+        where: { id },
+        omit: { config: true },
+        data: { ...data, ...(changedPlan ? { plan: changedPlan.key, seats: data.seats ?? changedPlan.seats } : {}) },
       });
-      // Apply plan defaults to modules on plan change (admins can still fine-tune).
-      if (data.plan !== undefined) {
-        await syncModulesToPlan(id, String(data.plan));
+      const licenseChanged = result.plan !== tenant.plan || result.seats !== tenant.seats ||
+        result.subscriptionExpiry?.getTime() !== tenant.subscriptionExpiry?.getTime();
+      if (licenseChanged) {
+        await tx.license.create({
+          data: {
+            tenantId: id, plan: result.plan, seats: result.seats, expiresAt: result.subscriptionExpiry,
+            note: typeof body.licenseNote === "string" && body.licenseNote.trim() ? body.licenseNote.trim() : "License updated by super admin",
+            createdBy: sa.sub,
+          },
+        });
       }
-    }
+      if (changedPlan) {
+        for (const { key: module } of MODULES) {
+          const enabled = changedPlan.modules.includes(module);
+          await tx.tenantModule.upsert({
+            where: { tenantId_module: { tenantId: id, module } },
+            update: { enabled },
+            create: { tenantId: id, module, enabled },
+          });
+        }
+      }
+      return result;
+    }, { isolationLevel: "Serializable", timeout: 15000 });
+    if (!updated) return NextResponse.json({ error: "Tenant not found." }, { status: 404 });
 
-    invalidateTenantAccess(id);
     return NextResponse.json({ tenant: updated });
   } catch (err) {
+    if (isTransactionWriteConflict(err)) return NextResponse.json({ error: "Workspace settings changed. Refresh and try again." }, { status: 409 });
     const message = err instanceof Error && err.message === "unauthorized" ? "unauthorized" : "Failed to update tenant.";
     const status = message === "unauthorized" ? 401 : 400;
     return NextResponse.json({ error: message }, { status });
@@ -106,25 +111,10 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     const tenant = await prisma.tenant.findUnique({ where: { id }, select: { id: true, slug: true } });
     if (!tenant) return NextResponse.json({ error: "Tenant not found." }, { status: 404 });
     await prisma.tenant.delete({ where: { id } });
-    invalidateTenantAccess(id);
     return NextResponse.json({ success: true });
   } catch (err) {
     const message = err instanceof Error && err.message === "unauthorized" ? "unauthorized" : "Failed to delete tenant.";
     const status = message === "unauthorized" ? 401 : 500;
     return NextResponse.json({ error: message }, { status });
   }
-}
-
-/** Re-point the tenant's module flags to a plan's defaults. */
-async function syncModulesToPlan(tenantId: string, planKey: string) {
-  const defaults = (await getEffectivePlan(planKey)).modules;
-  await prisma.$transaction(
-    MODULES.map((m) =>
-      prisma.tenantModule.upsert({
-        where: { tenantId_module: { tenantId, module: m.key } },
-        update: { enabled: defaults.includes(m.key) },
-        create: { tenantId, module: m.key, enabled: defaults.includes(m.key) },
-      })
-    )
-  );
 }

@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { prisma } from "./prisma";
-import { createPunchForEvent } from "./punch-idempotency";
-import { attendanceDayForPunch, reconcileEmployeeDay } from "./reconcile";
+import { isUniqueWriteConflict, PENDING_DEVICE_ATTENDANCE, reconcileDeviceEvent } from "./device-attendance-ingest";
 import type { RealtimeDevice } from "@/generated/prisma/client";
 import { REALTIME_ONLINE_WINDOW_MS } from "./device-health";
 
@@ -27,27 +26,6 @@ export interface RealtimePunch {
   verifyMode?: string;
   inOutMode?: string;
   rawLine: string;
-}
-
-function prismaErrorCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? (error as { code?: string }).code
-    : undefined;
-}
-
-async function reconcileWithRetry(
-  tenant: Parameters<typeof reconcileEmployeeDay>[0],
-  employee: Parameters<typeof reconcileEmployeeDay>[1],
-  istDay: Date
-) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await reconcileEmployeeDay(tenant, employee, istDay, { finalize: false });
-    } catch (error) {
-      const code = prismaErrorCode(error);
-      if ((code !== "P2002" && code !== "P2034") || attempt === 1) throw error;
-    }
-  }
 }
 
 export function realtimeStatusOf(
@@ -82,9 +60,10 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
   const existing = await prisma.realtimeLog.findFirst({
     where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
   });
-  if (existing?.processed) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
+  if (existing?.processed && !existing.error) return { accepted: true as const, action: "duplicate" as const, logId: existing.id };
 
   let log = existing;
+  let resume = Boolean(existing);
   if (!log) {
     try {
       log = await prisma.realtimeLog.create({
@@ -98,62 +77,41 @@ export async function handleRealtimePunch(device: RealtimeDevice, punch: Realtim
         },
       });
     } catch (error) {
-      if (prismaErrorCode(error) !== "P2002") throw error;
+      if (!isUniqueWriteConflict(error)) throw error;
       const duplicate = await prisma.realtimeLog.findFirst({
         where: { realtimeDeviceId: device.id, userId: punch.userId, punchTime: punch.punchTime },
       });
       if (!duplicate) throw error;
-      if (duplicate.processed) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
+      if (duplicate.processed && !duplicate.error) return { accepted: true as const, action: "duplicate" as const, logId: duplicate.id };
       log = duplicate;
+      resume = true;
     }
   }
 
-  const employee = await prisma.employee.findFirst({
-    where: { tenantId: device.tenantId, status: "active", OR: [{ deviceCode: punch.userId }, { deviceCode: null, employeeNumber: punch.userId }] },
-    select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-  });
-  if (!employee) {
-    await prisma.realtimeLog.update({
-      where: { id: log.id },
-      data: { error: `No active employee with device code "${punch.userId}" in this workspace`, processed: true },
-    });
-    return { accepted: true as const, action: "no_employee" as const, logId: log.id };
-  }
-
-  const hint =
-    String(punch.inOutMode ?? "0").trim() === "5"
-      ? "in"
-      : String(punch.inOutMode ?? "0").trim() === "1"
-        ? "out"
-        : "unknown";
-  const created = await createPunchForEvent({
-      tenantId: device.tenantId,
-      employeeId: employee.id,
-      realtimeDeviceId: device.id,
-      source: "realtime",
-      eventKey: `realtime-log:${log.id}`,
-      punchTime: punch.punchTime,
-      inOutHint: hint,
-  });
-  if (!created.created) {
+  const event = { id: log.id, userId: punch.userId, punchTime: punch.punchTime };
+  try {
+    const processed = await reconcileDeviceEvent(device, event, "realtime", resume, punch.inOutMode);
+    if (!processed) {
+      await prisma.realtimeLog.update({
+        where: { id: log.id },
+        data: { processed: true, error: `No active employee with device code "${punch.userId}" in this workspace` },
+      });
+      return { accepted: true as const, action: "no_employee" as const, logId: log.id };
+    }
     await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-    return { accepted: true as const, action: "duplicate" as const, logId: log.id };
+    return {
+      accepted: true as const,
+      action: processed.created ? (processed.result.action === "created" ? "in" as const : "out" as const) : "duplicate" as const,
+      logId: log.id,
+      attendanceId: processed.result.attendanceId,
+    };
+  } catch (error) {
+    await prisma.realtimeLog.updateMany({
+      where: { id: log.id, OR: [{ processed: false }, { error: { not: null } }] },
+      data: { processed: false, error: PENDING_DEVICE_ATTENDANCE },
+    }).catch(() => undefined);
+    throw error;
   }
-
-  const tenant = await prisma.tenant.findUnique({ where: { id: device.tenantId } });
-  const result = await reconcileWithRetry(
-    tenant ?? { id: device.tenantId, config: null },
-    { id: employee.id, shiftId: employee.shiftId, tenantId: device.tenantId, branchId: employee.branchId },
-    await attendanceDayForPunch(employee, punch.punchTime)
-  );
-
-  await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-  return {
-    accepted: true as const,
-    action: result.action === "created" ? ("in" as const) : ("out" as const),
-    logId: log.id,
-    attendanceId: result.attendanceId,
-  };
 }
 
 /** Re-attempt realtime logs flagged with no-employee (mirrors reprocessFailedLogs). */
@@ -169,50 +127,27 @@ export async function reprocessFailedRealtimeLogs(
       OR: [{ processed: false }, { error: { not: null } }],
     },
     select: { id: true, realtimeDeviceId: true, userId: true, punchTime: true },
+    orderBy: { punchTime: "desc" },
     take: limit,
   });
   const counters = { accepted: 0, duplicate: 0, failed: 0 };
   for (const log of logs) {
+    if (!log.userId || !log.punchTime) {
+      counters.failed++;
+      continue;
+    }
     try {
-      if (!log.userId || !log.punchTime) {
-        counters.failed++;
-        continue;
-      }
-      const device = await prisma.realtimeDevice.findUnique({ where: { id: log.realtimeDeviceId } });
-      if (!device) {
-        counters.failed++;
-        continue;
-      }
-      const employee = await prisma.employee.findFirst({
-        where: { tenantId, status: "active", OR: [{ deviceCode: log.userId }, { deviceCode: null, employeeNumber: log.userId }] },
-        select: { id: true, shiftId: true, branchId: true, tenantId: true, shift: true },
-      });
-      if (!employee) {
-        counters.failed++;
-        continue;
-      }
-      const created = await createPunchForEvent({
-          tenantId,
-          employeeId: employee.id,
-          realtimeDeviceId: device.id,
-          source: "realtime",
-          eventKey: `realtime-log:${log.id}`,
-          punchTime: log.punchTime,
-          inOutHint: "unknown",
-      });
-      if (!created.created) {
-        await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-        counters.duplicate++;
-        continue;
-      }
-      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-      await reconcileWithRetry(
-        tenant ?? { id: tenantId, config: null },
-        { id: employee.id, shiftId: employee.shiftId, tenantId, branchId: employee.branchId },
-        await attendanceDayForPunch(employee, log.punchTime)
+      const processed = await reconcileDeviceEvent(
+        { id: log.realtimeDeviceId, tenantId },
+        { id: log.id, userId: log.userId, punchTime: log.punchTime },
+        "realtime", true,
       );
+      if (!processed) {
+        counters.failed++;
+        continue;
+      }
       await prisma.realtimeLog.update({ where: { id: log.id }, data: { error: null, processed: true } });
-      counters.accepted++;
+      counters[processed.created ? "accepted" : "duplicate"]++;
     } catch {
       counters.failed++;
     }

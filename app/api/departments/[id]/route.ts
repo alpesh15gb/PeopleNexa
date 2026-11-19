@@ -40,6 +40,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   const department = await prisma.department.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!department) return NextResponse.json({ error: "not found" }, { status: 404 });
-  await prisma.department.delete({ where: { id } });
+  const changed = await prisma.department.deleteMany({ where: { id, tenantId: session.tenantId, employees: { none: {} } } });
+  if (!changed.count) return NextResponse.json({ error: "Reassign employees to another department before deleting this one." }, { status: 409 });
   return NextResponse.json({ success: true });
 }

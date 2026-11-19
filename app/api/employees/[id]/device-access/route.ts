@@ -1,4 +1,4 @@
-import { needsEbioAccessCommand } from "@/lib/ebio-access-plan";
+import { canRetryEbioBlock, EBIO_BLOCK_RETRY_LEASE_MS, needsEbioAccessCommand } from "@/lib/ebio-access-plan";
 import { employeeLocationScope } from "@/lib/location-scope";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +6,7 @@ import { requireActiveSession } from "@/lib/session";
 import { appendAudit } from "@/lib/audit";
 import { getEbioserverConfig, getEbioserverPassword, setEbioUserDeviceAccess, updateEbioEmployee } from "@/lib/ebioserver";
 import { ebioLocationCode, topologySyncInstruction } from "@/lib/ebio-location";
+import type { Prisma } from "@/generated/prisma/client";
 
 async function locationIdFor(session: { sub: string; tenantId: string; role: string }) {
   if (session.role !== "location_manager") return null;
@@ -50,11 +51,76 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     provisionResults,
     mode: employee.status === "inactive" ? "blocked" : employee.deviceAccessEnabled ? "restricted" : "all",
     devices: devices.map((device) => {
-      const policy = state.get(device.id) ?? { allowed: employee.status === "active" && !employee.deviceAccessEnabled, commandStatus: employee.status === "inactive" ? "pending" : employee.deviceAccessEnabled ? "pending" : "unrestricted", lastCommandAt: null, lastResponse: null, lastError: null };
-      return { ...device, locationCode: ebioLocationCode(device.config), ...policy, blocked: !policy.allowed };
+      const recorded = state.get(device.id);
+      const policy = recorded ?? { allowed: employee.status === "active" && !employee.deviceAccessEnabled, commandStatus: employee.status === "inactive" ? "pending" : employee.deviceAccessEnabled ? "pending" : "unrestricted", lastCommandAt: null, lastResponse: null, lastError: null };
+      return { ...device, locationCode: ebioLocationCode(device.config), ...policy, blocked: !policy.allowed, recorded: Boolean(recorded), retryableBlock: employee.status === "inactive" && !!recorded && canRetryEbioBlock(recorded) };
     }),
     deviceIds: access.filter((row) => row.allowed && devices.some((device) => device.id === row.deviceId)).map((row) => row.deviceId),
   });
+}
+
+/** Retry recorded deny commands for an inactive employee. No provisioning or grant changes. */
+export async function PATCH(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const session = await requireActiveSession().catch(() => null);
+  if (!session || (session.role !== "admin" && session.role !== "location_manager")) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const { id } = await ctx.params;
+  const locationId = await locationIdFor(session);
+  if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const employeeScope = { id, tenantId: session.tenantId, ...(locationId ? employeeLocationScope(locationId) : {}) };
+  const employee = await prisma.employee.findFirst({ where: employeeScope, select: { status: true, deviceCode: true } });
+  if (!employee) return NextResponse.json({ error: "Employee not found." }, { status: 404 });
+  if (employee.status !== "inactive") return NextResponse.json({ error: "Block retries are available for inactive employees." }, { status: 409 });
+  if (!employee.deviceCode) return NextResponse.json({ error: "Assign a device code before retrying block commands." }, { status: 409 });
+
+  const now = new Date();
+  const eligibility: Prisma.EmployeeDeviceAccessWhereInput = {
+    tenantId: session.tenantId,
+    employeeId: id,
+    employee: { ...employeeScope, status: "inactive", deviceCode: employee.deviceCode },
+    device: { tenantId: session.tenantId, status: "active", config: { path: ["ebioserver"], equals: true }, ...(locationId ? { branch: { locationId } } : {}) },
+    allowed: false,
+    OR: [
+      { commandStatus: "failed" },
+      { commandStatus: "pending", lastCommandAt: null },
+      { commandStatus: "pending", lastCommandAt: { lte: new Date(now.getTime() - EBIO_BLOCK_RETRY_LEASE_MS) } },
+    ],
+  };
+  const pending = await prisma.employeeDeviceAccess.findMany({ where: eligibility, select: { id: true, commandStatus: true, lastCommandAt: true, device: { select: { id: true, name: true, serialNumber: true } } }, orderBy: { deviceId: "asc" } });
+  if (!pending.length) return NextResponse.json({ results: [] });
+
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { config: true } });
+  const profile = getEbioserverConfig(tenant);
+  let connected = false;
+  try {
+    connected = Boolean(profile.enabled && profile.url && getEbioserverPassword(profile));
+  } catch {
+    // An unreadable stored credential cannot be used for a physical command.
+  }
+  if (!connected) return NextResponse.json({ error: "Configure and enable eBioserver before retrying block commands." }, { status: 409 });
+
+  const results: Array<{ deviceId: string; name: string; allowed: false; status: "sent" | "failed"; error?: string }> = [];
+  for (const { id: policyId, device, commandStatus, lastCommandAt } of pending) {
+    const claimedAt = new Date();
+    const claimed = await prisma.employeeDeviceAccess.updateMany({ where: { id: policyId, ...eligibility, commandStatus, lastCommandAt }, data: { commandStatus: "pending", lastCommandAt: claimedAt } });
+    if (!claimed.count) continue;
+
+    let status: "sent" | "failed" = "sent";
+    let lastResponse: string | null = null;
+    let lastError: string | null = null;
+    try {
+      lastResponse = await setEbioUserDeviceAccess(profile, device.serialNumber, employee.deviceCode, false);
+    } catch (error) {
+      status = "failed";
+      lastError = error instanceof Error ? error.message : "Device block failed.";
+    }
+    await prisma.employeeDeviceAccess.updateMany({
+      where: { id: policyId, tenantId: session.tenantId, allowed: false, commandStatus: "pending", lastCommandAt: claimedAt, employee: eligibility.employee },
+      data: { commandStatus: status, lastCommandAt: new Date(), lastResponse, lastError },
+    });
+    results.push({ deviceId: device.id, name: device.name, allowed: false, status, error: lastError ?? undefined });
+  }
+  if (results.length) await appendAudit({ tenantId: session.tenantId, actorId: session.sub, actorRole: session.role, action: "employee.device_access.retry_block", entity: "Employee", entityId: id, summary: `Retried ${results.length} device block command(s)`, after: { results } });
+  return NextResponse.json({ results }, { status: results.some((result) => result.status === "failed") ? 207 : 200 });
 }
 
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

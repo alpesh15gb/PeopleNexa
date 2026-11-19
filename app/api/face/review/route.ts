@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { attendanceDayForPunch, reconcileEmployeeDay, isFinalizable, shiftForEmployeeDay } from "@/lib/reconcile";
-import { istStartOfDay } from "@/lib/ist";
 import { notifyEmployee } from "@/lib/notifications";
 import { auditEmployeeLabel } from "@/lib/audit-display";
 import { employeeLocationScope } from "@/lib/location-scope";
 import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
+import { workspaceRegion } from "@/lib/workspace-region";
 
 /**
  * POST — human review of a gray-zone / rejected face punch, or authorization
@@ -43,84 +44,70 @@ export async function POST(req: NextRequest) {
   });
   if (!punch) return NextResponse.json({ error: "Punch not found" }, { status: 404 });
   if (punch.employeeId === session.sub) return NextResponse.json({ error: "Another manager must review your punch." }, { status: 403 });
-  const isPendingAuth = (punch as { authStatus?: string }).authStatus === "pending";
+  const isPendingAuth = punch.authStatus === "pending";
   if (!isPendingAuth && punch.faceStatus !== "review" && punch.faceStatus !== "rejected") {
     return NextResponse.json({ error: "Punch is not pending review." }, { status: 409 });
   }
 
-  const employee = await prisma.employee.findFirst({
-    where: { id: punch.employeeId, tenantId: session.tenantId },
-    include: { shift: true },
-  });
+  const { tenantId } = session;
+  const approved = decision === "accept";
+  const status = approved ? "approved" : "declined";
+  const authorization = { faceStatus: status, authStatus: status };
 
-  // Capture narrowed values for the closure below (TS can't narrow across it).
-  const tenantId = session.tenantId;
-  const punchTimeValue = punch.punchTime;
-  const workDay = employee ? await attendanceDayForPunch(employee, punchTimeValue) : istStartOfDay(punchTimeValue);
-  async function saveDecision(data: { faceStatus: string; authStatus?: string }) {
-    try {
-      const count = await prisma.$transaction(async tx => {
-        await assertLeavePayrollOpen(tx, tenantId, punch!.employeeId, workDay, workDay);
-        const changed = await tx.punch.updateMany({ where: { id: punch!.id, tenantId, authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, data });
-        if (changed.count) await tx.auditLog.create({ data: { tenantId, actorId: session!.sub, actorRole: session!.role, action: "punch.authorization", entity: "Punch", entityId: punch!.id, summary: `Mobile punch ${decision === "accept" ? "approved" : "declined"} for ${employee ? auditEmployeeLabel(employee) : punch!.employeeId} — evidence retained`, before: { authStatus: punch!.authStatus, faceStatus: punch!.faceStatus }, after: { ...data, employeeId: punch!.employeeId, ...(employee ? { employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber } } : {}), punchTime: punchTimeValue.toISOString() } } });
-        return changed.count;
-      }, { isolationLevel: "Serializable" });
-      return count === 1 ? null : "Punch changed during review. Refresh and try again.";
-    } catch (error) {
-      if (["PAYROLL_LOCKED", "P2034"].includes((error as { code?: string }).code ?? "")) return (error as Error).message;
-      throw error;
-    }
-  }
-
-  async function reconcileDay() {
-    if (!employee) return;
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    await reconcileEmployeeDay(
-      tenant ?? { id: tenantId, config: null },
-      {
-        id: employee.id,
-        shiftId: employee.shiftId,
-        tenantId: employee.tenantId,
-        branchId: employee.branchId,
-      },
-      await attendanceDayForPunch(employee, punchTimeValue),
-      { finalize: isFinalizable(workDay, undefined, await shiftForEmployeeDay(employee, workDay)) }
-    );
-  }
-
-  if (decision === "accept") {
-    if (isPendingAuth) {
-      // Authorize this event only; another held event may be its valid OUT.
-      const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
-      if (error) return NextResponse.json({ error }, { status: 409 });
-      await reconcileDay();
-      await notifyEmployee(
-        session.tenantId,
-        punch.employeeId,
-        "success",
-        "Punch approved",
-        "Your held punch was approved by your admin and counted toward attendance."
+  try {
+    const changed = await prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.findFirst({ where: { id: punch.employeeId, tenantId } });
+      if (!employee) return false;
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { id: true, config: true } });
+      const { timeZone } = workspaceRegion(tenant?.config);
+      const workDay = await attendanceDayForPunch(employee, punch.punchTime, timeZone, tx);
+      await assertLeavePayrollOpen(tx, tenantId, employee.id, workDay, workDay);
+      const claim = await tx.punch.updateMany({
+        where: { id: punch.id, tenantId, authStatus: punch.authStatus, faceStatus: punch.faceStatus, punchTime: punch.punchTime },
+        data: authorization,
+      });
+      if (claim.count !== 1) return false;
+      await tx.attendance.updateMany({
+        where: { tenantId, employeeId: employee.id, date: workDay, finalized: true },
+        data: { finalized: false },
+      });
+      const shift = await shiftForEmployeeDay(employee, workDay, timeZone, tx);
+      await reconcileEmployeeDay(
+        tenant ?? { id: tenantId, config: null }, employee, workDay,
+        { finalize: isFinalizable(workDay, undefined, shift, undefined, undefined, timeZone) }, tx,
       );
-      return NextResponse.json({ ok: true, faceStatus: "approved", authStatus: "approved" });
+      await tx.auditLog.create({
+        data: {
+          tenantId, actorId: session.sub, actorRole: session.role, action: "punch.authorization",
+          entity: "Punch", entityId: punch.id,
+          summary: `Mobile punch ${status} for ${auditEmployeeLabel(employee)}`,
+          before: { authStatus: punch.authStatus, faceStatus: punch.faceStatus },
+          after: { ...authorization, employeeId: employee.id, employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeNumber: employee.employeeNumber }, punchTime: punch.punchTime.toISOString() },
+        },
+      });
+      return true;
+    }, { isolationLevel: "Serializable" });
+    if (!changed) return NextResponse.json({ error: "Punch changed during review. Refresh and try again." }, { status: 409 });
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === "PAYROLL_LOCKED" && error instanceof Error) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
-    const error = await saveDecision({ faceStatus: "approved", authStatus: "approved" });
-    if (error) return NextResponse.json({ error }, { status: 409 });
-    await reconcileDay();
-    return NextResponse.json({ ok: true, faceStatus: "approved", authStatus: "approved" });
+    if (isTransactionWriteConflict(error)) {
+      return NextResponse.json({ error: "Payroll or attendance changed. Refresh and try again." }, { status: 409 });
+    }
+    throw error;
   }
 
-  // Retain declined evidence for reports without counting it toward attendance.
-  const error = await saveDecision({ faceStatus: "declined", authStatus: "declined" });
-  if (error) return NextResponse.json({ error }, { status: 409 });
-  await reconcileDay();
   if (isPendingAuth) {
     await notifyEmployee(
-      session.tenantId,
+      tenantId,
       punch.employeeId,
-      "warning",
-      "Punch declined",
-      "Your held punch was declined by your admin and was not counted. Contact your admin if this is a mistake."
-    );
+      approved ? "success" : "warning",
+      approved ? "Punch approved" : "Punch declined",
+      approved
+        ? "Your held punch was approved and counted toward attendance."
+        : "Your held punch was declined. Contact your admin if this is a mistake.",
+    ).catch((error) => console.warn("[punch review] notification failed:", error));
   }
-  return NextResponse.json({ ok: true, faceStatus: "declined", authStatus: "declined" });
+  return NextResponse.json({ ok: true, ...authorization });
 }

@@ -1,211 +1,84 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
+import { Banknote, BookOpen, Building2, CalendarClock, CalendarDays, ClipboardCheck, FileText, Globe2, IdCard, LayoutDashboard, MapPin, Network, UsersRound, Webhook } from "lucide-react";
+import { PageHeader } from "@/components/ui/card";
+import { getTenantAccess } from "@/lib/modules-server";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
-import {
-  ArrowUpRight,
-  Building2,
-  CalendarClock,
-  FileText,
-  Landmark,
-  MapPin,
-  Network,
-  ShieldCheck,
-  UsersRound,
-} from "lucide-react";
-import { SettingsWorkspace } from "@/components/settings-workspace";
+import { requireActiveSession } from "@/lib/session";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { SettingsDirectory, type SettingsService } from "../settings-directory";
+import { WorkspaceRegionForm } from "./workspace-region-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function CompanySettingsPage() {
-  const session = await requireSession();
-  if (session.role !== "admin") return null;
-  const [
-    profile,
-    locations,
-    shifts,
-    leave,
-    payroll,
-    departments,
-    designations,
-    documents,
-    policies,
-    integrations,
-  ] = await Promise.all([
-    prisma.tenantProfile.findUnique({
-      where: { tenantId: session.tenantId },
-      select: { id: true },
-    }),
-    prisma.location.count({ where: { tenantId: session.tenantId } }),
-    prisma.shift.count({ where: { tenantId: session.tenantId } }),
-    prisma.configurationRecord.count({
+  const session = await requireActiveSession();
+  if (session.role !== "admin") redirect("/admin");
+  const tenantId = session.tenantId;
+  const { modules } = await getTenantAccess(tenantId);
+  const now = new Date();
+  const [tenant, locations, shifts, policies, punch, attendance, correction] = await Promise.all([
+    prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true, config: true, profile: { select: { legalName: true } } } }),
+    prisma.location.count({ where: { tenantId, isActive: true } }),
+    modules.has("shifts") ? prisma.shift.count({ where: { tenantId } }) : 0,
+    modules.has("leaves") || modules.has("payroll") ? prisma.configurationRecord.groupBy({
+      by: ["kind"],
       where: {
-        tenantId: session.tenantId,
-        kind: "leave_policy",
+        tenantId,
+        kind: { in: [...(modules.has("leaves") ? ["leave_policy"] : []), ...(modules.has("payroll") ? ["payroll_policy"] : [])] },
         active: true,
-        effectiveFrom: { lte: new Date() },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
       },
-    }),
-    prisma.configurationRecord.count({
-      where: {
-        tenantId: session.tenantId,
-        kind: "payroll_policy",
-        active: true,
-        effectiveFrom: { lte: new Date() },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
-      },
-    }),
-    prisma.department.count({ where: { tenantId: session.tenantId } }),
-    prisma.designation.count({
-      where: { tenantId: session.tenantId, active: true },
-    }),
-    prisma.document.count({ where: { tenantId: session.tenantId } }),
-    prisma.policy.count({ where: { tenantId: session.tenantId } }),
-    prisma.webhookEndpoint.count({ where: { tenantId: session.tenantId } }),
+      _count: { _all: true },
+    }) : [],
+    prisma.punch.findFirst({ where: { tenantId }, select: { id: true } }),
+    prisma.attendance.findFirst({ where: { tenantId }, select: { id: true } }),
+    prisma.punchCorrection.findFirst({ where: { tenantId }, select: { id: true } }),
   ]);
-  const sections = [
-    [
-      "Company Profile",
-      "/admin/configuration",
-      profile ? "Configured" : "Needs attention",
-      "Legal identity, contacts, logo, and tenant defaults.",
-      Building2,
-    ],
-    [
-      "Locations & Legal Entities",
-      "/admin/locations",
-      locations
-        ? `${locations} location${locations === 1 ? "" : "s"}`
-        : "Needs attention",
-      "Location records and location-specific legal details.",
-      MapPin,
-    ],
-    [
-      "Attendance Rules",
-      "/admin/shifts",
-      shifts ? `${shifts} shift${shifts === 1 ? "" : "s"}` : "Needs attention",
-      "Operational shifts and attendance controls.",
-      CalendarClock,
-    ],
-    [
-      "Leave Policies",
-      "/admin/leaves/policies",
-      leave ? "Settings applied" : "Needs attention",
-      "Allowances, approval rules, carry forward and balance allocation.",
-      ShieldCheck,
-    ],
-    [
-      "Payroll Setup",
-      "/admin/payroll/configuration",
-      payroll ? "Settings applied" : "Needs attention",
-      "Pay schedule, salary structure, deductions, contributions and change history.",
-      Landmark,
-    ],
-    [
-      "Departments & Designations",
-      "/admin/departments",
-      departments || designations
-        ? `${departments} departments · ${designations} designations`
-        : "Needs attention",
-      "Organisation structure used by people records.",
-      UsersRound,
-    ],
-    [
-      "Documents & Branding",
-      "/admin/documents",
-      documents
-        ? `${documents} document${documents === 1 ? "" : "s"}`
-        : "Optional",
-      "Managed documents, company brand assets, and ID-card templates.",
-      FileText,
-    ],
-    [
-      "Policies & Acknowledgements",
-      "/admin/policies",
-      policies
-        ? `${policies} polic${policies === 1 ? "y" : "ies"}`
-        : "Optional",
-      "Published workforce policies and acknowledgement tracking.",
-      ShieldCheck,
-    ],
-    [
-      "Integrations",
-      "/admin/webhooks",
-      integrations
-        ? `${integrations} webhook${integrations === 1 ? "" : "s"}`
-        : "Optional",
-      "Webhook integration endpoints. Device integrations remain in Devices.",
-      Network,
-    ],
-  ] as const;
-  const complete = [
-    profile,
-    locations > 0,
-    shifts > 0,
-    leave > 0,
-    payroll > 0,
-  ].filter(Boolean).length;
+
+  const region = workspaceRegion(tenant.config);
+  const policyCounts = new Map(policies.map(({ kind, _count }) => [kind, _count._all]));
+  const activePolicies = (kind: string) => {
+    const count = policyCounts.get(kind) ?? 0;
+    return count ? `${count} active polic${count === 1 ? "y" : "ies"}` : undefined;
+  };
+  const services: SettingsService[] = [
+    { id: "workspace", title: "Workspace", links: [
+      { href: "/admin/configuration?section=company", title: "Company profile", description: "Legal identity, contacts, address and company logo.", detail: tenant.profile?.legalName ?? tenant.name, icon: Building2 },
+      { href: "#regional-settings", title: "Region and time zone", description: "Country, currency, date formatting and the attendance clock.", detail: `${region.currency} · ${region.timeZone}`, icon: Globe2 },
+      { href: "/admin/locations", title: "Locations", description: "Manage establishments and operating locations.", detail: `${locations} active location${locations === 1 ? "" : "s"}`, icon: MapPin },
+      { href: "/admin/configuration?section=locations", title: "Location profiles", description: "Store contact, legal and branding details for each location.", icon: Building2 },
+      { href: "/admin/configuration?section=dashboard", title: "Dashboard layouts", description: "Choose dashboard widgets for the workspace or for individual locations.", icon: LayoutDashboard },
+    ] },
+    { id: "people-services", title: "People and employee services", links: [
+      { href: "/admin/departments", title: "Departments", description: "Maintain the teams used in employee profiles and reporting.", module: "employees", icon: UsersRound },
+      { href: "/admin/designations", title: "Designations", description: "Manage job titles available on employee records.", module: "employees", icon: ClipboardCheck },
+      { href: "/admin/documents", title: "Employee documents", description: "Record employee documents and track expiry dates.", module: "documents", icon: FileText },
+      { href: "/admin/configuration?section=id-cards", title: "ID-card templates", description: "Manage front and back artwork for workspace and location ID cards.", module: "employees", icon: IdCard },
+      { href: "/admin/policies", title: "Company policies", description: "Publish workforce policies to employee self-service.", module: "policies", icon: BookOpen },
+    ] },
+    { id: "time-and-leave", title: "Attendance and leave", links: [
+      { href: "/admin/shifts", title: "Shifts and weekly offs", description: "Define shift hours, grace periods and weekly days off.", detail: `${shifts} shift${shifts === 1 ? "" : "s"}`, module: "shifts", icon: CalendarClock },
+      { href: "/admin/holidays", title: "Holiday calendar", description: "Set dates that apply to attendance and leave calculations.", module: "holidays", icon: CalendarDays },
+      { href: "/admin/leaves/policies", title: "Leave policies", description: "Manage entitlements, approval rules, carry forward and balances.", detail: activePolicies("leave_policy"), module: "leaves", icon: ClipboardCheck },
+    ] },
+    { id: "payroll-service", title: "Payroll", links: [
+      { href: "/admin/payroll/configuration", title: "Payroll settings", description: "Configure pay schedules, salary components, deductions and contributions.", detail: activePolicies("payroll_policy"), module: "payroll", icon: Banknote },
+    ] },
+    { id: "integrations", title: "Integrations", links: [
+      { href: "/admin/settings", title: "Workspace connections", description: "Configure eBioserver, face match and SMS notifications.", icon: Network },
+      { href: "/admin/webhooks", title: "Webhooks", description: "Manage endpoints that receive workspace events.", module: "platform", icon: Webhook },
+    ] },
+  ];
+  const enabledServices = services
+    .map((service) => ({ ...service, links: service.links.filter(({ module }) => !module || modules.has(module)) }))
+    .filter((service) => service.links.length > 0);
+
   return (
-    <SettingsWorkspace
-      title="Company settings"
-      description="Manage the operational foundations for PeopleNexa. This setup guide is optional and never blocks existing work."
-      progress={{
-        label: "Setup progress",
-        complete,
-        total: 5,
-        detail:
-          "Tenant defaults and published location overrides continue to apply without changing historic records.",
-      }}
-    >
-      <section aria-labelledby="settings-directory">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2
-              id="settings-directory"
-              className="font-display text-lg font-semibold"
-            >
-              Settings directory
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Open a section to manage its existing configuration.
-            </p>
-          </div>
-          <Link
-            className="text-sm font-semibold text-primary underline-offset-4 hover:underline"
-            href="/admin/configuration"
-          >
-            Open configuration editor
-          </Link>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {sections.map(([title, href, state, help, Icon]) => (
-            <Link
-              key={title}
-              href={href}
-              className="group min-h-[176px] rounded-2xl border border-edge bg-card p-5 transition-colors hover:border-primary/35 hover:bg-tint"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Icon aria-hidden="true" className="h-5 w-5" />
-                </span>
-                <ArrowUpRight
-                  aria-hidden="true"
-                  className="h-5 w-5 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-                />
-              </div>
-              <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-primary">
-                {state}
-              </p>
-              <h2 className="mt-1 font-display text-base font-semibold">
-                {title}
-              </h2>
-              <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
-                {help}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
-    </SettingsWorkspace>
+    <div className="animate-fade-up space-y-6">
+      <PageHeader title="Company settings" description="Manage workspace details and configure each HR service." />
+      <SettingsDirectory services={enabledServices} />
+      <WorkspaceRegionForm initial={region} hasAttendance={Boolean(punch || attendance || correction)} />
+    </div>
   );
 }

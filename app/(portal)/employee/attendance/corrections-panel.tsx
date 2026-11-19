@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Wrench, Plus, Clock3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -9,74 +9,98 @@ import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { formatDateIST, formatTime, todayKey } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import { formatCalendarDate, formatWorkspaceTime, parseWorkspaceWallTime } from "@/lib/workspace-time";
+import { DEFAULT_WORKSPACE_REGION, type WorkspaceRegion } from "@/lib/workspace-region";
 import { t, type Lang } from "@/lib/i18n";
 
 type Correction = {
   id: string;
-  date: string;
-  currentIn: string | null;
-  currentOut: string | null;
-  requestedIn: string | null;
-  requestedOut: string | null;
+  date: Date;
+  currentIn: Date | null;
+  currentOut: Date | null;
+  requestedIn: Date | null;
+  requestedOut: Date | null;
   reason: string;
   status: string;
-  createdAt: string;
+  reviewNote: string | null;
 };
 
 export function CorrectionsPanel({
   corrections,
   lang = "en",
+  region = DEFAULT_WORKSPACE_REGION,
+  today,
+  earliestDate,
+  initialDate,
+  openOnLoad,
+  closeHref,
 }: {
   corrections: Correction[];
   lang?: Lang;
+  region?: WorkspaceRegion;
+  today: string;
+  earliestDate: string | null;
+  initialDate: string;
+  openOnLoad: boolean;
+  closeHref: string;
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(openOnLoad);
+  const [date, setDate] = useState(initialDate || today);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const dateField = useRef<HTMLInputElement>(null);
+
+  function close() {
+    setOpen(false);
+    setError("");
+    setDate(today);
+    if (openOnLoad) router.replace(closeHref, { scroll: false });
+  }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setError("");
     setLoading(true);
     const form = new FormData(e.currentTarget);
     try {
-      const dateStr = String(form.get("date") ?? "");
       const inStr = String(form.get("requestedIn") ?? "");
       const outStr = String(form.get("requestedOut") ?? "");
       if (!inStr && !outStr) {
-        toast("error", "Provide at least one corrected punch time.");
-        return;
+        throw new Error("Provide at least one corrected punch time.");
       }
-      // Client-side in < out + future checks before hitting the server.
-      const inAt = inStr ? new Date(`${dateStr}T${inStr}`) : null;
-      const outAt = outStr ? new Date(`${dateStr}T${outStr}`) : null;
+      const inAt = inStr ? parseWorkspaceWallTime(inStr, region.timeZone) : null;
+      const outAt = outStr ? parseWorkspaceWallTime(outStr, region.timeZone) : null;
+      if ((inStr && !inAt) || (outStr && !outAt)) {
+        throw new Error(`Enter a valid local time in ${region.timeZone}.`);
+      }
       if (inAt && outAt && inAt.getTime() >= outAt.getTime()) {
-        toast("error", "In-time must be before out-time.");
-        return;
+        throw new Error("In-time must be before out-time.");
       }
       const now = new Date();
       if ((inAt && inAt.getTime() > now.getTime()) || (outAt && outAt.getTime() > now.getTime())) {
-        toast("error", "Corrected punch times cannot be in the future.");
-        return;
+        throw new Error("Corrected punch times cannot be in the future.");
       }
       const res = await fetch("/api/attendance/corrections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          date: form.get("date"),
-          requestedIn: form.get("requestedIn") ? `${form.get("date")}T${form.get("requestedIn")}` : null,
-          requestedOut: form.get("requestedOut") ? `${form.get("date")}T${form.get("requestedOut")}` : null,
+          date,
+          requestedIn: inStr || null,
+          requestedOut: outStr || null,
           reason: form.get("reason"),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to submit");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "The request could not be confirmed. Check your correction history before trying again.");
       toast("success", t(lang, "corrections.submitted"));
       setOpen(false);
+      router.replace(`/employee/attendance?month=${date.slice(0, 7)}&view=corrections`, { scroll: false });
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to submit");
+      setError(e instanceof Error && e.name !== "TypeError" ? e.message : "The request could not be confirmed. Check your correction history before trying again.");
     } finally {
       setLoading(false);
     }
@@ -85,14 +109,14 @@ export function CorrectionsPanel({
   const pending = corrections.filter((c) => c.status === "pending").length;
 
   return (
-    <div className="animate-fade-up">
-      <div className="flex items-center justify-between">
+    <section aria-labelledby="attendance-corrections">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4 text-muted-foreground" />
-          <h2 className="font-display text-base font-semibold tracking-tight">{t(lang, "corrections.title")}</h2>
+          <h2 id="attendance-corrections" className="font-display text-base font-semibold tracking-tight">{t(lang, "corrections.title")}</h2>
           {pending > 0 && <Badge tone="warning">{pending} {t(lang, "corrections.pending")}</Badge>}
         </div>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button size="sm" disabled={!!earliestDate && earliestDate > today} onClick={() => setOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> {t(lang, "corrections.request")}
         </Button>
       </div>
@@ -101,55 +125,50 @@ export function CorrectionsPanel({
         <EmptyState
           icon={<Clock3 className="h-5 w-5" />}
           title={t(lang, "corrections.none")}
-          description={t(lang, "corrections.noneDesc")}
+          description="No punch correction requests for this month."
         />
       ) : (
         <div className="mt-4 divide-y divide-[color:var(--border)]">
-          {corrections.map((c) => (
-            <div key={c.id} className="flex flex-wrap items-center gap-3 py-3">
-              <span className="font-mono text-[12.5px] text-muted-foreground">
-                {formatDateIST(c.date)}
-              </span>
-              <span className="text-[12.5px] text-muted-foreground">
-                {t(lang, "corrections.requested")}:{" "}
-                <span className="text-foreground">
-                  {formatTime(c.requestedIn ? new Date(c.requestedIn) : null)} →{" "}
-                  {formatTime(c.requestedOut ? new Date(c.requestedOut) : null)}
-                </span>
-              </span>
-              <span className="hidden min-w-0 max-w-xs truncate text-[12.5px] text-muted-foreground sm:inline">
-                “{c.reason}”
-              </span>
-              <Badge tone={c.status === "pending" ? "warning" : c.status === "approved" ? "success" : "danger"} className="ml-auto">
-                {t(lang, `status.${c.status}`)}
-              </Badge>
+          {corrections.map((c, index) => (
+            <div key={c.id} id={index === 0 || istDateKey(corrections[index - 1].date) !== istDateKey(c.date) ? `corrections-${istDateKey(c.date)}` : undefined} className="scroll-mt-24 space-y-2 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <time dateTime={istDateKey(c.date)} className="font-medium">{formatCalendarDate(istDateKey(c.date), region.locale)}</time>
+                <Badge tone={c.status === "pending" ? "warning" : c.status === "approved" ? "success" : "danger"}>{t(lang, `status.${c.status}`)}</Badge>
+              </div>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div><dt className="text-xs text-muted-foreground">Recorded</dt><dd>{formatWorkspaceTime(c.currentIn, region)} → {formatWorkspaceTime(c.currentOut, region)}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Requested</dt><dd>{formatWorkspaceTime(c.requestedIn, region)} → {formatWorkspaceTime(c.requestedOut, region)}</dd></div>
+              </dl>
+              <p className="break-words text-sm text-muted-foreground">{c.reason}</p>
+              {c.reviewNote && <p className="break-words text-sm"><span className="font-medium">Reviewer note</span> · {c.reviewNote}</p>}
             </div>
           ))}
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={t(lang, "corrections.request")} size="sm">
+      <Modal open={open} onClose={() => !loading && close()} title={t(lang, "corrections.request")} description={`Enter only the times that need changing, in ${region.timeZone}. For overnight work, select the shift’s start date below, then enter each punch’s actual date and time.`} size="md" initialFocus={dateField}>
         <form onSubmit={submit} className="space-y-4">
+          {error && <p role="alert" className="rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
           <Field label={t(lang, "corrections.date")}>
-            <Input name="date" type="date" required max={todayKey()} />
+            <Input ref={dateField} name="date" type="date" required value={date} onChange={(event) => setDate(event.target.value)} min={earliestDate ?? undefined} max={today} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t(lang, "corrections.inTime")}>
-              <Input name="requestedIn" type="time" />
+              <Input name="requestedIn" type="datetime-local" />
             </Field>
             <Field label={t(lang, "corrections.outTime")}>
-              <Input name="requestedOut" type="time" />
+              <Input name="requestedOut" type="datetime-local" />
             </Field>
           </div>
           <Field label={t(lang, "corrections.reason")}>
-            <Textarea name="reason" required placeholder={t(lang, "corrections.reasonPlaceholder")} />
+            <Textarea name="reason" required maxLength={2000} placeholder={t(lang, "corrections.reasonPlaceholder")} />
           </Field>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>{t(lang, "common.cancel")}</Button>
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" disabled={loading} onClick={close}>{t(lang, "common.cancel")}</Button>
             <Button type="submit" loading={loading}>{t(lang, "corrections.submit")}</Button>
           </div>
         </form>
       </Modal>
-    </div>
+    </section>
   );
 }

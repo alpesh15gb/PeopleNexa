@@ -16,7 +16,7 @@ assert.match(generator, /status: \{ in: \["cancelled", "reversed"\] \}/, "genera
 assert.match(generator, /replacedRunId/, "replacement generation links rather than deletes historical rows");
 assert.doesNotMatch(generator, /payrollRun\.(?:delete|deleteMany)\(/, "replacement generation never deletes historical runs");
 assert.doesNotMatch(generator, /A cancelled payroll exists/, "cancelled history must not block preview creation");
-assert.match(payrollPage, /candidate\.status !== 'cancelled' && candidate\.status !== 'reversed'/, "the payroll selection defaults to the active run, not history");
+assert.match(payrollPage, /activePayroll = payrolls\.find\(\(candidate\) => !\["cancelled", "reversed"\]\.includes\(candidate\.status\)\)/, "the payroll selection defaults to the active run, not history");
 assert.match(payrollPage, /\?\? activePayroll/, "a stale run URL falls back to the active run instead of offering creation");
 assert.match(payrollPanel, /payroll\.status === "cancelled"\s*\? "Cancelled"/, "cancelled history is never presented as paid");
 assert.match(payrollPanel, /data\.cancelled \|\| !data\.created/, "an empty auto-cancelled generation is not reported as ready for review");

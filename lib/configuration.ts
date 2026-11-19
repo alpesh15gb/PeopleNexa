@@ -20,17 +20,36 @@ export type PayrollSchedule = { frequency: "monthly"; payDateRule: "last_day" | 
 // Preserve the existing calendar-day fallback unless a location deliberately
 // configures a shorter no-shift attendance window.
 export const DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS = 24;
-export type PayrollAttendanceTreatment = { missingOutPunch: "review" | "half_day" | "full_day"; noPunch: "full_day"; noShiftAttendanceWindowHours: number };
+export type PayrollAttendanceTreatment = { missingOutPunch: "review" | "half_day" | "full_day"; noPunch: "full_day"; noShiftAttendanceWindowHours: number; useShiftWeeklyOffs?: boolean };
 export type PayrollPolicyDraft = { monthlyDivisor: number; salaryDivisorMethod: SalaryDivisorMethod; earnedSalaryRounding: PayrollRoundingMode; earnedSalaryAggregation: EarnedSalaryAggregation; deductLossOfPay: boolean; overtimeMultiplier: number; overtimeBasis: "basic_hourly" | "fixed_hourly"; attendanceTreatment: PayrollAttendanceTreatment; statutory: { pfEnabled: boolean; pfWageCeiling: number; esicEnabled: boolean; esicGrossCeiling: number; professionalTaxEnabled: boolean; professionalTaxState: string; labourWelfareFundEnabled: boolean; tdsEnabled: boolean; tdsRegime: "new" | "old" }; components?: PayrollComponentRule[]; schedule?: PayrollSchedule; statutoryRules?: PayrollStatutoryRule[] };
 
 export const DASHBOARD_WIDGETS = [
   "total_employees", "present", "late", "permission", "absent", "pending_leaves", "pending_leave_requests",
   "attendance_trend", "device_attendance", "project_attendance", "todays_attendance",
-  "driving_license_expiry", "birthdays", "anniversaries", "new_joiners", "departments", "gender_ratio",
+  "driving_license_expiry", "birthdays", "anniversaries", "new_joiners", "departments", "gender_ratio", "on_leave",
 ] as const;
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGETS)[number];
 export type DashboardWidgetSize = "compact" | "standard" | "wide";
 export type DashboardLayout = { widgets: Array<{ key: DashboardWidgetKey; enabled: boolean; order: number; size: DashboardWidgetSize }> };
+
+const optionalDashboardWidgets = new Set<DashboardWidgetKey>([
+  "permission", "device_attendance", "project_attendance", "driving_license_expiry",
+  "birthdays", "anniversaries", "gender_ratio",
+]);
+
+export function isDefaultDashboardWidget(key: DashboardWidgetKey) {
+  return !optionalDashboardWidgets.has(key);
+}
+
+export function defaultDashboardWidgets(): DashboardLayout["widgets"] {
+  const order: DashboardWidgetKey[] = [
+    "total_employees", "present", "late", "absent", "on_leave", "pending_leaves",
+    "pending_leave_requests", "new_joiners", "attendance_trend", "todays_attendance", "departments",
+  ];
+  const wide = new Set<DashboardWidgetKey>(["attendance_trend", "todays_attendance"]);
+  return [...order, ...DASHBOARD_WIDGETS.filter((key) => !order.includes(key))]
+    .map((key, index) => ({ key, order: index, enabled: isDefaultDashboardWidget(key), size: wide.has(key) ? "wide" : "standard" }));
+}
 
 export function dashboardLayout(payload: unknown): DashboardLayout | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
@@ -131,6 +150,8 @@ export function payrollPolicyDraft(payload: unknown): PayrollPolicyDraft | null 
   const decimal = (input: unknown, min: number, max: number) => typeof input === "number" && Number.isFinite(input) && input >= min && input <= max;
   const state = typeof rules.professionalTaxState === "string" ? rules.professionalTaxState.trim() : "";
   const salaryDivisorMethod = value.salaryDivisorMethod ?? "fixed_divisor"; const treatment = treatmentRaw && typeof treatmentRaw === "object" && !Array.isArray(treatmentRaw) ? treatmentRaw as Record<string, unknown> : {}; const missingOutPunch = treatment.missingOutPunch ?? "review"; const noPunch = treatment.noPunch ?? "full_day"; const noShiftAttendanceWindowHours = treatment.noShiftAttendanceWindowHours ?? DEFAULT_NO_SHIFT_ATTENDANCE_WINDOW_HOURS;
+  const useShiftWeeklyOffs = treatment.useShiftWeeklyOffs;
+  if (useShiftWeeklyOffs !== undefined && typeof useShiftWeeklyOffs !== "boolean") return null;
   const earnedSalaryRounding = value.earnedSalaryRounding ?? "two_decimals";
   const earnedSalaryAggregation = value.earnedSalaryAggregation ?? "rounded_total";
   if (!whole(value.monthlyDivisor, 1, 366) || !["fixed_divisor", "calendar_days"].includes(String(salaryDivisorMethod)) || !PAYROLL_ROUNDING_MODES.includes(earnedSalaryRounding as PayrollRoundingMode) || !EARNED_SALARY_AGGREGATIONS.includes(earnedSalaryAggregation as EarnedSalaryAggregation) || !["review", "half_day", "full_day"].includes(String(missingOutPunch)) || noPunch !== "full_day" || !whole(noShiftAttendanceWindowHours, 1, 24) || typeof value.deductLossOfPay !== "boolean" || !decimal(value.overtimeMultiplier, 0, 10) || !["basic_hourly", "fixed_hourly"].includes(String(value.overtimeBasis)) || typeof rules.pfEnabled !== "boolean" || !whole(rules.pfWageCeiling, 0, 10_000_000) || typeof rules.esicEnabled !== "boolean" || !whole(rules.esicGrossCeiling, 0, 10_000_000) || typeof rules.professionalTaxEnabled !== "boolean" || state.length > 80 || typeof rules.labourWelfareFundEnabled !== "boolean" || typeof rules.tdsEnabled !== "boolean" || !["new", "old"].includes(String(rules.tdsRegime))) return null;
@@ -139,7 +160,7 @@ export function payrollPolicyDraft(payload: unknown): PayrollPolicyDraft | null 
   const schedule = parsePayrollSchedule(value.schedule);
   const statutoryRules = parseStatutoryRules(value.statutoryRules);
   if (value.schedule !== undefined && !schedule || value.statutoryRules !== undefined && !statutoryRules) return null;
-  return { monthlyDivisor: value.monthlyDivisor as number, salaryDivisorMethod: salaryDivisorMethod as SalaryDivisorMethod, earnedSalaryRounding: earnedSalaryRounding as PayrollRoundingMode, earnedSalaryAggregation: earnedSalaryAggregation as EarnedSalaryAggregation, deductLossOfPay: value.deductLossOfPay, overtimeMultiplier: value.overtimeMultiplier as number, overtimeBasis: value.overtimeBasis as PayrollPolicyDraft["overtimeBasis"], attendanceTreatment: { missingOutPunch: missingOutPunch as PayrollAttendanceTreatment["missingOutPunch"], noPunch: "full_day", noShiftAttendanceWindowHours: noShiftAttendanceWindowHours as number }, statutory: { pfEnabled: rules.pfEnabled, pfWageCeiling: rules.pfWageCeiling as number, esicEnabled: rules.esicEnabled, esicGrossCeiling: rules.esicGrossCeiling as number, professionalTaxEnabled: rules.professionalTaxEnabled, professionalTaxState: state, labourWelfareFundEnabled: rules.labourWelfareFundEnabled, tdsEnabled: rules.tdsEnabled, tdsRegime: rules.tdsRegime as "new" | "old" }, ...(components ? { components } : {}), ...(schedule ? { schedule } : {}), ...(statutoryRules ? { statutoryRules } : {}) };
+  return { monthlyDivisor: value.monthlyDivisor as number, salaryDivisorMethod: salaryDivisorMethod as SalaryDivisorMethod, earnedSalaryRounding: earnedSalaryRounding as PayrollRoundingMode, earnedSalaryAggregation: earnedSalaryAggregation as EarnedSalaryAggregation, deductLossOfPay: value.deductLossOfPay, overtimeMultiplier: value.overtimeMultiplier as number, overtimeBasis: value.overtimeBasis as PayrollPolicyDraft["overtimeBasis"], attendanceTreatment: { missingOutPunch: missingOutPunch as PayrollAttendanceTreatment["missingOutPunch"], noPunch: "full_day", noShiftAttendanceWindowHours: noShiftAttendanceWindowHours as number, ...(useShiftWeeklyOffs === undefined ? {} : { useShiftWeeklyOffs }) }, statutory: { pfEnabled: rules.pfEnabled, pfWageCeiling: rules.pfWageCeiling as number, esicEnabled: rules.esicEnabled, esicGrossCeiling: rules.esicGrossCeiling as number, professionalTaxEnabled: rules.professionalTaxEnabled, professionalTaxState: state, labourWelfareFundEnabled: rules.labourWelfareFundEnabled, tdsEnabled: rules.tdsEnabled, tdsRegime: rules.tdsRegime as "new" | "old" }, ...(components ? { components } : {}), ...(schedule ? { schedule } : {}), ...(statutoryRules ? { statutoryRules } : {}) };
 }
 
 function parsePayrollSchedule(input: unknown): PayrollSchedule | null {

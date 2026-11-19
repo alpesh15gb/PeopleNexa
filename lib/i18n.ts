@@ -73,6 +73,7 @@ const dict: Record<string, Partial<Record<Lang, string>>> = {
   "attendance.status": { en: "Status", hi: "स्थिति" },
   "attendance.holiday": { en: "Holiday: {name}", hi: "अवकाश: {name}" },
   "attendance.sunday": { en: "Sunday", hi: "रविवार" },
+  "attendance.weeklyOff": { en: "Weekly day off", hi: "साप्ताहिक अवकाश" },
   "attendance.onLeave": { en: "On leave", hi: "अवकाश पर" },
   "attendance.onLeaveTitle": { en: "On leave ({type})", hi: "अवकाश पर ({type})" },
   "attendance.legendHoliday": { en: "Holiday", hi: "अवकाश" },
@@ -183,6 +184,7 @@ const dict: Record<string, Partial<Record<Lang, string>>> = {
   "profile.joiningDate": { en: "Joining date", hi: "जॉइनिंग दिनांक" },
   "profile.lastLogin": { en: "Last login", hi: "अंतिम लॉगिन" },
   "profile.company": { en: "Company", hi: "कंपनी" },
+  "profile.manager": { en: "Reporting manager", hi: "रिपोर्टिंग प्रबंधक" },
   "profile.unassigned": { en: "Unassigned", hi: "असाइन नहीं" },
   "profile.teamMember": { en: "Team member", hi: "टीम सदस्य" },
   "profile.administrator": { en: "Administrator", hi: "प्रशासक" },
@@ -213,7 +215,7 @@ const dict: Record<string, Partial<Record<Lang, string>>> = {
   "clock.clockedInMsg": { en: "Clocked in — have a great day!", hi: "क्लॉक इन — आपका दिन शुभ हो!" },
   "clock.clockedOutMsg": { en: "Clocked out — see you tomorrow!", hi: "क्लॉक आउट — कल मिलते हैं!" },
   "clock.geoRequired": { en: "Geolocation is required to punch in/out", hi: "पंच इन/आउट के लिए जियोलोकेशन आवश्यक है" },
-  "clock.cameraUnavailable": { en: "Camera unavailable — you can clock in without a selfie", hi: "कैमरा उपलब्ध नहीं — आप बिना सेल्फ़ी के क्लॉक इन कर सकते हैं" },
+  "clock.cameraUnavailable": { en: "Camera unavailable. Allow camera access to capture the required selfie, or request a correction if you cannot clock in.", hi: "कैमरा उपलब्ध नहीं है। ज़रूरी सेल्फ़ी के लिए कैमरा एक्सेस दें। अगर क्लॉक इन नहीं कर सकते, तो सुधार का अनुरोध करें।" },
   "clock.locError": { en: "Could not get your location. Check permissions and try again.", hi: "आपकी लोकेशन नहीं मिल सकी। अनुमतियाँ जाँचें और फिर कोशिश करें।" },
   "clock.geofenceNote": { en: "Your location is verified against the {name} geofence before punching.", hi: "पंच से पहले आपकी लोकेशन {name} जियोफेंस के विरुद्ध सत्यापित की जाती है।" },
   "clock.noGeofenceNote": { en: "No geofence configured for your branch — location is still recorded.", hi: "आपकी ब्रांच के लिए कोई जियोफेंस कॉन्फ़िगर नहीं — लोकेशन फिर भी दर्ज की जाती है।" },
@@ -284,6 +286,7 @@ const langExtra: Record<string, Partial<Record<Lang, string>>> = {
   "attendance.out": { gu: "આઉટ", mr: "आउट", ta: "அவுட்" },
   "attendance.status": { gu: "સ્થિતિ", mr: "स्थिती", ta: "நிலை" },
   "attendance.sunday": { gu: "રવિવાર", mr: "रविवार", ta: "ஞாயிறு" },
+  "attendance.weeklyOff": { gu: "સાપ્તાહિક રજા", mr: "साप्ताहिक सुट्टी", ta: "வார விடுமுறை" },
   "attendance.onLeave": { gu: "રજા પર", mr: "रजेवर", ta: "விடுப்பில்" },
 
   // ---- leaves ----

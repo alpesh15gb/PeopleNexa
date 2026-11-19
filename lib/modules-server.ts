@@ -12,42 +12,28 @@ interface AccessSnapshot {
   modules: Set<string>;
 }
 
-const cache = new Map<string, { at: number; snap: AccessSnapshot }>();
-const CACHE_TTL_MS = 15_000;
-
 export async function getTenantAccess(tenantId: string): Promise<AccessSnapshot> {
-  const hit = cache.get(tenantId);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.snap;
-
-  const [tenant, moduleRows] = await Promise.all([
-    prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { status: true, subscriptionExpiry: true, plan: true },
-    }),
-    prisma.tenantModule.findMany({
-      where: { tenantId, enabled: true },
-      select: { module: true },
-    }),
-  ]);
+  // The proxy and admin handlers may run in different bundles or processes.
+  // Always read current access so suspension and module changes take effect across them.
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: {
+      status: true,
+      subscriptionExpiry: true,
+      plan: true,
+      modules: { select: { module: true, enabled: true } },
+    },
+  });
+  if (!tenant) return { status: "suspended", subscriptionExpiry: null, modules: new Set() };
 
   // Tenants with no module rows yet (e.g. seeded before gating existed, or the
   // short window before the entrypoint backfill runs) fall back to their plan's
   // default module set so the workspace is never locked out.
-  const modules =
-    moduleRows.length > 0
-      ? new Set(moduleRows.map((r) => r.module))
-      : new Set((await getEffectivePlan(tenant?.plan ?? "trial")).modules);
-
-  const snap: AccessSnapshot = {
-    status: tenant?.status ?? "suspended",
-    subscriptionExpiry: tenant?.subscriptionExpiry ?? null,
-    modules,
+  return {
+    status: tenant.status,
+    subscriptionExpiry: tenant.subscriptionExpiry,
+    modules: tenant.modules.length
+      ? new Set(tenant.modules.filter((row) => row.enabled).map((row) => row.module))
+      : new Set((await getEffectivePlan(tenant.plan)).modules),
   };
-  cache.set(tenantId, { at: Date.now(), snap });
-  return snap;
-}
-
-/** Invalidate the cached snapshot after a license/module change. */
-export function invalidateTenantAccess(tenantId: string) {
-  cache.delete(tenantId);
 }

@@ -16,7 +16,8 @@ const normalize = (s: string) =>
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 32);
+    .slice(0, 32)
+    .replace(/-$/, "");
 
 export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: string }) {
   const router = useRouter();
@@ -113,7 +114,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
     <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
-          <Input name="companyName" required placeholder="Acme Corp" className={`h-11 ${BLUE_FOCUS}`} />
+          <Input name="companyName" required maxLength={120} placeholder="Acme Corp" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
 
         <Field label="Workspace subdomain" hint="This becomes your team's web address">
@@ -156,13 +157,13 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         </Field>
 
         <Field label="Your full name">
-          <Input name="name" required placeholder="Admin" className={`h-11 ${BLUE_FOCUS}`} />
+          <Input name="name" required maxLength={120} placeholder="Admin" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
         <Field label="Work email">
-          <Input name="email" type="email" required autoComplete="email" placeholder="admin@yourcompany.com" className={`h-11 ${BLUE_FOCUS}`} />
+          <Input name="email" type="email" required maxLength={254} autoComplete="email" placeholder="admin@yourcompany.com" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
         <Field label="Password" hint="At least 6 characters">
-          <Input name="password" type="password" required autoComplete="new-password" placeholder="Create a password" className={`h-11 ${BLUE_FOCUS}`} />
+          <Input name="password" type="password" required minLength={6} maxLength={72} autoComplete="new-password" placeholder="Create a password" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
       </div>
 

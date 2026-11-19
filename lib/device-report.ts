@@ -5,9 +5,11 @@
 import { istDateKey, istWallClock } from "./ist";
 import { attendanceRequiresReview } from "./attendance-validation";
 import { minutesOfDay } from "./dates";
+import { isShiftWeeklyOff } from "./shift-weekly-offs";
 
 export interface DeviceShift {
   sundayWeeklyOff?: boolean;
+  weeklyOffDays?: number[];
   name: string;
   startTime: string; // "09:00"
   endTime: string; // "18:00"
@@ -15,10 +17,6 @@ export interface DeviceShift {
 
 function reportShift(rosters: Map<string, DeviceShift> | undefined, employee: DeviceEmployee, day: string, record: DeviceRecord | undefined) {
   return rosters?.get(`${employee.id}|${day}`) ?? record?.shift ?? employee.shift;
-}
-
-function isWeeklyOff(day: string, shift: DeviceShift | null) {
-  return shift?.sundayWeeklyOff === true && new Date(`${day}T12:00:00Z`).getUTCDay() === 0;
 }
 
 export interface DeviceEmployee {
@@ -308,7 +306,7 @@ export function buildDeviceDaily(args: {
       const last = rawPunches[rawPunches.length - 1];
       if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatClockIST(last.time);
     }
-    const status = rawPunches.length ? "P" : args.holidays.has(day) ? "H" : leaves.has(emp.id) ? "L" : isWeeklyOff(day, shift) ? "WO" : "A";
+    const status = rawPunches.length ? "P" : args.holidays.has(day) ? "H" : leaves.has(emp.id) ? "L" : isShiftWeeklyOff(shift, day) ? "WO" : "A";
     const attendanceStatus = record?.status ?? "Pending";
     const { earlyMinutes: _e, durationMinutes: _d, ...rest } = cells;
     return {
@@ -443,7 +441,7 @@ export function buildDeviceMonthly(args: {
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         leaveCount++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (isShiftWeeklyOff(shift, dayKey)) {
         status = "WO";
         weeklyOffs++;
       } else {
@@ -635,7 +633,7 @@ export function buildStatusMatrix(args: {
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         totals.leave++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (isShiftWeeklyOff(shift, dayKey)) {
         status = "WO";
         totals.weekOff++;
       } else {
@@ -917,7 +915,7 @@ export function buildPerformance(args: {
       } else if (leaves.has(`${emp.id}|${dayKey}`)) {
         status = "L";
         leaveCount++;
-      } else if (isWeeklyOff(dayKey, shift)) {
+      } else if (isShiftWeeklyOff(shift, dayKey)) {
         status = "WO";
         wo++;
       } else {

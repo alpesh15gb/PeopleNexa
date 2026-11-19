@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   const text = String(body.body ?? "").trim();
-  if (!text) return NextResponse.json({ error: "Comment is empty." }, { status: 400 });
+  if (!text || text.length > 2000) return NextResponse.json({ error: "Enter a comment up to 2,000 characters." }, { status: 400 });
 
   const post = await prisma.orgPost.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!post) return NextResponse.json({ error: "Post not found" }, { status: 404 });

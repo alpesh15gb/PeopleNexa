@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { appendAudit } from "@/lib/audit";
 import { payrollPolicyDraft } from "@/lib/configuration";
 import { ensureDesignations, normalizeDesignationName } from "@/lib/designation";
+import { ylrWorkbookImportEnabled } from "@/lib/employee-legacy-import";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { previewYlrWorkbook, YLR_BRANCH_NAME, type YlrWorkbookPreview } from "@/lib/ylr-workbook-import";
@@ -38,9 +39,32 @@ function configuredMessComponents(payloads: unknown[]): Map<number, string> {
   return found;
 }
 
+export async function PUT(request: NextRequest) {
+  const session = await requireActiveSession().catch(() => null);
+  if (session?.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const body = await request.json().catch(() => null);
+  if (typeof body?.enabled !== "boolean") return NextResponse.json({ error: "Enabled must be a boolean." }, { status: 400 });
+
+  const enabled: boolean = body.enabled;
+  await prisma.$executeRaw`
+    UPDATE "Tenant"
+    SET "config" = jsonb_set(
+      CASE WHEN jsonb_typeof("config") = 'object' THEN "config" ELSE '{}'::jsonb END,
+      '{legacyYlrWorkbookImport}',
+      to_jsonb(${enabled}::boolean)
+    ), "updatedAt" = CURRENT_TIMESTAMP
+    WHERE "id" = ${session.tenantId}
+  `;
+  return NextResponse.json({ enabled });
+}
+
 export async function POST(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (session?.role !== "admin") return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true, seats: true } });
+  if (!tenant || !ylrWorkbookImportEnabled(tenant.config)) {
+    return NextResponse.json({ error: "Legacy workbook import is disabled for this workspace." }, { status: 403 });
+  }
   const confirm = request.nextUrl.searchParams.get("confirm") === "true";
   const newEmployeeStatus = request.nextUrl.searchParams.get("newEmployeeStatus") ?? "active";
   if (newEmployeeStatus !== "active" && newEmployeeStatus !== "inactive") return NextResponse.json({ error: "New employee status must be active or inactive." }, { status: 400 });
@@ -69,14 +93,13 @@ export async function POST(request: NextRequest) {
       byCode.set(key, employee);
     }
   }
-  const [tenant, departments, componentRecords] = await Promise.all([
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { seats: true } }),
+  const [departments, componentRecords] = await Promise.all([
     prisma.department.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true } }),
     branch.locationId ? prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "payroll_policy", OR: [{ locationId: branch.locationId }, { locationId: null }] }, select: { payload: true } }) : [],
   ]);
   const newRows = importRows.filter((row) => !byCode.has(employeeCodeKey(row.employeeCode)));
   const currentCount = await prisma.employee.count({ where: { tenantId: session.tenantId, loginOnly: false } });
-  if (currentCount + newRows.length > (tenant?.seats ?? 0)) return NextResponse.json({ error: `Import would exceed the ${tenant?.seats ?? 0} seat limit.` }, { status: 400 });
+  if (currentCount + newRows.length > tenant.seats) return NextResponse.json({ error: `Import would exceed the ${tenant.seats} seat limit.` }, { status: 400 });
   const departmentsByName = new Map(departments.map((department) => [department.name.toLocaleLowerCase(), department.id]));
   const messComponents = configuredMessComponents(componentRecords.map((record) => record.payload));
   const importExceptions = [...preview.exceptions];

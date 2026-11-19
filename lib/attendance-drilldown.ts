@@ -24,10 +24,10 @@ export function attendanceEmployeeScope({
   };
 }
 
-export function attendanceStatusFilter(status: AttendanceDrilldownStatus, start: Date, end: Date) {
+export function attendanceStatusFilter(status: AttendanceDrilldownStatus, start: Date, end: Date, punchWindow = { start, end }) {
   if (status === "present") {
     return {
-      punches: { some: authorizedPunchDayFilter(start, end) },
+      punches: { some: authorizedPunchDayFilter(punchWindow.start, punchWindow.end) },
     };
   }
   return {

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { isMonthKey } from "@/lib/dates";
+import { isDateKey, isMonthKey } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";
+import { cashbookRecords } from "@/lib/cashbook-records";
+import { recordApiPaging } from "@/lib/document-expense-pagination";
 
 const TYPES = ["cash_in", "cash_out"] as const;
 const CATEGORIES = ["salary", "advance", "vendor", "expense", "other"] as const;
@@ -12,11 +14,6 @@ const MODES = ["cash", "upi", "bank", "other"] as const;
 // by design). Payroll "paid" status only tracks payout metadata on the payslip
 // (paidVia/paidAt/paymentRef). Admins record cash movement here manually so the
 // ledger stays an explicit, reviewable book rather than a derived projection.
-
-function monthRange(month: string): { gte: Date; lt: Date } {
-  const [y, m] = month.split("-").map(Number);
-  return { gte: new Date(y, m - 1, 1), lt: new Date(y, m, 1) };
-}
 
 /** GET — admin lists entries for a month (?month=YYYY-MM), tenant-scoped, newest first. */
 export async function GET(req: NextRequest) {
@@ -28,32 +25,10 @@ export async function GET(req: NextRequest) {
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const month = req.nextUrl.searchParams.get("month");
-  let dateFilter: { gte: Date; lt: Date } | undefined;
-  if (month !== null && month !== "") {
-    if (!isMonthKey(month)) {
-      return NextResponse.json({ error: "month must be YYYY-MM." }, { status: 400 });
-    }
-    const { gte, lt } = monthRange(month);
-    dateFilter = { gte, lt };
-  }
-
-  const entries = await prisma.cashbookEntry.findMany({
-    where: {
-      tenantId: session.tenantId,
-      ...(locationId ? { locationId } : {}),
-      ...(dateFilter ? { date: dateFilter } : {}),
-    },
-    orderBy: { date: "desc" },
-    take: 200,
-  });
-
-  const cashIn = entries.filter((e) => e.type === "cash_in").reduce((s, e) => s + e.amount, 0);
-  const cashOut = entries.filter((e) => e.type === "cash_out").reduce((s, e) => s + e.amount, 0);
-
-  return NextResponse.json({
-    entries,
-    summary: { cashIn, cashOut, balance: cashIn - cashOut },
-  });
+  if (month && !isMonthKey(month)) return NextResponse.json({ error: "month must be YYYY-MM." }, { status: 400 });
+  const paging = recordApiPaging(req.nextUrl.searchParams, 200);
+  if (!paging) return NextResponse.json({ error: "Use a positive page and a page size up to 200." }, { status: 400 });
+  return NextResponse.json(await cashbookRecords(session.tenantId, locationId, month, paging.page, paging.pageSize));
 }
 
 /** POST — admin records a cash-in / cash-out entry. */
@@ -67,10 +42,10 @@ export async function POST(req: NextRequest) {
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
 
-  const date = new Date(body.date);
-  if (Number.isNaN(date.getTime())) {
+  if (typeof body.date !== "string" || !isDateKey(body.date)) {
     return NextResponse.json({ error: "Enter a valid date." }, { status: 400 });
   }
+  const date = new Date(`${body.date}T00:00:00Z`);
 
   const type = String(body.type ?? "");
   if (!(TYPES as readonly string[]).includes(type)) {

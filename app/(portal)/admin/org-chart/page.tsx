@@ -1,14 +1,16 @@
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
+import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { OrgChartTree } from "./org-chart-tree";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminOrgChartPage() {
-  const session = await requireSession();
+  const session = await requireActiveSession();
+  if (session.role !== "admin") redirect("/admin");
   const employees = await prisma.employee.findMany({
-    where: { tenantId: session.tenantId, status: "active" },
+    where: { tenantId: session.tenantId, status: "active", loginOnly: false },
     select: {
       id: true,
       firstName: true,
@@ -21,7 +23,8 @@ export default async function AdminOrgChartPage() {
     orderBy: { employeeNumber: "asc" },
   });
 
-  const unlinked = employees.filter((e) => !e.managerId).length;
+  const ids = new Set(employees.map((employee) => employee.id));
+  const unlinked = employees.filter((employee) => !employee.managerId || !ids.has(employee.managerId)).length;
   const deptCount = new Set(employees.map((e) => e.department?.name).filter(Boolean)).size;
 
   return (

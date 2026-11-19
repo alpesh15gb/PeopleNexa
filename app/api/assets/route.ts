@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     if (!name) {
       return NextResponse.json({ error: "Asset name is required." }, { status: 400 });
     }
-    const validStatuses = ["available", "assigned", "maintenance", "retired", "lost"];
+    const validStatuses = ["available", "maintenance", "retired", "lost"];
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }

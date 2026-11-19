@@ -6,33 +6,43 @@ import { Package } from "lucide-react";
 import { PageHeader, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/dates";
+import { getTenantAccess } from "@/lib/modules-server";
 
 export const dynamic = "force-dynamic";
 
 export default async function EmployeeProfilePage() {
   const session = await requireSession();
-  const lang = await getLang();
-  const [employee, myAssets] = await Promise.all([
-    prisma.employee.findUnique({
-      where: { id: session.sub },
-      include: { branch: true, department: true, shift: true, tenant: true },
-    }),
-    prisma.assetAssignment.findMany({
-      where: { employeeId: session.sub, returnedAt: null },
-      include: { asset: { select: { id: true, name: true, tag: true, category: true, serialNumber: true } } },
-      orderBy: { assignedAt: "desc" },
+  const [lang, access, employee] = await Promise.all([
+    getLang(),
+    getTenantAccess(session.tenantId),
+    prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId },
+      include: {
+        branch: { select: { name: true } },
+        department: { select: { name: true } },
+        shift: { select: { name: true, startTime: true, endTime: true } },
+        tenant: { select: { name: true } },
+        manager: { select: { firstName: true, lastName: true, tenantId: true } },
+      },
     }),
   ]);
   if (!employee) return null;
+  const manager = employee.manager?.tenantId === session.tenantId ? employee.manager : null;
+  const myAssets = access.modules.has("assets") ? await prisma.assetAssignment.findMany({
+    where: { employeeId: employee.id, asset: { tenantId: session.tenantId }, returnedAt: null },
+    include: { asset: { select: { name: true, tag: true, category: true } } },
+    orderBy: { assignedAt: "desc" },
+  }) : null;
 
   const fields = [
     { label: t(lang, "profile.employeeId"), value: employee.employeeNumber },
-    { label: t(lang, "profile.email"), value: employee.email },
+    { label: t(lang, "profile.email"), value: employee.email && !employee.email.endsWith("@employees.peoplenexa.invalid") ? employee.email : "—" },
     { label: t(lang, "profile.phone"), value: employee.phone || "—" },
     { label: t(lang, "profile.position"), value: employee.position || "—" },
     { label: t(lang, "profile.department"), value: employee.department?.name ?? t(lang, "profile.unassigned") },
     { label: t(lang, "profile.branch"), value: employee.branch?.name ?? "—" },
-    { label: t(lang, "profile.shift"), value: employee.shift ? `${employee.shift.name} (${employee.shift.startTime}–${employee.shift.endTime})` : "—" },
+    { label: t(lang, "profile.manager"), value: manager ? `${manager.firstName} ${manager.lastName}`.trim() : "—" },
+    ...(access.modules.has("shifts") ? [{ label: t(lang, "profile.shift"), value: employee.shift ? `${employee.shift.name} (${employee.shift.startTime}–${employee.shift.endTime})` : "—" }] : []),
     { label: t(lang, "profile.joiningDate"), value: employee.joiningDate ? formatDate(employee.joiningDate) : "—" },
     { label: t(lang, "profile.lastLogin"), value: employee.lastLoginAt ? formatDate(employee.lastLoginAt) : "—" },
     { label: t(lang, "profile.company"), value: employee.tenant.name },
@@ -56,7 +66,7 @@ export default async function EmployeeProfilePage() {
               </p>
               <div className="mt-2 flex gap-2">
                 <Badge tone={employee.status === "active" ? "success" : "neutral"}>{employee.status}</Badge>
-                <Badge tone="violet">{employee.role === "admin" ? t(lang, "profile.administrator") : t(lang, "profile.employee")}</Badge>
+                {employee.role === "admin" && <Badge tone="violet">{t(lang, "profile.administrator")}</Badge>}
               </div>
             </div>
           </div>
@@ -72,7 +82,7 @@ export default async function EmployeeProfilePage() {
         </CardContent>
       </Card>
 
-      <Card>
+      {myAssets && <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Package className="h-4 w-4 text-indigo-300" /> {t(lang, "profile.myAssets")}
@@ -107,7 +117,7 @@ export default async function EmployeeProfilePage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }

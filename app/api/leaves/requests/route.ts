@@ -1,9 +1,11 @@
-import { leaveCalendar, leaveEligibilityError } from "@/lib/leave-calendar";
+import { leaveCalendar, leaveEligibilityError, parseLeaveDateKey } from "@/lib/leave-calendar";
 import { assertLeavePayrollOpen } from "@/lib/leave-payroll-lock";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { fromDateKey, toDateKey, daysBetween } from "@/lib/dates";
+import { daysBetween } from "@/lib/dates";
+import { istDateKey, istStartOfDay } from "@/lib/ist";
+import { workspaceRegion } from "@/lib/workspace-region";
 import { notifyAdmins, notifyEmployee } from "@/lib/notifications";
 import { configurationEffectiveAtISTDay } from "@/lib/configuration";
 import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
@@ -114,13 +116,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Enter leave details as a JSON object." }, { status: 400 });
+    }
     const { leaveTypeId, fromDate, toDate, reason } = body as Record<
       string,
       string
     >;
     const halfDay = body.halfDay === true;
-    if (![leaveTypeId, fromDate, toDate].every((value) => typeof value === "string") || (reason !== undefined && reason !== null && (typeof reason !== "string" || reason.length > 2000))) return NextResponse.json({ error: "Invalid leave fields. Reasons must be text of at most 2,000 characters." }, { status: 400 });
+    if (![leaveTypeId, fromDate, toDate].every((value) => typeof value === "string") ||
+      (reason != null && (typeof reason !== "string" || reason.length > 2000)) ||
+      (body.employeeId != null && typeof body.employeeId !== "string") ||
+      (body.halfDay != null && typeof body.halfDay !== "boolean")) {
+      return NextResponse.json({ error: "Invalid leave fields. Reasons must be text of at most 2,000 characters." }, { status: 400 });
+    }
     if (!leaveTypeId || !fromDate || !toDate) {
       return NextResponse.json(
         { error: "Leave type and dates are required." },
@@ -162,7 +172,7 @@ export async function POST(req: NextRequest) {
         !actor ||
         !canApplyLeaveOnBehalf(session.role, actor, {
           branchId: target.branchId,
-          locationId: target.branch?.locationId ?? target.locationId,
+          locationId: target.branchId ? target.branch?.locationId ?? null : target.locationId,
         })
       ) {
         return NextResponse.json(
@@ -173,9 +183,9 @@ export async function POST(req: NextRequest) {
       employeeId = target.id;
     }
 
-    const from = fromDateKey(fromDate);
-    const to = fromDateKey(toDate);
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    const from = parseLeaveDateKey(fromDate);
+    const to = parseLeaveDateKey(toDate);
+    if (!from || !to) {
       return NextResponse.json(
         { error: "Leave dates are invalid. Use YYYY-MM-DD." },
         { status: 400 },
@@ -244,13 +254,13 @@ export async function POST(req: NextRequest) {
                   tenantId: session.tenantId,
                   employeeId,
                   status: { in: ["approved", "pending"] },
-                  fromDate: { lte: to },
-                  toDate: { gte: from },
+                  fromDate: { lt: new Date(istStartOfDay(to).getTime() + 86_400_000) },
+                  toDate: { gte: istStartOfDay(from) },
                 },
               });
               if (overlap) {
                 const err = new Error(
-                  `This range overlaps an existing ${overlap.status} request (${toDateKey(overlap.fromDate)} → ${toDateKey(overlap.toDate)}).`,
+                  `This range overlaps an existing ${overlap.status} request (${istDateKey(overlap.fromDate)} → ${istDateKey(overlap.toDate)}).`,
                 ) as Error & { code?: string };
                 err.code = "OVERLAP";
                 throw err;
@@ -389,7 +399,8 @@ export async function POST(req: NextRequest) {
                 days = calendar.days;
               } else days = halfDay ? 0.5 : daysBetween(from, to);
               if (days <= 0) throw Object.assign(new Error("These dates contain no chargeable leave days. Choose working dates."), { code: "BALANCE" });
-              const eligibility = leaveEligibilityError(policy?.rules ?? {}, fromDate, days, applicant.joiningDate, String(reason ?? ""));
+              const tenant = policy?.rules.noticeDays ? await tx.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }) : null;
+              const eligibility = leaveEligibilityError(policy?.rules ?? {}, fromDate, days, applicant.joiningDate, String(reason ?? ""), new Date(), workspaceRegion(tenant?.config).timeZone);
               if (eligibility) throw Object.assign(new Error(eligibility), { code: "BALANCE" });
               const usedDays = allocated
                 ? usedRows
@@ -438,7 +449,7 @@ export async function POST(req: NextRequest) {
                   fromDate: from,
                   toDate: to,
                   days,
-                  reason: reason || null,
+                  reason: reason?.trim() || null,
                   status:
                     (policy?.rules.requiresApproval ??
                     leaveType.requiresApproval)
@@ -507,22 +518,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Notify admins about the new request (or the employee when auto-approved).
+    const notificationFailed = () => console.warn("[leave] Request saved; notification failed.");
     if (attribution.onBehalf) {
       await notifyEmployee(
         session.tenantId,
         employeeId,
         "info",
         "Leave logged for you",
-        `${request.leaveType.name} (${toDateKey(request.fromDate)} → ${toDateKey(request.toDate)}) was logged on your behalf by an admin.`,
-      );
+        `${request.leaveType.name} (${istDateKey(request.fromDate)} → ${istDateKey(request.toDate)}) was recorded on your behalf.`,
+      ).catch(notificationFailed);
       if (request.status === "pending") {
         await notifyAdmins(
           session.tenantId,
           "info",
           "Leave request recorded for employee",
           `${request.employee.firstName} ${request.employee.lastName}'s ${days} day(s) of ${request.leaveType.name} needs approval.`,
-        );
+        ).catch(notificationFailed);
       }
     } else if (request.status === "pending") {
       await notifyAdmins(
@@ -530,15 +541,15 @@ export async function POST(req: NextRequest) {
         "info",
         "New leave request",
         `${request.employee.firstName} ${request.employee.lastName} requested ${days} day(s) of ${request.leaveType.name}.`,
-      );
+      ).catch(notificationFailed);
     } else {
       await notifyEmployee(
         session.tenantId,
         employeeId,
         "success",
         "Leave approved",
-        `Your ${request.leaveType.name} (${toDateKey(request.fromDate)} → ${toDateKey(request.toDate)}) was auto-approved.`,
-      );
+        `Your ${request.leaveType.name} (${istDateKey(request.fromDate)} → ${istDateKey(request.toDate)}) was auto-approved.`,
+      ).catch(notificationFailed);
     }
 
     return NextResponse.json({ request }, { status: 201 });

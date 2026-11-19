@@ -3,6 +3,7 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { EXPENSE_REIMBURSEMENT_PREFIX } from "@/lib/expense-reimbursement";
 
 /** GET — adjustments for a month (admin). */
 export async function GET(req: NextRequest) {
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest) {
 
   if (!label)
     return NextResponse.json({ error: "Label is required." }, { status: 400 });
+  if (label.startsWith(EXPENSE_REIMBURSEMENT_PREFIX)) return NextResponse.json({ error: "Use expense claim approval to add a payroll reimbursement." }, { status: 400 });
   if (!Number.isFinite(amount) || amount === 0) {
     return NextResponse.json(
       {

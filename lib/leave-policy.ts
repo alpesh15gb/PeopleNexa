@@ -1,4 +1,4 @@
-import { leavePolicyDraft, resolveConfiguration } from "@/lib/configuration";
+import { leavePolicyDraft, resolveConfiguration, type WorkedDayAccrual } from "@/lib/configuration";
 
 import type { LeaveCalendarRules } from "./leave-calendar";
 
@@ -26,6 +26,7 @@ export type LeavePolicySnapshot = {
     requiresApproval: boolean;
     carryForward: boolean;
     carryForwardLimit: number | null;
+    workedDayAccrual?: WorkedDayAccrual;
   };
 };
 

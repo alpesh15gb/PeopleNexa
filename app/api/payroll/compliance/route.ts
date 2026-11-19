@@ -6,6 +6,7 @@ import { fyFromMonth } from "@/lib/payroll";
 import { fiscalYearMonths, quarterMonths } from "@/lib/payroll-periods";
 import { financialExportPayslipFilter } from "@/lib/payroll-reporting";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { supportsIndiaPayroll, workspaceRegion } from "@/lib/workspace-region";
 
 const csv = (rows: (string | number)[][]) =>
   rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
@@ -23,6 +24,13 @@ export async function GET(req: NextRequest) {
   const locationId = await managerLocationId(session);
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const employeeScope = locationId ? { employee: employeeLocationScope(locationId) } : {};
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  if (!supportsIndiaPayroll(workspaceRegion(tenant?.config))) {
+    // The existing engine only produced India payroll. Keep those finalized
+    // records exportable after a workspace changes its regional settings.
+    const indiaHistory = await prisma.payslip.findFirst({ where: { tenantId: session.tenantId, ...employeeScope, ...financialExportPayslipFilter() }, select: { id: true } });
+    if (!indiaHistory) return NextResponse.json({ error: "These statutory export formats are for India payroll. Use your local payroll provider for this workspace’s jurisdiction." }, { status: 409 });
+  }
   const type = String(req.nextUrl.searchParams.get("type") ?? "ecr");
   const month = req.nextUrl.searchParams.get("month") || monthKeyIST(new Date());
   if (!isMonthKey(month)) {

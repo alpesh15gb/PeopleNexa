@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const n = Number(req.nextUrl.searchParams.get("limit") ?? 100);
   const take = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), 500) : 100;
   const logs = await prisma.deviceLog.findMany({
-    where: { deviceId: id },
+    where: { deviceId: id, tenantId: session.tenantId },
     orderBy: { createdAt: "desc" },
     take,
   });

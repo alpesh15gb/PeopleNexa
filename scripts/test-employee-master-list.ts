@@ -49,6 +49,11 @@ async function main() {
     assert.deepEqual(searched.employees.map(row => row.id), ["active"]);
     const secondPage = await loadEmployeeMasterList(baseWhere, "all", 2);
     assert.equal(secondPage.employees.length, 0);
+    queries.length = 0;
+    const coreDirectory = await loadEmployeeMasterList(baseWhere, "all", 1, false);
+    assert.equal(coreDirectory.counts.assignment_pending, 0);
+    assert.ok(coreDirectory.employees.every(row => row.deviceCode === null && !row.assignmentPending));
+    assert.equal(queries.length, 2, "core directory skips device assignment queries");
     assert.deepEqual(masterStatusWhere(baseWhere, "active"), { ...baseWhere, status: "active" });
     console.log("Employee list: lightweight bounded queries, all four filters/counts, scoped search, pending flags and pagination passed.");
   } finally {

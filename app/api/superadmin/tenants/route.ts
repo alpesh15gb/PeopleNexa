@@ -3,13 +3,15 @@ import { requireSuperAdmin } from "@/lib/superadmin";
 import { prisma } from "@/lib/prisma";
 import { PLANS, MODULES } from "@/lib/modules";
 import { getEffectivePlan } from "@/lib/plans-server";
-import { generateCompanyCode, normalizeSlug } from "@/lib/onboarding";
+import { createWorkspaceDefaults, generateCompanyCode, isValidWorkspaceSlug, normalizeSlug } from "@/lib/onboarding";
+import { newWorkspacePayrollSettings } from "@/lib/payroll-policy";
 import { hashPassword } from "@/lib/auth";
 
 export async function GET() {
   try {
     await requireSuperAdmin();
     const tenants = await prisma.tenant.findMany({
+      omit: { config: true },
       include: {
         _count: { select: { employees: true } },
         modules: { select: { module: true, enabled: true } },
@@ -55,7 +57,7 @@ export async function POST(req: NextRequest) {
     if (slug.length < 2) {
       return NextResponse.json({ error: "Subdomain must be at least 2 characters." }, { status: 400 });
     }
-    if (["www", "api", "admin", "app"].includes(slug)) {
+    if (!isValidWorkspaceSlug(slug)) {
       return NextResponse.json({ error: "This subdomain is reserved. Choose another one." }, { status: 400 });
     }
     if (!PLANS.some((p) => p.key === planKey)) {
@@ -80,59 +82,64 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "That subdomain is already taken." }, { status: 400 });
     }
 
-    const tenant = await prisma.tenant.create({
-      data: {
-        name,
-        code: generateCompanyCode(),
-        slug,
-        email: body.email || null,
-        phone: body.phone || null,
-        plan: planKey,
-        seats,
-        subscriptionExpiry: expiresAt,
-        status: body.status === "suspended" ? "suspended" : "active",
-      },
-    });
-
-    // Enable the plan's modules for the tenant.
-    await prisma.tenantModule.createMany({
-      data: MODULES.map((m) => ({
-        tenantId: tenant.id,
-        module: m.key,
-        enabled: effectivePlan.modules.includes(m.key),
-      })),
-    });
-
-    await prisma.license.create({
-      data: {
-        tenantId: tenant.id,
-        plan: planKey,
-        seats,
-        expiresAt,
-        note: body.licenseNote || `Manual signup (${planKey})`,
-        createdBy: sa.sub,
-      },
-    });
-
-    let admin = null;
-    if (adminEmail && adminPassword) {
-      const branch = await prisma.branch.create({
-        data: { tenantId: tenant.id, name: "Main Branch", code: "MAIN", isDefault: true },
+    const adminPasswordHash = hasAdminPassword ? await hashPassword(adminPassword) : null;
+    const { tenant, admin } = await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: {
+          name,
+          code: generateCompanyCode(),
+          slug,
+          email: body.email || null,
+          phone: body.phone || null,
+          plan: planKey,
+          seats,
+          subscriptionExpiry: expiresAt,
+          status: body.status === "suspended" ? "suspended" : "active",
+          config: newWorkspacePayrollSettings(),
+        },
       });
-      admin = await prisma.employee.create({
+
+      // Enable the plan's modules for the tenant.
+      await tx.tenantModule.createMany({
+        data: MODULES.map((m) => ({
+          tenantId: tenant.id,
+          module: m.key,
+          enabled: effectivePlan.modules.includes(m.key),
+        })),
+      });
+
+      await tx.license.create({
         data: {
           tenantId: tenant.id,
-          employeeNumber: "ADM-001",
-          firstName: name,
-          lastName: "Admin",
-          email: adminEmail,
-          password: await hashPassword(adminPassword),
-          role: "admin",
-          branchId: branch.id,
+          plan: planKey,
+          seats,
+          expiresAt,
+          note: body.licenseNote || `Manual signup (${planKey})`,
+          createdBy: sa.sub,
         },
-        select: { id: true, email: true },
       });
-    }
+
+      const { branch, shift } = await createWorkspaceDefaults(tx, tenant.id);
+      let admin = null;
+      if (adminPasswordHash) {
+        admin = await tx.employee.create({
+          data: {
+            tenantId: tenant.id,
+            employeeNumber: "ADM-001",
+            firstName: name,
+            lastName: "Admin",
+            email: adminEmail,
+            password: adminPasswordHash,
+            role: "admin",
+            branchId: branch.id,
+            shiftId: shift.id,
+          },
+          select: { id: true, email: true },
+        });
+      }
+
+      return { tenant, admin };
+    });
 
     return NextResponse.json({ tenant, admin }, { status: 201 });
   } catch (err) {

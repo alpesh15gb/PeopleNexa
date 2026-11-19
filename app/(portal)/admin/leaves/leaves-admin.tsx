@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -24,15 +24,23 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import { addDays, formatDate, toDateKey, fromDateKey } from "@/lib/dates";
+import { formatDate, formatDateIST, fromDateKey } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
+import { formatCalendarDate, offsetDateKey } from "@/lib/workspace-time";
+import { countsAsLeaveDay } from "@/lib/leave-calendar";
+import type { LeaveCancellationDecision } from "@/lib/leave-request-history";
 
 interface Request {
   cancellationRequestedBy?: string | null;
+  cancellationRequestedAt?: Date | null;
   cancellationReason?: string | null;
+  cancellationDecision?: LeaveCancellationDecision;
+  canReview: boolean;
+  leavePolicySnapshot?: unknown;
   id: string;
   days: number;
   reason: string | null;
+  reviewNote: string | null;
   status: string;
   fromDate: Date;
   toDate: Date;
@@ -40,6 +48,21 @@ interface Request {
   source: string;
   leaveType: { name: string; color: string };
   employee: { firstName: string; lastName: string; employeeNumber: string };
+}
+
+function LeaveReviewAction({ request, onReview }: { request: Request; onReview: (request: Request) => void }) {
+  if (request.status !== "pending" && !request.cancellationRequestedBy) return null;
+  if (!request.canReview) return <span className="text-xs text-muted-foreground">Independent reviewer required</span>;
+  const label = request.cancellationRequestedBy ? "Review cancellation" : "Review request";
+  return <Button size="sm" variant="outline" aria-label={`${label} for ${request.employee.firstName} ${request.employee.lastName}`} onClick={() => onReview(request)}>{label}</Button>;
+}
+
+function LeaveRequestStatus({ request }: { request: Request }) {
+  return <div className="space-y-1">
+    {request.status === "cancelled" && !request.cancellationDecision ? <span className="rounded-full bg-tint px-2 py-1 text-xs">Withdrawn</span> : <StatusPill status={request.status} />}
+    {request.cancellationRequestedBy && <p className="text-xs font-medium text-amber-700 dark:text-amber-300">Cancellation awaiting review</p>}
+    {!request.cancellationRequestedBy && request.cancellationDecision && <p className="text-xs text-muted-foreground">{request.cancellationDecision.approved ? "Cancellation approved" : "Cancellation declined"}</p>}
+  </div>;
 }
 
 interface Type {
@@ -77,15 +100,25 @@ interface ImportBatch {
 export function LeavesAdmin({
   requests,
   types,
-  employees,
   canManageTypes,
+  canLogLeave,
+  canViewBalances,
+  canManageHolidays,
   importBatches,
+  reviewOnly = false,
+  todayKey,
+  locale,
 }: {
   requests: Request[];
   types: Type[];
-  employees: Employee[];
   canManageTypes: boolean;
+  canLogLeave: boolean;
+  canViewBalances: boolean;
+  canManageHolidays: boolean;
   importBatches: ImportBatch[];
+  reviewOnly?: boolean;
+  todayKey: string;
+  locale: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -96,32 +129,73 @@ export function LeavesAdmin({
   const [requestSearch, setRequestSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [reviewRequest, setReviewRequest] = useState<Request | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewError, setReviewError] = useState("");
   const [typeModal, setTypeModal] = useState<Type | "new" | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingType, setDeletingType] = useState<Type | null>(null);
   const [onBehalfOpen, setOnBehalfOpen] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
+  const [logError, setLogError] = useState("");
   const [employeeQuery, setEmployeeQuery] = useState("");
-  const deferredEmployeeQuery = useDeferredValue(employeeQuery);
-  const [month, setMonth] = useState(() => new Date());
+  const deferredEmployeeQuery = useDeferredValue(employeeQuery.trim());
+  const [employeeSearch, setEmployeeSearch] = useState<{
+    query: string;
+    employees: Employee[];
+    hasMore?: boolean;
+    error?: string;
+  } | null>(null);
+  const [month, setMonth] = useState(() => fromDateKey(todayKey));
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importTypeId, setImportTypeId] = useState("");
-  const [importMonth, setImportMonth] = useState("2026-08");
+  const [importFormat, setImportFormat] = useState<"csv" | "legacy">("csv");
+  const [importMonth, setImportMonth] = useState("");
   const [importPreview, setImportPreview] = useState<any>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [reviewedExceptions, setReviewedExceptions] = useState(false);
   const [exceptionsAcknowledged, setExceptionsAcknowledged] = useState(false);
 
+  useEffect(() => {
+    if (!onBehalfOpen) return;
+    const controller = new AbortController();
+    const query = deferredEmployeeQuery;
+    const params = new URLSearchParams({ q: query });
+    fetch(`/api/leaves/employees?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Employee search failed.");
+        if (!controller.signal.aborted) setEmployeeSearch({ query, ...data });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setEmployeeSearch({ query, employees: [], error: error.message });
+      });
+    return () => controller.abort();
+  }, [deferredEmployeeQuery, onBehalfOpen]);
+
+  function resetImportPreview() {
+    setImportPreview(null);
+    setReviewedExceptions(false);
+    setExceptionsAcknowledged(false);
+  }
+
+  function closeEmployeeDialog() {
+    setOnBehalfOpen(false);
+    setEmployeeQuery("");
+    setEmployeeSearch(null);
+  }
+
   async function previewImport(confirm = false) {
-    if (!importFile || !importTypeId) {
-      toast("error", "Choose the workbook and mapped leave type.");
+    if (!importFile || !importTypeId || !importMonth) {
+      toast("error", "Choose a file, leave type and cutoff month.");
       return;
     }
     setImportBusy(true);
     try {
       const form = new FormData();
       form.set("file", importFile);
+      form.set("format", importFormat);
       form.set("leaveTypeId", importTypeId);
       form.set("throughMonth", importMonth);
       if (confirm) {
@@ -140,18 +214,18 @@ export function LeavesAdmin({
       });
       const data = await response.json();
       if (!response.ok) {
-        toast("error", data.error ?? "Could not import the workbook.");
+        toast("error", data.error ?? "Could not import the file.");
         return;
       }
       if (confirm) {
         toast(
           "success",
           data.idempotent
-            ? "This workbook was already imported; no changes made."
+            ? "This file was already imported."
             : "Immutable balance snapshots imported.",
         );
         setImportOpen(false);
-        setImportPreview(null);
+        resetImportPreview();
         setImportFile(null);
         router.refresh();
         return;
@@ -168,6 +242,7 @@ export function LeavesAdmin({
     try {
       const form = new FormData();
       form.set("file", importFile);
+      form.set("format", importFormat);
       form.set("leaveTypeId", importTypeId);
       form.set("throughMonth", importMonth);
       form.set("report", "true");
@@ -191,24 +266,44 @@ export function LeavesAdmin({
     }
   }
 
-  async function review(id: string, status: string) {
+  function startReview(request: Request) {
+    setReviewRequest(request);
+    setReviewNote("");
+    setReviewError("");
+  }
+
+  function requestDates(request: Request) {
+    return `${formatCalendarDate(istDateKey(request.fromDate), locale)} – ${formatCalendarDate(istDateKey(request.toDate), locale)}`;
+  }
+
+  async function review(approve: boolean) {
+    if (!reviewRequest || busy) return;
+    const { id, cancellationRequestedBy, cancellationRequestedAt } = reviewRequest;
+    setReviewError("");
     setBusy(id);
     try {
+      const status = cancellationRequestedBy
+        ? approve ? "cancellation_approved" : "cancellation_rejected"
+        : approve ? "approved" : "rejected";
       const res = await fetch(`/api/leaves/requests/${id}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, note: reviewNote.trim(), expectedCancellationRequestedAt: cancellationRequestedAt?.toISOString() }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to update");
+        setReviewError(data.error ?? "Could not save the decision.");
+        if (res.status === 409) router.refresh();
         return;
       }
       toast(
         "success",
-        status === "cancellation_approved" ? "Cancellation approved; regenerate affected draft payroll" : status === "cancellation_rejected" ? "Cancellation rejected; leave remains approved" : status === "approved" ? "Leave approved" : "Leave rejected",
+        status === "cancellation_approved" ? "Cancellation approved. Leave balance restored." : status === "cancellation_rejected" ? "Cancellation declined. Leave remains approved." : status === "approved" ? "Leave approved" : "Leave rejected",
       );
+      setReviewRequest(null);
       router.refresh();
+    } catch {
+      setReviewError("Could not send your decision. Try again.");
     } finally {
       setBusy(null);
     }
@@ -278,13 +373,17 @@ export function LeavesAdmin({
     }
   }
 
-  const pending = requests.filter((r) => r.status === "pending" || r.cancellationRequestedBy).length;
-  const statusFilter = searchParams.get("status") ?? "all";
+  const pending = requests.filter((r) => r.canReview && (r.status === "pending" || r.cancellationRequestedBy)).length;
+  const statusFilter = reviewOnly ? "pending" : searchParams.get("status") ?? "all";
   const filteredRequests = requests
     .filter((request) => {
       const query = requestSearch.trim().toLowerCase();
       return (
-        (statusFilter === "all" || (statusFilter === "cancellation_pending" ? Boolean(request.cancellationRequestedBy) : statusFilter === "pending" ? request.status === "pending" || Boolean(request.cancellationRequestedBy) : request.status === statusFilter)) &&
+        (statusFilter === "all" ||
+          (statusFilter === "needs_review" && request.canReview && (request.status === "pending" || Boolean(request.cancellationRequestedBy))) ||
+          (statusFilter === "cancellation_pending" && Boolean(request.cancellationRequestedBy)) ||
+          request.status === statusFilter ||
+          (reviewOnly && Boolean(request.cancellationRequestedBy))) &&
         (!query ||
           `${request.employee.firstName} ${request.employee.lastName} ${request.employee.employeeNumber} ${request.leaveType.name}`
             .toLowerCase()
@@ -294,20 +393,20 @@ export function LeavesAdmin({
     .sort(
       (a, b) => Number(b.status === "pending" || Boolean(b.cancellationRequestedBy)) - Number(a.status === "pending" || Boolean(a.cancellationRequestedBy)),
     );
-  const todayKey = istDateKey(new Date());
   const awayToday = new Set(
     requests
       .filter(
         (request) =>
           request.status === "approved" &&
-          toDateKey(request.fromDate) <= todayKey &&
-          toDateKey(request.toDate) >= todayKey,
+          istDateKey(request.fromDate) <= todayKey &&
+          istDateKey(request.toDate) >= todayKey &&
+          countsAsLeaveDay(request.leavePolicySnapshot, todayKey),
       )
       .map((request) => request.employee.employeeNumber),
   ).size;
   const upcoming = requests.filter(
     (request) =>
-      request.status === "approved" && toDateKey(request.fromDate) > todayKey,
+      request.status === "approved" && istDateKey(request.fromDate) > todayKey,
   ).length;
   function setStatusFilter(value: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -315,18 +414,11 @@ export function LeavesAdmin({
     else params.set("status", value);
     router.replace(`?${params.toString()}`, { scroll: false });
   }
-  const employeeMatches = employees.filter((employee) => {
-    const query = deferredEmployeeQuery.trim().toLowerCase();
-    return (
-      !query ||
-      `${employee.firstName} ${employee.lastName} ${employee.employeeNumber}`
-        .toLowerCase()
-        .includes(query)
-    );
-  });
+  const currentEmployeeSearch = employeeSearch?.query === employeeQuery.trim() ? employeeSearch : null;
 
   return (
     <>
+      {!reviewOnly && <>
       <section
         aria-label="Leave overview"
         className="grid grid-cols-3 gap-2 border-b border-edge p-3 sm:gap-3 sm:p-5"
@@ -335,11 +427,11 @@ export function LeavesAdmin({
           type="button"
           onClick={() => {
             setTab("requests");
-            setStatusFilter("pending");
+            setStatusFilter("needs_review");
           }}
           className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-left focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <p className="text-xs font-medium text-primary">Awaiting approval</p>
+          <p className="text-xs font-medium text-primary">Ready for your review</p>
           <p className="mt-2 text-3xl font-semibold tabular-nums">{pending}</p>
           <p className="mt-2 hidden text-xs text-muted-foreground sm:block">
             {pending ? "Open requests to review" : "You're all caught up"}
@@ -349,7 +441,7 @@ export function LeavesAdmin({
           type="button"
           onClick={() => {
             setTab("calendar");
-            setMonth(new Date());
+            setMonth(fromDateKey(todayKey));
           }}
           className="rounded-xl border border-edge bg-card p-4 text-left focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -384,11 +476,11 @@ export function LeavesAdmin({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
         <nav aria-label="Leave workspace" className="flex flex-wrap gap-1">
           {(
-            [
+            ([
               ["requests", `Requests${pending ? ` (${pending})` : ""}`],
               ["balances", "Employee balances"],
               ["calendar", "Team calendar"],
-            ] as const
+            ] as const).filter(([key]) => key !== "balances" || canViewBalances)
           ).map(([key, label]) => (
             <button
               key={key}
@@ -408,15 +500,19 @@ export function LeavesAdmin({
           ))}
         </nav>
         <div className="flex flex-wrap gap-2">
-          <Button
+          {canLogLeave && <Button
             size="sm"
             variant="outline"
-            onClick={() => setOnBehalfOpen(true)}
+            disabled={types.length === 0}
+            onClick={() => { setLogError(""); setOnBehalfOpen(true); }}
           >
             <PenLine aria-hidden="true" className="h-3.5 w-3.5" /> Log leave
-          </Button>
+          </Button>}
           {canManageTypes && (
-            <Link href="/admin/leaves/policies" className="inline-flex min-h-8 items-center rounded-lg px-3 text-xs font-medium text-primary hover:bg-tint">Leave settings</Link>
+            <Link href="/admin/leaves/policies" className="inline-flex min-h-8 items-center rounded-lg px-3 text-xs font-medium text-primary hover:bg-tint">Leave policies</Link>
+          )}
+          {canManageHolidays && (
+            <Link href="/admin/holidays" className="inline-flex min-h-8 items-center rounded-lg px-3 text-xs font-medium text-primary hover:bg-tint">Holidays</Link>
           )}
           {canManageTypes && (
             <Button
@@ -461,6 +557,7 @@ export function LeavesAdmin({
           </Button>
         </nav>
       )}
+      </>}
       {tab === "requests" && (
         <div className="flex flex-wrap items-center gap-3 border-b border-edge p-5">
           <div className="relative min-w-48 flex-1">
@@ -476,6 +573,7 @@ export function LeavesAdmin({
               placeholder="Search employee, ID or leave type"
             />
           </div>
+          {!reviewOnly && <>
           <label className="sr-only" htmlFor="leave-status-filter">
             Filter requests by status
           </label>
@@ -486,12 +584,14 @@ export function LeavesAdmin({
             className="w-auto min-w-36"
           >
             <option value="all">All statuses</option>
-            <option value="pending">Pending</option>
+            <option value="needs_review">Ready for your review</option>
+            <option value="pending">Leave awaiting approval</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="cancellation_pending">Cancellation awaiting review</option>
             <option value="cancelled">Cancelled / withdrawn</option>
           </Select>
+          </>}
           <span aria-live="polite" className="text-xs text-muted-foreground">
             {filteredRequests.length} requests
           </span>
@@ -502,7 +602,7 @@ export function LeavesAdmin({
           <div>
             <h2 className="font-semibold">Leave types</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Create and name leave types. Manage applied allowances and rules in Leave settings.
+              Create and name leave types. Set allowances and request rules in Leave policies.
             </p>
           </div>
           <Button size="sm" onClick={() => setTypeModal("new")}>
@@ -525,46 +625,25 @@ export function LeavesAdmin({
                       {r.employee.employeeNumber}
                     </p>
                   </div>
-                  <StatusPill status={r.status} />
+                  <LeaveRequestStatus request={r} />
                 </div>
                 <div className="rounded-xl bg-tint p-3">
                   <p className="text-sm font-medium">
                     {r.leaveType.name} · {r.days} days
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {formatDate(r.fromDate)} → {formatDate(r.toDate)}
+                    {requestDates(r)}
                   </p>
                   {r.cancellationRequestedBy && <p className="mt-2 text-sm text-amber-500">Cancellation requested: {r.cancellationReason}</p>}
                   {r.reason && (
-                    <p className="mt-2 text-xs text-muted-foreground">
+                    <p className="mt-2 break-words text-xs text-muted-foreground">
                       {r.reason}
                     </p>
                   )}
+                  {r.reviewNote && <p className="mt-2 break-words text-xs text-muted-foreground">Review note · {r.reviewNote}</p>}
+                  {!r.cancellationRequestedBy && r.cancellationDecision?.note && <p className="mt-2 break-words text-xs text-muted-foreground">Cancellation review note · {r.cancellationDecision.note}</p>}
                 </div>
-                {(r.status === "pending" || r.cancellationRequestedBy) && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      size="sm"
-                      variant="success"
-                      loading={busy === r.id}
-                      aria-label={`Approve leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                      onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_approved" : "approved")}
-                    >
-                      <Check aria-hidden="true" className="h-3.5 w-3.5" />
-                      {r.cancellationRequestedBy ? "Approve cancellation" : "Approve"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy === r.id}
-                      aria-label={`Reject leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                      onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_rejected" : "rejected")}
-                    >
-                      <X aria-hidden="true" className="h-3.5 w-3.5" />
-                      {r.cancellationRequestedBy ? "Keep leave" : "Reject"}
-                    </Button>
-                  </div>
-                )}
+                <LeaveReviewAction request={r} onReview={startReview} />
                 {r.source === "admin_on_behalf" && (
                   <p className="text-xs text-muted-foreground">
                     Recorded on behalf
@@ -576,7 +655,7 @@ export function LeavesAdmin({
               <p className="p-8 text-center text-sm text-muted-foreground">
                 {requests.length
                   ? "No matching requests. Change your search or status filter."
-                  : "No leave requests yet."}
+                  : reviewOnly ? "No leave requests need your review." : "No leave requests yet."}
               </p>
             )}
           </div>
@@ -588,7 +667,7 @@ export function LeavesAdmin({
                   <TH>Type</TH>
                   <TH className="hidden md:table-cell">Dates</TH>
                   <TH>Days</TH>
-                  <TH className="hidden lg:table-cell">Reason</TH>
+                  <TH className="hidden lg:table-cell">Request details</TH>
                   <TH>Status</TH>
                   <TH className="w-28" />
                 </TR>
@@ -603,12 +682,12 @@ export function LeavesAdmin({
                       <p className="font-medium text-foreground">
                         {requests.length
                           ? "No matching requests"
-                          : "No leave requests yet"}
+                          : reviewOnly ? "No leave requests need your review" : "No leave requests yet"}
                       </p>
                       <p className="mt-2">
                         {requests.length
                           ? "Change your search or status filter to see more requests."
-                          : "Employee requests will appear here for review."}
+                          : reviewOnly ? "New applications and cancellations within your scope will appear here." : "Employee requests will appear here for review."}
                       </p>
                     </td>
                   </tr>
@@ -623,7 +702,7 @@ export function LeavesAdmin({
                           {r.employee.employeeNumber}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground md:hidden">
-                          {formatDate(r.fromDate)} → {formatDate(r.toDate)}
+                          {requestDates(r)}
                         </p>
                         {r.reason && (
                           <p className="mt-1 max-w-56 text-xs text-muted-foreground lg:hidden">
@@ -642,54 +721,21 @@ export function LeavesAdmin({
                       </TD>
                       <TD className="hidden md:table-cell">
                         <span className="text-[13px] text-muted-foreground">
-                          {formatDate(r.fromDate)} → {formatDate(r.toDate)}
+                          {formatDateIST(r.fromDate)} → {formatDateIST(r.toDate)}
                         </span>
                       </TD>
                       <TD className="font-semibold">{r.days}d</TD>
                       <TD className="hidden max-w-[220px] lg:table-cell">
-                        <span className="block truncate text-[13px] text-muted-foreground">
-                          {r.reason || "—"}
-                        </span>
+                        {r.reason && <p className="break-words text-xs text-muted-foreground">{r.reason}</p>}
+                        {r.reviewNote && <p className="mt-1 break-words text-xs text-muted-foreground">Review note · {r.reviewNote}</p>}
+                        {r.cancellationRequestedBy && r.cancellationReason && <p className="mt-1 break-words text-xs text-muted-foreground">Cancellation reason · {r.cancellationReason}</p>}
+                        {!r.cancellationRequestedBy && r.cancellationDecision?.note && <p className="mt-1 break-words text-xs text-muted-foreground">Cancellation review note · {r.cancellationDecision.note}</p>}
                       </TD>
                       <TD>
-                        <StatusPill status={r.status} />
+                        <LeaveRequestStatus request={r} />
                       </TD>
                       <TD>
-                        {(r.status === "pending" || r.cancellationRequestedBy) ? (
-                          <div className="flex items-center gap-1.5">
-                            <Button
-                              size="sm"
-                              variant="success"
-                              aria-label={`Approve leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                              loading={busy === r.id}
-                              onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_approved" : "approved")}
-                            >
-                              <Check
-                                aria-hidden="true"
-                                className="h-3.5 w-3.5"
-                              />
-                              <span>{r.cancellationRequestedBy ? "Approve cancellation" : "Approve"}</span>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              aria-label={`Reject leave for ${r.employee.firstName} ${r.employee.lastName}`}
-                              disabled={busy === r.id}
-                              onClick={() => review(r.id, r.cancellationRequestedBy ? "cancellation_rejected" : "rejected")}
-                            >
-                              <X aria-hidden="true" className="h-3.5 w-3.5" />
-                              <span>{r.cancellationRequestedBy ? "Keep leave" : "Reject"}</span>
-                            </Button>
-                          </div>
-                        ) : (
-                          <span className="text-[12px] text-muted-foreground">
-                            {r.status === "approved"
-                              ? "Approved"
-                              : r.status === "cancelled"
-                                ? "Withdrawn"
-                                : "Rejected"}
-                          </span>
-                        )}
+                        <LeaveReviewAction request={r} onReview={startReview} />
                         {r.source === "admin_on_behalf" && (
                           <p className="mt-1 text-[10.5px] text-muted-foreground">
                             Recorded on behalf
@@ -706,7 +752,7 @@ export function LeavesAdmin({
       ) : tab === "balances" ? (
         <EmployeeBalances />
       ) : tab === "calendar" ? (
-        <TeamCalendar month={month} setMonth={setMonth} requests={requests} />
+        <TeamCalendar month={month} setMonth={setMonth} requests={requests} today={todayKey} />
       ) : tab === "types" ? (
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
           {types.map((t) => (
@@ -763,13 +809,11 @@ export function LeavesAdmin({
                 Initial balance reconciliation
               </p>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                Accepts the Key Stone Manipur 2026 ledger or the canonical flat
-                CSV. It creates immutable balance snapshots, never leave
-                requests or policy allocations.
+                Bring in employee leave balances as of a selected month.
               </p>
             </div>
             <Button size="sm" onClick={() => setImportOpen(true)}>
-              <Upload className="h-3.5 w-3.5" /> Import workbook
+              <Upload className="h-3.5 w-3.5" /> Import balances
             </Button>
           </div>
           {importBatches.length === 0 ? (
@@ -844,28 +888,44 @@ export function LeavesAdmin({
         onClose={() => {
           if (!importBusy) {
             setImportOpen(false);
-            setImportPreview(null);
+            setImportFile(null);
+            resetImportPreview();
           }
         }}
-        title="Import leave balance ledger"
+        title="Import leave balances"
         size="lg"
       >
         <div className="space-y-4">
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            Select the leave type and cutoff. Employee codes match active staff
-            by employee number or device code, regardless of portal access. XLSX
-            uses the selected ledger month. Canonical CSV requires every
-            through_month value to match it. The cutoff is an IST boundary.
-          </p>
-          <Field label="Ledger (.xlsx) or canonical export (.csv)">
+          <Field label="File format">
+            <Select
+              value={importFormat}
+              disabled={importBusy}
+              onChange={(event) => {
+                setImportFormat(event.target.value === "legacy" ? "legacy" : "csv");
+                setImportFile(null);
+                setImportMonth("");
+                resetImportPreview();
+              }}
+            >
+              <option value="csv">Standard leave balance CSV</option>
+              <option value="legacy">Legacy 2026 ledger (.xlsx)</option>
+            </Select>
+          </Field>
+          {importFormat === "csv" && (
+            <p className="text-[12px] leading-5 text-muted-foreground">
+              <a href="/api/leaves/imports?template=flat" className="font-medium text-primary underline">Download the CSV template</a>.
+              Use <code>peoplenexa-leave-balance-flat-v1</code> as the <code>schema_profile</code>. Each row’s <code>through_month</code> must match the cutoff month.
+            </p>
+          )}
+          <Field label={importFormat === "csv" ? "Leave balance CSV" : "Legacy ledger workbook"}>
             <Input
+              key={importFormat}
               type="file"
-              accept=".xlsx,.csv"
+              accept={importFormat === "csv" ? ".csv" : ".xlsx"}
+              disabled={importBusy}
               onChange={(event) => {
                 setImportFile(event.target.files?.[0] ?? null);
-                setImportPreview(null);
-                setReviewedExceptions(false);
-                setExceptionsAcknowledged(false);
+                resetImportPreview();
               }}
             />
           </Field>
@@ -873,11 +933,10 @@ export function LeavesAdmin({
             <Field label="Map all rows to leave type">
               <Select
                 value={importTypeId}
+                disabled={importBusy}
                 onChange={(event) => {
                   setImportTypeId(event.target.value);
-                  setImportPreview(null);
-                  setReviewedExceptions(false);
-                  setExceptionsAcknowledged(false);
+                  resetImportPreview();
                 }}
               >
                 <option value="">Select leave type</option>
@@ -888,38 +947,19 @@ export function LeavesAdmin({
                 ))}
               </Select>
             </Field>
-            <Field label="Ledger through month">
-              <Select
+            <Field label="Cutoff month">
+              <Input
+                type="month"
                 value={importMonth}
+                min={importFormat === "legacy" ? "2026-01" : undefined}
+                max={importFormat === "legacy" ? "2026-12" : undefined}
+                placeholder="YYYY-MM"
+                disabled={importBusy}
                 onChange={(event) => {
                   setImportMonth(event.target.value);
-                  setImportPreview(null);
-                  setReviewedExceptions(false);
-                  setExceptionsAcknowledged(false);
+                  resetImportPreview();
                 }}
-              >
-                {[
-                  "January",
-                  "February",
-                  "March",
-                  "April",
-                  "May",
-                  "June",
-                  "July",
-                  "August",
-                  "September",
-                  "October",
-                  "November",
-                  "December",
-                ].map((label, index) => (
-                  <option
-                    key={label}
-                    value={`2026-${String(index + 1).padStart(2, "0")}`}
-                  >
-                    {label} 2026
-                  </option>
-                ))}
-              </Select>
+              />
             </Field>
           </div>
           {importPreview && (
@@ -1021,11 +1061,11 @@ export function LeavesAdmin({
             </div>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setImportOpen(false)}>
+            <Button variant="ghost" disabled={importBusy} onClick={() => { setImportOpen(false); setImportFile(null); resetImportPreview(); }}>
               Cancel
             </Button>
             {!importPreview ? (
-              <Button loading={importBusy} onClick={() => previewImport()}>
+              <Button loading={importBusy} disabled={!importFile || !importTypeId || !importMonth} onClick={() => previewImport()}>
                 Dry run
               </Button>
             ) : (
@@ -1047,22 +1087,54 @@ export function LeavesAdmin({
       </Modal>
 
       <Modal
+        open={reviewRequest !== null}
+        onClose={() => !busy && setReviewRequest(null)}
+        title={reviewRequest?.cancellationRequestedBy ? "Review leave cancellation" : "Review leave request"}
+      >
+        {reviewRequest && <div className="space-y-4">
+          <div className="rounded-xl border border-edge bg-tint p-4">
+            <p className="font-semibold">{reviewRequest.employee.firstName} {reviewRequest.employee.lastName}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{reviewRequest.leaveType.name} · {reviewRequest.days} {reviewRequest.days === 1 ? "day" : "days"} · {requestDates(reviewRequest)}</p>
+            {reviewRequest.reason && <p className="mt-2 break-words text-sm">Leave reason · {reviewRequest.reason}</p>}
+            {reviewRequest.cancellationReason && <p className="mt-2 break-words text-sm">Cancellation reason · {reviewRequest.cancellationReason}</p>}
+          </div>
+          {reviewRequest.cancellationRequestedBy && <p className="text-sm text-muted-foreground">Approving restores the employee’s balance. Review any affected draft payroll before closing it. Declining keeps the approved leave in effect.</p>}
+          <Field label="Decision note (optional)">
+            <Textarea value={reviewNote} maxLength={2000} disabled={!!busy} onChange={(event) => setReviewNote(event.target.value)} placeholder="Visible to the employee" />
+          </Field>
+          {reviewError && <p role="alert" className="text-sm text-rose-600 dark:text-rose-300">{reviewError}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={!!busy} onClick={() => setReviewRequest(null)}>Close</Button>
+            <Button type="button" variant="outline" disabled={!!busy} onClick={() => review(false)}>
+              <X aria-hidden="true" className="h-4 w-4" />{reviewRequest.cancellationRequestedBy ? "Decline cancellation" : "Reject leave"}
+            </Button>
+            <Button type="button" variant="success" disabled={!!busy} onClick={() => review(true)}>
+              <Check aria-hidden="true" className="h-4 w-4" />{reviewRequest.cancellationRequestedBy ? "Approve cancellation" : "Approve leave"}
+            </Button>
+          </div>
+        </div>}
+      </Modal>
+
+      <Modal
         open={onBehalfOpen}
-        onClose={() => setOnBehalfOpen(false)}
+        onClose={() => !logSaving && closeEmployeeDialog()}
         title="Log leave for an employee"
         size="sm"
       >
         <form
           onSubmit={async (e) => {
             e.preventDefault();
-            setLogSaving(true);
             const form = new FormData(e.currentTarget);
+            const employeeId = form.get("employeeId");
+            if (!employeeId || logSaving) return;
+            setLogError("");
+            setLogSaving(true);
             try {
               const res = await fetch("/api/leaves/requests", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  employeeId: form.get("employeeId"),
+                  employeeId,
                   leaveTypeId: form.get("leaveTypeId"),
                   fromDate: form.get("fromDate"),
                   toDate: form.get("toDate"),
@@ -1072,17 +1144,19 @@ export function LeavesAdmin({
               });
               const data = await res.json();
               if (!res.ok) {
-                toast("error", data.error ?? "Failed to log leave");
+                setLogError(data.error ?? "Could not log leave.");
                 return;
               }
-              toast("success", "Leave logged — employee notified");
-              setOnBehalfOpen(false);
-              setEmployeeQuery("");
+              toast("success", data.request.status === "pending" ? "Leave logged and sent for independent review." : "Leave logged and approved.");
+              closeEmployeeDialog();
               router.refresh();
+            } catch {
+              setLogError("Could not send the request. Try again.");
             } finally {
               setLogSaving(false);
             }
           }}
+          onChange={() => logError && setLogError("")}
           className="space-y-4"
         >
           <Field label="Find employee">
@@ -1094,20 +1168,19 @@ export function LeavesAdmin({
             />
           </Field>
           <Field label="Employee">
-            <Select name="employeeId" required>
+            <Select name="employeeId" key={employeeQuery.trim()} required disabled={!currentEmployeeSearch?.employees.length}>
               <option value="">Select employee</option>
-              {employeeMatches.map((e) => (
+              {currentEmployeeSearch?.employees.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.firstName} {e.lastName} ({e.employeeNumber})
                 </option>
               ))}
             </Select>
-            {employeeQuery && employeeMatches.length === 0 && (
-              <p className="mt-1.5 text-[12px] text-muted-foreground">
-                No matching employee in your permitted scope. Try a name or
-                employee number.
-              </p>
-            )}
+            <p aria-live="polite" className="mt-1.5 text-[12px] text-muted-foreground">
+              {!currentEmployeeSearch ? "Searching employees…" : currentEmployeeSearch.error ?? (
+                !currentEmployeeSearch.employees.length ? "No matching employees." : currentEmployeeSearch.hasMore ? "Showing the first 30 matches. Refine your search to find more employees." : ""
+              )}
+            </p>
           </Field>
           <Field label="Leave type">
             <Select name="leaveTypeId" required>
@@ -1145,6 +1218,7 @@ export function LeavesAdmin({
           <Field label="Reason">
             <Textarea
               name="reason"
+              maxLength={2000}
               placeholder="Why is this leave being recorded?"
             />
           </Field>
@@ -1153,15 +1227,17 @@ export function LeavesAdmin({
             active location policy and normal approval workflow; only leave
             types explicitly configured without approval are auto-approved.
           </p>
+          {logError && <p role="alert" className="text-sm text-rose-600 dark:text-rose-300">{logError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setOnBehalfOpen(false)}
+              disabled={logSaving}
+              onClick={closeEmployeeDialog}
             >
               Cancel
             </Button>
-            <Button type="submit" loading={logSaving}>
+            <Button type="submit" loading={logSaving} disabled={!currentEmployeeSearch?.employees.length}>
               Log leave
             </Button>
           </div>
@@ -1203,7 +1279,7 @@ export function LeavesAdmin({
                 placeholder="e.g. CL"
               />
             </Field>
-            <Field label="Default annual maximum (optional)" hint="Fallback for employees without an applied leave policy. Policy allowances are managed in Leave settings.">
+            <Field label="Default annual maximum (optional)" hint="Fallback for employees without an applied leave policy. Policy allowances are managed in Leave policies.">
               <Input
                 name="maxDays"
                 type="number"
@@ -1313,6 +1389,7 @@ export function LeavesAdmin({
 }
 
 type BalanceResponse = {
+  balanceRefreshPending: boolean;
   types: Array<{ id: string; name: string; code: string }>;
   balances: Array<{
     employee: {
@@ -1371,36 +1448,39 @@ function EmployeeBalances() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<BalanceResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [retry, setRetry] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     setPage(1);
   }, [deferredQuery, leaveTypeId, source]);
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
+    setLoadError("");
     const params = new URLSearchParams({ page: String(page) });
     if (deferredQuery.trim()) params.set("q", deferredQuery.trim());
     if (leaveTypeId) params.set("leaveTypeId", leaveTypeId);
     if (source) params.set("source", source);
-    void fetch(`/api/leaves/balances?${params}`)
+    void fetch(`/api/leaves/balances?${params}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error();
         return response.json() as Promise<BalanceResponse>;
       })
       .then((result) => {
-        if (!cancelled) setData(result);
+        if (!controller.signal.aborted) setData(result);
       })
       .catch(() => {
-        if (!cancelled) setData(null);
+        if (!controller.signal.aborted) setLoadError("Could not load employee balances.");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [deferredQuery, leaveTypeId, source, page]);
+  }, [deferredQuery, leaveTypeId, source, page, retry]);
 
   return (
     <div className="space-y-4 p-5">
@@ -1409,6 +1489,7 @@ function EmployeeBalances() {
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
+              aria-label="Find employee"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="pl-9"
@@ -1439,6 +1520,11 @@ function EmployeeBalances() {
           </Select>
         </Field>
       </div>
+      {!loadError && data?.balanceRefreshPending && <p role="status" className="text-sm text-muted-foreground">Showing the last saved balances. Retry to check for newer accruals.</p>}
+      {(loadError || data?.balanceRefreshPending) && <div className="flex flex-wrap items-center gap-2">
+        {loadError && <p role="alert" className="text-sm text-rose-600 dark:text-rose-300">{loadError}</p>}
+        <Button size="sm" variant="outline" disabled={loading} onClick={() => setRetry((value) => value + 1)}>Retry balances</Button>
+      </div>}
       <div className="rounded-xl border border-edge bg-tint px-3 py-2 text-[12px] text-muted-foreground">
         Imported snapshots apply only to source employees that matched an active
         PeopleNexa employee code during import. They never create or map missing
@@ -1465,7 +1551,7 @@ function EmployeeBalances() {
           .
         </div>
       ) : null}
-      <div className="overflow-x-auto rounded-xl border border-edge">
+      {!loadError && <div className="overflow-x-auto rounded-xl border border-edge">
         <Table>
           <THead>
             <TR>
@@ -1492,8 +1578,8 @@ function EmployeeBalances() {
             ) : data?.balances.length ? (
               data.balances.flatMap((row) =>
                 row.balances.map((balance) => (
-                  <>
-                    <TR key={`${row.employee.id}:${balance.leaveType.id}`}>
+                  <Fragment key={`${row.employee.id}:${balance.leaveType.id}`}>
+                    <TR>
                       <TD>
                         <button
                           className="text-left text-[13px] font-medium hover:text-indigo-300"
@@ -1581,7 +1667,7 @@ function EmployeeBalances() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )),
               )
             ) : (
@@ -1597,16 +1683,16 @@ function EmployeeBalances() {
             )}
           </TBody>
         </Table>
-      </div>
-      {data && (
+      </div>}
+      {data && !loadError && (
         <div className="flex items-center justify-between text-[12px] text-muted-foreground">
           <span>{data.total} employees</span>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
               variant="outline"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage(page - 1)}
+              disabled={data.page <= 1 || loading}
+              onClick={() => setPage(data.page - 1)}
             >
               Previous
             </Button>
@@ -1616,8 +1702,8 @@ function EmployeeBalances() {
             <Button
               size="sm"
               variant="outline"
-              disabled={page >= data.pages || loading}
-              onClick={() => setPage(page + 1)}
+              disabled={data.page >= data.pages || loading}
+              onClick={() => setPage(data.page + 1)}
             >
               Next
             </Button>
@@ -1632,10 +1718,12 @@ function TeamCalendar({
   month,
   setMonth,
   requests,
+  today,
 }: {
   month: Date;
   setMonth: (d: Date) => void;
   requests: Request[];
+  today: string;
 }) {
   const year = month.getFullYear();
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -1643,22 +1731,18 @@ function TeamCalendar({
   const first = new Date(year, mon, 1);
   const offset = (first.getDay() + 6) % 7; // Monday-first
   const daysInMonth = new Date(year, mon + 1, 0).getDate();
-  // IST-pinned so server (UTC) and browser hydrate the same day key.
-  const today = istDateKey(new Date());
-
+  const monthKey = `${year}-${String(mon + 1).padStart(2, "0")}`;
+  const firstKey = `${monthKey}-01`;
+  const lastKey = `${monthKey}-${daysInMonth}`;
   const approved = requests.filter((r) => r.status === "approved");
   const byDay = new Map<string, typeof approved>();
-  for (const r of approved) {
-    for (
-      let d = fromDateKey(toDateKey(r.fromDate));
-      d <= r.toDate;
-      d = addDays(d, 1)
-    ) {
-      const key = toDateKey(d);
-      if (!key.startsWith(`${year}-${String(mon + 1).padStart(2, "0")}`))
-        continue;
+  for (const request of approved) {
+    const from = istDateKey(request.fromDate);
+    const to = istDateKey(request.toDate);
+    for (let key = from > firstKey ? from : firstKey; key <= to && key <= lastKey; key = offsetDateKey(key, 1)) {
+      if (!countsAsLeaveDay(request.leavePolicySnapshot, key)) continue;
       if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key)!.push(r);
+      byDay.get(key)!.push(request);
     }
   }
 

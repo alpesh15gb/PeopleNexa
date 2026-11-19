@@ -1,4 +1,6 @@
 import { istDateKey } from "./ist";
+import { dateKeyInTimeZone } from "./workspace-time";
+import { DEFAULT_WORKSPACE_REGION } from "./workspace-region";
 
 export type LeaveCalendarRules = {
   dayCounting?: "calendar_days" | "working_days" | "sandwich";
@@ -10,9 +12,16 @@ export type LeaveCalendarRules = {
 };
 
 const DAY = 86_400_000;
+/** Date-only leave inputs persist at UTC midnight, independent of server timezone. */
+export function parseLeaveDateKey(key: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const date = new Date(`${key}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === key ? date : null;
+}
+
 export function leaveCalendar(from: string, to: string, rules: LeaveCalendarRules, holidays: Array<{ date: Date; isRecurring: boolean; isHalfDay: boolean }>, halfDay = false) {
-  const start = Date.parse(`${from}T00:00:00Z`);
-  const end = Date.parse(`${to}T00:00:00Z`);
+  const start = parseLeaveDateKey(from)?.getTime() ?? NaN;
+  const end = parseLeaveDateKey(to)?.getTime() ?? NaN;
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || end - start >= 366 * DAY) throw new Error("Invalid leave date range.");
   if (halfDay && from !== to) throw new Error("Half-day leave must be for a single date.");
   const rows: Array<{ date: string; fraction: number }> = [];
@@ -37,9 +46,9 @@ export function leaveCalendar(from: string, to: string, rules: LeaveCalendarRule
   return { chargeableDays, nonWorkingFractions, days: Object.values(chargeableDays).reduce((sum, days) => sum + days, 0) };
 }
 
-export function leaveEligibilityError(rules: LeaveCalendarRules, from: string, days: number, joiningDate: Date | null, reason: string, now = new Date()) {
+export function leaveEligibilityError(rules: LeaveCalendarRules, from: string, days: number, joiningDate: Date | null, reason: string, now = new Date(), timeZone = DEFAULT_WORKSPACE_REGION.timeZone) {
   const start = Date.parse(`${from}T00:00:00Z`);
-  const today = Date.parse(`${istDateKey(now)}T00:00:00Z`);
+  const today = Date.parse(`${dateKeyInTimeZone(now, timeZone)}T00:00:00Z`);
   if (rules.requiresReason && !reason.trim()) return "A reason is required for this leave type.";
   if ((rules.noticeDays ?? 0) > 0 && start - today < rules.noticeDays! * DAY) return `Apply at least ${rules.noticeDays} day(s) before the leave starts.`;
   if (joiningDate && start < Date.parse(`${istDateKey(joiningDate)}T00:00:00Z`) + (rules.minServiceDays ?? 0) * DAY) return `This leave cannot start before joining or the ${rules.minServiceDays ?? 0}-day service requirement.`;
@@ -54,4 +63,10 @@ export function snapshottedLeaveFraction(snapshot: unknown, date: string): numbe
   const fraction = calendar.chargeableDays[date];
   if (fraction === 0 || fraction === 0.5 || fraction === 1) return fraction;
   throw new Error(`Leave snapshot has no valid day fraction for ${date}.`);
+}
+
+/** Keep legacy leave ranges visible, while honoring dates excluded by newer policies. */
+export function countsAsLeaveDay(snapshot: unknown, date: string): boolean {
+  const calendar = (snapshot as { calendar?: { chargeableDays?: Record<string, unknown> } } | null)?.calendar;
+  return calendar?.chargeableDays?.[date] !== 0;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { notifyEmployee } from "@/lib/notifications";
 import { managerLocationId } from "@/lib/location-scope";
@@ -17,13 +17,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!asset) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   }
-  if (asset.status !== "assigned") {
-    return NextResponse.json({ error: "This asset is not currently assigned." }, { status: 400 });
-  }
-
-  const open = await prisma.assetAssignment.findFirst({
+  const openAssignments = await prisma.assetAssignment.findMany({
     where: { assetId: asset.id, returnedAt: null },
+    take: 2,
   });
+  if (openAssignments.length > 1) {
+    return NextResponse.json({ error: "This asset has multiple open assignments. Its assignment history needs reconciliation." }, { status: 409 });
+  }
+  const [open] = openAssignments;
   if (!open) {
     return NextResponse.json({ error: "No open assignment found for this asset." }, { status: 400 });
   }
@@ -31,13 +32,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}));
   const note = body.note ? String(body.note).trim() : null;
 
-  await prisma.$transaction([
-    prisma.assetAssignment.update({
-      where: { id: open.id },
+  const returned = await prisma.$transaction(async (tx) => {
+    const changed = await tx.asset.updateMany({
+      where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}), status: asset.status, assignments: { some: { id: open.id, returnedAt: null } } },
+      data: { status: asset.status === "assigned" ? "available" : asset.status },
+    });
+    if (!changed.count) return false;
+    await tx.assetAssignment.update({
+      where: { id: open.id, returnedAt: null },
       data: { returnedAt: new Date(), note: note ?? open.note },
-    }),
-    prisma.asset.update({ where: { id: asset.id }, data: { status: "available" } }),
-  ]);
+    });
+    return true;
+  }).catch((error: unknown) => {
+    if ((error as { code?: string })?.code === "P2025") return false;
+    throw error;
+  });
+  if (!returned) return NextResponse.json({ error: "This asset or its assignment has changed. Refresh the inventory." }, { status: 409 });
 
   await notifyEmployee(
     session.tenantId,

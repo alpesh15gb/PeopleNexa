@@ -31,6 +31,7 @@ export default async function SuperadminOverviewPage() {
       }),
     ]),
     prisma.tenant.findMany({
+      omit: { config: true },
       include: {
         _count: { select: { employees: true } },
         modules: { select: { module: true, enabled: true } },

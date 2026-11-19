@@ -3,6 +3,8 @@ import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { istDateKey, parseIST } from "@/lib/ist";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
+import { countsAsLeaveDay } from "@/lib/leave-calendar";
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 
 const DATE_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
   const shiftId = String(body.shiftId ?? "");
   const fromDay = parseDateKeyAsIST(String(body.dateFrom ?? ""));
   const toDay = parseDateKeyAsIST(String(body.dateTo ?? ""));
-  const overwrite = Boolean(body.overwrite);
+  const overwrite = body.overwrite === true;
 
   if (!shiftId) return NextResponse.json({ error: "Select a shift." }, { status: 400 });
   if (!fromDay || !toDay || toDay < fromDay) {
@@ -93,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   let employeeIds: string[] = [];
   if (Array.isArray(body.employeeIds) && body.employeeIds.length > 0) {
-    employeeIds = body.employeeIds.map(String);
+    employeeIds = [...new Set<string>(body.employeeIds.map(String))];
   } else if (body.departmentId) {
     const emps = await prisma.employee.findMany({
        where: { tenantId: session.tenantId, status: "active", departmentId: body.departmentId, ...employeeScope },
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest) {
   // Validate that every employee belongs to this tenant (avoid FK errors).
   // Login-only manager accounts work no shifts — filter them out.
   const validEmps = await prisma.employee.findMany({
-    where: { id: { in: employeeIds }, tenantId: session.tenantId, loginOnly: false, ...employeeScope },
+    where: { id: { in: employeeIds }, tenantId: session.tenantId, status: "active", loginOnly: false, ...employeeScope },
     select: { id: true },
   });
   const validIds = new Set(validEmps.map((e) => e.id));
@@ -116,24 +118,10 @@ export async function POST(req: NextRequest) {
   const shift = await prisma.shift.findFirst({ where: { id: shiftId, tenantId: session.tenantId } });
   if (!shift) return NextResponse.json({ error: "Shift not found." }, { status: 404 });
 
-  // Pre-fetch existing assignments in range to report clashes.
-  const existing = await prisma.rosterAssignment.findMany({
-    where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: fromDay, lte: toDay } },
-    select: { employeeId: true, date: true },
-  });
-  const clashKeys = new Set(existing.map((e) => `${e.employeeId}|${istDateKey(e.date)}`));
-
-  // Collect all (employeeId, date) targets first; respect overwrite for clashes.
-  const targets: { employeeId: string; date: Date }[] = [];
-  let clashes = 0;
+  const targets: { tenantId: string; employeeId: string; date: Date; shiftId: string; createdBy: string }[] = [];
   for (const employeeId of employeeIds) {
-    for (let d = new Date(fromDay); d <= toDay; d = new Date(d.getTime() + 24 * 3600 * 1000)) {
-      const key = `${employeeId}|${istDateKey(d)}`;
-      if (clashKeys.has(key) && !overwrite) {
-        clashes++;
-        continue;
-      }
-      targets.push({ employeeId, date: new Date(d) });
+    for (let d = fromDay; d <= toDay; d = new Date(d.getTime() + 86_400_000)) {
+      targets.push({ tenantId: session.tenantId, employeeId, date: d, shiftId, createdBy: session.sub });
     }
   }
 
@@ -145,8 +133,8 @@ export async function POST(req: NextRequest) {
   const looseTo = new Date(toDay.getTime() + padDay);
   const [holidays, approvedLeaves] = await Promise.all([
     prisma.holiday.findMany({
-      where: { tenantId: session.tenantId, date: { gte: looseFrom, lte: looseTo } },
-      select: { date: true },
+      where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: { gte: looseFrom, lte: looseTo } }] },
+      select: { date: true, isRecurring: true },
     }),
     prisma.leaveRequest.findMany({
       where: {
@@ -156,41 +144,44 @@ export async function POST(req: NextRequest) {
         fromDate: { lte: looseTo },
         toDate: { gte: looseFrom },
       },
-      select: { employeeId: true, fromDate: true, toDate: true },
+      select: { employeeId: true, fromDate: true, toDate: true, leavePolicySnapshot: true },
     }),
   ]);
-  const holidayKeys = new Set(holidays.map((h) => istDateKey(h.date)));
-  const leavesByEmp = new Map<string, { start: string; end: string }[]>();
-  for (const l of approvedLeaves) {
-    const start = istDateKey(l.fromDate);
-    const end = istDateKey(l.toDate);
-    if (!leavesByEmp.has(l.employeeId)) leavesByEmp.set(l.employeeId, []);
-    leavesByEmp.get(l.employeeId)!.push({ start, end });
+  // A uniqueness conflict must skip, even when another request inserts the
+  // assignment after this one starts. Only explicit overwrite can update rows.
+  let assigned: { employeeId: string; date: Date }[];
+  try {
+    assigned = await prisma.$transaction(async (tx) => {
+      const inserted = await tx.rosterAssignment.createManyAndReturn({
+        data: targets, skipDuplicates: true, select: { employeeId: true, date: true },
+      });
+      if (!overwrite) return inserted;
+      await tx.rosterAssignment.updateMany({
+        where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: fromDay, lte: toDay }, shiftId: { not: shiftId } },
+        data: { shiftId },
+      });
+      return targets;
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    if (isTransactionWriteConflict(error)) return NextResponse.json({ error: "The roster changed while you were assigning shifts. Refresh and try again." }, { status: 409 });
+    throw error;
+  }
+
+  const holidayKeys = new Set(holidays.map((h) => h.isRecurring ? istDateKey(h.date).slice(5) : istDateKey(h.date)));
+  const leavesByEmp = new Map<string, { start: string; end: string; snapshot: unknown }[]>();
+  for (const leave of approvedLeaves) {
+    const start = istDateKey(leave.fromDate);
+    const end = istDateKey(leave.toDate);
+    if (!leavesByEmp.has(leave.employeeId)) leavesByEmp.set(leave.employeeId, []);
+    leavesByEmp.get(leave.employeeId)!.push({ start, end, snapshot: leave.leavePolicySnapshot });
   }
   let leaveConflicts = 0;
   let holidayConflicts = 0;
-  for (const t of targets) {
-    const key = istDateKey(t.date);
-    if (holidayKeys.has(key)) holidayConflicts++;
-    const ranges = leavesByEmp.get(t.employeeId);
-    if (ranges?.some((r) => key >= r.start && key <= r.end)) leaveConflicts++;
-  }
-
-  // Batched upserts: chunk targets to keep each transaction small.
-  const CHUNK_SIZE = 50;
-  let created = 0;
-  for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
-    const chunk = targets.slice(i, i + CHUNK_SIZE);
-    await prisma.$transaction(
-      chunk.map((t) =>
-        prisma.rosterAssignment.upsert({
-          where: { tenantId_employeeId_date: { tenantId: session.tenantId, employeeId: t.employeeId, date: t.date } },
-          update: { shiftId },
-          create: { tenantId: session.tenantId, employeeId: t.employeeId, shiftId, date: t.date, createdBy: session.sub },
-        })
-      )
-    );
-    created += chunk.length;
+  for (const assignment of assigned) {
+    const key = istDateKey(assignment.date);
+    if (holidayKeys.has(key) || holidayKeys.has(key.slice(5))) holidayConflicts++;
+    const ranges = leavesByEmp.get(assignment.employeeId);
+    if (ranges?.some((range) => key >= range.start && key <= range.end && countsAsLeaveDay(range.snapshot, key))) leaveConflicts++;
   }
 
   const warnings: string[] = [];
@@ -199,8 +190,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    created,
-    clashes,
+    created: assigned.length,
+    clashes: targets.length - assigned.length,
     days,
     employees: employeeIds.length,
     leaveConflicts,

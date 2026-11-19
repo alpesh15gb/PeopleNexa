@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { managerLocationId } from "@/lib/location-scope";
+import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await requireActiveSession().catch(() => null);
@@ -46,7 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     const body = await req.json();
-    const data: Record<string, unknown> = {};
+    const data: Prisma.AssetUpdateManyMutationInput = {};
     if (body.name !== undefined) data.name = String(body.name).trim();
     if (body.category !== undefined) data.category = String(body.category).trim();
     if (body.tag !== undefined) data.tag = body.tag ? String(body.tag).trim() : null;
@@ -71,7 +72,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!validStatuses.includes(String(body.status))) {
         return NextResponse.json({ error: "Invalid status." }, { status: 400 });
       }
-      data.status = String(body.status);
+      const status = String(body.status);
+      if (status !== existing.status) {
+        if (status === "assigned") return NextResponse.json({ error: "Use Assign to select who will receive this asset." }, { status: 400 });
+        data.status = status;
+      }
     }
     if (body.notes !== undefined) data.notes = body.notes ? String(body.notes).trim() : null;
 
@@ -79,11 +84,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
     }
 
-    const asset = await prisma.asset.update({ where: { id }, data });
+    const asset = await prisma.asset.update({
+      where: {
+        id,
+        tenantId: session.tenantId,
+        ...(locationId ? { locationId } : {}),
+        ...(data.status ? { status: existing.status, assignments: { none: { returnedAt: null } } } : {}),
+      },
+      data,
+    });
     return NextResponse.json({ success: true, asset });
   } catch (e) {
     if ((e as { code?: string }).code === "P2002") {
       return NextResponse.json({ error: "An asset with this tag already exists." }, { status: 409 });
+    }
+    if ((e as { code?: string }).code === "P2025") {
+      return NextResponse.json({ error: "Return the open assignment before changing asset status, or refresh the inventory." }, { status: 409 });
     }
     return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   }
@@ -102,6 +118,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!existing) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
   }
-  await prisma.asset.delete({ where: { id } });
+  const deleted = await prisma.asset.deleteMany({
+    where: { id, tenantId: session.tenantId, ...(locationId ? { locationId } : {}), status: existing.status, assignments: { none: { returnedAt: null } } },
+  });
+  if (!deleted.count) return NextResponse.json({ error: "Return the open assignment before deleting this asset, or refresh the inventory." }, { status: 409 });
   return NextResponse.json({ success: true });
 }

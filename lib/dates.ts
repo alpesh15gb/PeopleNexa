@@ -127,8 +127,9 @@ export function dayRangeIST(dateKey: string): { start: Date; end: Date } {
 
 /** True only for a real, canonical Gregorian calendar day (YYYY-MM-DD). */
 export function isDateKey(value: string): boolean {
-  const parsed = fromDateKey(value);
-  return !Number.isNaN(parsed.getTime()) && toDateKey(parsed) === value;
+  if (!/^[1-9]\d{3}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 /**

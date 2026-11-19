@@ -6,14 +6,12 @@ managers, scoped to the selected location and month.
 
 ## Workflow
 
-1. Select the payroll location and month. Save the client's original `.xlsx` file
-   (maximum 10 MB), then choose the exact worksheet. The filename does not decide
-   the location or month. Recognized month labels and daily columns must agree
-   with the selected period.
-2. Preview matches, daily marks, calculated work days and earned leave. Exact
-   employee numbers are matched first; the verified YLR convention replaces `/`
-   with a literal `0`, preserving all digits. If the two codes belong to different
-   employees, the row is blocked. Device codes and employee master IDs never change.
+1. Select the payroll location and month. Download the standard attendance
+   template, complete it, and save the `.xlsx` file in PeopleNexa (maximum 10 MB).
+   Choose the attendance worksheet. Recognized month labels and daily columns
+   must agree with the selected period.
+2. Preview matches, daily marks, and work days. Standard attendance uses employee
+   numbers from PeopleNexa. Store employee numbers with leading zeros as text in Excel.
 3. Exclude unmatched, duplicate, hourly, or otherwise invalid rows with a reason,
    or correct and upload a new workbook. No employees are created. Inactive
    employees, name mismatches, workbook summary differences and approved app leave
@@ -29,13 +27,39 @@ managers, scoped to the selected location and month.
    attendance source. To replace a workbook, cancel the draft with a reason, upload
    the correction and create a replacement run. Finalized runs remain immutable.
 
-## Calculation and leave
+## Standard attendance marks
 
-P and OD each count as one worked day. L is unpaid. No punch records, clocked hours
-or overtime are fabricated. Salary and effective approved salary revisions come
-only from PeopleNexa; workbook salary is ignored. The published payroll policy
-still determines the divisor, components, deductions and rounding. A policy that
-disables unpaid-day deductions cannot generate manual payroll with unpaid days.
+| Mark | Payroll treatment |
+| --- | --- |
+| `P`, `OD` | One day worked |
+| `A` | Absence |
+| `HL` | Half day worked and half day unpaid |
+| `PL` | Paid leave for monthly employees |
+| `UL` | Unpaid leave |
+| `WO`, `H` | Weekly off and holiday |
+
+Leave balances follow the configured leave workflows. Standard attendance uploads
+supply day marks for the selected payroll run. The published payroll policy
+determines the divisor, components, deductions, and rounding. Use time-based
+attendance for hourly payroll. Record overtime in the payroll system.
+
+New workspaces use rostered and assigned shift weekly offs in system-attendance
+payroll. An unworked weekly off does not count as an absence. Work and approved
+leave still follow their recorded rules. Each payslip stores the off dates it
+used so draft review and regeneration use the same calendar after a shift edit.
+Existing workspaces retain their system-attendance calculation. The standard
+workbook supports an explicit `WO` mark in any workspace.
+
+## Legacy attendance format
+
+Choose **Legacy attendance with earned-leave credits** to review the historical
+workbook format. This format recognizes the old employee-code alias with `/`
+replaced by a literal `0`. If both codes point to different employees, the row
+requires correction. Uploaded and reviewed workbooks retain their original format.
+
+`P` and `OD` each count as one worked day. `L` is unpaid. Salary and effective
+approved salary revisions come from PeopleNexa. Enable unpaid-day deductions in
+the published payroll policy before generating manual payroll with unpaid days.
 
 Earned leave is calculated from worked days: fewer than 14 = 0, 14–24 = 1,
 25 or more = 2. It becomes available on the first day of the following month
@@ -66,12 +90,10 @@ normally after taking the usual database/volume backup. No seed operation is nee
 
 ## Validation
 
-`npm run test:payroll-attendance-import` covers exact/alias matching, collisions,
-duplicates, month mismatch, blank decisions, inactive/hourly staff, unpaid L days,
-next-month IST availability, idempotent finalization, reversal/replacement, and
-manual accrual replacing biometric accrual. If the supplied client workbook exists
-locally, it also verifies its actual September worksheet without committing any
-employee data.
+`npm run test:payroll-attendance-import` covers the standard template, both
+formats, exact and alias matching, collisions, duplicates, month mismatch, blank
+decisions, pay modes, legacy next-month credits, idempotent finalization, and
+reversal and replacement.
 
 Production database migration and an authenticated browser import must be checked
 in the deployment environment before using the feature for live payroll.

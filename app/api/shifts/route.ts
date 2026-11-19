@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { parseShiftWeeklyOffDays } from "@/lib/shift-weekly-offs";
 
 export async function GET() {
   const session = await requireActiveSession().catch(() => null);
@@ -20,12 +21,16 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    if (!body.name || !body.startTime || !body.endTime) {
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || !body.startTime || !body.endTime) {
       return NextResponse.json({ error: "Name, start time and end time are required." }, { status: 400 });
     }
-    const name = String(body.name).trim();
     if (body.singlePunchHalfDay !== undefined && typeof body.singlePunchHalfDay !== "boolean") return NextResponse.json({ error: "Single-punch half day must be true or false." }, { status: 400 });
     if (body.sundayWeeklyOff !== undefined && typeof body.sundayWeeklyOff !== "boolean") return NextResponse.json({ error: "Sunday weekly off must be true or false." }, { status: 400 });
+    const weeklyOffDays = body.weeklyOffDays === undefined
+      ? (body.sundayWeeklyOff ? [0] : [])
+      : parseShiftWeeklyOffDays(body.weeklyOffDays);
+    if (!weeklyOffDays) return NextResponse.json({ error: "Choose valid weekdays from Sunday through Saturday." }, { status: 400 });
     const exists = await prisma.shift.findFirst({ where: { tenantId: session.tenantId, name } });
     if (exists) return NextResponse.json({ error: "A shift with this name already exists." }, { status: 400 });
 
@@ -53,7 +58,8 @@ export async function POST(req: NextRequest) {
         endTime: String(body.endTime),
         graceMinutes,
         isNightShift: Boolean(body.isNightShift),
-        sundayWeeklyOff: body.sundayWeeklyOff ?? false,
+        sundayWeeklyOff: weeklyOffDays.includes(0),
+        weeklyOffDays,
         singlePunchHalfDay: body.singlePunchHalfDay ?? false,
       },
     });

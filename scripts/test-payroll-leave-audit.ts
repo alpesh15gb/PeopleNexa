@@ -12,11 +12,85 @@ import {
   DEFAULT_PAYROLL_CONFIG,
   generatePayslipForEmployee,
   reverseLoanDeductionAllocations,
+  snapshottedPayrollWeeklyOffDates,
+  unpaidAttendanceDays,
 } from "../lib/payroll";
+import { payrollAdjustmentsChanged, payrollSourceReview } from "../lib/payroll-source-review";
 import { prisma } from "../lib/prisma";
 import type { Prisma } from "../generated/prisma/client";
 
+async function assertScheduleAwareAttendance() {
+  const month = "2026-10";
+  const employee = { id: "employee", shiftId: "general", joiningDate: null, firstName: "Test", lastName: "Employee" };
+  const shift = { startTime: "09:00", endTime: "18:00", weeklyOffDays: [0, 6] };
+  const day = (value: number) => `${month}-${String(value).padStart(2, "0")}`;
+  const punched = (date: string, status: string, endHour: string) => ({
+    date: new Date(date), status, punchInTime: new Date(`${date}T04:00:00Z`), punchOutTime: new Date(`${date}T${endHour}:00:00Z`),
+  });
+  const leave = (date: string, fraction: number, paid: boolean) => ({
+    fromDate: new Date(date),
+    toDate: new Date(date),
+    days: fraction,
+    leaveType: { paid },
+    leavePolicySnapshot: { rules: { paid }, calendar: { chargeableDays: { [date]: fraction } } },
+  });
+  const attendance = [punched(day(4), "present", "14"), punched(day(5), "half_day", "08"), punched(day(10), "half_day", "08")];
+  const db = {
+    attendance: { findMany: async () => attendance },
+    payrollAdjustment: { findMany: async () => [] },
+    shift: { findUnique: async () => shift },
+    holiday: { findMany: async () => [{ date: new Date(day(1)), isRecurring: false }] },
+    leaveRequest: {
+      count: async () => 0,
+      findMany: async () => [leave(day(11), 1, true), leave(day(17), 0, false), leave(day(18), 1, false)],
+    },
+    rosterAssignment: {
+      findMany: async () => [
+        { date: new Date(day(3)), shift: { ...shift, weeklyOffDays: [] } },
+        { date: new Date(day(7)), shift: { ...shift, weeklyOffDays: [3] } },
+      ],
+    },
+  } as unknown as Prisma.TransactionClient;
+
+  const legacy = await attendanceSummary("tenant", employee, month, true, db);
+  assert.equal(legacy.absentDays, 24);
+  assert.equal(legacy.workingDays, 27);
+  assert.equal(snapshottedPayrollWeeklyOffDates(legacy), undefined);
+  assert.equal(unpaidAttendanceDays(legacy), 26);
+
+  const initial = await attendanceSummary("tenant", employee, month, true, db, "resolve_from_shifts");
+  assert.deepEqual(initial.weeklyOffDates, [4, 7, 10, 11, 17, 18, 24, 25, 31].map(day), "dated roster overrides the employee shift");
+  assert.equal(initial.absentDays, 20);
+  assert.equal(initial.workingDays, 21);
+  assert.equal(initial.presentDays, 1, "actual weekly-off work still counts");
+  assert.equal(initial.halfDays, 2);
+  assert.equal(initial.halfDaysWorkedOnWeeklyOff, 1);
+  assert.equal(initial.workedHours, 18);
+  assert.equal(initial.overtimeHours, 1);
+  assert.equal(initial.paidLeaveDays, 1, "approved paid leave retains its snapshot");
+  assert.equal(initial.unpaidLeaveDays, 1, "approved unpaid leave retains its snapshot");
+  assert.equal(unpaidAttendanceDays(initial), 21.5, "only the scheduled half-day can cause loss of pay");
+
+  shift.weeklyOffDays = [];
+  const savedDates = snapshottedPayrollWeeklyOffDates(JSON.parse(JSON.stringify(initial)));
+  const reloaded = await attendanceSummary("tenant", employee, month, true, db, savedDates);
+  assert.deepEqual(reloaded, initial, "draft replay uses its captured calendar after live shift edits");
+  const futureRun = await attendanceSummary("tenant", employee, month, true, db, "resolve_from_shifts");
+  assert.deepEqual(futureRun.weeklyOffDates, [day(7)], "a new run resolves calendar dates again");
+  const slip = { employeeId: employee.id, employee, inputSnapshot: { attendance: initial } };
+  assert.deepEqual(await payrollSourceReview(db, "tenant", month, [slip]), []);
+  const adjustment = { id: "adjustment", employeeId: employee.id, type: "bonus", label: "Bonus", amount: 25 };
+  const revised = { ...db, payrollAdjustment: { findMany: async () => [adjustment] } } as unknown as Prisma.TransactionClient;
+  assert.match((await payrollSourceReview(revised, "tenant", month, [slip]))[0], /payroll adjustments changed/);
+  assert.equal(payrollAdjustmentsChanged({ result: { adjustments: [{ label: "Bonus", amount: 25 }] } }, [adjustment]), false, "legacy draft compares recorded adjustment values");
+  assert.equal(payrollAdjustmentsChanged({ adjustmentInputs: [adjustment] }, [{ ...adjustment, amount: 26 }]), true);
+  assert.equal(payrollAdjustmentsChanged({ adjustmentInputs: [adjustment] }, [{ ...adjustment, id: "replacement" }]), true);
+  attendance.push(punched(day(2), "present", "13"));
+  assert.match((await payrollSourceReview(db, "tenant", month, [slip]))[0], /attendance or leave changed/);
+}
+
 async function main() {
+  await assertScheduleAwareAttendance();
   assert.equal(
     calculateLeaveBalance({
       cap: 12,

@@ -1,163 +1,94 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { Fingerprint, AlertTriangle, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { deviceHealthState, deviceStatusMetadata, ebioDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
-import { DeviceStatusBadge, DeviceStatusLegend, deviceStatusDetail } from "@/components/devices/device-status";
+import { Cable, Cloud, Network } from "lucide-react";
+import { DeviceStatusBadge } from "@/components/devices/device-status";
 import { useLiveEbioDevices } from "@/components/devices/use-live-ebio-devices";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatDateTime } from "@/lib/dates";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { EmptyState } from "@/components/ui/stat";
+import { deviceHealthState, ebioDeviceHealthState, realtimeDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+
+const fleets = [
+  { key: "direct", label: "Direct devices", icon: Cable, state: deviceHealthState },
+  { key: "ebio", label: "eBioserver", icon: Network, state: ebioDeviceHealthState },
+  { key: "realtime", label: "Realtime", icon: Cloud, state: realtimeDeviceHealthState },
+] as const;
 
 interface Device {
   id: string;
   name: string;
   serialNumber: string;
-  ipAddress: string | null;
-  type: string;
   protocol: string;
-  ebio: boolean;
+  fleet: typeof fleets[number]["key"];
+  branchName: string | null;
   status: string;
   lastSeenAt: Date | null;
-  createdAt: Date;
+  punchesToday: number;
+  logs: number;
+  errors: number;
 }
 
-function DeviceHealthCards({
-  devices,
-  punchMap,
-  logMap,
-  errorMap,
-  now,
-}: {
-  devices: Device[];
-  punchMap: Record<string, number>;
-  logMap: Record<string, number>;
-  errorMap: Record<string, number>;
-  now: number;
-}) {
+export function DeviceHealthGrid({ devices: rows, region, liveEbio, canViewInventory = true }: { devices: Device[]; region: WorkspaceRegion; liveEbio: boolean; canViewInventory?: boolean }) {
+  const { devices, now } = useLiveEbioDevices(rows, liveEbio);
   const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
-  const stateOf = (d: Device) => d.ebio ? ebioDeviceHealthState(d.status, d.lastSeenAt, now) : deviceHealthState(d.status, d.lastSeenAt, now);
-  const visibleDevices = devices.filter((d) => statusFilter === "all" || stateOf(d) === statusFilter)
-    .sort((a, b) => stateOf(a).localeCompare(stateOf(b)) || a.name.localeCompare(b.name));
+  const [fleetFilter, setFleetFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const statusRows = devices.map((device) => {
+    const fleet = fleets.find((item) => item.key === device.fleet)!;
+    const lastSeen = device.lastSeenAt ? new Date(device.lastSeenAt) : null;
+    return { device, lastSeen, state: fleet.state(device.status, lastSeen, now) };
+  });
+  const search = query.trim().toLowerCase();
+  const visible = statusRows.filter(({ device, state }) => (statusFilter === "all" || state === statusFilter) && (fleetFilter === "all" || fleetFilter === device.fleet) && `${device.name} ${device.serialNumber} ${device.branchName ?? ""}`.toLowerCase().includes(search));
+  const dateTime = new Intl.DateTimeFormat(region.locale, { dateStyle: "medium", timeStyle: "short", timeZone: region.timeZone });
+  const totals = [
+    { title: "Online or idle", value: statusRows.filter(({ state }) => state === "online" || state === "idle").length },
+    { title: "Need attention", value: statusRows.filter(({ state }) => state === "offline" || state === "stale").length },
+    { title: "Device punches today", value: devices.reduce((sum, device) => sum + device.punchesToday, 0) },
+  ];
 
-
-  function lastSeen(d: Device): string {
-    if (!d.lastSeenAt) return "Never";
-    const mins = Math.max(0, Math.round((now - d.lastSeenAt.getTime()) / 60000));
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.round(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    return `${Math.round(hrs / 24)}d ago`;
-  }
-
-  if (devices.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <Fingerprint className="h-8 w-8 text-muted-foreground/40" />
-        <p className="text-[13px] text-muted-foreground">No devices registered — add one under Devices to monitor it here.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <DeviceStatusLegend />
-        <label className="text-[12px] text-muted-foreground"><span className="sr-only">Filter devices by status</span><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as "all" | DeviceHealthState)} className="h-9 rounded-lg border border-edge bg-tint px-2 text-foreground"><option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="stale">Stale</option><option value="offline">Offline</option><option value="disabled">Admin disabled</option></select></label>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {visibleDevices.map((d) => {
-        const state = stateOf(d);
-        const detail = deviceStatusDetail(state);
-        const errors = errorMap[d.id] ?? 0;
-        return (
-          <div key={d.id} className="card-surface rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", state === "offline" || state === "stale" ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300" : "bg-tint-strong text-muted-foreground")}>
-                <detail.Icon className="h-4 w-4" aria-hidden="true" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13.5px] font-semibold">{d.name}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">{d.serialNumber}</p>
-              </div>
-              <DeviceStatusBadge state={state} />
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg bg-tint px-2 py-2">
-                <p className="font-mono text-[15px] font-bold">{punchMap[d.id] ?? 0}</p>
-                <p className="text-[10px] text-muted-foreground">Punches today</p>
-              </div>
-              <div className="rounded-lg bg-tint px-2 py-2">
-                <p className="font-mono text-[15px] font-bold">{logMap[d.id] ?? 0}</p>
-                <p className="text-[10px] text-muted-foreground">Logs total</p>
-              </div>
-              <div className="rounded-lg bg-tint px-2 py-2">
-                <p className={cn("font-mono text-[15px] font-bold", errors > 0 ? "text-rose-300" : "")}>{errors}</p>
-                <p className="text-[10px] text-muted-foreground">Errors</p>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="rounded-md bg-tint-strong px-1.5 py-0.5 capitalize">{d.type}</span>
-              <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.protocol}</span>
-              {d.ipAddress && <span className="rounded-md bg-tint-strong px-1.5 py-0.5 font-mono">{d.ipAddress}</span>}
-              <span className="ml-auto flex items-center gap-1" title={d.lastSeenAt ? `${formatDateTime(d.lastSeenAt)} IST` : deviceStatusMetadata(state)}>
-                <Clock className="h-3 w-3" aria-hidden="true" /> {lastSeen(d)}{d.lastSeenAt && " IST"}
-              </span>
-            </div>
-            {errors > 0 && (
-              <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300">
-                <AlertTriangle className="h-3 w-3" /> {errors} unprocessed/failed log{errors === 1 ? "" : "s"} — check the device log
-              </p>
-            )}
-          </div>
-        );
-      })}
-      {visibleDevices.length === 0 && <p className="col-span-full py-10 text-center text-[13px] text-muted-foreground">No devices match this status.</p>}
-      </div>
-    </div>
-  );
-}
-
-export function DeviceHealthGrid(props: {
-  devices: Device[];
-  punchMap: Record<string, number>;
-  logMap: Record<string, number>;
-  errorMap: Record<string, number>;
-  todayPunches: number;
-}) {
-  const { devices, now } = useLiveEbioDevices(props.devices);
-  const healthOf = (device: Device) => device.ebio
-    ? ebioDeviceHealthState(device.status, device.lastSeenAt, now)
-    : deviceHealthState(device.status, device.lastSeenAt, now);
-  const healthy = devices.filter((device) => ["online", "idle"].includes(healthOf(device))).length;
-  const offline = devices.filter((device) => ["offline", "stale"].includes(healthOf(device))).length;
-  const todayPunches = props.todayPunches;
   return <>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-emerald-300">{healthy}</p>
-            <p className="text-[12px] text-muted-foreground">Online / idle</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold text-rose-300">{offline}</p>
-            <p className="text-[12px] text-muted-foreground">Offline / stale</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="font-display text-2xl font-bold">{todayPunches}</p>
-            <p className="text-[12px] text-muted-foreground">Punches today</p>
-          </CardContent>
-        </Card>
-      </div>
-    <Card>
-      <CardContent className="p-0">
-        <DeviceHealthCards {...props} devices={devices} now={now} />
-      </CardContent>
-    </Card>
+    <dl className="grid min-w-0 gap-3 sm:grid-cols-3">
+      {totals.map((total) => <div key={total.title} className="min-w-0 rounded-2xl border border-edge bg-card px-4 py-3">
+        <dt className="text-sm text-muted-foreground">{total.title}</dt><dd className="mt-1 font-display text-2xl font-semibold tabular-nums">{total.value}</dd>
+      </div>)}
+    </dl>
+    {devices.length > 0 && <div className="flex min-w-0 flex-wrap gap-2 rounded-2xl border border-edge bg-card p-3">
+      <Input type="search" aria-label="Search device health" className="w-full sm:w-64" placeholder="Name, serial or branch" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <Select aria-label="Filter by device service" className="w-full sm:w-48" value={fleetFilter} onChange={(event) => setFleetFilter(event.target.value)}>
+        <option value="all">All services</option>{fleets.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+      </Select>
+      <Select aria-label="Filter by device status" className="w-full sm:w-48" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+        <option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option><option value="stale">Stale</option><option value="disabled">Admin disabled</option>
+      </Select>
+    </div>}
+    {visible.length === 0 && <Card><EmptyState title={devices.length ? "No devices match these filters" : "No devices registered"} description={devices.length ? "Change the search or filters." : "Register devices from Device inventory to see their status here."} /></Card>}
+    {fleets.map(({ key, label, icon: Icon }) => {
+      const members = visible.filter(({ device }) => device.fleet === key);
+      if (!members.length) return null;
+      return <section key={key} aria-label={label} className="min-w-0 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 font-display text-lg font-semibold"><Icon aria-hidden="true" className="h-4 w-4 text-primary" />{label}</h2>{canViewInventory && <Link href={`/admin/devices?service=${key}`} className="text-sm font-medium text-primary underline-offset-4 hover:underline">Open inventory</Link>}</div>
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {members.map(({ device, state, lastSeen }) => <Card key={device.id} className="min-w-0">
+            <CardContent className="min-w-0 space-y-3 p-4 sm:p-5">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1"><h3 className="truncate font-semibold" title={device.name}>{device.name}</h3><p className="truncate font-mono text-xs text-muted-foreground" title={device.serialNumber}>{device.serialNumber}</p></div>
+                <DeviceStatusBadge state={state} />
+              </div>
+              <dl className="grid grid-cols-3 gap-2 rounded-xl border border-edge bg-tint/40 p-3 text-sm">
+                <div className="min-w-0"><dt className="text-xs text-muted-foreground">Punches</dt><dd className="font-semibold tabular-nums">{device.punchesToday}</dd></div>
+                <div className="min-w-0"><dt className="text-xs text-muted-foreground">All logs</dt><dd className="font-semibold tabular-nums">{device.logs}</dd></div>
+                <div className="min-w-0"><dt className="text-xs text-muted-foreground">Log errors</dt><dd className={`font-semibold tabular-nums ${device.errors ? "text-destructive" : ""}`}>{device.errors}</dd></div>
+              </dl>
+              <p className="break-words text-xs text-muted-foreground">{[device.branchName, device.protocol, lastSeen ? `Last seen ${dateTime.format(lastSeen)}` : "No heartbeat recorded"].filter(Boolean).join(" · ")}</p>
+            </CardContent>
+          </Card>)}
+        </div>
+      </section>;
+    })}
   </>;
 }
