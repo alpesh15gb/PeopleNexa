@@ -26,31 +26,30 @@ export async function PUT(req: NextRequest) {
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = await req.json().catch(() => ({}));
-  const enabled = Boolean(body.enabled);
-  // Undefined = field not sent → keep existing. Blank token = keep existing (eBio-style).
-  const apiUrlRaw = body.apiUrl === undefined ? undefined : String(body.apiUrl);
-  const apiTokenRaw =
-    body.apiToken == null || String(body.apiToken) === "" ? undefined : String(body.apiToken);
-  const senderRaw = body.sender === undefined ? undefined : String(body.sender ?? "");
-  if (apiUrlRaw !== undefined && apiUrlRaw !== "" && !/^https?:\/\//i.test(apiUrlRaw)) {
-    return NextResponse.json({ error: "API URL must start with http:// or https://" }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body) ||
+    (body.enabled !== undefined && typeof body.enabled !== "boolean") ||
+    ["apiUrl", "apiToken", "sender"].some((key) => body[key] != null && typeof body[key] !== "string")) {
+    return NextResponse.json({ error: "Send valid SMS gateway settings." }, { status: 400 });
   }
-  if (enabled) {
-    let effectiveUrl = apiUrlRaw;
-    if (effectiveUrl === undefined) {
-      const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
-      effectiveUrl = getSmsConfig(tenant?.config ?? null).apiUrl;
+  const enabled = body.enabled as boolean | undefined;
+  const apiUrl = body.apiUrl === undefined ? undefined : (body.apiUrl ?? "").trim();
+  const apiToken = body.apiToken?.trim() || undefined;
+  const sender = body.sender === undefined ? undefined : (body.sender ?? "").trim();
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const current = getSmsConfig(tenant?.config);
+  const effectiveUrl = apiUrl ?? current.apiUrl;
+  if (apiUrl || (enabled ?? current.enabled)) {
+    const url = /^https?:\/\//i.test(effectiveUrl) && URL.canParse(effectiveUrl) ? new URL(effectiveUrl) : null;
+    if (!url || url.username || url.password) {
+      return NextResponse.json({ error: "Enter an HTTP or HTTPS gateway URL without embedded credentials." }, { status: 400 });
     }
-    if (!effectiveUrl || !effectiveUrl.trim()) {
-      return NextResponse.json({ error: "Cannot enable SMS without an API URL." }, { status: 400 });
-    }
+  }
+  if ((enabled ?? current.enabled) && !(apiToken ?? current.apiToken).trim()) {
+    return NextResponse.json({ error: "Enter a bearer token before enabling SMS notifications." }, { status: 400 });
   }
   const cfg = await saveSmsConfig(session.tenantId, {
-    enabled,
-    ...(apiUrlRaw !== undefined ? { apiUrl: apiUrlRaw } : {}),
-    ...(apiTokenRaw !== undefined ? { apiToken: apiTokenRaw } : {}),
-    ...(senderRaw !== undefined ? { sender: senderRaw } : {}),
+    enabled, apiUrl, apiToken, sender,
   });
   return NextResponse.json({
     success: true,

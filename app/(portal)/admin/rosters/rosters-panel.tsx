@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Download, Plus, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -57,13 +58,22 @@ export function RostersPanel({
   employees,
   shifts,
   departments,
+  weekKey,
+  today,
 }: {
   employees: Employee[];
   shifts: Shift[];
   departments: Department[];
+  weekKey: string;
+  today: string;
 }) {
   const toast = useToast();
-  const [week, setWeek] = useState<Date>(() => weekStart(new Date()));
+  const router = useRouter();
+  const week = weekStart(fromDateKey(weekKey));
+  const [loadError, setLoadError] = useState("");
+  function setWeek(nextWeek: Date) {
+    router.push(`/admin/rosters?week=${toDateKey(weekStart(nextWeek))}`, { scroll: false });
+  }
   const [rows, setRows] = useState<RosterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -73,21 +83,28 @@ export function RostersPanel({
   const fromKey = toDateKey(from);
   const toKey = toDateKey(to);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setLoadError("");
     try {
-      const res = await fetch(`/api/rosters?from=${fromKey}&to=${toKey}`);
+      const res = await fetch(`/api/rosters?from=${fromKey}&to=${toKey}`, { signal });
       const data = await res.json();
-      if (res.ok) setRows(data.assignments ?? []);
-    } catch {
-      // keep last data
+      if (!res.ok) throw new Error(data.error ?? "Could not load the roster.");
+      if (!signal?.aborted) setRows(data.assignments ?? []);
+    } catch (error) {
+      if (!signal?.aborted) {
+        setRows([]);
+        setLoadError(error instanceof Error && error.name !== "TypeError" ? error.message : "Could not load the roster. Check your connection and retry.");
+      }
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [fromKey, toKey]);
 
   useEffect(() => {
-    load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   const byEmp = useMemo(() => {
@@ -103,13 +120,17 @@ export function RostersPanel({
   const assignedCount = new Set(rows.map((r) => `${r.employeeId}|${r.date}`)).size;
 
   function exportCsv() {
-    const header = ["Employee", "Emp No", ...days.map((d) => formatDate(d))].join(",");
+    function csv(value: string) {
+      const safe = /^[=+@\-\t\r]/.test(value) ? "'" + value : value;
+      return `"${safe.replaceAll('"', '""')}"`;
+    }
+    const header = ["Employee", "Emp No", ...days.map((d) => formatDate(d))].map(csv).join(",");
     const lines = employees.map((e) => {
       const cell = (d: Date) => {
         const a = byEmp.get(e.id)?.get(toDateKey(d));
-        return a ? `"${a.shift.name} ${a.shift.startTime}-${a.shift.endTime}"` : "";
+        return a ? `${a.shift.name} ${a.shift.startTime}-${a.shift.endTime}` : "";
       };
-      return [`"${e.firstName} ${e.lastName}"`, e.employeeNumber, ...days.map(cell)].join(",");
+      return [`${e.firstName} ${e.lastName}`, e.employeeNumber, ...days.map(cell)].map(csv).join(",");
     });
     const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -125,30 +146,33 @@ export function RostersPanel({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
         <div className="flex items-center gap-2">
-          <Button size="icon" variant="outline" onClick={() => setWeek(addDays(week, -7))}>
+          <Button size="icon" variant="outline" aria-label="Previous roster week" onClick={() => setWeek(addDays(week, -7))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <p className="min-w-44 text-center text-[13.5px] font-semibold">
+          <p className="min-w-24 text-center sm:min-w-44 text-[13.5px] font-semibold">
             {formatDate(from)} → {formatDate(to)}
           </p>
-          <Button size="icon" variant="outline" onClick={() => setWeek(addDays(week, 7))}>
+          <Button size="icon" variant="outline" aria-label="Next roster week" onClick={() => setWeek(addDays(week, 7))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setWeek(weekStart(new Date()))}>
+          <Button size="sm" variant="ghost" onClick={() => setWeek(fromDateKey(today))}>
             This week
           </Button>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-muted-foreground">{assignedCount} assignments</span>
-          <Button size="sm" variant="outline" onClick={exportCsv} disabled={rows.length === 0}>
+          <Button size="sm" variant="outline" onClick={exportCsv} disabled={loading || rows.length === 0}>
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
-          <Button size="sm" onClick={() => setBulkOpen(true)}>
+          <Button size="sm" disabled={employees.length === 0 || shifts.length === 0} onClick={() => setBulkOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> Bulk assign
           </Button>
         </div>
       </div>
 
+      {loadError && <div className="flex flex-wrap items-center gap-3 p-4"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button variant="outline" size="sm" onClick={() => void load()}>Retry roster</Button></div>}
+      {!loadError && employees.length === 0 && <p className="p-5 text-sm text-muted-foreground">No active staff are assigned to your scope.</p>}
+      {!loadError && employees.length > 0 && shifts.length === 0 && <p className="p-5 text-sm text-muted-foreground">Create a work shift in Attendance setup before adding roster assignments.</p>}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] text-left">
           <thead>

@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
+import { PageHeader } from "@/components/ui/card";
+import { formatDate } from "@/lib/dates";
 
 type Review = {
   id: string;
@@ -15,19 +17,36 @@ type Review = {
   selfSummary: string | null;
   managerSummary: string | null;
   overallRating: number | null;
+  dueDate: string | null;
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string; position: string | null };
   scores: { id: string; kpiId: string; kpi: string; selfScore: number | null; managerScore: number | null; managerComment: string | null }[];
   feedbacks: { id: string; rater: string; comment: string; rating: number | null }[];
 };
 
 const tone: Record<string, "warning" | "info" | "success"> = { draft: "warning", self_done: "info", completed: "success" };
+const statusLabel: Record<string, string> = { draft: "Self-review due", self_done: "Awaiting manager", completed: "Completed" };
+
+type ReviewPage = { page: number; pageCount: number };
+function ReviewNavigation({ current, other, peer = false }: { current: ReviewPage; other: ReviewPage; peer?: boolean }) {
+  if (current.pageCount <= 1) return null;
+  const href = (page: number) => `?page=${peer ? other.page : page}&peerPage=${peer ? page : other.page}`;
+  return <nav aria-label={peer ? "Peer feedback pages" : "Review history pages"} className="flex items-center gap-4 text-sm">
+    {current.page > 1 && <a className="text-primary" href={href(current.page - 1)}>Previous</a>}
+    <span>Page {current.page} of {current.pageCount}</span>
+    {current.page < current.pageCount && <a className="text-primary" href={href(current.page + 1)}>Next</a>}
+  </nav>;
+}
 
 export default function EmployeePerformancePage() {
   const router = useRouter();
   const toast = useToast();
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [historyPage, setHistoryPage] = useState<ReviewPage>({ page: 1, pageCount: 1 });
+  const [peerPage, setPeerPage] = useState<ReviewPage>({ page: 1, pageCount: 1 });
   const [peers, setPeers] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [formError, setFormError] = useState("");
 
   // self-score state
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -40,21 +59,44 @@ export default function EmployeePerformancePage() {
   const [fbComment, setFbComment] = useState("");
   const [fbRating, setFbRating] = useState<number | "">("");
 
-  async function load() {
-    const res = await fetch("/api/performance?scope=self");
-    const data = await res.json();
-    setReviews(data.reviews);
-    setPeers(data.peerReviews ?? []);
-    setLoading(false);
+  async function load(signal?: AbortSignal) {
+    setLoadError("");
+    try {
+      const url = new URL(window.location.href);
+      const params = new URLSearchParams({ scope: "self", pageSize: "25" });
+      for (const key of ["page", "peerPage"]) {
+        const value = url.searchParams.get(key);
+        if (value && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))) params.set(key, value);
+      }
+      const res = await fetch(`/api/performance?${params}`, { signal });
+      if (!res.ok) throw new Error("Could not load your performance reviews.");
+      const data = await res.json();
+      if (!signal?.aborted) {
+        setReviews(data.reviews ?? []);
+        setPeers(data.peerReviews ?? []);
+        setHistoryPage(data.pagination);
+        setPeerPage(data.peerPagination);
+      }
+    } catch {
+      if (!signal?.aborted) setLoadError("Could not load your performance reviews.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, []);
+
+  const drafts = reviews.filter((review) => review.status === "draft");
+  const draft = drafts.find((review) => review.id === draftId) ?? drafts[0];
 
   async function submitSelf(e: React.FormEvent) {
     e.preventDefault();
-    if (!draftId) return;
+    if (!draft || busy) return;
+    setFormError("");
     setBusy(true);
     try {
       const payload: Record<string, unknown> = {
@@ -62,7 +104,7 @@ export default function EmployeePerformancePage() {
         scores: Object.fromEntries(Object.entries(selfScores).map(([k, v]) => [k, v === "" ? null : Number(v)])),
       };
       if (selfSummary.trim()) payload.selfSummary = selfSummary;
-      const res = await fetch(`/api/performance/reviews/${draftId}`, {
+      const res = await fetch(`/api/performance/reviews/${draft.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -71,10 +113,12 @@ export default function EmployeePerformancePage() {
       if (!res.ok) throw new Error(data.error ?? "Failed");
       toast("success", "Self-review submitted.");
       setDraftId(null);
+      setSelfScores({});
+      setSelfSummary("");
       router.refresh();
       await load();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed");
+      setFormError(e instanceof Error ? e.message : "Could not submit the self-review.");
     } finally {
       setBusy(false);
     }
@@ -82,7 +126,7 @@ export default function EmployeePerformancePage() {
 
   async function submitFeedback(e: React.FormEvent) {
     e.preventDefault();
-    if (!fbId) return;
+    if (!fbId || busy) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/performance/reviews/${fbId}`, {
@@ -104,24 +148,25 @@ export default function EmployeePerformancePage() {
     }
   }
 
-  if (loading) return <p className="text-[13px] text-muted-foreground">Loading…</p>;
-
-  const draft = reviews.find((r) => r.status === "draft");
-
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight">Performance</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Self-review, manager feedback and 360° peer input.</p>
-      </div>
+      <PageHeader title="My performance" description="Complete your self-review and read feedback once your manager finishes the review." />
 
-      {/* Self review */}
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Loading performance reviews…</p> : loadError ? (
+        <div className="flex flex-wrap items-center gap-3"><p role="alert" className="text-sm text-destructive">{loadError}</p><Button size="sm" variant="outline" onClick={() => { setLoading(true); void load(); }}>Retry reviews</Button></div>
+      ) : <>
       {draft ? (
         <form onSubmit={submitSelf} className="space-y-4 rounded-2xl border border-indigo-400/20 bg-indigo-500/5 p-5">
           <div className="flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-indigo-400" />
-            <p className="text-[14px] font-semibold">Self-review — {draft.period}</p>
+            <h2 className="text-sm font-semibold">Self-review · {draft.period}</h2>
           </div>
+          {draft.dueDate && <p className="text-sm text-muted-foreground">Due {formatDate(new Date(draft.dueDate))}</p>}
+          {drafts.length > 1 && <label className="flex flex-wrap items-center gap-2 text-sm">Review period
+            <select value={draft.id} disabled={busy} onChange={(event) => { setDraftId(event.target.value); setSelfScores({}); setSelfSummary(""); setFormError(""); }} className="rounded-lg border border-edge bg-card px-3 py-2">
+              {drafts.map((review) => <option key={review.id} value={review.id}>{review.period}</option>)}
+            </select>
+          </label>}
           <div className="space-y-2.5">
             {draft.scores.map((s) => (
               <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl bg-card px-4 py-3">
@@ -129,6 +174,7 @@ export default function EmployeePerformancePage() {
                 <div className="flex items-center gap-1">
                   <Star className="h-3.5 w-3.5 text-muted-foreground" />
                   <select
+                    aria-label={`Self rating for ${s.kpi}`}
                     value={selfScores[s.kpiId] ?? ""}
                     onChange={(e) => setSelfScores({ ...selfScores, [s.kpiId]: e.target.value === "" ? "" : Number(e.target.value) })}
                     className="rounded-lg border border-edge bg-card px-2 py-1.5 text-[12.5px] outline-none"
@@ -140,14 +186,13 @@ export default function EmployeePerformancePage() {
               </div>
             ))}
           </div>
-          <textarea value={selfSummary} onChange={(e) => setSelfSummary(e.target.value)} rows={3} placeholder="Your summary of this period…" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+          <textarea aria-label="Self-review summary" value={selfSummary} onChange={(e) => setSelfSummary(e.target.value)} rows={3} placeholder="Your summary of this period…" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end">
             <Button type="submit" loading={busy}>Submit self-review</Button>
           </div>
         </form>
-      ) : (
-        <EmptyState icon={<ClipboardList className="h-5 w-5" />} title={reviews.length ? "Self-review submitted" : "No reviews yet"} description={reviews.length ? "Waiting for your manager to complete the cycle." : "Your manager will start a review cycle for you."} />
-      )}
+      ) : reviews.length === 0 && <EmptyState icon={<ClipboardList className="h-5 w-5" />} title="No reviews yet" description="Your manager will start a review cycle for you." />}
 
       {/* My reviews */}
       {reviews.filter((r) => r.status !== "draft").length > 0 && (
@@ -157,7 +202,7 @@ export default function EmployeePerformancePage() {
             <div key={r.id} className="rounded-2xl border border-edge bg-card p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[14px] font-semibold">{r.period}</p>
-                <Badge tone={tone[r.status]} className="capitalize">{r.status.replace("_", " ")}</Badge>
+                <Badge tone={tone[r.status]}>{statusLabel[r.status] ?? r.status}</Badge>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {r.scores.map((s) => (
@@ -174,6 +219,8 @@ export default function EmployeePerformancePage() {
               {r.overallRating && (
                 <p className="mt-3 text-[13px]"><Star className="mr-1 inline h-3.5 w-3.5 text-amber-400" /> Overall: <span className="font-bold">{r.overallRating}/5</span></p>
               )}
+              {r.selfSummary && <p className="mt-3 whitespace-pre-wrap break-words text-sm"><span className="font-medium">Your summary · </span>{r.selfSummary}</p>}
+              {r.managerSummary && <p className="mt-3 whitespace-pre-wrap break-words text-sm"><span className="font-medium">Manager summary · </span>{r.managerSummary}</p>}
               {r.feedbacks.length > 0 && (
                 <div className="mt-3 space-y-2">
                   <p className="text-[11.5px] font-medium uppercase tracking-wider text-muted-foreground">Peer feedback</p>
@@ -187,6 +234,7 @@ export default function EmployeePerformancePage() {
         </div>
       )}
 
+      <ReviewNavigation current={historyPage} other={peerPage} />
       {/* 360 feedback on peers */}
       {peers.length > 0 && (
         <div className="space-y-3">
@@ -208,9 +256,9 @@ export default function EmployeePerformancePage() {
               )}
               {fbId === r.id && (
                 <form onSubmit={submitFeedback} className="mt-3 space-y-2.5">
-                  <textarea value={fbComment} onChange={(e) => setFbComment(e.target.value)} required rows={2} placeholder="Constructive feedback…" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+                  <textarea aria-label="Peer feedback" maxLength={10000} value={fbComment} onChange={(e) => setFbComment(e.target.value)} required rows={2} placeholder="Constructive feedback…" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
                   <div className="flex items-center justify-end gap-2">
-                    <select value={fbRating} onChange={(e) => setFbRating(e.target.value === "" ? "" : Number(e.target.value))} className="rounded-lg border border-edge bg-card px-2 py-1.5 text-[12.5px] outline-none">
+                    <select aria-label="Peer rating" value={fbRating} onChange={(e) => setFbRating(e.target.value === "" ? "" : Number(e.target.value))} className="rounded-lg border border-edge bg-card px-2 py-1.5 text-[12.5px] outline-none">
                       <option value="">No rating</option>
                       {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}/5</option>)}
                     </select>
@@ -222,6 +270,8 @@ export default function EmployeePerformancePage() {
           ))}
         </div>
       )}
+      <ReviewNavigation current={peerPage} other={historyPage} peer />
+      </>}
     </div>
   );
 }

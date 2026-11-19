@@ -45,6 +45,7 @@ export function TaxReviewPanel({
   const [status, setStatus] = useState("submitted");
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [reviewError, setReviewError] = useState("");
 
   const period = declarations.filter((d) => d.fy === fy);
   const filtered = period.filter(
@@ -57,8 +58,9 @@ export function TaxReviewPanel({
 
   async function review(id: string, action: "verify" | "reject") {
     const declaration = declarations.find((item) => item.id === id);
-    if (!declaration) return;
+    if (!declaration || busy) return;
     setBusy(id);
+    setReviewError("");
     try {
       const res = await fetch(`/api/tax-declarations/${id}`, {
         method: "PATCH",
@@ -69,8 +71,8 @@ export function TaxReviewPanel({
           note: action === "reject" ? note.trim() : undefined,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to update");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Could not update the declaration.");
       toast(
         "success",
         action === "verify"
@@ -81,7 +83,9 @@ export function TaxReviewPanel({
       setNote("");
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to update");
+      const message = e instanceof Error ? e.message : "Could not confirm the review. Check the declaration before retrying.";
+      if (rejecting === id) setReviewError(message);
+      else toast("error", message);
     } finally {
       setBusy(null);
     }
@@ -201,6 +205,7 @@ export function TaxReviewPanel({
                       onClick={() => {
                         setRejecting(d.id);
                         setNote("");
+                        setReviewError("");
                       }}
                     >
                       <X className="h-3.5 w-3.5" /> Return for correction
@@ -236,11 +241,12 @@ export function TaxReviewPanel({
           >
             <Input
               required
-              maxLength={1000}
+              maxLength={2000}
               value={note}
               onChange={(event) => setNote(event.target.value)}
             />
           </Field>
+          {reviewError && <p role="alert" className="text-sm text-destructive">{reviewError}</p>}
           <div className="flex justify-end gap-2">
             <Button
               type="button"

@@ -15,7 +15,6 @@ import {
   MessageSquareText,
   PhoneCall,
   Plus,
-  Route,
   ShieldCheck,
   Smartphone,
   Sparkles,
@@ -42,9 +41,9 @@ const FEATURES = [
     desc: "PF, ESIC, PT, TDS (old/new regime) and LWF built in. Bank CSV for bulk payments and Tally export.",
   },
   {
-    icon: MapPin,
-    title: "Field GPS tracking",
-    desc: "Live journey maps and route replay for field teams — stops, distance and visit history per employee.",
+    icon: Users,
+    title: "Employee self-service",
+    desc: "Give employees one place to view their attendance, request leave and download payslips.",
   },
   {
     icon: Bot,
@@ -55,9 +54,9 @@ const FEATURES = [
 
 /* Trust band — headline proof points. White-on-accent CTA uses --accent (#C2410C light) per contrast spec. */
 const TRUST_BAND = [
-  { value: "80L+", label: "Attendance punches processed every month" },
-  { value: "650+", label: "Branches, plants & field teams onboard" },
-  { value: "10+", label: "Languages — EN · हिं · ગુ · मरा · தமிழ் + more" },
+  { value: "Attendance", label: "Web, mobile and biometric punch records" },
+  { value: "Leave", label: "Balances, requests and approvals" },
+  { value: "Payroll", label: "Pay runs, payslips and bank exports" },
 ];
 
 const PERSONAS = [
@@ -69,7 +68,7 @@ const PERSONAS = [
   {
     icon: MapPin,
     title: "Field & sales force",
-    desc: "Selfie check-ins, journey tracking with route replay, and expense claims approved from the field.",
+    desc: "Location-verified check-ins and mobile expense submission for assigned work locations.",
   },
   {
     icon: Building2,
@@ -82,12 +81,12 @@ const SECURITY = [
   {
     icon: Lock,
     title: "Private by design",
-    desc: "Role-based access — employees only ever see their own data. HTTPS in transit, hosted in India, DPDP-ready practices.",
+    desc: "Role-based access controls which employee records and workspace settings each person can open.",
   },
   {
     icon: MapPin,
-    title: "Location, only on the clock",
-    desc: "GPS is recorded while clocked in or on an approved journey. When your team goes home, tracking stops — no 24×7 surveillance.",
+    title: "Location verification at punch time",
+    desc: "Where required by the workspace, a check-in or check-out verifies the employee’s location.",
   },
   {
     icon: ShieldCheck,
@@ -134,7 +133,7 @@ const FAQS = [
   },
   {
     q: "Does the mobile app track employees after work hours?",
-    a: "Location is only recorded while the employee is clocked in or running an approved journey. Admins can't see an employee's location when they're off the clock.",
+    a: "Location verification happens during a check-in or check-out when your workspace requires it.",
   },
   {
     q: "Which languages are supported?",
@@ -248,6 +247,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
           </div>
         )}
       </header>
+      <main>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
@@ -270,15 +270,14 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
           <div className="mx-auto max-w-3xl text-center">
             <span className="inline-flex items-center gap-2 rounded-full border border-edge bg-tint px-3.5 py-1.5 text-[12px] font-medium text-muted-foreground">
               <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-              HRMS · Attendance · Payroll · Field tracking — for Indian teams
+              Employee management · Attendance · Leave · Payroll
             </span>
             <h1 className="mt-6 font-display text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
               Run your workforce on{" "}
               <span className="text-gradient">one simple platform</span>
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-[15.5px] leading-relaxed text-muted-foreground sm:text-lg">
-              Geofenced attendance, shift rosters, leaves, payroll with PF·ESIC·TDS·LWF, field GPS
-              tracking and an AI assistant — everything in one workspace your team will actually use.
+              Manage employee records, shifts, leave and payroll. Give your team one place to clock in, submit requests and access payslips.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
@@ -420,85 +419,25 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
         </div>
       </section>
 
-      {/* ── Field force (route replay mockup) ───────────────────────────── */}
-      <section id="field" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-20">
-        <div className="grid items-center gap-12 lg:grid-cols-2">
-          <div className="min-w-0">
-            <p className={cn("text-[12px] font-semibold uppercase tracking-widest", EYEBROW)}>Field force</p>
-            <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
-              Know your team is on site — <span className="text-gradient">not just “clocked in”</span>
-            </h2>
-            <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
-              Field reps check in with a selfie at the customer site. Their route is recorded and can be
-              replayed later — visits, distance and timestamps — so you can verify work without shadowing anyone.
-            </p>
-            <ul className="mt-6 space-y-3 text-[14px] text-muted-foreground">
-              {[
-                "Selfie + GPS check-in at each stop",
-                "Route replay with visit timestamps",
-                "Expense claims filed from the field, approved from HQ",
-              ].map((li) => (
-                <li key={li} className="flex items-center gap-2.5">
-                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded-full", ICON_SOFT)}>
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                  {li}
-                </li>
-              ))}
-            </ul>
+      <section aria-labelledby="self-service-heading" className="mx-auto max-w-6xl px-5 py-16 sm:py-20">
+        <div className="grid gap-8 rounded-3xl border border-edge bg-card p-6 sm:p-10 lg:grid-cols-[0.85fr_1fr] lg:gap-12">
+          <div className="self-center">
+            <h2 id="self-service-heading" className="font-display text-3xl font-bold tracking-tight sm:text-4xl">A workspace for every role</h2>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">Employees handle their own requests. Managers and HR work through their teams’ records, approvals and payroll.</p>
+            <Link href="/login" className="mt-5 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary hover:underline">Open your workspace <ArrowRight aria-hidden="true" className="size-4" /></Link>
           </div>
-          {/* Route-replay mockup */}
-          <div className="relative min-w-0">
-            <div className="absolute -inset-6 rounded-full bg-[#3B82F6]/10 blur-3xl" aria-hidden />
-            <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5">
-              <div className="flex items-center justify-between border-b border-edge pb-3.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-primary-foreground", ICON_TILE)}>
-                    <Route className="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>
-                  <span className="truncate text-[13px] font-semibold">Journey · Rahul S.</span>
-                </div>
-                <span className="shrink-0 rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Replay</span>
+          <dl className="divide-y divide-edge rounded-2xl border border-edge bg-tint/50 px-5">
+            {[
+              { title: "Employees", description: "Clock in, request leave, submit an expense and view payslips.", icon: Fingerprint },
+              { title: "Managers", description: "Review team attendance, leave and pending requests.", icon: Users },
+              { title: "HR and payroll", description: "Maintain employee records, configure policies and run payroll.", icon: Wallet },
+            ].map(({ title, description, icon: Icon }) => (
+              <div key={title} className="flex gap-3 py-4">
+                <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+                <div><dt className="text-sm font-semibold">{title}</dt><dd className="mt-1 text-sm text-muted-foreground">{description}</dd></div>
               </div>
-              <div className="relative mt-4 h-56 overflow-hidden rounded-xl bg-grid">
-                <svg viewBox="0 0 400 220" className="absolute inset-0 h-full w-full" aria-hidden>
-                  <path
-                    d="M 40 180 L 120 140 L 190 165 L 260 100 L 330 60 L 370 40"
-                    fill="none"
-                    stroke="url(#routeGrad)"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeDasharray="6 6"
-                  />
-                  <defs>
-                    <linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#2563EB" />
-                      <stop offset="100%" stopColor="#3B82F6" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-                {[
-                  { x: 40, y: 180, tag: "HQ" },
-                  { x: 190, y: 165, tag: "10:20" },
-                  { x: 260, y: 100, tag: "11:05" },
-                  { x: 330, y: 60, tag: "12:40" },
-                ].map((p) => (
-                  <span key={p.tag} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: `${(p.x / 400) * 100}%`, top: `${(p.y / 220) * 100}%` }}>
-                    <span className="block h-3 w-3 rounded-full border-2 border-white bg-primary shadow-[0_0_0_4px_rgba(37,99,235,0.25)]" />
-                    <span className="mt-1 block rounded-md bg-card px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm">{p.tag}</span>
-                  </span>
-                ))}
-              </div>
-              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
-                <span>12 stops · 34 km</span>
-                <span className="inline-flex items-center gap-1">
-                  <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" /> Geofence verified
-                </span>
-                <span>Out 18:02</span>
-              </div>
-            </div>
-          </div>
+            ))}
+          </dl>
         </div>
       </section>
 
@@ -712,6 +651,7 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
       </section>
 
       {/* ── Footer ──────────────────────────────────────────────────────── */}
+      </main>
       <footer className="border-t border-edge bg-tint/40">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-5 py-10 sm:flex-row">
           <div className="flex items-center gap-2.5">

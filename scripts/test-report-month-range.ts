@@ -99,6 +99,45 @@ assert.equal(nonWorkingDayPresentMatrix.blocks[0].days[3].status, "P", "present 
 assert.equal(nonWorkingDayPresentMatrix.blocks[0].totals.present, 2, "non-working-day presence counts as Present");
 assert.equal("pon" in nonWorkingDayPresentMatrix.blocks[0].totals, false, "matrix has no PON total");
 
+const localNightShift = { name: "Night", startTime: "22:00", endTime: "05:00", isNightShift: true };
+const localNight = {
+  ...base,
+  timeZone: "America/New_York",
+  month: "2026-03",
+  records: [{
+    employeeId: "e",
+    date: parseIST("2026-03-07 00:00:00")!,
+    status: "present",
+    punchInTime: new Date("2026-03-08T03:00:00Z"),
+    punchOutTime: new Date("2026-03-08T06:30:00Z"),
+    lateMinutes: 0, overtimeMinutes: 0, punches: [],
+    shift: localNightShift,
+  }],
+};
+const regionalMonthly = buildDeviceMonthly(localNight);
+assert.equal(regionalMonthly.timeZone, "America/New_York");
+assert.deepEqual(regionalMonthly.blocks[0].days[6], {
+  day: 7, dayKey: "2026-03-07", status: "P", shift: "Night (22:00-05:00)", inTime: "22:00", outTime: "01:30",
+  lateBy: "", earlyBy: "2:30", duration: "3:30", overTime: "",
+}, "a DST overnight shift stays on its work date and uses elapsed early-departure time");
+assert.equal(buildStatusMatrix(localNight).blocks[0].days[6].inTime, "22:00");
+assert.equal(buildPerformance(localNight).blocks[0].days[6].outTime, "01:30");
+const regionalHours = buildWorkSummary({ ...localNight, runBy: "Admin", generatedAt: "Test" });
+assert.equal(regionalHours.blocks[0].rows[6].early, "2:30");
+assert.equal(regionalHours.blocks[0].rows[6].work, "3:30");
+
+const localDayWithoutShift = {
+  ...localNight,
+  employees: [{ ...base.employees[0], shift: null }],
+  records: [{
+    ...localNight.records[0],
+    punchInTime: new Date("2026-03-07T13:00:00Z"),
+    punchOutTime: new Date("2026-03-07T21:00:00Z"),
+    shift: null,
+  }],
+};
+assert.equal(buildDeviceMonthly(localDayWithoutShift).blocks[0].days[6].duration, "8:00", "an IST date change does not invalidate a single workspace day");
+
 const punchRoute = readFileSync(new URL("../app/api/reports/punch-details/route.ts", import.meta.url), "utf8");
 assert.match(punchRoute, /In Device Serial Number/, "punch XLSX includes the device serial column");
 assert.match(punchRoute, /date: \{ gte: start, lt: end \}/, "punch query uses the inclusive end-day range");

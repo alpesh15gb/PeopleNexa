@@ -3,10 +3,15 @@ import { requireSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { Package } from "lucide-react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/dates";
 import { getTenantAccess } from "@/lib/modules-server";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { formatCalendarDate } from "@/lib/workspace-time";
+import { istDateKey } from "@/lib/ist";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +26,13 @@ export default async function EmployeeProfilePage() {
         branch: { select: { name: true } },
         department: { select: { name: true } },
         shift: { select: { name: true, startTime: true, endTime: true } },
-        tenant: { select: { name: true } },
+        tenant: { select: { name: true, config: true } },
         manager: { select: { firstName: true, lastName: true, tenantId: true } },
       },
     }),
   ]);
-  if (!employee) return null;
+  if (!employee) redirect("/login");
+  const region = workspaceRegion(employee.tenant.config);
   const manager = employee.manager?.tenantId === session.tenantId ? employee.manager : null;
   const myAssets = access.modules.has("assets") ? await prisma.assetAssignment.findMany({
     where: { employeeId: employee.id, asset: { tenantId: session.tenantId }, returnedAt: null },
@@ -34,23 +40,25 @@ export default async function EmployeeProfilePage() {
     orderBy: { assignedAt: "desc" },
   }) : null;
 
-  const fields = [
+  const employment = [
     { label: t(lang, "profile.employeeId"), value: employee.employeeNumber },
-    { label: t(lang, "profile.email"), value: employee.email && !employee.email.endsWith("@employees.peoplenexa.invalid") ? employee.email : "—" },
-    { label: t(lang, "profile.phone"), value: employee.phone || "—" },
     { label: t(lang, "profile.position"), value: employee.position || "—" },
     { label: t(lang, "profile.department"), value: employee.department?.name ?? t(lang, "profile.unassigned") },
     { label: t(lang, "profile.branch"), value: employee.branch?.name ?? "—" },
     { label: t(lang, "profile.manager"), value: manager ? `${manager.firstName} ${manager.lastName}`.trim() : "—" },
     ...(access.modules.has("shifts") ? [{ label: t(lang, "profile.shift"), value: employee.shift ? `${employee.shift.name} (${employee.shift.startTime}–${employee.shift.endTime})` : "—" }] : []),
-    { label: t(lang, "profile.joiningDate"), value: employee.joiningDate ? formatDate(employee.joiningDate) : "—" },
-    { label: t(lang, "profile.lastLogin"), value: employee.lastLoginAt ? formatDate(employee.lastLoginAt) : "—" },
+    { label: t(lang, "profile.joiningDate"), value: employee.joiningDate ? formatCalendarDate(istDateKey(employee.joiningDate), region.locale) : "—" },
     { label: t(lang, "profile.company"), value: employee.tenant.name },
+  ];
+  const account = [
+    { label: t(lang, "profile.email"), value: employee.email && !employee.email.endsWith("@employees.peoplenexa.invalid") ? employee.email : "—" },
+    { label: t(lang, "profile.phone"), value: employee.phone || "—" },
+    { label: t(lang, "profile.lastLogin"), value: employee.lastLoginAt ? new Intl.DateTimeFormat(region.locale, { timeZone: region.timeZone, dateStyle: "medium", timeStyle: "short" }).format(employee.lastLoginAt) : "—" },
   ];
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title={t(lang, "profile.title")} actions={<a href="/change-password" className="text-sm text-primary underline">Change password</a>} />
+      <PageHeader title={t(lang, "profile.title")} description="Review your employment, contact, and account details." />
       <Card>
         <CardContent className="p-6">
           <div className="flex flex-wrap items-center gap-5">
@@ -71,14 +79,27 @@ export default async function EmployeeProfilePage() {
             </div>
           </div>
 
-          <div className="mt-8 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-            {fields.map((f) => (
+          <h2 className="mt-8 text-base font-semibold">Employment</h2>
+          <dl className="mt-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+            {employment.map((f) => (
               <div key={f.label} className="border-t border-edge pt-3">
-                <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{f.label}</p>
-                <p className="mt-1 text-[13.5px] font-medium">{f.value}</p>
+                <dt className="text-xs text-muted-foreground">{f.label}</dt>
+                <dd className="mt-1 break-words text-sm font-medium">{f.value}</dd>
               </div>
             ))}
-          </div>
+          </dl>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex-wrap items-center">
+          <CardTitle>Contact and sign-in</CardTitle>
+          <Link href="/change-password" className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint">Change password</Link>
+        </CardHeader>
+        <CardContent className="p-6 pt-3">
+          <dl className="grid gap-4 sm:grid-cols-3">
+            {account.map((field) => <div key={field.label}><dt className="text-xs text-muted-foreground">{field.label}</dt><dd className="mt-1 break-words text-sm font-medium">{field.value}</dd></div>)}
+          </dl>
+          <p className="mt-4 text-sm text-muted-foreground">Ask HR to update a work or contact detail. {access.modules.has("helpdesk") && <Link href="/employee/helpdesk" className="font-medium text-primary hover:underline">Open Helpdesk</Link>}</p>
         </CardContent>
       </Card>
 

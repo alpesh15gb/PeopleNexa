@@ -1,15 +1,17 @@
 // eBioserver-style Daily + Monthly attendance report builders.
-// Pure functions only (no prisma, no I/O). All wall-clock formatting goes
-// through lib/ist + lib/dates helpers so output stays IST-consistent.
+// Report dates use stored attendance day keys. Punch timestamps use the workspace clock.
 
 import { istDateKey, istWallClock } from "./ist";
 import { attendanceRequiresReview } from "./attendance-validation";
 import { minutesOfDay } from "./dates";
 import { isShiftWeeklyOff } from "./shift-weekly-offs";
+import { DEFAULT_WORKSPACE_REGION } from "./workspace-region";
+import { dateKeyInTimeZone, wallMinutesInTimeZone, workspaceWallTime } from "./workspace-time";
 
 export interface DeviceShift {
   sundayWeeklyOff?: boolean;
   weeklyOffDays?: number[];
+  isNightShift?: boolean;
   name: string;
   startTime: string; // "09:00"
   endTime: string; // "18:00"
@@ -43,7 +45,7 @@ export interface DeviceRecord {
   shift: DeviceShift | null;
 }
 
-/** Raw-punch fallback entry (Punch table shape, IST instants). */
+/** Raw-punch fallback entry with a stored instant. */
 export interface SnapshotPunch {
   time: string | Date;
   type?: string | null;
@@ -51,22 +53,28 @@ export interface SnapshotPunch {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
-/** HH:MM (24h, IST). Blank when missing/invalid. */
-export function formatClockIST(d: Date | string | null | undefined): string {
-  if (!d) return "";
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return "";
-  const w = istWallClock(dt);
-  return `${pad2(w.getUTCHours())}:${pad2(w.getUTCMinutes())}`;
+/** HH:MM in the report time zone. Blank when missing or invalid. */
+function formatReportClock(value: Date | string | null | undefined, timeZone: string): string {
+  if (!value) return "";
+  const instant = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(instant.getTime())) return "";
+  const minutes = timeZone === DEFAULT_WORKSPACE_REGION.timeZone
+    ? istMinutesOfDay(instant)
+    : wallMinutesInTimeZone(instant, timeZone);
+  return `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
 }
 
-/** Minutes since IST midnight for a stored instant, or null when missing. */
-export function istMinutesOfDay(d: Date | string | null | undefined): number | null {
-  if (!d) return null;
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return null;
-  const w = istWallClock(dt);
-  return w.getUTCHours() * 60 + w.getUTCMinutes();
+export function formatClockIST(value: Date | string | null | undefined): string {
+  return formatReportClock(value, DEFAULT_WORKSPACE_REGION.timeZone);
+}
+
+function istMinutesOfDay(instant: Date) {
+  const wall = istWallClock(instant);
+  return wall.getUTCHours() * 60 + wall.getUTCMinutes();
+}
+
+function reportPunchDateKey(instant: Date, timeZone: string) {
+  return timeZone === DEFAULT_WORKSPACE_REGION.timeZone ? istDateKey(instant) : dateKeyInTimeZone(instant, timeZone);
 }
 
 /** H:MM for spans (e.g. 75 → "1:15"). */
@@ -150,7 +158,7 @@ function suffixFor(entries: ParsedPunch[], i: number): string {
 }
 
 /** "HH:MMIN;HH:MMOUT;" from the snapshot, falling back to raw punches. */
-export function punchesText(snapshot: unknown, fallback?: SnapshotPunch[]): string {
+export function punchesText(snapshot: unknown, fallback?: SnapshotPunch[], timeZone = DEFAULT_WORKSPACE_REGION.timeZone): string {
   let entries = parseSnapshotPunches(snapshot);
   if (entries.length === 0 && fallback && fallback.length > 0) {
     entries = fallback
@@ -163,7 +171,7 @@ export function punchesText(snapshot: unknown, fallback?: SnapshotPunch[]): stri
       .sort((a, b) => a.time.getTime() - b.time.getTime());
   }
   if (entries.length === 0) return "";
-  return entries.map((e, i) => `${formatClockIST(e.time)}${suffixFor(entries, i)}`).join(";") + ";";
+  return entries.map((e, i) => `${formatReportClock(e.time, timeZone)}${suffixFor(entries, i)}`).join(";") + ";";
 }
 
 // ─── Shared per-day cells ──────────────────────────────────────────────────
@@ -184,6 +192,7 @@ function buildDayCells(
   record: DeviceRecord | undefined,
   employeeShift: DeviceShift | null,
   fallback: SnapshotPunch[] | undefined,
+  timeZone: string,
 ): DayCells {
   const empty: DayCells = {
     inTime: "",
@@ -197,24 +206,22 @@ function buildDayCells(
     durationMinutes: 0,
   };
   if (!record) return empty;
-  if (!record.shift && !employeeShift && record.punchInTime && record.punchOutTime && istDateKey(record.punchInTime) !== istDateKey(record.punchOutTime)) return { ...empty, inTime: formatClockIST(record.punchInTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
-  if (attendanceRequiresReview(record)) return { ...empty, inTime: formatClockIST(record.punchInTime), outTime: formatClockIST(record.punchOutTime), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback) };
-  const inTime = formatClockIST(record.punchInTime);
-  const outTime = formatClockIST(record.punchOutTime);
+  if (!record.shift && !employeeShift && record.punchInTime && record.punchOutTime && reportPunchDateKey(record.punchInTime, timeZone) !== reportPunchDateKey(record.punchOutTime, timeZone)) return { ...empty, inTime: formatReportClock(record.punchInTime, timeZone), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback, timeZone) };
+  if (attendanceRequiresReview(record)) return { ...empty, inTime: formatReportClock(record.punchInTime, timeZone), outTime: formatReportClock(record.punchOutTime, timeZone), duration: "Review", overtime: "Review", punches: punchesText(record.punches, fallback, timeZone) };
+  const inTime = formatReportClock(record.punchInTime, timeZone);
+  const outTime = formatReportClock(record.punchOutTime, timeZone);
   const late = record.lateMinutes > 0 ? formatHM(record.lateMinutes) : "";
   const overtime = record.overtimeMinutes > 0 ? formatHM(record.overtimeMinutes) : "";
 
-  // Early-going = max(0, shiftEnd − out) when both exist, else blank.
   let early = "";
   let earlyMinutes = 0;
   const shift = record.shift ?? employeeShift;
-  const outMin = istMinutesOfDay(record.punchOutTime);
-  if (shift && outMin !== null) {
-    const endMin = minutesOfDay(shift.endTime);
-    if (shift.endTime && /^\d{2}:\d{2}$/.test(shift.endTime)) {
-      earlyMinutes = Math.max(0, endMin - outMin);
-      early = earlyMinutes > 0 ? formatHM(earlyMinutes) : "";
-    }
+  if (shift && record.punchOutTime && /^\d{2}:\d{2}$/.test(shift.endTime)) {
+    const endMinute = minutesOfDay(shift.endTime);
+    const overnight = shift.isNightShift || endMinute < minutesOfDay(shift.startTime);
+    const scheduledOut = workspaceWallTime(istDateKey(record.date), endMinute + (overnight ? 1440 : 0), timeZone);
+    earlyMinutes = Math.max(0, Math.ceil((scheduledOut.getTime() - record.punchOutTime.getTime()) / 60_000));
+    early = earlyMinutes ? formatHM(earlyMinutes) : "";
   }
 
   // Duration = H:MM span out−in when both exist, else blank.
@@ -235,7 +242,7 @@ function buildDayCells(
     early,
     duration,
     overtime,
-    punches: punchesText(record.punches, fallback),
+    punches: punchesText(record.punches, fallback, timeZone),
     earlyMinutes,
     durationMinutes,
   };
@@ -253,6 +260,7 @@ export interface DeviceDailyRow extends Omit<DayCells, "earlyMinutes" | "duratio
 }
 
 export interface DeviceDailyOutput {
+  timeZone: string;
   kind: "daily";
   day: string;
   dayLabel: string;
@@ -278,6 +286,7 @@ export const DEVICE_DAILY_COLUMNS = [
 ];
 
 export function buildDeviceDaily(args: {
+  timeZone?: string;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -291,20 +300,21 @@ export function buildDeviceDaily(args: {
   /** IST day keys that are tenant holidays. */
   holidays: Set<string>;
 }): DeviceDailyOutput {
-  const { tenant, branch, day, employees, records, punchesByDay, leaves } = args;
+  const { tenant, branch, day, employees, records, punchesByDay, leaves, timeZone = DEFAULT_WORKSPACE_REGION.timeZone } = args;
   const byEmployee = new Map(records.map((r) => [r.employeeId, r]));
   const rows: DeviceDailyRow[] = employees.map((emp) => {
     const record = byEmployee.get(emp.id);
     const rawPunches = punchesByDay.get(`${emp.id}|${day}`) ?? [];
     const shift = reportShift(args.rosterShifts, emp, day, record);
-    const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, rawPunches);
+    const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, rawPunches, timeZone);
     // Daily presence follows the dashboard's authorized raw punches, including
     // employees whose Attendance row has not yet been reconciled.
     if (rawPunches.length) {
-      cells.punches = punchesText(null, rawPunches);
-      if (!cells.inTime) cells.inTime = formatClockIST(rawPunches[0].time);
+      cells.punches = punchesText(null, rawPunches, timeZone);
+      const firstIn = rawPunches.find((punch) => punch.type?.toLowerCase() !== "out");
+      if (!cells.inTime && firstIn) cells.inTime = formatReportClock(firstIn.time, timeZone);
       const last = rawPunches[rawPunches.length - 1];
-      if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatClockIST(last.time);
+      if (!cells.outTime && last.type?.toLowerCase() === "out") cells.outTime = formatReportClock(last.time, timeZone);
     }
     const status = rawPunches.length ? "P" : args.holidays.has(day) ? "H" : leaves.has(emp.id) ? "L" : isShiftWeeklyOff(shift, day) ? "WO" : "A";
     const attendanceStatus = record?.status ?? "Pending";
@@ -321,6 +331,7 @@ export function buildDeviceDaily(args: {
   });
   return {
     kind: "daily",
+    timeZone,
     day,
     dayLabel: formatDayLabel(day),
     header: {
@@ -373,6 +384,7 @@ export interface DeviceMonthlyBlock {
 }
 
 export interface DeviceMonthlyOutput {
+  timeZone: string;
   kind: "monthly";
   month: string;
   monthLabel: string;
@@ -396,6 +408,7 @@ export const DEVICE_MONTHLY_COLUMNS = [
 const PRESENT_STATUSES = new Set(["present", "late", "permission", "half_day"]);
 
 export function buildDeviceMonthly(args: {
+  timeZone?: string;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -409,7 +422,7 @@ export function buildDeviceMonthly(args: {
   /** IST day keys that are tenant holidays. */
   holidays: Set<string>;
 }): DeviceMonthlyOutput {
-  const { tenant, branch, month, employees, records, punchesByDay, leaves, holidays } = args;
+  const { tenant, branch, month, employees, records, punchesByDay, leaves, holidays, timeZone = DEFAULT_WORKSPACE_REGION.timeZone } = args;
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
 
@@ -426,7 +439,7 @@ export function buildDeviceMonthly(args: {
     const rows: DeviceMonthlyDayRow[] = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
-      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`), timeZone);
       let status: string;
       if (record && PRESENT_STATUSES.has(record.status)) {
         status = record.status === "half_day" ? "½P" : "P";
@@ -434,7 +447,7 @@ export function buildDeviceMonthly(args: {
         lateSum += Math.max(0, record.lateMinutes);
         earlySum += cells.earlyMinutes;
         durationSum += cells.durationMinutes;
-        if (!attendanceRequiresReview(record)) otSum += Math.max(0, record.overtimeMinutes);
+        if (cells.overtime !== "Review") otSum += Math.max(0, record.overtimeMinutes);
       } else if (holidays.has(dayKey)) {
         status = "H";
         holidayCount++;
@@ -493,6 +506,7 @@ export function buildDeviceMonthly(args: {
 
   return {
     kind: "monthly",
+    timeZone,
     month,
     monthLabel: formatMonthLabel(month),
     header: {
@@ -586,6 +600,7 @@ export interface DeviceStatusMatrixBlock {
 }
 
 export interface DeviceStatusMatrixOutput {
+  timeZone: string;
   kind: "status-matrix";
   month: string;
   monthLabel: string;
@@ -596,6 +611,7 @@ export interface DeviceStatusMatrixOutput {
 
 export function buildStatusMatrix(args: {
   /** Explicit employee/day rosters override the saved day shift and default. */
+  timeZone?: string;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -612,7 +628,7 @@ export function buildStatusMatrix(args: {
   /** IST day keys that are tenant holidays. */
   holidays: Set<string>;
 }): DeviceStatusMatrixOutput {
-  const { tenant, branch, department, month, employees, records, punchesByDay, leaves, holidays, leaveLabels } = args;
+  const { tenant, branch, department, month, employees, records, punchesByDay, leaves, holidays, leaveLabels, timeZone = DEFAULT_WORKSPACE_REGION.timeZone } = args;
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
   const blocks: DeviceStatusMatrixBlock[] = employees.map((emp, employeeIndex) => {
@@ -620,7 +636,7 @@ export function buildStatusMatrix(args: {
     const matrixDays = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
-      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`), timeZone);
       const present = !!record && PRESENT_STATUSES.has(record.status);
       const isSunday = new Date(`${dayKey}T12:00:00Z`).getUTCDay() === 0;
       let status: string;
@@ -661,6 +677,7 @@ export function buildStatusMatrix(args: {
   });
   return {
     kind: "status-matrix",
+    timeZone,
     month,
     monthLabel: formatMonthLabel(month),
     header: {
@@ -704,6 +721,7 @@ export interface DeviceWorkSummaryBlock {
 }
 
 export interface DeviceWorkSummaryOutput {
+  timeZone: string;
   kind: "work-summary";
   month: string;
   monthLabel: string;
@@ -712,6 +730,7 @@ export interface DeviceWorkSummaryOutput {
 }
 
 export function buildWorkSummary(args: {
+  timeZone?: string;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -727,7 +746,7 @@ export function buildWorkSummary(args: {
   runBy: string;
   generatedAt: string;
 }): DeviceWorkSummaryOutput {
-  const { tenant, month, employees, records, punchesByDay, runBy, generatedAt } = args;
+  const { tenant, month, employees, records, punchesByDay, runBy, generatedAt, timeZone = DEFAULT_WORKSPACE_REGION.timeZone } = args;
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
   const from = days.length > 0 ? formatMonDDYYYY(days[0]) : "";
@@ -740,7 +759,7 @@ export function buildWorkSummary(args: {
     const rows: DeviceWorkSummaryRow[] = days.map((dayKey) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
-      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`), timeZone);
       const present = !!record && PRESENT_STATUSES.has(record.status);
       let firstIn = "";
       let lastOut = "";
@@ -750,24 +769,24 @@ export function buildWorkSummary(args: {
       if (record) {
         // Use the reconciled pair, never infer an OUT from the final raw punch.
         const first = record.punchInTime;
-        const crossDayWithoutShift = !shift && first && record.punchOutTime && istDateKey(first) !== istDateKey(record.punchOutTime);
+        const crossDayWithoutShift = !shift && first && record.punchOutTime && reportPunchDateKey(first, timeZone) !== reportPunchDateKey(record.punchOutTime, timeZone);
         const last = crossDayWithoutShift ? null : record.punchOutTime;
         requiresReview ||= Boolean(crossDayWithoutShift);
         if (first && last) {
           requiresReview ||= attendanceRequiresReview({ punchInTime: first, punchOutTime: last });
-          firstIn = formatClockIST(first);
-          lastOut = formatClockIST(last);
+          firstIn = formatReportClock(first, timeZone);
+          lastOut = formatReportClock(last, timeZone);
           const diff = Math.round((last.getTime() - first.getTime()) / 60000);
           if (diff >= 0) {
             grossMin = diff;
             gross = formatHM(diff);
           }
         } else if (first && !last) {
-          firstIn = formatClockIST(first);
+          firstIn = formatReportClock(first, timeZone);
         } else {
           // Snapshot empty even after fallback → punchIn/Out columns.
-          firstIn = formatClockIST(record.punchInTime);
-          lastOut = formatClockIST(record.punchOutTime);
+          firstIn = formatReportClock(record.punchInTime, timeZone);
+          lastOut = formatReportClock(record.punchOutTime, timeZone);
           if (record.punchInTime && record.punchOutTime) {
             const diff = Math.round((record.punchOutTime.getTime() - record.punchInTime.getTime()) / 60000);
             if (diff >= 0) {
@@ -814,6 +833,7 @@ export function buildWorkSummary(args: {
   });
   return {
     kind: "work-summary",
+    timeZone,
     month,
     monthLabel: formatMonthLabel(month),
     header: {
@@ -864,6 +884,7 @@ export interface DevicePerformanceBlock {
 }
 
 export interface DevicePerformanceOutput {
+  timeZone: string;
   kind: "performance";
   month: string;
   monthLabel: string;
@@ -872,6 +893,7 @@ export interface DevicePerformanceOutput {
 }
 
 export function buildPerformance(args: {
+  timeZone?: string;
   rosterShifts?: Map<string, DeviceShift>;
   tenant: { name: string };
   branch: { name: string } | null;
@@ -885,7 +907,7 @@ export function buildPerformance(args: {
   /** IST day keys that are tenant holidays. */
   holidays: Set<string>;
 }): DevicePerformanceOutput {
-  const { tenant, branch, month, employees, records, punchesByDay, leaves, holidays } = args;
+  const { tenant, branch, month, employees, records, punchesByDay, leaves, holidays, timeZone = DEFAULT_WORKSPACE_REGION.timeZone } = args;
   const days = monthDays(month);
   const byKey = new Map(records.map((r) => [`${r.employeeId}|${istDateKey(r.date)}`, r]));
   const blocks: DevicePerformanceBlock[] = employees.map((emp) => {
@@ -900,7 +922,7 @@ export function buildPerformance(args: {
     const rows: DevicePerformanceDay[] = days.map((dayKey, idx) => {
       const record = byKey.get(`${emp.id}|${dayKey}`);
       const shift = reportShift(args.rosterShifts, emp, dayKey, record);
-      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`));
+      const cells = buildDayCells(record ? { ...record, shift } : undefined, shift, punchesByDay.get(`${emp.id}|${dayKey}`), timeZone);
       let status: string;
       if (record && PRESENT_STATUSES.has(record.status)) {
         status = record.status === "half_day" ? "½P" : "P";
@@ -908,7 +930,7 @@ export function buildPerformance(args: {
         if (record.status === "half_day") half++;
         else fullPresent++;
         workMin += cells.durationMinutes;
-        if (!attendanceRequiresReview(record)) otMin += Math.max(0, record.overtimeMinutes);
+        if (cells.overtime !== "Review") otMin += Math.max(0, record.overtimeMinutes);
       } else if (holidays.has(dayKey)) {
         status = "H";
         hld++;
@@ -956,6 +978,7 @@ export function buildPerformance(args: {
   });
   return {
     kind: "performance",
+    timeZone,
     month,
     monthLabel: formatMonthLabel(month),
     header: {

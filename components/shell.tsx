@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -89,6 +89,7 @@ const adminNav: NavItem[] = [
   { href: "/admin/expenses", label: "Expenses", icon: <Receipt className="h-4 w-4" />, module: "expenses", section: "Compensation" },
   { href: "/admin/cashbook", label: "Cashbook", icon: <Wallet className="h-4 w-4" />, module: "expenses", section: "Compensation" },
   { href: "/admin/branches", label: "Branches", icon: <MapPin className="h-4 w-4" />, module: "branches", section: "Workplace" },
+  { href: "/admin/locations", label: "Locations", icon: <Building2 className="h-4 w-4" />, section: "Workplace" },
   { href: "/admin/performance", label: "Performance", icon: <ClipboardList className="h-4 w-4" />, module: "performance", section: "Workplace" },
   { href: "/admin/helpdesk", label: "Helpdesk", icon: <LifeBuoy className="h-4 w-4" />, module: "helpdesk", section: "Workplace" },
   { href: "/admin/policies", label: "Policies", icon: <ScrollText className="h-4 w-4" />, module: "policies", section: "Workplace" },
@@ -321,6 +322,8 @@ export function Shell({
 }) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const accountButton = useRef<HTMLButtonElement>(null);
+  const mobileNavigation = useRef<HTMLDialogElement>(null);
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
@@ -328,7 +331,8 @@ export function Shell({
   const moduleSet = new Set(enabledModules ?? []);
   const isAdmin = role === "admin";
   const canManage = isAdmin || role === "branch_manager" || role === "location_manager" || role === "supervisor";
-  const selfService = pathname === "/employee" || pathname.startsWith("/employee/");
+  const isNotifications = pathname === "/notifications";
+  const selfService = isNotifications || pathname === "/employee" || pathname.startsWith("/employee/");
   const managementHome = role === "supervisor" ? "/admin/attendance" : "/admin";
   const branchRoutes = new Set(["/admin", "/admin/approvals", "/admin/attendance", "/admin/regularization", "/admin/employee-master", "/admin/leaves"]);
   const locationHidden = new Set(["/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/configuration/company-settings", "/admin/audit"]);
@@ -337,6 +341,7 @@ export function Shell({
     : role === "branch_manager" ? ["attendance", "leaves"] : ["attendance"];
   const canSeeApprovals = canManage && approvalModules.some((module) => moduleSet.has(module));
   const managementNav = !canManage ? [] : adminNav.filter(({ href }) => {
+    if (href === "/admin/locations" && !isAdmin) return false;
     if (href === "/admin/approvals" && !canSeeApprovals) return false;
     if (role === "branch_manager") return branchRoutes.has(href);
     if (role === "location_manager") return !locationHidden.has(href);
@@ -378,17 +383,20 @@ export function Shell({
     return (item.match ?? [item.href]).some((path) => pathname === path || pathname.startsWith(path + "/"));
   });
 
-  const servicePages = current?.section && current.href !== "/admin/payroll" && ["People", "Compensation", "Reports", "Devices"].includes(current.section)
+  const servicePages = current?.section && current.section !== "Overview" && current.href !== "/admin/payroll" && pathname !== "/employee"
     ? nav.filter((item) => item.section === current.section)
     : [];
 
   const logout = async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("Logout failed");
     } catch {
-      // still redirect
+      toast("error", "Could not sign out. Try again.");
+      return;
     }
-    router.push("/login");
+    setMenuOpen(false);
+    router.replace("/login");
     router.refresh();
   };
 
@@ -436,19 +444,21 @@ export function Shell({
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
+    const dialog = mobileNavigation.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    if (dialog && !dialog.open) dialog.showModal();
     document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      dialog?.close();
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus({ preventScroll: true });
     };
-  }, [open ]);
+  }, [open]);
 
   return (
     <div className="portal-workspace min-h-screen">
+      <a href="#workspace-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground">Skip to page content</a>
       {/* Desktop sidebar — fixed full-height flex column so inner nav can scroll */}
       <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-[var(--workspace-sidebar)] lg:flex">
         {sidebar}
@@ -456,14 +466,15 @@ export function Shell({
 
       {/* Mobile drawer — proper dialog semantics */}
       {open && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setOpen(false)} aria-hidden="true" />
-          <aside
-            role="dialog"
-            aria-modal="true"
-            aria-label="Workspace navigation"
-            className="absolute inset-y-0 left-0 flex h-full w-72 max-w-[85vw] animate-fade-in flex-col border-r border-edge bg-[var(--workspace-sidebar)]"
-          >
+        <dialog
+          ref={mobileNavigation}
+          id="mobile-workspace-navigation"
+          aria-label="Workspace navigation"
+          onCancel={(event) => { event.preventDefault(); setOpen(false); }}
+          onClick={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
+          className="fixed inset-y-0 left-0 right-auto m-0 h-dvh max-h-none w-72 max-w-[85vw] overflow-hidden border-r border-edge bg-[var(--workspace-sidebar)] p-0 text-foreground backdrop:bg-black/65"
+        >
+          <div className="relative h-full">
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"
@@ -472,8 +483,8 @@ export function Shell({
               <X aria-hidden="true" className="h-4 w-4" />
             </button>
             {sidebar}
-          </aside>
-        </div>
+          </div>
+        </dialog>
       )}
 
       {/* Main column */}
@@ -484,13 +495,14 @@ export function Shell({
             onClick={() => setOpen(true)}
             aria-label="Open menu"
             aria-expanded={open}
+            aria-controls={open ? "mobile-workspace-navigation" : undefined}
             className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
           >
             <Menu aria-hidden="true" className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
             {current?.section && <p className="hidden truncate text-[11px] font-medium text-muted-foreground md:block">{current.section}</p>}
-            <p className="truncate font-display text-[16px] font-semibold tracking-tight">{current?.label ?? (selfService ? "My work" : "Workspace")}</p>
+            <p className="truncate font-display text-[16px] font-semibold tracking-tight">{isNotifications ? "Notifications" : current?.label ?? (selfService ? "My work" : "Workspace")}</p>
           </div>
 
           <WorkspaceLauncher actions={actions} pages={launcherPages} />
@@ -504,12 +516,19 @@ export function Shell({
             <LanguageToggle lang={lang} />
           </div>
 
-          <div className="relative">
+          <div className="relative" onKeyDown={(event) => {
+            if (menuOpen && event.key === "Escape") {
+              setMenuOpen(false);
+              accountButton.current?.focus();
+            }
+          }} onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
+          }}>
             <button
+              ref={accountButton}
               onClick={() => setMenuOpen((v) => !v)}
               aria-label="Account menu"
               aria-expanded={menuOpen}
-              aria-haspopup="menu"
               className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-edge bg-tint py-1.5 pl-1.5 pr-2.5 transition-colors duration-200 hover:border-primary/25 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_100%)] text-[11px] font-bold text-white">
@@ -521,7 +540,7 @@ export function Shell({
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
-                <div role="menu" className="card-surface absolute right-0 z-40 mt-2 w-52 max-w-[calc(100vw-2rem)] animate-scale-in rounded-xl bg-card-2 p-1.5 shadow-2xl">
+                <div role="group" aria-label="Account actions" className="card-surface absolute right-0 z-40 mt-2 w-52 max-w-[calc(100vw-2rem)] animate-scale-in rounded-xl bg-card-2 p-1.5 shadow-2xl">
                   <div className="border-b border-edge px-3 py-2.5">
                     <p className="text-[13px] font-semibold">{name}</p>
                     <p className="text-[11px] text-muted-foreground">{companyName}</p>
@@ -529,6 +548,7 @@ export function Shell({
                   {!isAdmin && (
                     <Link
                       href="/employee/profile"
+                      onClick={() => setMenuOpen(false)}
                       className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                     >
                       <Users className="h-4 w-4" /> {t(lang, "nav.myProfile")}
@@ -546,7 +566,14 @@ export function Shell({
           </div>
         </header>
         {servicePages.length > 1 && (
-          <nav aria-label={`${current?.section} pages`} className="flex gap-3 overflow-x-auto border-b border-edge bg-card px-4 sm:gap-5 sm:px-7">
+          <nav aria-label={`${current?.section} pages`} className="border-b border-edge bg-card px-4 sm:px-7">
+            <label className="flex min-h-12 items-center gap-3 text-xs font-semibold text-muted-foreground sm:hidden">
+              {current?.section}
+              <select aria-label={`Open a page in ${current?.section}`} value={current?.href} onChange={(event) => router.push(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-edge bg-background p-2 text-sm text-foreground">
+                {servicePages.map((item) => <option key={item.href} value={item.href}>{item.label}</option>)}
+              </select>
+            </label>
+            <div className="hidden gap-5 overflow-x-auto sm:flex">
             {servicePages.map((item) => (
               <Link key={item.href} href={item.href} aria-current={item === current ? "page" : undefined}
                 className={cn("flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm",
@@ -554,11 +581,12 @@ export function Shell({
                 {item.label}
               </Link>
             ))}
+            </div>
           </nav>
         )}
 
 
-        <main className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9">{children}</main>
+        <main id="workspace-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9">{children}</main>
       </div>
     </div>
   );

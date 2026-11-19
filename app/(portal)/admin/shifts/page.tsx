@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/stat";
 import { ShiftsManager } from "./shifts-manager";
@@ -8,7 +9,7 @@ import { unassignedSinglePunchHalfDay } from "@/lib/unassigned-shift-policy";
 export const dynamic = "force-dynamic";
 
 export default async function AdminShiftsPage() {
-  const session = await requireSession();
+  const session = await requireActiveSession();
   const shifts = await prisma.shift.findMany({
     where: { tenantId: session.tenantId },
     include: { _count: { select: { employees: true } } },
@@ -22,6 +23,7 @@ export default async function AdminShiftsPage() {
       <PageHeader
         title="Shifts"
         description="Set working hours, weekly days off and late-arrival rules."
+        actions={canManageShifts && <Link href="/admin/attendance?view=setup" className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Attendance setup</Link>}
       />
       <Card>
         <CardContent className="p-0">

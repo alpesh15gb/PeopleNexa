@@ -87,8 +87,8 @@ export default async function AdminReportsPage({
   });
   const visibleBranches = branches;
   const date = params.date && isDateKey(params.date) ? params.date : today;
-  const deviceBranchId = forcedBranchId ?? (forcedLocationId && !visibleBranches.some((branch) => branch.id === params.branchId) ? "" : params.branchId ?? "");
-  const deviceDepartmentId = params.departmentId ?? "";
+  const deviceBranchId = forcedBranchId ?? (visibleBranches.some((branch) => branch.id === params.branchId) ? params.branchId! : "");
+  const deviceDepartmentId = departments.some((department) => department.id === params.departmentId) ? params.departmentId! : "";
   const kind = DEVICE_KIND_BY_TYPE[type];
   const inactiveEmployees = type === "inactive-employees" ? await prisma.employee.findMany({
     where: inactiveEmployeeReportWhere({ tenantId: session.tenantId, role: session.role, manager, branchId: params.branchId, departmentId: params.departmentId, query: params.q }),
@@ -110,8 +110,8 @@ export default async function AdminReportsPage({
     <div className="animate-fade-up space-y-6">
       <Link href="/admin/reports" className="inline-flex text-sm font-medium text-primary hover:underline">Report library</Link>
       <PageHeader
-        title="Reports"
-        description="Attendance reports with Excel and print"
+        title={type === "inactive-employees" ? "Inactive employees" : "Attendance reports"}
+        description={type === "inactive-employees" ? "Search separated staff and export the filtered roster." : "Review daily and monthly attendance, then export or print."}
         actions={
           <div className="flex flex-wrap gap-2">
             {session.role === "admin" && (
@@ -119,7 +119,7 @@ export default async function AdminReportsPage({
                 <Download className="h-4 w-4" aria-hidden="true" /> Download master data
               </a>
             )}
-            <Link href="/admin/reports/punch-details" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Punch Details / Logs</Link>
+            <Link href={`/admin/reports/punch-details?${new URLSearchParams({ from: date, to: date })}`} className="inline-flex min-h-10 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground">Punch details</Link>
           </div>
         }
       />

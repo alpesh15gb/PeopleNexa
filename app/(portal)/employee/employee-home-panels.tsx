@@ -9,17 +9,40 @@ import { formatCalendarDate } from "@/lib/workspace-time";
 
 type HomeLink = { href: string; label: string; icon: LucideIcon };
 type ScheduleShift = { name: string; startTime: string; endTime: string; isNightShift: boolean; weeklyOffDays: number[]; sundayWeeklyOff: boolean };
-type LeaveActivity = { id: string; fromDate: Date; toDate: Date; days: number; status: string; leaveType: { name: string; color: string } };
+type LeaveActivity = { id: string; fromDate: Date; toDate: Date; days: number; status: string; cancellationRequestedAt: Date | null; leaveType: { name: string; color: string } };
 
-export function EmployeeHomeLinks({ actions }: { actions: HomeLink[] }) {
+export function EmployeeHomeLinks({ actions, label = "Employee self-service" }: { actions: HomeLink[]; label?: string }) {
   return (
-    <nav aria-label="Employee self-service" className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
+    <nav aria-label={label} className={actions.length === 1 ? "grid" : "grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]"}>
       {actions.map(({ href, label, icon: Icon }) => (
         <Link key={href} href={href} className="group flex min-h-12 items-center gap-2 rounded-xl border border-edge bg-card px-3 py-2 text-sm font-medium hover:border-primary/40 hover:bg-tint">
           <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           <span className="min-w-0 flex-1">{label}</span>
           <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
         </Link>
+      ))}
+    </nav>
+  );
+}
+
+export function EmployeeServiceDirectory({ groups }: { groups: { label: string; links: HomeLink[] }[] }) {
+  return (
+    <nav aria-label="Employee services" className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {groups.filter((group) => group.links.length > 0).map((group) => (
+        <section key={group.label} className="min-w-0 rounded-xl border border-edge bg-card px-4 py-3">
+          <h3 className="border-b border-edge pb-2 text-sm font-semibold">{group.label}</h3>
+          <ul className="mt-1">
+            {group.links.map(({ href, label, icon: Icon }) => (
+              <li key={href}>
+                <Link href={href} className="group -mx-1 flex min-h-11 items-center gap-3 rounded-md px-1 text-sm font-medium hover:bg-tint">
+                  <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="min-w-0 flex-1 break-words">{label}</span>
+                  <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       ))}
     </nav>
   );
@@ -66,12 +89,13 @@ export function EmployeeWorkSchedule({ days, locale, lang, branchName }: {
 export function EmployeeHomeRequests({ requests }: { requests: (HomeLink & { count: number })[] }) {
   if (requests.length === 0) return null;
 
+  const pending = requests.filter(({ count }) => count > 0);
   return (
-    <Card aria-labelledby="employee-requests-title">
-      <CardHeader><CardTitle id="employee-requests-title">My requests awaiting review</CardTitle></CardHeader>
+    <Card role="region" aria-labelledby="employee-requests-title">
+      <CardHeader><h2 id="employee-requests-title" className="font-display text-base font-semibold">My requests awaiting review</h2></CardHeader>
       <CardContent className="pt-3">
-        <ul className="divide-y divide-edge">
-          {requests.map(({ href, label, icon: Icon, count }) => (
+        {pending.length === 0 ? <p className="py-2 text-sm text-muted-foreground">No requests awaiting review.</p> : <ul className="divide-y divide-edge">
+          {pending.map(({ href, label, icon: Icon, count }) => (
             <li key={href}>
               <Link href={href} className="group flex items-center gap-3 rounded-md px-1 py-2.5 hover:bg-tint">
                 <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -81,7 +105,7 @@ export function EmployeeHomeRequests({ requests }: { requests: (HomeLink & { cou
               </Link>
             </li>
           ))}
-        </ul>
+        </ul>}
       </CardContent>
     </Card>
   );
@@ -105,6 +129,7 @@ export function EmployeeLeaveActivity({ recent, next, today, locale, lang }: { r
           <div className="rounded-lg border border-edge bg-tint px-3 py-2.5 text-sm">
             <p className="font-medium">{istDateKey(next.fromDate) <= today ? "Approved leave" : "Next approved leave"}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">{next.leaveType.name} · {dateLabel(next)}</p>
+            {next.cancellationRequestedAt && <p className="mt-1 text-xs text-warning">Cancellation awaiting review</p>}
           </div>
         )}
         {recent.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{t(lang, "common.noLeaveRequests")}</p> : (
@@ -114,7 +139,8 @@ export function EmployeeLeaveActivity({ recent, next, today, locale, lang }: { r
                 <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: request.leaveType.color }} />
                 <div className="min-w-0 flex-1">
                   <p className="break-words text-sm font-medium">{request.leaveType.name}</p>
-                  <p className="text-xs text-muted-foreground">{dateLabel(request)} · {t(lang, "dashboard.days", { n: request.days })}</p>
+                  <p className="text-xs text-muted-foreground">{dateLabel(request)} · {t(lang, request.days === 1 ? "leaves.day" : "leaves.days", { n: request.days })}</p>
+                  {request.status === "approved" && request.cancellationRequestedAt && <p className="mt-1 text-xs text-warning">Cancellation awaiting review</p>}
                 </div>
                 <StatusPill status={request.status} lang={lang} />
               </li>

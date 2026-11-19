@@ -23,26 +23,43 @@ export async function GET() {
   return NextResponse.json({ locations });
 }
 
-/** POST — create a location (admin). Body: { name, code }. */
+/** POST — create a location and optionally assign its branches in one write. */
 export async function POST(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Provide location details as an object." }, { status: 400 });
+    }
     const name = String(body.name ?? "").trim();
     const code = String(body.code ?? "").trim().toUpperCase();
-    if (!name || !code) {
-      return NextResponse.json({ error: "Name and code are required." }, { status: 400 });
+    if (!name || !code || name.length > 120 || code.length > 32) {
+      return NextResponse.json({ error: "Enter a name of up to 120 characters and a code of up to 32 characters." }, { status: 400 });
     }
+    if (body.branchIds !== undefined && (!Array.isArray(body.branchIds) || body.branchIds.some((id: unknown) => typeof id !== "string" || !id))) {
+      return NextResponse.json({ error: "Select branches from this workspace." }, { status: 400 });
+    }
+    const branchIds = [...new Set<string>(body.branchIds ?? [])];
     const exists = await prisma.location.findFirst({ where: { tenantId: session.tenantId, code } });
     if (exists) return NextResponse.json({ error: "A location with this code already exists." }, { status: 400 });
-    const location = await prisma.location.create({
-      data: { tenantId: session.tenantId, name, code },
+    const location = await prisma.$transaction(async (tx) => {
+      const created = await tx.location.create({ data: { tenantId: session.tenantId, name, code } });
+      if (branchIds.length) {
+        const changed = await tx.branch.updateMany({
+          where: { tenantId: session.tenantId, id: { in: branchIds } },
+          data: { locationId: created.id },
+        });
+        if (changed.count !== branchIds.length) throw new Error("invalid-branches");
+      }
+      return created;
     });
     return NextResponse.json({ location }, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "invalid-branches") return NextResponse.json({ error: "One or more branches do not belong to this workspace." }, { status: 400 });
+    if ((error as { code?: string }).code === "P2002") return NextResponse.json({ error: "A location with this code already exists." }, { status: 409 });
     return NextResponse.json({ error: "Failed to create location." }, { status: 500 });
   }
 }

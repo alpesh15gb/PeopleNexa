@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAssignmentPending } from "@/lib/employee-assignment";
+import { portalHome } from "@/lib/ess-login";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, signToken, SESSION_COOKIE, SESSION_COOKIE_DOMAIN } from "@/lib/auth";
 
@@ -83,7 +84,12 @@ export async function POST(req: NextRequest) {
     });
 
     const token = signToken({ sub: employee.id, role: employee.role, tenantId: employee.tenantId, sessionVersion: employee.sessionVersion });
-    const res = NextResponse.json({ success: true, role: employee.role, mustChangePassword: employee.mustChangePassword });
+    const res = NextResponse.json({
+      success: true,
+      role: employee.role,
+      mustChangePassword: employee.mustChangePassword,
+      next: employee.mustChangePassword ? "/change-password" : portalHome(employee.role),
+    });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

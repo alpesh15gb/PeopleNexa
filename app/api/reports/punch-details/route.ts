@@ -1,3 +1,7 @@
+import { workspaceRegion } from "@/lib/workspace-region";
+import { formatWorkspaceTime } from "@/lib/workspace-time";
+import { employeeLocationScope } from "@/lib/location-scope";
+import { recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
@@ -71,13 +75,13 @@ export async function GET(req: NextRequest) {
   const toRange = dayRangeIST(to);
   const start = fromRange.start;
   const end = toRange.end;
-  if (start.getTime() > end.getTime()) {
-    return NextResponse.json({ error: "From date must be before To date." }, { status: 400 });
+  if (to < from || (Date.parse(to) - Date.parse(from)) / 86400000 >= 93) {
+    return NextResponse.json({ error: "Select a range of up to 93 days." }, { status: 400 });
   }
   const format = (params.get("format") ?? "json").toLowerCase();
-  const search = params.get("q")?.trim() ?? "";
-  const page = Math.max(1, Number(params.get("page") ?? 1) || 1);
-  const size = Math.min(500, Math.max(10, Number(params.get("size") ?? 50) || 50));
+  const search = params.get("q")?.trim().slice(0, 100) ?? "";
+  const requestedPage = recordPageNumber(params.get("page")) ?? 1;
+  const size = Math.min(500, Math.max(10, recordPageNumber(params.get("size")) ?? 50));
 
   const manager =
     session.role !== "admin"
@@ -96,25 +100,28 @@ export async function GET(req: NextRequest) {
     session.role === "branch_manager"
       ? { branchId: manager?.branchId ?? "__none__" }
       : session.role === "location_manager"
-        ? { branch: { locationId: manager?.locationId ?? "__none__" } }
+        ? employeeLocationScope(manager?.locationId ?? "__none__")
         : {};
-  const searchFilter = search
-    ? {
-        OR: [
-          { firstName: { contains: search, mode: "insensitive" as const } },
-          { lastName: { contains: search, mode: "insensitive" as const } },
-          { employeeNumber: { contains: search, mode: "insensitive" as const } },
-          { deviceCode: { contains: search, mode: "insensitive" as const } },
-        ],
-      }
-    : {};
+  const searchFilters = search.split(/\s+/).filter(Boolean).map((term) => ({
+    OR: [
+      { firstName: { contains: term, mode: "insensitive" as const } },
+      { lastName: { contains: term, mode: "insensitive" as const } },
+      { employeeNumber: { contains: term, mode: "insensitive" as const } },
+      { deviceCode: { contains: term, mode: "insensitive" as const } },
+    ],
+  }));
   const where = {
     tenantId: session.tenantId,
     date: { gte: start, lt: end },
-    employee: { ...employeeScope, ...searchFilter },
+    employee: { AND: [employeeScope, ...searchFilters] },
   };
 
+  const total = await prisma.attendance.count({ where });
+  const { page, offset } = recordPagination(total, requestedPage, size);
   if (format === "xlsx") {
+    if (total > 50000) return NextResponse.json({ error: "Narrow the export to 50,000 records or fewer." }, { status: 400 });
+    const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+    const region = workspaceRegion(tenant?.config);
     const attendance = await prisma.attendance.findMany({
       where,
       select: {
@@ -173,8 +180,8 @@ export async function GET(req: NextRequest) {
         date: formatDateIST(row.date),
         deviceIn: row.deviceIn?.name ?? "",
         deviceInSerial: row.deviceIn?.serialNumber ?? "",
-        inTime: row.punchInTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchInTime) : "",
-        outTime: row.punchOutTime ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(row.punchOutTime) : "",
+        inTime: row.punchInTime ? formatWorkspaceTime(row.punchInTime, region) : "",
+        outTime: row.punchOutTime ? formatWorkspaceTime(row.punchOutTime, region) : "",
         attendance: row.status,
         deviceOut: row.deviceOut?.name ?? "",
         deviceOutSerial: row.deviceOut?.serialNumber ?? "",
@@ -191,9 +198,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const [total, attendance] = await Promise.all([
-    prisma.attendance.count({ where }),
-    prisma.attendance.findMany({
+  const attendance = await prisma.attendance.findMany({
       where,
       select: {
         id: true,
@@ -216,11 +221,10 @@ export async function GET(req: NextRequest) {
         },
         },
       },
-      orderBy: [{ date: "desc" }, { punchInTime: "asc" }],
-      skip: (page - 1) * size,
+      orderBy: [{ date: "desc" }, { punchInTime: "asc" }, { id: "asc" }],
+      skip: offset,
       take: size,
-    }),
-  ]);
+  });
   const rows = await withMachines(attendance, session.tenantId, start, end);
   return NextResponse.json({ total, page, size, from, to, rows });
 }

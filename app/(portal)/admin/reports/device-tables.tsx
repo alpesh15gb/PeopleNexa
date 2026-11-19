@@ -67,6 +67,8 @@ function usePagedDevice(baseUrl: string) {
   const [data, setData] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const retry = () => setAttempt((value) => value + 1);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -103,13 +105,13 @@ function usePagedDevice(baseUrl: string) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, attempt]);
 
   const total =
     typeof (data as { total?: unknown })?.total === "number"
       ? (data as { total: number }).total
       : null;
-  return { data, loading, error, page, setPage, query, setQuery, total };
+  return { data, loading, error, page, setPage, query, setQuery, total, retry };
 }
 
 function LoadingCard() {
@@ -122,11 +124,11 @@ function LoadingCard() {
   );
 }
 
-function ErrorCard({ error }: { error: string }) {
+function ErrorCard({ error, retry }: { error: string; retry: () => void }) {
   return (
     <Card>
       <CardContent>
-        <EmptyState title="Could not load report" description={error} />
+        <EmptyState title="Could not load report" description={error} action={<Button variant="outline" onClick={retry}>Retry report</Button>} />
       </CardContent>
     </Card>
   );
@@ -186,6 +188,8 @@ function DailyDirect({ apiUrl }: { apiUrl: string }) {
   const [data, setData] = useState<DeviceDailyOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(0);
+  const retry = () => setAttempt((value) => value + 1);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,22 +214,22 @@ function DailyDirect({ apiUrl }: { apiUrl: string }) {
     return () => {
       cancelled = true;
     };
-  }, [apiUrl]);
+  }, [apiUrl, attempt]);
 
   if (loading) return <LoadingCard />;
-  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} />;
+  if (error || !data) return <ErrorCard error={error ?? "Failed to load report."} retry={retry} />;
   return <DailyTable output={data} />;
 }
 
 const TH = "border border-input bg-card-2 px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-foreground";
 const TD = "border border-input px-2 py-1.5 text-[12px] text-foreground";
 
-function ReportHeader({ left, center, right }: { left: string; center: string; right: string }) {
+function ReportHeader({ left, center, right, timeZone }: { left: string; center: string; right: string; timeZone: string }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-4 bg-card px-1 py-2 text-foreground">
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-1 bg-card px-1 py-2 text-foreground">
       <p className="text-[13px] font-semibold">{left}</p>
       <p className="text-[15px] font-bold">{center}</p>
-      <p className="text-[13px] font-semibold">{right}</p>
+      <p className="text-[13px] font-semibold">{right}<span className="block text-xs font-normal text-muted-foreground">{timeZone}</span></p>
     </div>
   );
 }
@@ -248,7 +252,7 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
   }
   return (
     <div className="print-report bg-card p-4 text-foreground">
-      <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
+      <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} timeZone={output.timeZone} />
       <div className="overflow-x-auto">
         <table id="report-table" className="w-full border-collapse bg-card">
           <thead>
@@ -286,10 +290,10 @@ function DailyTable({ output }: { output: DeviceDailyOutput }) {
 }
 
 function MonthlyTables({ baseUrl }: { baseUrl: string }) {
-  const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
+  const { data, loading, error, query, setQuery, page, setPage, total, retry } = usePagedDevice(baseUrl);
   const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
-  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} retry={retry} /></div>;
   const output = data as DeviceMonthlyOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
@@ -308,7 +312,7 @@ function MonthlyTables({ baseUrl }: { baseUrl: string }) {
     <div className="print-report space-y-8 bg-card p-4 text-foreground">
       {visible.map((block) => (
         <div key={block.code}>
-          <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
+          <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} timeZone={output.timeZone} />
           <p className="mb-1 bg-card text-[13px] font-semibold text-foreground">
             Code | {block.code} | Name | {block.name} | Designation | {block.designation}
           </p>
@@ -356,10 +360,10 @@ function statusCellClass(status: string): string {
 }
 
 function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
-  const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
+  const { data, loading, error, query, setQuery, page, setPage, total, retry } = usePagedDevice(baseUrl);
   const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
-  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} retry={retry} /></div>;
   const output = data as DeviceStatusMatrixOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
@@ -376,7 +380,7 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
     <div className="space-y-4">
       {pager}
       <div className="print-report space-y-8 bg-card p-4 text-foreground">
-        <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
+        <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} timeZone={output.timeZone} />
         {output.department && (
           <p className="bg-card text-[13px] font-semibold text-foreground">Department | {output.department}</p>
         )}
@@ -430,10 +434,10 @@ function StatusMatrixTables({ baseUrl }: { baseUrl: string }) {
 const WORK_SUMMARY_COLUMNS = ["Date", "Shift", "First IN", "Last OUT", "Gross", "Work Hours", "Late", "Overtime", "Early"];
 
 function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
-  const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
+  const { data, loading, error, query, setQuery, page, setPage, total, retry } = usePagedDevice(baseUrl);
   const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
-  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} retry={retry} /></div>;
   const output = data as DeviceWorkSummaryOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
@@ -450,7 +454,7 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
     <div className="space-y-4">
       {pager}
       <div className="print-report space-y-8 bg-card p-4 text-foreground">
-        <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
+        <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} timeZone={output.timeZone} />
         <p className="bg-card text-[12px] text-foreground">
           Run by {output.header.runBy} | Date/Time {output.header.generatedAt}
         </p>
@@ -506,10 +510,10 @@ function WorkSummaryTables({ baseUrl }: { baseUrl: string }) {
 }
 
 function PerformanceTables({ baseUrl }: { baseUrl: string }) {
-  const { data, loading, error, query, setQuery, page, setPage, total } = usePagedDevice(baseUrl);
+  const { data, loading, error, query, setQuery, page, setPage, total, retry } = usePagedDevice(baseUrl);
   const pager = <ReportPager query={query} setQuery={setQuery} page={page} setPage={setPage} total={total ?? 0} loading={loading} />;
   if (loading) return <div className="space-y-4">{pager}<LoadingCard /></div>;
-  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} /></div>;
+  if (error || !data) return <div className="space-y-4">{pager}<ErrorCard error={error ?? "Failed to load report."} retry={retry} /></div>;
   const output = data as DevicePerformanceOutput;
   const blocks = Array.isArray((output as { blocks?: unknown })?.blocks) ? output.blocks : [];
   const visible = blocks;
@@ -529,7 +533,7 @@ function PerformanceTables({ baseUrl }: { baseUrl: string }) {
         {visible.map((block, i) => (
           <div key={block.code}>
             {i === 0 && (
-              <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} />
+              <ReportHeader left={output.header.left} center={output.header.center} right={output.header.right} timeZone={output.timeZone} />
             )}
             <p className="mb-1 bg-card text-[13px] font-semibold text-foreground">
               Dep | {block.department} | Name | {block.name} | E.Code | {block.code} | Desig | {block.designation} | Shift | {block.shiftHours}

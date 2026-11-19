@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Send, Sparkles, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 
 type AiResult = {
   answer: string;
@@ -16,7 +15,7 @@ const SUGGESTIONS = [
   "Who is late today?",
   "How many leave requests are pending?",
   "What are our upcoming holidays?",
-  "How is Rahul doing this month?",
+  "Who is absent today?",
   "How much overtime this month?",
 ];
 
@@ -38,23 +37,27 @@ export function AiPanel() {
   const [question, setQuestion] = useState("");
   const [history, setHistory] = useState<{ q: string; r: AiResult }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const input = useRef<HTMLInputElement>(null);
 
   const ask = async (q: string) => {
     const text = q.trim();
     if (!text || busy) return;
     setBusy(true);
-    setQuestion("");
+    setQuestion(text);
+    setError("");
     try {
       const res = await fetch("/api/ai/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: text }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) throw new Error(data?.error ?? "Could not load an answer. Try again.");
       setHistory((h) => [...h, { q: text, r: data }]);
+      setQuestion("");
     } catch (e) {
-      setHistory((h) => [...h, { q: text, r: { tone: "danger", answer: e instanceof Error ? e.message : "Something went wrong." } }]);
+      setError(e instanceof Error ? e.message : "Could not load an answer.");
     } finally {
       setBusy(false);
     }
@@ -62,12 +65,12 @@ export function AiPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-4">
+      <div role="log" aria-label="Workspace answers" className="space-y-4">
         {history.length === 0 && (
           <div className="rounded-2xl border border-edge bg-card p-6 text-center">
             <Sparkles className="mx-auto mb-3 h-8 w-8 text-indigo-400" />
-            <p className="text-[14px] font-medium">Ask anything about your workspace</p>
-            <p className="mt-1 text-[12.5px] text-muted-foreground">Attendance, leaves, payroll, expenses, overtime, holidays — answered live.</p>
+            <p className="text-[14px] font-medium">Get an answer from workspace records</p>
+            <p className="mt-1 text-[12.5px] text-muted-foreground">Try a question about attendance, leave, payroll, expenses, overtime or holidays.</p>
           </div>
         )}
         {history.map((h, i) => (
@@ -84,7 +87,7 @@ export function AiPanel() {
                 </div>
                 <p className="mt-1.5 text-[13.5px] leading-relaxed">{renderAnswer(h.r.answer)}</p>
                 {h.r.data && h.r.data.length > 0 && (
-                  <div className="mt-3 overflow-hidden rounded-xl border border-edge">
+                  <div tabIndex={0} aria-label="Answer results" className="mt-3 overflow-x-auto rounded-xl border border-edge">
                     <table className="w-full text-left text-[12.5px]">
                       <thead>
                         <tr className="border-b border-edge bg-tint/60">
@@ -94,10 +97,10 @@ export function AiPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {h.r.data.slice(0, 12).map((row, ri) => (
+                        {h.r.data.map((row, ri) => (
                           <tr key={ri} className="border-b border-edge last:border-0">
-                            {Object.values(row).map((v, ci) => (
-                              <td key={ci} className="px-3 py-2">{String(v)}</td>
+                            {(h.r.columns ?? Object.keys(h.r.data![0])).map((column) => (
+                              <td key={column} className="px-3 py-2">{String(row[column] ?? "—")}</td>
                             ))}
                           </tr>
                         ))}
@@ -115,7 +118,9 @@ export function AiPanel() {
         {SUGGESTIONS.map((s) => (
           <button
             key={s}
-            onClick={() => ask(s)}
+            type="button"
+            disabled={busy}
+            onClick={() => { setQuestion(s); input.current?.focus(); }}
             className="rounded-full border border-edge bg-card px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-indigo-400/40 hover:text-foreground"
           >
             {s}
@@ -131,10 +136,14 @@ export function AiPanel() {
         className="flex items-center gap-2 rounded-2xl border border-edge bg-card p-2"
       >
         <input
+          ref={input}
+          aria-label="Question about your workspace"
+          maxLength={500}
+          readOnly={busy}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder="e.g. Who is absent today?"
-          className="flex-1 bg-transparent px-3 py-2 text-[14px] outline-none placeholder:text-muted-foreground/60"
+          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] placeholder:text-muted-foreground/60"
         />
         <button
           type="submit"
@@ -145,9 +154,8 @@ export function AiPanel() {
           Ask
         </button>
       </form>
-      <p className="text-center text-[11px] text-muted-foreground/70">
-        <Badge tone="info">On-device</Badge> Answers are computed live from your tenant data — no external AI service is involved.
-      </p>
+      {busy && <p role="status" className="text-sm text-muted-foreground">Checking workspace records…</p>}
+      {error && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{error}</p>}
     </div>
   );
 }

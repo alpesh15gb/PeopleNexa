@@ -24,10 +24,10 @@ export async function POST(req: NextRequest) {
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = await req.json().catch(() => ({}));
-  const title = String(body.title ?? "").trim();
-  const text = String(body.body ?? "").trim();
-  if (!title || !text) return NextResponse.json({ error: "Title and body are required." }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  const text = typeof body?.body === "string" ? body.body.trim() : "";
+  if (!title || !text || title.length > 180 || text.length > 50_000) return NextResponse.json({ error: "Enter a policy title up to 180 characters and policy text up to 50,000 characters." }, { status: 400 });
 
   const policy = await prisma.policy.create({
     data: {

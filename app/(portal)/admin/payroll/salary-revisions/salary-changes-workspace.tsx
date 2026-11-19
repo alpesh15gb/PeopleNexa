@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Plus, Search, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatMoney } from "@/lib/utils";
 import { formatDate } from "@/lib/dates";
+import { payrollScopeHref } from "@/lib/payroll-work-queue";
 
 type Employee = {
   id: string;
@@ -36,6 +38,14 @@ type Revision = {
   employee: { employeeNumber: string; firstName: string; lastName: string };
 };
 
+type ConflictingPayrollRun = { id: string; month: string; locationId: string | null };
+
+class SalaryChangeError extends Error {
+  constructor(message: string, readonly payrollRun?: ConflictingPayrollRun) {
+    super(message);
+  }
+}
+
 export function SalaryRevisions({
   employees,
   revisions,
@@ -53,6 +63,8 @@ export function SalaryRevisions({
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState("");
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [conflictingPayrollRun, setConflictingPayrollRun] = useState<ConflictingPayrollRun>();
   const [employeeId, setEmployeeId] = useState("");
   const [salary, setSalary] = useState<number | null>(null);
   const [confirmation, setConfirmation] = useState<{
@@ -68,11 +80,13 @@ export function SalaryRevisions({
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok)
-      throw new Error(data.error ?? "Could not save the salary change.");
+      throw new SalaryChangeError(data.error ?? "Could not save the salary change.", data.payrollRun);
     return data;
   }
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
+    setError("");
     const form = event.currentTarget;
     setBusy("create");
     try {
@@ -90,18 +104,15 @@ export function SalaryRevisions({
       setSalary(null);
       router.refresh();
     } catch (error) {
-      toast(
-        "error",
-        error instanceof Error
-          ? error.message
-          : "Could not save salary change.",
-      );
+      setError(error instanceof Error ? error.message : "Could not save salary change.");
     } finally {
       setBusy(null);
     }
   }
   async function transition() {
-    if (!confirmation) return;
+    if (!confirmation || busy) return;
+    setError("");
+    setConflictingPayrollRun(undefined);
     setBusy(confirmation.revision.id);
     try {
       await request("PATCH", {
@@ -119,12 +130,8 @@ export function SalaryRevisions({
       setConfirmation(null);
       router.refresh();
     } catch (error) {
-      toast(
-        "error",
-        error instanceof Error
-          ? error.message
-          : "Could not update salary change.",
-      );
+      setError(error instanceof Error ? error.message : "Could not update salary change.");
+      if (error instanceof SalaryChangeError) setConflictingPayrollRun(error.payrollRun);
     } finally {
       setBusy(null);
     }
@@ -152,10 +159,11 @@ export function SalaryRevisions({
             approval.
           </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button disabled={!employees.length} onClick={() => { setError(""); setOpen(true); }}>
           <Plus aria-hidden="true" className="h-4 w-4" />
           New salary change
         </Button>
+        {!employees.length && <p className="w-full text-sm text-muted-foreground">Set a monthly salary for at least one active employee before creating a salary change.</p>}
       </section>
       <section
         aria-label="Salary change summary"
@@ -258,9 +266,10 @@ export function SalaryRevisions({
                     size="sm"
                     variant="outline"
                     disabled={Boolean(busy)}
-                    onClick={() =>
-                      setConfirmation({ revision, action: "submit" })
-                    }
+                    onClick={() => {
+                      setError("");
+                      setConfirmation({ revision, action: "submit" });
+                    }}
                   >
                     Send for approval
                   </Button>
@@ -271,9 +280,10 @@ export function SalaryRevisions({
                     <Button
                       size="sm"
                       disabled={Boolean(busy)}
-                      onClick={() =>
-                        setConfirmation({ revision, action: "approve" })
-                      }
+                      onClick={() => {
+                        setError("");
+                        setConfirmation({ revision, action: "approve" });
+                      }}
                     >
                       Approve change
                     </Button>
@@ -291,9 +301,10 @@ export function SalaryRevisions({
                     size="sm"
                     variant="ghost"
                     disabled={Boolean(busy)}
-                    onClick={() =>
-                      setConfirmation({ revision, action: "cancel" })
-                    }
+                    onClick={() => {
+                      setError("");
+                      setConfirmation({ revision, action: "cancel" });
+                    }}
                   >
                     Cancel change
                   </Button>
@@ -335,9 +346,7 @@ export function SalaryRevisions({
               required
             >
               <option value="">Select employee</option>
-              {employees
-                .filter((item) => item.salary && item.salary > 0)
-                .map((item) => (
+              {employees.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.firstName} {item.lastName} · {item.employeeNumber}
                   </option>
@@ -359,7 +368,7 @@ export function SalaryRevisions({
               onValueChange={setSalary}
             />
           </Field>
-          <Field label="Effective date">
+          <Field label="Effective date" hint="The first pay month starting on or after this date uses the new salary after approval.">
             <Input name="effectiveFrom" type="date" required />
           </Field>
           <Field label="Reason (optional)">
@@ -370,6 +379,7 @@ export function SalaryRevisions({
             finalized and paid payroll stays unchanged. Salary components are
             managed in Payroll settings.
           </p>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button
               type="button"
@@ -411,6 +421,10 @@ export function SalaryRevisions({
               Effective {formatDate(confirmation.revision.effectiveFrom)}.
               Previously finalized payroll will not change.
             </p>
+            {error && <div role="alert" className="mt-3 space-y-2 text-sm">
+              <p className="text-destructive">{error}</p>
+              {conflictingPayrollRun && <Link className="inline-flex font-medium text-primary underline" href={payrollScopeHref("/admin/payroll", { locationId: conflictingPayrollRun.locationId, period: conflictingPayrollRun.month, runId: conflictingPayrollRun.id })}>Open affected payroll</Link>}
+            </div>}
             <div className="mt-5 flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -426,7 +440,7 @@ export function SalaryRevisions({
                 }
                 onClick={() => void transition()}
               >
-                Confirm
+                {confirmation.action === "approve" ? "Approve salary change" : confirmation.action === "cancel" ? "Cancel salary change" : "Send for approval"}
               </Button>
             </div>
           </>

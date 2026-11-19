@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeCheck, Save, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -22,19 +22,20 @@ export function TaxDeclarationPanel({
   currentFy,
   declarations,
   monthlySalary,
-  name,
 }: {
   currentFy: string;
   declarations: Declaration[];
   monthlySalary: number;
-  name: string;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const existing = declarations.find((d) => d.fy === currentFy);
   const initial = existing?.sections ?? {};
+  const verified = existing?.status === "verified";
+  const historical = declarations.filter((item) => item.fy !== currentFy);
   const [sections, setSections] = useState({
     "80c": initial["80c"] ?? 0,
     "80d": initial["80d"] ?? 0,
@@ -55,16 +56,19 @@ export function TaxDeclarationPanel({
     setSections((s) => ({ ...s, [key]: Math.max(0, Number(v) || 0) }));
   };
 
-  async function submit() {
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving || verified) return;
     setSaving(true);
+    setError("");
     try {
       const res = await fetch("/api/tax-declarations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fy: currentFy, sections }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to submit");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Could not submit your declaration.");
       toast(
         "success",
         existing
@@ -73,7 +77,7 @@ export function TaxDeclarationPanel({
       );
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to submit");
+      setError(e instanceof Error ? e.message : "Could not confirm submission. Check your declaration before retrying.");
     } finally {
       setSaving(false);
     }
@@ -81,7 +85,7 @@ export function TaxDeclarationPanel({
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-2">
+      <form className="lg:col-span-2" onSubmit={submit}>
         <div className="mb-4 flex items-center gap-2">
           <Badge tone="info" className="font-mono">
             {currentFy}
@@ -101,7 +105,10 @@ export function TaxDeclarationPanel({
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        {verified && <p className="mb-4 rounded-lg border border-edge bg-tint p-3 text-sm">Your declaration is verified. Ask HR to return it if you need to make a correction.</p>}
+        {existing?.status === "rejected" && <p className="mb-4 rounded-lg border border-warning/40 bg-tint p-3 text-sm"><strong className="block">Returned for correction</strong>{existing.note || "Review the amounts and resubmit when ready."}</p>}
+        <fieldset disabled={saving || verified} className="grid gap-4 sm:grid-cols-2">
+          <legend className="sr-only">Declared amounts</legend>
           <Field
             label="80C — investments and contributions"
             hint="PF, PPF, ELSS, LIC and tuition payments"
@@ -148,7 +155,7 @@ export function TaxDeclarationPanel({
               onChange={(e) => set("other", e.target.value)}
             />
           </Field>
-        </div>
+        </fieldset>
 
         <div className="mt-4 flex items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3">
           <span className="text-[13px] font-medium">Total declared</span>
@@ -157,15 +164,16 @@ export function TaxDeclarationPanel({
           </span>
         </div>
 
-        <Button onClick={submit} loading={saving} className="mt-4">
+        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+        {!verified && <Button type="submit" loading={saving} className="mt-4">
           <Save className="h-4 w-4" />{" "}
           {existing ? "Update declaration" : "Submit declaration"}
-        </Button>
+        </Button>}
         <p className="mt-2 text-[12px] text-muted-foreground">
-          {name} — HR reviews your declaration before payroll uses verified
+          HR reviews your declaration before payroll uses verified
           amounts under the applicable tax settings.
         </p>
-      </div>
+      </form>
 
       <div className="space-y-4">
         <div className="card-surface rounded-2xl p-5">
@@ -195,13 +203,13 @@ export function TaxDeclarationPanel({
           <div className="flex items-center gap-2 text-[13px] font-semibold">
             <BadgeCheck className="h-4 w-4 text-brand" /> Previous years
           </div>
-          {declarations.length === 0 ? (
+          {historical.length === 0 ? (
             <p className="mt-3 text-[12.5px] text-muted-foreground">
-              No declarations yet.
+              No declarations from previous years.
             </p>
           ) : (
             <div className="mt-3 divide-y divide-[color:var(--border)]">
-              {declarations.map((d) => (
+              {historical.map((d) => (
                 <div
                   key={d.id}
                   className="flex items-center justify-between py-2"

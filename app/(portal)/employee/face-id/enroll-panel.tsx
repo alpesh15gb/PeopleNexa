@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Portal } from "@/components/ui/portal";
+import { Modal } from "@/components/ui/modal";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -32,12 +32,16 @@ const POSE_STEPS = [
 export function EnrollPanel({
   initial,
   consentVersion,
+  canEnroll,
 }: {
   initial: EnrollmentStatus;
   consentVersion: string;
+  canEnroll: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
+  const [error, setError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
   const [enrollment, setEnrollment] = useState<EnrollmentStatus>(initial);
   const [photos, setPhotos] = useState<(string | null)[]>([null, null, null]);
   const [step, setStep] = useState(0);
@@ -58,6 +62,7 @@ export function EnrollPanel({
   // <video>, snapshot to canvas on capture, always stop tracks on close.
   useEffect(() => {
     if (!cameraOpen) return;
+    setCameraReady(false);
     let cancelled = false;
     (async () => {
       try {
@@ -69,11 +74,14 @@ export function EnrollPanel({
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
+          await videoRef.current.play();
+          if (!cancelled) setCameraReady(true);
         }
       } catch {
-        toast("error", "Camera is unavailable. Check browser permissions and try again.");
-        setCameraOpen(false);
+        if (!cancelled) {
+          setError("Camera is unavailable. Allow camera access in your browser settings and try again.");
+          setCameraOpen(false);
+        }
       }
     })();
     return () => {
@@ -81,9 +89,10 @@ export function EnrollPanel({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [cameraOpen, toast]);
+  }, [cameraOpen]);
 
   const openCamera = (index: number) => {
+    setError("");
     setCaptureStep(index);
     setStep(index);
     setCameraOpen(true);
@@ -91,10 +100,11 @@ export function EnrollPanel({
 
   const capturePhoto = () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !cameraReady || !video.videoWidth) return;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
+    const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
     canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
     const merged = photos.map((p, i) => (i === captureStep ? dataUrl : p));
@@ -105,7 +115,8 @@ export function EnrollPanel({
   };
 
   const submit = async () => {
-    if (!complete || !consent || saving) return;
+    if (!canEnroll || !complete || !consent || saving) return;
+    setError("");
     // Worst-case guard: a near-black/empty frame (lens covered, capture fired
     // before the sensor adjusted) can never yield a face — fail fast with a
     // clear message instead of a round-trip and a cryptic server error.
@@ -117,7 +128,7 @@ export function EnrollPanel({
       return approx < MIN_PHOTO_BYTES;
     });
     if (badIndex !== -1) {
-      toast("error", `Photo ${badIndex + 1} looks blank (lens covered or too dark). Retake it with light on your face.`);
+      setError(`Photo ${badIndex + 1} looks blank. Retake it with light on your face.`);
       setStep(badIndex);
       return;
     }
@@ -133,10 +144,10 @@ export function EnrollPanel({
         // 503 = server face backend down: retries won't help, say so plainly
         // and keep the captured photos so nothing is lost.
         if (res.status === 503) {
-          toast("error", "Face service is temporarily unavailable. Your photos are kept — try saving again later.");
+          setError("Face verification is temporarily unavailable. You can retry with these photos while this page stays open.");
           return;
         }
-        toast("error", typeof data.error === "string" ? data.error : "Failed to save enrollment.");
+        setError(typeof data.error === "string" ? data.error : "Could not save enrollment.");
         return;
       }
       toast("success", enrolled ? "Face ID updated." : "Face ID enrolled.");
@@ -150,7 +161,7 @@ export function EnrollPanel({
       setConsent(false);
       router.refresh();
     } catch {
-      toast("error", "Network error. Please try again.");
+      setError("Could not confirm the change. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -182,6 +193,7 @@ export function EnrollPanel({
 
   return (
     <div className="space-y-6">
+      {error && <p role="alert" className="rounded-xl border border-destructive/25 p-3 text-sm text-destructive">{error}</p>}
       <Card>
         <CardHeader>
           <div>
@@ -216,7 +228,7 @@ export function EnrollPanel({
         </CardContent>
       </Card>
 
-      <Card>
+      {canEnroll ? <Card>
         <CardHeader>
           <div>
             <CardTitle>{enrolled ? "Re-enroll Face ID" : "Enroll Face ID"}</CardTitle>
@@ -335,32 +347,17 @@ export function EnrollPanel({
             </p>
           )}
         </CardContent>
-      </Card>
+      </Card> : <p className="text-sm text-muted-foreground">Face matching is unavailable for this account. Use My attendance to follow your workspace’s clock-in process.</p>}
 
-      {cameraOpen && (
-        <Portal>
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setCameraOpen(false)} />
-          <div className="card-surface relative w-full max-w-md animate-scale-in rounded-2xl bg-card-2 p-5">
-            <p className="font-display text-lg font-semibold">Capture photo {captureStep + 1} of {TOTAL_STEPS}</p>
-            <p className="mt-0.5 text-[13px] text-muted-foreground">
-              Face the camera directly with even lighting, no sunglasses or mask.
-            </p>
-            <div className="relative mt-4 overflow-hidden rounded-xl border border-edge-strong bg-black">
-              <video ref={videoRef} aria-label="Live camera preview" className="aspect-[4/3] w-full object-cover" playsInline muted />
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setCameraOpen(false)} className="min-h-11">
-                Cancel
-              </Button>
-              <Button type="button" onClick={capturePhoto} className="min-h-11">
-                <Camera className="h-4 w-4" aria-hidden="true" /> Capture
-              </Button>
-            </div>
-          </div>
+      <Modal open={cameraOpen} onClose={() => setCameraOpen(false)} title={`Capture photo ${captureStep + 1} of ${TOTAL_STEPS}`} description={frontOnly ? POSE_STEPS[0].hint : POSE_STEPS[captureStep].hint} size="sm">
+        <div className="overflow-hidden rounded-xl border border-edge-strong bg-black">
+          <video ref={videoRef} aria-label="Live camera preview" className="aspect-[4/3] w-full object-cover" playsInline muted />
         </div>
-        </Portal>
-      )}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => setCameraOpen(false)}>Cancel</Button>
+          <Button type="button" disabled={!cameraReady} onClick={capturePhoto}><Camera className="h-4 w-4" aria-hidden="true" /> Capture</Button>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={confirmWithdraw}

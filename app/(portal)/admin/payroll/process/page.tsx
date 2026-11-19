@@ -1,17 +1,19 @@
 import { redirect } from "next/navigation";
+import { isMonthKey } from "@/lib/dates";
+import { payrollScopeHref } from "@/lib/payroll-work-queue";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 /** Legacy operational URL. The monthly workflow has one canonical route. */
-export default async function ProcessPayrollPage({ searchParams }: { searchParams: Promise<{ month?: string; period?: string; location?: string; run?: string }> }) {
+export default async function ProcessPayrollPage({ searchParams }: { searchParams: Promise<{ month?: string | string[]; period?: string | string[]; location?: string | string[]; run?: string | string[] }> }) {
   const session = await requireSession();
-  if (session.role !== "admin" && session.role !== "location_manager") return null;
+  if (session.role !== "admin" && session.role !== "location_manager") redirect("/employee");
   const params = await searchParams;
-  const query = new URLSearchParams({
-    ...(params.period || params.month ? { period: params.period || params.month! } : {}),
-    ...(params.location ? { location: params.location } : {}),
-    ...(params.run ? { run: params.run } : {}),
-  });
-  redirect(`/admin/payroll${query.size ? `?${query}` : ""}`);
+  const period = [params.period, params.month].find((value): value is string => typeof value === "string" && isMonthKey(value));
+  redirect(payrollScopeHref("/admin/payroll", {
+    period,
+    locationId: typeof params.location === "string" ? params.location : null,
+    runId: typeof params.run === "string" ? params.run : undefined,
+  }));
 }

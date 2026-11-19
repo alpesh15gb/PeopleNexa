@@ -51,9 +51,14 @@ export function CashbookPanel({
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<CashbookEntryRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const defaultDate = todayKey().startsWith(month) ? todayKey() : `${month}-01`;
+  const openAdd = () => { setSaveError(""); setAddOpen(true); };
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (saving) return;
+    setSaveError("");
     setSaving(true);
     const form = new FormData(e.currentTarget);
     try {
@@ -71,14 +76,16 @@ export function CashbookPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to add entry");
+        setSaveError(data.error ?? "Could not add the entry.");
         return;
       }
       toast("success", "Cashbook entry added");
       setAddOpen(false);
-      router.refresh();
+      const entryMonth = String(form.get("date")).slice(0, 7);
+      if (entryMonth !== month) router.push(`/admin/cashbook?month=${entryMonth}`);
+      else router.refresh();
     } catch {
-      toast("error", "Something went wrong.");
+      setSaveError("Could not confirm the entry. Check the cashbook before retrying.");
     } finally {
       setSaving(false);
     }
@@ -146,7 +153,7 @@ export function CashbookPanel({
             onChange={(e) => e.target.value && router.push(`/admin/cashbook?month=${e.target.value}`)}
             className="w-full sm:w-44"
           />
-          <Button size="sm" onClick={() => setAddOpen(true)}>
+          <Button size="sm" onClick={openAdd}>
             <Plus className="h-3.5 w-3.5" /> Add entry
           </Button>
         </div>
@@ -157,7 +164,7 @@ export function CashbookPanel({
             title="No entries this month"
               description="Record the first cash movement for this month."
             action={
-              <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Button size="sm" onClick={openAdd}>
                 <Plus className="h-3.5 w-3.5" /> Add entry
               </Button>
             }
@@ -236,7 +243,7 @@ export function CashbookPanel({
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Date">
-              <Input name="date" type="date" defaultValue={todayKey()} required />
+              <Input name="date" type="date" defaultValue={defaultDate} required />
             </Field>
             <Field label="Amount (₹)">
               <Input name="amount" type="number" min={0.01} step={0.01} required placeholder="e.g. 5000" />
@@ -270,6 +277,7 @@ export function CashbookPanel({
           <Field label="Note" hint="Optional — e.g. tea stall, supplier payment">
             <Input name="note" maxLength={500} placeholder="Optional note" />
           </Field>
+          {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" onClick={() => setAddOpen(false)} disabled={saving}>
               Cancel

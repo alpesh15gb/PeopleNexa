@@ -1,9 +1,11 @@
 import { authorizedPunchDayFilter } from "./attendance-presence";
 
-export type AttendanceDrilldownStatus = "present" | "late";
+export const ATTENDANCE_REVIEW_FLAGS = ["missed_punch", "needs_review"];
+
+export type AttendanceDrilldownStatus = "present" | "late" | "needs_review";
 
 export function attendanceDrilldownStatus(value: string | undefined): AttendanceDrilldownStatus | null {
-  return value === "present" || value === "late" ? value : null;
+  return value === "present" || value === "late" || value === "needs_review" ? value : null;
 }
 
 export function attendanceEmployeeScope({
@@ -32,7 +34,7 @@ export function attendanceStatusFilter(status: AttendanceDrilldownStatus, start:
   }
   return {
     attendance: {
-      some: { status, date: { gte: start, lt: end } },
+      some: { ...(status === "needs_review" ? { reviewStatus: { in: ATTENDANCE_REVIEW_FLAGS } } : { status }), date: { gte: start, lt: end } },
     },
   };
 }

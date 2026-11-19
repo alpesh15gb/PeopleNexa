@@ -2,6 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { requireActiveSession } from "@/lib/session";
+import { optionalDateInput } from "@/lib/dates";
+import { resolveSalaryRevision, type EffectiveSalaryRevision } from "@/lib/salary-revisions";
+import type { Prisma } from "@/generated/prisma/client";
+
+async function blockedRevisionRun(tx: Prisma.TransactionClient, tenantId: string, revision: EffectiveSalaryRevision, action: "approve" | "cancel", base: number | null) {
+  const month = revision.effectiveFrom.toISOString().slice(0, 7);
+  const [openRuns, currentRevisions] = await Promise.all([
+    tx.payrollRun.findMany({
+      where: { tenantId, month: { gte: month }, status: { in: ["draft", "reviewed", "approved"] }, payslips: { some: { employeeId: revision.employeeId } } },
+      orderBy: [{ month: "asc" }, { id: "asc" }],
+      select: { id: true, month: true, locationId: true, status: true },
+    }),
+    tx.salaryRevision.findMany({
+      where: { tenantId, employeeId: revision.employeeId, status: "approved" },
+      select: { id: true, employeeId: true, newSalary: true, effectiveFrom: true },
+    }),
+  ]);
+  const nextRevisions = action === "approve" ? [...currentRevisions, revision] : currentRevisions.filter(({ id }) => id !== revision.id);
+  return openRuns.find((run) => {
+    const before = resolveSalaryRevision(currentRevisions, revision.employeeId, run.month)?.newSalary ?? base;
+    const after = resolveSalaryRevision(nextRevisions, revision.employeeId, run.month)?.newSalary ?? base;
+    return before !== after;
+  });
+}
+
+function revisionConflict(run: NonNullable<Awaited<ReturnType<typeof blockedRevisionRun>>>) {
+  return NextResponse.json({
+    error: `This change affects ${run.month} payroll, which already has a payslip for this employee. Cancel that run before changing the salary, then create a replacement run with the updated salary.`,
+    payrollRun: run,
+  }, { status: 409 });
+}
 
 async function access() {
   const session = await requireActiveSession().catch(() => null);
@@ -37,20 +68,25 @@ export async function POST(request: NextRequest) {
   if (!granted)
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { session, locationId } = granted;
-  const body = await request.json().catch(() => ({}));
-  const employeeId = String(body.employeeId ?? "");
-  const newSalary = Number(body.newSalary);
-  const effectiveFrom = new Date(String(body.effectiveFrom ?? ""));
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Enter the employee, salary and effective date." }, { status: 400 });
+  }
+  const employeeId = typeof body.employeeId === "string" ? body.employeeId.trim() : "";
+  const newSalary = typeof body.newSalary === "number" || (typeof body.newSalary === "string" && body.newSalary.trim())
+    ? Number(body.newSalary) : NaN;
+  const effectiveFrom = optionalDateInput(body.effectiveFrom);
   if (
     !employeeId ||
     !Number.isFinite(newSalary) ||
     newSalary <= 0 ||
-    Number.isNaN(effectiveFrom.getTime())
+    !(effectiveFrom instanceof Date) ||
+    (body.reason != null && (typeof body.reason !== "string" || body.reason.trim().length > 500))
   )
     return NextResponse.json(
       {
         error:
-          "Employee, positive monthly base, and effective date are required.",
+          "Enter an employee, a positive monthly salary, a valid effective date, and a reason of up to 500 characters.",
       },
       { status: 400 },
     );
@@ -138,9 +174,12 @@ export async function PATCH(request: NextRequest) {
   if (!granted)
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const { session, locationId } = granted;
-  const body = await request.json().catch(() => ({}));
-  const id = String(body.id ?? "");
-  const action = String(body.action ?? "");
+  const body = await request.json().catch(() => null);
+  const id = typeof body?.id === "string" ? body.id.trim() : "";
+  const action = body?.action;
+  if (!id || !["submit", "approve", "cancel"].includes(action)) {
+    return NextResponse.json({ error: "Select a salary revision and a supported action." }, { status: 400 });
+  }
   try {
     return await prisma.$transaction(
       async (tx) => {
@@ -152,6 +191,7 @@ export async function PATCH(request: NextRequest) {
               ? { employee: employeeLocationScope(locationId) }
               : {}),
           },
+          include: { employee: { select: { salary: true } } },
         });
         if (!revision)
           return NextResponse.json(
@@ -195,6 +235,8 @@ export async function PATCH(request: NextRequest) {
               { error: "A creator cannot approve their own salary revision." },
               { status: 403 },
             );
+          const blocked = await blockedRevisionRun(tx, session.tenantId, revision, "approve", revision.employee.salary);
+          if (blocked) return revisionConflict(blocked);
           const next = await tx.salaryRevision.updateMany({
             where: { id, tenantId: session.tenantId, status: revision.status },
             data: {
@@ -230,6 +272,10 @@ export async function PATCH(request: NextRequest) {
         ) {
           if (revision.status === "approved" && session.role !== "admin") {
             return NextResponse.json({ error: "Only an administrator can cancel an approved salary change." }, { status: 403 });
+          }
+          if (revision.status === "approved") {
+            const blocked = await blockedRevisionRun(tx, session.tenantId, revision, "cancel", revision.employee.salary);
+            if (blocked) return revisionConflict(blocked);
           }
           const next = await tx.salaryRevision.updateMany({
             where: { id, tenantId: session.tenantId, status: revision.status },

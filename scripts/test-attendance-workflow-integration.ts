@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import ExcelJS from "exceljs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { NextRequest } from "next/server";
@@ -13,6 +14,8 @@ import { POST as addPunch, DELETE as removePunch } from "../app/api/attendance/[
 import { POST as applyLeave } from "../app/api/leaves/requests/route";
 import { GET as previewLeave } from "../app/api/leaves/preview/route";
 import { POST as reviewFacePunch } from "../app/api/face/review/route";
+import { GET as deviceReport } from "../app/api/reports/device/route";
+import { GET as mobilePunches } from "../app/api/reports/mobile-punches/route";
 import { POST as assignRoster } from "../app/api/rosters/route";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -202,7 +205,83 @@ async function main() {
     assert.equal((await prisma.rosterAssignment.findUniqueOrThrow({ where: { id: assigned.id } })).shiftId, assigned.shiftId);
     assert.equal((await roster(oppositeShift, true)).status, 200);
     assert.equal((await prisma.rosterAssignment.findUniqueOrThrow({ where: { id: assigned.id } })).shiftId, oppositeShift);
-    console.log("Device replay, overnight attendance transactions, timezone-independent leave, and concurrent roster behavior passed.");
+    const [ownLocation, otherLocation] = await Promise.all([
+      prisma.location.create({ data: { tenantId, name: "Own location", code: "OWN" } }),
+      prisma.location.create({ data: { tenantId, name: "Other location", code: "OTHER" } }),
+    ]);
+    await prisma.employee.update({ where: { id: worker.id }, data: { locationId: ownLocation.id } });
+    const locationManager = await employee("LOCATION_MANAGER", { role: "location_manager", locationId: ownLocation.id });
+    const other = await employee("OTHER_LOCATION", { locationId: otherLocation.id });
+    const evidenceTime = time("2026-04-08 09:00:00");
+    await prisma.punch.createMany({ data: [worker, other].map(({ id }) => ({
+      tenantId, employeeId: id, source: "mobile", punchTime: evidenceTime,
+    })) });
+    token = signToken({ tenantId, sub: locationManager.id, role: locationManager.role });
+    const otherSearch = await mobilePunches(request("/mobile-punches?from=2026-04-08&q=OTHER_LOCATION", "GET"));
+    assert.equal(otherSearch.status, 200);
+    assert.equal((await otherSearch.json()).total, 0, "search terms cannot replace a location manager's assignment scope");
+    const ownSearch = await mobilePunches(request("/mobile-punches?from=2026-04-08&q=Test%20WORKER", "GET"));
+    assert.equal((await ownSearch.json()).total, 1, "search can match both names of an in-scope employee");
+
+    await prisma.tenant.update({ where: { id: tenantId }, data: { config: {
+      workspaceRegion: { countryCode: "US", currency: "USD", locale: "en-US", timeZone: "America/New_York" },
+    } } });
+    const [regionalBranch, foreignBranch] = await Promise.all([
+      prisma.branch.create({ data: { tenantId, locationId: ownLocation.id, name: "Regional home branch", code: "REGION-HOME" } }),
+      prisma.branch.create({ data: { tenantId, locationId: otherLocation.id, name: "Regional foreign branch", code: "REGION-AWAY" } }),
+    ]);
+    const regional = await employee("REGIONAL", { branchId: regionalBranch.id });
+    const foreign = await employee("FOREIGN_WORKER", { branchId: foreignBranch.id });
+    const branchManager = await employee("REGIONAL_MANAGER", { role: "branch_manager", branchId: regionalBranch.id, loginOnly: true });
+    const pendingOnly = await employee("PENDING_ONLY");
+    const localNight = await prisma.shift.create({ data: { tenantId, name: "Regional night", startTime: "22:00", endTime: "05:00", isNightShift: true } });
+    await prisma.attendance.create({ data: {
+      tenantId, employeeId: regional.id, date: time("2026-03-07 00:00:00"), status: "present", shiftId: localNight.id,
+      punchInTime: new Date("2026-03-08T03:00:00Z"), punchOutTime: new Date("2026-03-08T06:30:00Z"),
+    } });
+    await prisma.punch.createMany({ data: [
+      { tenantId, employeeId: regional.id, source: "device", punchTime: new Date("2026-04-01T03:30:00Z"), inOutHint: "out" },
+      { tenantId, employeeId: regional.id, source: "device", punchTime: new Date("2026-04-01T04:00:00Z"), inOutHint: "in" },
+      { tenantId, employeeId: pendingOnly.id, source: "mobile", punchTime: new Date("2026-04-01T03:40:00Z"), inOutHint: "in", authStatus: "pending" },
+      { tenantId, employeeId: foreign.id, source: "device", punchTime: new Date("2026-04-01T03:30:00Z"), inOutHint: "out" },
+    ] });
+    token = signToken({ tenantId, sub: admin.id, role: admin.role });
+    const monthResponse = await deviceReport(request("/device-report?kind=monthly&month=2026-03&q=REGIONAL&page=0", "GET"));
+    const monthOutput = await monthResponse.json();
+    assert.equal(monthResponse.status, 200);
+    assert.equal(monthOutput.timeZone, "America/New_York");
+    const overnight = monthOutput.blocks[0].days[6];
+    assert.deepEqual([overnight.dayKey, overnight.inTime, overnight.outTime, overnight.earlyBy, overnight.duration],
+      ["2026-03-07", "22:00", "01:30", "2:30", "3:30"]);
+    const morningResponse = await deviceReport(request("/device-report?kind=daily&date=2026-03-31&q=REGIONAL", "GET"));
+    const morning = (await morningResponse.json()).rows[0];
+    assert.deepEqual([morning.status, morning.inTime, morning.outTime, morning.punches], ["P", "", "23:30", "23:30OUT;"]);
+    const pendingResponse = await deviceReport(request("/device-report?kind=daily&date=2026-03-31&q=PENDING_ONLY", "GET"));
+    assert.equal((await pendingResponse.json()).rows[0].status, "A");
+    async function exportedCells(path: string) {
+      const response = await deviceReport(request(path + "&format=xlsx", "GET"));
+      assert.equal(response.status, 200);
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(await response.arrayBuffer());
+      const cells: string[] = [];
+      for (const sheet of workbook.worksheets) sheet.eachRow((row) => row.eachCell((cell) => cells.push(cell.text)));
+      return cells;
+    }
+    const cells = await exportedCells("/device-report?kind=monthly&month=2026-03&q=REGIONAL");
+    for (const value of ["22:00", "01:30", "2:30", "3:30"]) assert.ok(cells.includes(value), "the workbook retains the same regional times as the screen");
+    assert.ok(cells.some((cell) => cell.includes("America/New_York")));
+    for (const reviewer of [locationManager, branchManager]) {
+      token = signToken({ tenantId, sub: reviewer.id, role: reviewer.role });
+      for (const period of ["kind=daily&date=2026-03-31", "kind=monthly&month=2026-03"]) {
+        const scopedCells = await exportedCells(`/device-report?${period}`);
+        assert.ok(scopedCells.some((cell) => cell.includes("REGIONAL")));
+        assert.ok(!scopedCells.some((cell) => cell.includes("FOREIGN_WORKER")), "export must exclude employees outside the reviewer's assignment");
+        const denied = await deviceReport(request(`/device-report?${period}&branchId=${foreignBranch.id}&format=xlsx`, "GET"));
+        assert.equal(denied.status, 403);
+      }
+    }
+
+    console.log("Device replay, overnight attendance transactions, timezone-independent leave, concurrent rosters, scoped mobile reports, and regional daily/monthly JSON and workbook reports passed.");
   } finally {
     headers.cookies = originalCookies;
     prisma.$transaction = transaction;

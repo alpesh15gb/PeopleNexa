@@ -14,14 +14,13 @@ export default async function LoginPage() {
   return (
     <div className="animate-fade-up motion-reduce:animate-none">
       <div className="mb-7">
-        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary dark:text-[#93C5FD]">Welcome back</p>
-        <h2 className="font-display text-[30px] font-bold tracking-[-0.035em]">Sign in to your workspace</h2>
+        <h1 className="font-display text-[30px] font-bold tracking-[-0.035em]">Sign in to your workspace</h1>
         <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-          Pick up where your team left off. Your people data, requests, and daily actions are waiting.
+          {workspace ? <>You’re signing in to <strong className="font-semibold text-foreground">{workspace}</strong>.</> : "Enter your workspace name and the account details provided by your organization."}
         </p>
       </div>
       <LoginForm workspace={workspace} />
-      <p className="mt-7 text-center text-[13px] text-muted-foreground">
+      {!workspace && <p className="mt-7 text-center text-[13px] text-muted-foreground">
         New to PeopleNexa?{" "}
         <Link
           href="/register"
@@ -29,7 +28,7 @@ export default async function LoginPage() {
         >
           Create a workspace
         </Link>
-      </p>
+      </p>}
     </div>
   );
 }

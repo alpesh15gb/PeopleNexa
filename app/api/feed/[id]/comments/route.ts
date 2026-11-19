@@ -6,8 +6,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const session = await requireActiveSession().catch(() => null);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
-  const body = await req.json().catch(() => ({}));
-  const text = String(body.body ?? "").trim();
+  const body = await req.json().catch(() => null);
+  const text = typeof body?.body === "string" ? body.body.trim() : "";
   if (!text || text.length > 2000) return NextResponse.json({ error: "Enter a comment up to 2,000 characters." }, { status: 400 });
 
   const post = await prisma.orgPost.findFirst({ where: { id, tenantId: session.tenantId } });

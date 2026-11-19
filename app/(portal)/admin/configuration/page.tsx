@@ -17,10 +17,11 @@ const editorSections: { id: ConfigurationSection; label: string; href: string }[
   { id: "id-cards", label: "ID-card templates", href: "/admin/configuration?section=id-cards" },
 ];
 
-export default async function ConfigurationPage({ searchParams }: { searchParams: Promise<{ section?: string | string[] }> }) {
+export default async function ConfigurationPage({ searchParams }: { searchParams: Promise<{ section?: string | string[]; location?: string | string[] }> }) {
   const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
   if (session.role !== "admin") redirect("/admin");
-  const section = editorSections.find((item) => item.id === params.section)?.id ?? "all";
+  const activeEditor = editorSections.find((item) => item.id === params.section) ?? editorSections[0];
+  const section = activeEditor.id;
   const tenantId = session.tenantId;
   const recordKinds = section === "dashboard" ? ["dashboard"] : section === "id-cards" ? ["id_card"] : section === "all" ? ["dashboard", "id_card"] : [];
   const [tenant, locations, records, access] = await Promise.all([
@@ -33,13 +34,16 @@ export default async function ConfigurationPage({ searchParams }: { searchParams
     }) : [],
     getTenantAccess(tenantId),
   ]);
+  const dashboardLocation = section === "dashboard" && typeof params.location === "string"
+    ? locations.find((location) => location.id === params.location)
+    : undefined;
 
   return (
     <div className="animate-fade-up space-y-6">
       <Link href="/admin/configuration/company-settings" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline">
         <ArrowLeft aria-hidden="true" className="h-4 w-4" /> Company settings
       </Link>
-      <PageHeader title="Configuration editor" description={section === "all" ? "Manage workspace identity, dashboard layouts and ID-card templates." : undefined} />
+      <PageHeader title={section === "all" ? "Configuration editors" : activeEditor.label} description={section === "all" ? "Manage workspace identity, dashboard layouts and ID-card templates." : undefined} />
       <nav aria-label="Configuration editors" className="flex flex-wrap gap-2 rounded-2xl border border-edge bg-card p-3">
         {editorSections.map((item) => (
           <Link key={item.id} href={item.href} aria-current={section === item.id ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm font-medium ${section === item.id ? "bg-primary/10 text-primary" : "text-foreground hover:bg-tint"}`}>
@@ -47,7 +51,10 @@ export default async function ConfigurationPage({ searchParams }: { searchParams
           </Link>
         ))}
       </nav>
-      <ConfigurationManager key={section} tenant={tenant} locations={locations} records={records} section={section} showPayroll={access.modules.has("payroll")} showLeave={access.modules.has("leaves")} />
+      {section === "dashboard" && params.location && !dashboardLocation && (
+        <p role="alert" className="rounded-lg border border-warning/40 bg-card p-3 text-sm">That location is unavailable. Select the intended scope before creating a layout.</p>
+      )}
+      <ConfigurationManager key={`${section}:${dashboardLocation?.id ?? ""}`} tenant={tenant} locations={locations} records={records} section={section} initialDashboardLocationId={dashboardLocation?.id} showPayroll={access.modules.has("payroll")} showLeave={access.modules.has("leaves")} />
     </div>
   );
 }

@@ -30,7 +30,7 @@ function moveMonth(month: string, offset: number) {
 }
 
 export default async function EmployeeAttendancePage({ searchParams }: {
-  searchParams: Promise<{ month?: string; view?: string; action?: string; date?: string }>;
+  searchParams: Promise<{ month?: string; view?: string; action?: string; date?: string; focus?: string; from?: string; fromMonth?: string }>;
 }) {
   const session = await requireActiveSession();
   const [lang, employee, query] = await Promise.all([
@@ -46,7 +46,9 @@ export default async function EmployeeAttendancePage({ searchParams }: {
   const today = dateKeyInTimeZone(new Date(), region.timeZone);
   const currentMonth = today.slice(0, 7);
   const requested = typeof query.month === "string" ? query.month : "";
-  const month = isMonthKey(requested) && isDateKey(`${requested}-01`) && requested <= currentMonth ? requested : currentMonth;
+  const dateParam = typeof query.date === "string" ? query.date : "";
+  const inferredMonth = !requested && query.action === "request" && isDateKey(dateParam) ? dateParam.slice(0, 7) : requested;
+  const month = isMonthKey(inferredMonth) && isDateKey(`${inferredMonth}-01`) && inferredMonth <= currentMonth ? inferredMonth : currentMonth;
   const from = `${month}-01`;
   const nextMonth = moveMonth(month, 1);
   const lastDay = month === currentMonth ? today : offsetDateKey(`${nextMonth}-01`, -1);
@@ -88,14 +90,25 @@ export default async function EmployeeAttendancePage({ searchParams }: {
   const shiftByDay = new Map(roster.map((entry) => [istDateKey(entry.date), entry.shift]));
   const leaveRanges = leaves.map((leave) => ({ ...leave, from: istDateKey(leave.fromDate), to: istDateKey(leave.toDate) }));
   const days = Array.from({ length: Number(lastDay.slice(-2)) }, (_, index) => offsetDateKey(lastDay, -index));
+  const attentionFilter = query.focus === "review";
+  const attentionOnly = view === "entries" && attentionFilter;
+  const reviewDays = days.filter((day) => reviewByDay.has(day) || correctionByDay.get(day) === "pending" || ["missed_punch", "needs_review"].includes(recordByDay.get(day)?.reviewStatus ?? ""));
+  const visibleDays = attentionOnly ? reviewDays : days;
   const monthLabel = new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${from}T00:00:00Z`));
 
-  function href(monthKey: string, section = view) {
-    return section === "today" ? "/employee/attendance?view=today" : `/employee/attendance?${new URLSearchParams({ month: monthKey, view: section })}`;
+  function href(monthKey: string, section = view, filter = attentionFilter) {
+    return `/employee/attendance?${new URLSearchParams({
+      view: section,
+      ...(section !== "today" || monthKey !== currentMonth ? { month: monthKey } : {}),
+      ...(filter ? { focus: "review" } : {}),
+    })}`;
   }
 
-  const dateParam = typeof query.date === "string" ? query.date : "";
   const prefill = isDateKey(dateParam) && dateParam >= from && dateParam <= lastDay && (!earliestCorrection || dateParam >= earliestCorrection) ? dateParam : "";
+  const fromEntries = query.from === "entries";
+  const fromToday = query.from === "today";
+  const priorMonth = typeof query.fromMonth === "string" && isMonthKey(query.fromMonth) && isDateKey(`${query.fromMonth}-01`) && query.fromMonth <= currentMonth ? query.fromMonth : month;
+  const closeHref = fromToday ? href(priorMonth, "today") : fromEntries ? `${href(month, "entries")}${prefill ? `#attendance-${prefill}` : ""}` : href(month, "corrections");
 
   return (
     <div className="space-y-5">
@@ -115,25 +128,30 @@ export default async function EmployeeAttendancePage({ searchParams }: {
         </div>
         <form action="/employee/attendance" className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="view" value={view} />
+          {attentionFilter && <input type="hidden" name="focus" value="review" />}
           <Field label="Attendance month"><Input type="month" name="month" max={currentMonth} defaultValue={month} required /></Field>
           <Button type="submit" variant="outline"><CalendarDays aria-hidden="true" className="h-4 w-4" /> View month</Button>
         </form>
       </div>}
 
       {view === "today" ? (
-        <TodayAttendance employee={employee} region={region} lang={lang} now={new Date()} showCorrection={canRequest} />
+        <TodayAttendance employee={employee} region={region} lang={lang} now={new Date()} earliestCorrection={earliestCorrection} keepReviewFilter={attentionFilter} selectedMonth={month} />
       ) : view === "corrections" ? (
         <Card><CardContent>
-          <CorrectionsPanel key={`${month}-${query.action}-${prefill}`} corrections={corrections} lang={lang} region={region} today={today} earliestDate={earliestCorrection} openOnLoad={query.action === "request" && canRequest} initialDate={prefill} closeHref={href(month, "corrections")} />
+          <CorrectionsPanel key={`${month}-${query.action}-${prefill}-${closeHref}`} corrections={corrections} lang={lang} region={region} today={today} earliestDate={earliestCorrection} openOnLoad={query.action === "request" && canRequest} initialDate={prefill} closeHref={closeHref} returnToSource={fromEntries || fromToday} keepReviewFilter={attentionFilter} />
         </CardContent></Card>
       ) : employee.loginOnly ? (
         <Card><CardContent><p className="text-sm text-muted-foreground">Attendance entries are available for staff accounts.</p></CardContent></Card>
       ) : (
         <Card>
-          <Table>
+          <nav aria-label="Filter attendance entries" className="flex flex-wrap gap-2 border-b border-edge p-3 text-sm">
+            <Link aria-current={!attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${!attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", false)}>All dates</Link>
+            <Link aria-current={attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", true)}>Review and corrections ({reviewDays.length})</Link>
+          </nav>
+          {visibleDays.length ? <Table>
             <caption className="sr-only">Daily attendance for {monthLabel}</caption>
             <THead><TR><TH>{t(lang, "attendance.date")}</TH><TH>{t(lang, "attendance.status")}</TH><TH>{t(lang, "attendance.in")}</TH><TH>{t(lang, "attendance.out")}</TH><TH className="hidden xl:table-cell">Shift</TH><TH>Correction</TH></TR></THead>
-            <TBody>{days.map((day) => {
+            <TBody>{visibleDays.map((day) => {
               const record = recordByDay.get(day);
               const shift = shiftByDay.get(day) ?? record?.shift ?? employee.shift;
               const holiday = holidaysForAttendanceDay(holidays, day)[0];
@@ -142,7 +160,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
               const correctionStatus = correctionByDay.get(day);
               const beforeJoining = Boolean(joined && day < joined);
               const canCorrect = !beforeJoining && (!earliestCorrection || day >= earliestCorrection);
-              return <TR key={day}>
+              return <TR key={day} id={`attendance-${day}`} className="scroll-mt-24">
                 <TH scope="row" className="whitespace-nowrap py-3 text-sm font-medium normal-case tracking-normal text-foreground"><time dateTime={day}>{formatCalendarDate(day, region.locale)}</time>{day === today && <span className="ml-1 text-xs text-muted-foreground">Today</span>}</TH>
                 <TD className="whitespace-nowrap">
                   {record ? <StatusPill status={record.status} lang={lang} /> : holiday ? <Badge tone="violet">{holiday.isHalfDay ? "Half-day holiday" : "Holiday"}</Badge> : leave ? <Badge tone="info">{t(lang, "common.onLeave")}</Badge> : beforeJoining ? <span className="text-muted-foreground">Before joining</span> : isShiftWeeklyOff(shift, day) ? <Badge>{t(lang, "attendance.weeklyOff")}</Badge> : <span className="text-muted-foreground">No entry</span>}
@@ -156,12 +174,12 @@ export default async function EmployeeAttendancePage({ searchParams }: {
                 <TD className="hidden text-muted-foreground xl:table-cell">{shift?.name ?? "—"}</TD>
                 <TD>
                   {correctionStatus && <Link href={`${href(month, "corrections")}#corrections-${day}`} className="mr-3 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">{correctionStatus === "pending" ? "Pending review" : correctionStatus === "approved" ? "Approved" : "Declined"}</Link>}
-                  {canCorrect && correctionStatus !== "pending" && <Link href={`${href(month, "corrections")}&action=request&date=${day}`} aria-label={`Request correction for ${formatCalendarDate(day, region.locale)}`} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Request</Link>}
+                  {canCorrect && correctionStatus !== "pending" && <Link href={`${href(month, "corrections")}&action=request&date=${day}&from=entries`} aria-label={`Request correction for ${formatCalendarDate(day, region.locale)}`} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Request</Link>}
                   {!correctionStatus && !canCorrect && <span className="text-muted-foreground">—</span>}
                 </TD>
               </TR>;
             })}</TBody>
-          </Table>
+          </Table> : <p className="p-5 text-sm text-muted-foreground">No held punches, open corrections, or review flags for this month.</p>}
         </Card>
       )}
     </div>

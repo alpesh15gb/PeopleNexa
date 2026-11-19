@@ -6,7 +6,7 @@ Workspace administrators can set the country, currency, formatting locale and at
 
 Choose an IANA time zone before recording attendance. The employee clock, core attendance pages and API, punch corrections, dashboard and holiday calendar use the workspace zone. Punch timestamps remain UTC instants. Roster, leave, holiday and payroll calendar dates keep their canonical stored date representation. When a local day spans a daylight-saving transition, punch windows follow the actual local midnight boundaries. Manually entered times in a skipped hour are rejected. A repeated local time resolves to its first occurrence.
 
-Existing punches, attendance or pending corrections lock the operational time zone in Company settings. Changing that zone for an active workspace requires an effective-dated migration and a rollout plan for staff and devices. A workspace uses one attendance time zone. Vendor integrations that send unqualified wall-clock timestamps still use the existing IST input contract. Device-specific exports and other legacy timestamp displays can retain IST.
+Existing punches, attendance or pending corrections lock the operational time zone in Company settings. Changing that zone for an active workspace requires an effective-dated migration and a rollout plan for staff and devices. A workspace uses one attendance time zone. Vendor integrations that send unqualified wall-clock timestamps still use the existing IST input contract. Daily and monthly attendance reports, their spreadsheets, and mobile punch evidence display the workspace time zone. Daily raw-punch presence uses the workspace calendar day. Monthly reports use saved work dates and reconciled punches.
 
 ## Payroll capabilities
 

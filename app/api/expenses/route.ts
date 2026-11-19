@@ -6,6 +6,7 @@ import { dispatchWebhook } from "@/lib/webhooks";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { expenseSummary } from "@/lib/expense-records";
 import { recordApiPaging, recordPagination } from "@/lib/document-expense-pagination";
+import { formatRegionalMoney, workspaceRegion } from "@/lib/workspace-region";
 
 const CATEGORIES = ["travel", "food", "fuel", "mobile", "medical", "other"];
 
@@ -46,12 +47,13 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await notifyAdmins(
-    session.tenantId,
-    "info",
-    "New expense claim",
-    `₹${amount} — ${title} (${category})`
-  ).catch(() => console.error("Could not notify admins of submitted expense", claim.id));
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+    const amountLabel = formatRegionalMoney(amount, workspaceRegion(tenant?.config));
+    await notifyAdmins(session.tenantId, "info", "New expense claim", `${amountLabel} · ${title} (${category})`);
+  } catch {
+    console.error("Could not notify admins of submitted expense", claim.id);
+  }
 
   await dispatchWebhook(session.tenantId, "expense.created", {
     claimId: claim.id,

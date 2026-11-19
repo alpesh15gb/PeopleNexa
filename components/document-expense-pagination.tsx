@@ -7,7 +7,7 @@ export function DocumentExpensePagination({ path, params, pagination, label }: {
   path: string;
   params: RecordSearchParams;
   pagination: ReturnType<typeof recordPagination>;
-  label: "documents" | "claims" | "entries" | "audit entries" | "notifications";
+  label: "documents" | "claims" | "entries" | "audit entries" | "notifications" | "leave requests" | "corrections" | "punches" | "workspaces" | "posts" | "reviews";
 }) {
   const { page, pageCount, offset, pageSize, total } = pagination;
   if (total === 0) return null;

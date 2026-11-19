@@ -8,6 +8,7 @@ import { Field, Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 type Branch = { id: string; name: string; code: string; locationId: string | null };
 type Location = { id: string; name: string; code: string; branches: Pick<Branch, "id" | "name" | "code">[]; managers: { id: string; firstName: string; lastName: string; email: string | null }[] };
@@ -31,10 +32,10 @@ export function LocationsManager({ locations, branches }: { locations: Location[
       const res = await fetch(editing === "new" ? "/api/locations" : `/api/locations/${editing?.id}`, { method: editing === "new" ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return toast("error", data.error ?? "Could not save location.");
-      // A newly created location needs its branches assigned after it has an id.
-      if (editing === "new" && branchIds.length) await fetch(`/api/locations/${data.location.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchIds }) });
       toast("success", editing === "new" ? "Location created" : "Location updated");
       setEditing(null); router.refresh();
+    } catch {
+      toast("error", "Could not save the location. Try again.");
     } finally { setBusy(false); }
   }
 
@@ -60,11 +61,12 @@ export function LocationsManager({ locations, branches }: { locations: Location[
   }
 
   return <>
-    <div className="flex items-center justify-between border-b border-edge px-5 py-3"><p className="text-[13px] text-muted-foreground">{locations.length} locations · branch assignment and access are managed here</p><Button size="sm" onClick={() => setEditing("new")}><Plus className="h-3.5 w-3.5" /> New location</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3"><p className="text-sm text-muted-foreground">{locations.length} locations · {branches.filter((branch) => !branch.locationId).length} unassigned branches</p><Button size="sm" onClick={() => setEditing("new")}><Plus className="h-3.5 w-3.5" /> New location</Button></div>
     <div className="grid gap-4 p-5 lg:grid-cols-2">
+      {locations.length === 0 && <p className="col-span-full p-4 text-sm text-muted-foreground">Create a location to group branches and assign local managers.</p>}
       {locations.map((location) => <section key={location.id} className="card-surface rounded-xl p-4">
         <div className="flex items-start justify-between gap-3"><div><p className="font-display text-[16px] font-semibold"><MapPin className="mr-1.5 inline h-4 w-4 text-primary" />{location.name}</p><p className="mt-1 font-mono text-[11px] text-muted-foreground">{location.code}</p></div><div className="flex gap-1"><Button size="sm" variant="ghost" aria-label={`Edit ${location.name}`} onClick={() => setEditing(location)}><Pencil className="h-3.5 w-3.5" /></Button><Button size="sm" variant="ghost" aria-label={`Delete ${location.name}`} onClick={() => setDeleting(location)}><Trash2 className="h-3.5 w-3.5 text-rose-400" /></Button></div></div>
-        <div className="mt-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Branches ({location.branches.length})</p><div className="mt-2 flex flex-wrap gap-1.5">{location.branches.length ? location.branches.map((branch) => <span key={branch.id} className="rounded-md bg-tint px-2 py-1 text-[12px]"><Building2 className="mr-1 inline h-3 w-3" />{branch.name}</span>) : <span className="text-[12px] text-muted-foreground">No branches assigned</span>}</div></div>
+        <div className="mt-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Branches ({location.branches.length})</p><div className="mt-2 flex flex-wrap gap-1.5">{location.branches.length ? location.branches.map((branch) => <Link key={branch.id} href={`/admin/employee-master?branch=${encodeURIComponent(branch.id)}`} className="rounded-md bg-tint px-2 py-1 text-xs hover:underline"><Building2 aria-hidden="true" className="mr-1 inline h-3 w-3" />{branch.name}</Link>) : <span className="text-[12px] text-muted-foreground">No branches assigned</span>}</div></div>
         <div className="mt-4 border-t border-edge pt-3"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Location logins ({location.managers.length}/4)</p>{location.managers.length < 4 && <Button size="sm" variant="outline" onClick={() => setLoginFor(location)}><KeyRound className="h-3.5 w-3.5" /> Add login</Button>}</div><div className="mt-2 space-y-1.5">{location.managers.length ? location.managers.map((manager) => <div key={manager.id} className="flex items-center justify-between rounded-lg bg-tint px-2.5 py-2 text-[12px]"><span className="min-w-0 truncate">{manager.firstName} {manager.lastName} · <span className="text-muted-foreground">{manager.email}</span></span><button className="ml-2 text-rose-400 disabled:opacity-50" disabled={busy} onClick={() => deactivateLogin(location.id, manager.id)}>Deactivate</button></div>) : <p className="text-[12px] text-muted-foreground">No shared location access yet.</p>}</div></div>
       </section>)}
     </div>

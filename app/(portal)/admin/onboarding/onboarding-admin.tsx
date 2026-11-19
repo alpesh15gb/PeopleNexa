@@ -10,6 +10,8 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import Link from "next/link";
 
 interface Task {
   id: string;
@@ -37,7 +39,7 @@ const STARTER_CHECKLIST = [
   "Review and acknowledge company policies",
 ];
 
-export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees: Employee[] }) {
+export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; employees: Employee[]; today: string }) {
   const router = useRouter();
   const toast = useToast();
   const [addOpen, setAddOpen] = useState(false);
@@ -45,6 +47,9 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
   const [busy, setBusy] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<Task | null>(null);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [formError, setFormError] = useState("");
 
   const byEmployee = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -60,8 +65,16 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
     const done = tasks.filter((t) => t.status === "done").length;
     return { assigned: byEmployee.size, completed, done, total: tasks.length };
   }, [byEmployee, tasks]);
+  const matches = [...byEmployee.values()].filter((list) => {
+    const employee = list[0].employee;
+    const complete = list.every((task) => task.status === "done");
+    const overdue = list.some((task) => task.status !== "done" && task.dueBy && istDateKey(task.dueBy) < today);
+    return `${employee.firstName} ${employee.lastName} ${employee.employeeNumber}`.toLowerCase().includes(query.trim().toLowerCase()) &&
+      (status === "all" || (status === "complete" && complete) || (status === "open" && !complete) || (status === "overdue" && overdue));
+  });
 
   async function toggle(task: Task) {
+    if (busy) return;
     setBusy(task.id);
     try {
       const res = await fetch(`/api/onboarding/${task.id}`, {
@@ -75,12 +88,15 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
         return;
       }
       router.refresh();
+    } catch {
+      toast("error", "Could not update the task. Try again.");
     } finally {
       setBusy(null);
     }
   }
 
   async function remove(id: string) {
+    if (busy) return;
     setBusy(id);
     try {
       const res = await fetch(`/api/onboarding/${id}`, { method: "DELETE" });
@@ -92,6 +108,8 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
       setDeleting(null);
       toast("success", "Task removed");
       router.refresh();
+    } catch {
+      toast("error", "Could not remove the task. Try again.");
     } finally {
       setBusy(null);
     }
@@ -103,13 +121,17 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
         <p className="text-[13px] text-muted-foreground">
           {totals.completed}/{totals.assigned} checklists completed · {totals.done}/{totals.total} tasks done
         </p>
-        <Button size="sm" disabled={!employees.length} onClick={() => setAddOpen(true)}>
+        <Button size="sm" disabled={!employees.length} onClick={() => { setFormError(""); setAddOpen(true); }}>
           <Plus className="h-3.5 w-3.5" /> Add tasks
         </Button>
       </div>
+      {byEmployee.size > 0 && <div className="flex flex-wrap gap-3 border-b border-edge px-5 py-3">
+        <Input aria-label="Find onboarding employee" placeholder="Employee name or code" className="max-w-xs" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Select aria-label="Checklist status" value={status} className="w-auto" onChange={(event) => setStatus(event.target.value)}><option value="all">All checklists</option><option value="open">In progress</option><option value="overdue">Overdue</option><option value="complete">Complete</option></Select>
+      </div>}
 
       <div className="grid gap-4 p-5 lg:grid-cols-2">
-        {[...byEmployee.values()].map((list) => {
+        {matches.map((list) => {
           const e = list[0].employee;
           const done = list.filter((t) => t.status === "done").length;
           const pct = list.length ? Math.round((done / list.length) * 100) : 0;
@@ -122,7 +144,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 truncate text-[13.5px] font-semibold">
-                    {e.firstName} {e.lastName}
+                    <Link href={`/admin/employee-master?employee=${encodeURIComponent(e.id)}#employee-record`} className="hover:text-primary hover:underline">{e.firstName} {e.lastName}</Link>
                   </p>
                   <p className="text-[11.5px] text-muted-foreground">
                     {e.employeeNumber}
@@ -145,7 +167,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
                   <div key={t.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-tint">
                     <button
                       onClick={() => toggle(t)}
-                      disabled={busy === t.id}
+                      disabled={busy !== null}
                       aria-label={`${t.status === "done" ? "Reopen" : "Complete"} ${t.name}`}
                       className="text-muted-foreground transition-colors hover:text-emerald-300"
                     >
@@ -159,7 +181,7 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
                       {t.name}
                     </span>
                     {t.dueBy && (
-                      <span className="text-[10.5px] text-muted-foreground">{formatDate(t.dueBy)}</span>
+                      <span className={`text-xs ${t.status !== "done" && istDateKey(t.dueBy) < today ? "text-destructive" : "text-muted-foreground"}`}>{t.status !== "done" && istDateKey(t.dueBy) < today ? "Overdue · " : ""}{formatDate(t.dueBy)}</span>
                     )}
                     <button
                       onClick={() => setDeleting(t)}
@@ -174,18 +196,20 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
             </div>
           );
         })}
-        {byEmployee.size === 0 && (
+        {matches.length === 0 && (
           <div className="col-span-full flex flex-col items-center gap-3 py-14 text-center">
             <UserPlus className="h-8 w-8 text-muted-foreground/40" />
-            <p className="text-[13px] text-muted-foreground">{employees.length ? "Assign a checklist to get started." : "Add an employee to start assigning onboarding tasks."}</p>
+            <p className="text-[13px] text-muted-foreground">{byEmployee.size > 0 ? "No checklists match the selected filters." : employees.length ? "Assign a checklist to get started." : "Add an employee to start assigning onboarding tasks."}</p>
           </div>
         )}
       </div>
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add onboarding tasks" size="md">
+      <Modal open={addOpen} onClose={() => !submitting && setAddOpen(false)} title="Assign onboarding tasks" size="md">
         <form
           onSubmit={async (e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
+            if (submitting) return;
+            setFormError("");
             const form = new FormData(e.currentTarget);
             const names = String(form.get("names") ?? "")
               .split("\n")
@@ -204,13 +228,15 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
               });
               const data = await res.json();
               if (!res.ok) {
-                toast("error", data.error ?? "Failed to add tasks");
+                setFormError(data.error ?? "Could not assign the tasks.");
                 return;
               }
                toast("success", `${data.created} tasks added${data.skipped ? ` · ${data.skipped} already existed` : ""}`);
               setAddOpen(false);
               setSelectedId("");
               router.refresh();
+             } catch {
+               setFormError("Could not assign the tasks. Try again.");
              } finally {
                setSubmitting(false);
             }
@@ -238,8 +264,9 @@ export function OnboardingAdmin({ tasks, employees }: { tasks: Task[]; employees
               className="min-h-48 font-mono text-[12.5px]"
             />
           </Field>
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" disabled={submitting} onClick={() => setAddOpen(false)}>Cancel</Button>
              <Button type="submit" loading={submitting} disabled={submitting}>Add tasks</Button>
           </div>
         </form>

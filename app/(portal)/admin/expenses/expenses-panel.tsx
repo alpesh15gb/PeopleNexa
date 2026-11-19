@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/stat";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { formatRegionalMoney, type WorkspaceRegion } from "@/lib/workspace-region";
 import { formatDate, monthKeyIST } from "@/lib/dates";
 
 type Claim = {
@@ -31,7 +32,7 @@ const tone: Record<string, "warning" | "info" | "success" | "danger"> = {
   rejected: "danger",
 };
 
-export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Claim[]; actorId: string; canUsePayroll: boolean }) {
+export function ExpensesPanel({ claims, actorId, canUsePayroll, emptyTitle, region }: { claims: Claim[]; actorId: string; canUsePayroll: boolean; emptyTitle?: string; region: Pick<WorkspaceRegion, "currency" | "locale"> }) {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -39,17 +40,21 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
   const [action, setAction] = useState<"approved" | "rejected" | "settled" | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [payrollMonth, setPayrollMonth] = useState(monthKeyIST);
+  const [error, setError] = useState("");
   const externalSettlement = action === "settled" && viewing?.status === "pending";
 
   function view(claim: Claim, nextAction: typeof action = null) {
     setViewing(claim);
+    setError("");
     setAction(nextAction);
     setReviewNote(claim.reviewNote ?? "");
     setPayrollMonth(monthKeyIST());
   }
 
   async function update(id: string, status: NonNullable<typeof action>) {
+    if (busy) return;
     setBusy(id);
+    setError("");
     try {
       const res = await fetch(`/api/expenses/${id}`, {
         method: "PATCH",
@@ -60,13 +65,13 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
           ...(externalSettlement ? { settlementMethod: "external" } : {}),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to update");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Could not update the claim.");
       toast("success", `Claim ${status}.`);
       setViewing(null);
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to update");
+      setError(e instanceof Error ? e.message : "Could not confirm the update. Check the claim before retrying.");
     } finally {
       setBusy(null);
     }
@@ -77,8 +82,8 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
       {claims.length === 0 ? (
         <EmptyState
           icon={<Receipt className="h-5 w-5" />}
-          title="No claims yet"
-          description="Employee-submitted expense claims will appear here."
+          title={emptyTitle ?? "No claims yet"}
+          description={emptyTitle ? undefined : "Employee-submitted expense claims will appear here."}
         />
       ) : (
         <div className="divide-y divide-[color:var(--border)]">
@@ -99,10 +104,10 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
                 </div>
               </button>
               <div className="flex flex-wrap items-center gap-3">
-                <span className="font-mono text-[13.5px] font-bold">₹{c.amount.toLocaleString("en-IN")}</span>
+                <span className="font-mono text-[13.5px] font-bold">{formatRegionalMoney(c.amount, region)}</span>
                 <Badge tone={tone[c.status] ?? "neutral"} className="capitalize">{c.status}</Badge>
                 {c.status === "pending" && c.employee.id !== actorId && (
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     {canUsePayroll && (
                       <Button size="sm" variant="success" disabled={Boolean(busy)} onClick={() => view(c, "approved")}>
                         <Check className="h-3.5 w-3.5" /> Approve for payroll
@@ -133,7 +138,7 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
             <div className="grid grid-cols-2 gap-3 text-[13px]">
               <div className="rounded-xl bg-tint p-3">
                 <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Amount</p>
-                <p className="mt-0.5 font-mono text-lg font-bold">₹{viewing.amount.toLocaleString("en-IN")}</p>
+                <p className="mt-0.5 font-mono text-lg font-bold">{formatRegionalMoney(viewing.amount, region)}</p>
               </div>
               <div className="rounded-xl bg-tint p-3">
                 <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Category</p>
@@ -155,8 +160,9 @@ export function ExpensesPanel({ claims, actorId, canUsePayroll }: { claims: Clai
                   {externalSettlement ? "Confirm that this claim has already been paid outside payroll. Enter the payment reference below." : "An approved claim can be marked settled after its reimbursement appears in paid payroll."}
                 </p>}
                 <Field label={externalSettlement ? "Payment reference" : "Review note"} hint={externalSettlement ? undefined : "Optional. The employee can see this note."}>
-                  <Textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} />
+                  <Textarea value={reviewNote} maxLength={2000} onChange={(event) => setReviewNote(event.target.value)} />
                 </Field>
+                {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
                 <div className="flex justify-end gap-2">
                   <Button variant="ghost" disabled={Boolean(busy)} onClick={() => setViewing(null)}>Cancel</Button>
                   <Button variant={action === "rejected" ? "danger" : "primary"} loading={busy === viewing.id} disabled={(externalSettlement && !reviewNote.trim()) || (action === "approved" && !payrollMonth)} onClick={() => void update(viewing.id, action)}>

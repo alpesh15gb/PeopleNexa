@@ -2,8 +2,8 @@
 
 import { Switch } from "@/components/ui/switch";
 
-import { useState } from "react";
-import { MessageSquareText, Save, ShieldCheck, Zap } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { MessageSquareText, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
@@ -12,8 +12,6 @@ const TEMPLATES: { key: string; label: string; sample: string }[] = [
   { key: "leave.approved", label: "Leave approved", sample: "✅ Your leave request from {from} to {to} has been APPROVED by {admin}." },
   { key: "leave.rejected", label: "Leave rejected", sample: "ℹ️ Your leave request from {from} to {to} was not approved. Reason: {reason}." },
   { key: "exit.approved", label: "Exit approved", sample: "📋 Your resignation is approved. Last working day: {lwd}. Final settlement: ₹{amount}." },
-  { key: "payslip.generated", label: "Payslip ready", sample: "🧾 Your payslip for {month} is ready. Net pay: ₹{amount}. Login to view the full statement." },
-  { key: "punch.reminder", label: "Punch reminder", sample: "⏰ Reminder: you haven't clocked in yet today ({date})." },
 ];
 
 export function WhatsAppPanel({
@@ -27,21 +25,30 @@ export function WhatsAppPanel({
   const [token, setToken] = useState("");
   const [sender, setSender] = useState(initial.sender);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(initial);
+  const [error, setError] = useState("");
+  const changed = enabled !== saved.enabled || apiUrl.trim() !== saved.apiUrl || Boolean(token.trim()) || sender.trim() !== saved.sender;
 
-  async function save() {
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving || !changed) return;
     setSaving(true);
+    setError("");
     try {
       const res = await fetch("/api/settings/whatsapp", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled, apiUrl, apiToken: token, sender }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.config) throw new Error(data?.error ?? "Could not save gateway settings.");
+      setSaved(data.config);
+      setApiUrl(data.config.apiUrl);
+      setSender(data.config.sender);
       setToken("");
-      toast("success", enabled ? "WhatsApp gateway enabled" : "WhatsApp notifications disabled");
+      toast("success", "WhatsApp gateway settings saved.");
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to save");
+      setError(e instanceof Error ? e.message : "Could not save gateway settings.");
     } finally {
       setSaving(false);
     }
@@ -63,22 +70,24 @@ export function WhatsAppPanel({
           </div>
         </div>
 
-        <div className="space-y-4">
+        <form className="space-y-4" onSubmit={save}>
           <Field label="API URL" hint="e.g. https://your-gateway.example.com/whatsapp/send">
             <Input
               value={apiUrl}
+              type="url"
+              required={enabled}
               onChange={(e) => setApiUrl(e.target.value)}
               placeholder="https://…"
               className="h-11 font-mono"
             />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="API token" hint={initial.hasToken ? "Saved — leave blank to keep" : "Bearer token for the gateway"}>
+            <Field label="API token" hint={saved.hasToken ? "Leave blank to keep the saved token." : "Bearer token for the gateway"}>
               <Input
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder={initial.hasToken ? "••••••••" : "Enter token"}
+                placeholder={saved.hasToken ? "••••••••" : "Enter token"}
                 autoComplete="new-password"
                 className="h-11"
               />
@@ -102,31 +111,17 @@ export function WhatsAppPanel({
             />
           </div>
 
-          <Button onClick={save} loading={saving}>
+          {error && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{error}</p>}
+          <Button type="submit" loading={saving} disabled={!changed}>
             <Save className="h-4 w-4" /> Save gateway
           </Button>
-        </div>
+        </form>
       </div>
 
       <div className="space-y-4">
         <div className="card-surface rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-[13px] font-semibold">
-            <Zap className="h-4 w-4 text-amber-400" /> What gets sent
-          </div>
-          <ul className="mt-3 space-y-2 text-[12.5px] text-muted-foreground">
-            <li>• Leave approved / rejected</li>
-            <li>• Payslip ready after payroll run</li>
-            <li>• Resignation approved + final settlement</li>
-            <li>• Punch reminders (future — scheduled job)</li>
-          </ul>
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-edge bg-tint px-3 py-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-            Delivery is best-effort and never blocks payroll or approvals. Failed sends are silently skipped.
-          </div>
-        </div>
-
-        <div className="card-surface rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-[13px] font-semibold">Message templates</div>
+          <h2 className="text-sm font-semibold">Automatic messages</h2>
+          <p className="mt-1 text-xs text-muted-foreground">PeopleNexa sends these messages when the corresponding request is decided. Delivery is best effort.</p>
           <div className="mt-3 space-y-3">
             {TEMPLATES.map((t) => (
               <div key={t.key} className="rounded-xl border border-edge bg-tint px-3.5 py-2.5">

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { getSession } from "@/lib/session";
+import { readActiveIdentity } from "@/lib/session";
 import { getEffectivePlans } from "@/lib/plans-server";
 import { LandingPage } from "@/components/landing/landing-page";
+import { portalHome } from "@/lib/ess-login";
 
 const base = process.env.APP_BASE_DOMAIN ?? "peoplenexa.in";
 
@@ -31,14 +32,14 @@ export const metadata: Metadata = {
     template: "%s | PeopleNexa",
   },
   description:
-    "PeopleNexa is the all-in-one HRMS for Indian businesses — geofenced attendance, shift rosters, leaves, payroll with PF/ESIC/PT/TDS/LWF, field GPS tracking, assets, expenses and an AI assistant. Free 30-day trial, no credit card.",
+    "PeopleNexa brings employee records, geofenced attendance, shift rosters, leave, payroll, expenses and HR service requests into one workspace.",
   keywords: [
     "HRMS India",
     "attendance software",
     "payroll software India",
     "biometric attendance",
     "leave management",
-    "field force tracking",
+    "employee self-service",
     "PF ESIC TDS payroll",
     "HR and payroll software",
     "attendance tracking app",
@@ -52,7 +53,7 @@ export const metadata: Metadata = {
     siteName: "PeopleNexa",
     title: "PeopleNexa — HRMS, Attendance & Payroll for Indian teams",
     description:
-      "Geofenced attendance, shift rosters, leaves, payroll with PF/ESIC/PT/TDS/LWF, field GPS tracking and an AI assistant — free 30-day trial, no credit card.",
+      "Manage employee records, geofenced attendance, shift schedules, leave and payroll in one workspace.",
     images: [
       {
         url: "/og.png",
@@ -65,7 +66,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "PeopleNexa — HRMS, Attendance & Payroll for Indian teams",
-    description: "Geofenced attendance, payroll with PF/ESIC/PT/TDS/LWF, field GPS tracking and an AI assistant.",
+    description: "Employee self-service, geofenced attendance, leave and payroll in one workspace.",
     images: ["/og.png"],
   },
   robots: {
@@ -95,9 +96,10 @@ export default async function LandingRoute() {
   if (isTenantHost) redirect("/login");
 
   // Logged-in users skip the marketing page and go straight to their portal.
-  const session = await getSession();
-  if (session) {
-    redirect(session.role === "superadmin" ? "/superadmin" : session.role === "admin" ? "/admin" : "/employee");
+  const identity = await readActiveIdentity();
+  if (identity) {
+    if (identity.mustChangePassword) redirect("/change-password");
+    redirect(identity.session.role === "superadmin" ? "/superadmin" : portalHome(identity.session.role));
   }
 
   // Live pricing — reflects super-admin plan edits from the console, always
@@ -147,7 +149,7 @@ export default async function LandingRoute() {
         operatingSystem: "Web, Android, iOS (PWA)",
         url: `https://${base}/`,
         description:
-          "Geofenced attendance, shift rosters, leaves, payroll with PF/ESIC/PT/TDS/LWF, field GPS tracking, assets, expenses and an AI assistant.",
+          "Employee records, geofenced attendance, shift rosters, leave, payroll, assets and expenses.",
         offers: plans
           .filter((p) => p.key !== "enterprise")
           .map((p) => ({

@@ -51,12 +51,16 @@ export function DocumentsPanel({
   summary,
   canAdd,
   canDelete,
+  filtered,
+  filters,
 }: {
   documents: Doc[];
   employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[];
   summary: { total: number; expired: number; expiring: number };
   canAdd: boolean;
   canDelete: boolean;
+  filtered: boolean;
+  filters: React.ReactNode;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -66,10 +70,12 @@ export function DocumentsPanel({
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [viewing, setViewing] = useState<Doc | null>(null);
+  const [formError, setFormError] = useState("");
 
   const [form, setForm] = useState(emptyForm);
 
   function openForm(document?: Doc) {
+    setFormError("");
     setEditing(document ?? null);
     setForm(document ? {
       employeeId: document.employee.id,
@@ -86,6 +92,8 @@ export function DocumentsPanel({
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busy) return;
+    setFormError("");
     const attachment = new FormData(e.currentTarget).get("attachment");
     setBusy(true);
     try {
@@ -108,7 +116,7 @@ export function DocumentsPanel({
       setForm(emptyForm);
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Could not save document.");
+      setFormError(e instanceof Error ? e.message : "Could not save document.");
     } finally {
       setBusy(false);
     }
@@ -148,8 +156,9 @@ export function DocumentsPanel({
         <StatCard label="Expired" value={summary.expired} icon={<AlertTriangle className="h-4 w-4" />} tone="rose" />
         <StatCard label="Expiring within 60 days" value={summary.expiring} icon={<CalendarX2 className="h-4 w-4" />} tone="amber" />
       </div>
+      {filters}
       {documents.length === 0 ? (
-        <EmptyState icon={<FileText className="h-5 w-5" />} title="No documents yet" description={canAdd ? "Add an employee document with an optional file and expiry date." : "Documents for your assigned location will appear here."} />
+        <EmptyState icon={<FileText className="h-5 w-5" />} title={filtered ? "No matching documents" : "No documents yet"} description={filtered ? "Change or clear the search and expiry filters." : canAdd ? "Add an employee document with an optional file and expiry date." : "Documents for your assigned location will appear here."} action={!filtered && canAdd && employees.length > 0 ? <Button onClick={() => openForm()}>Add the first document</Button> : undefined} />
       ) : (
         <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
           {documents.map((d) => (
@@ -166,7 +175,7 @@ export function DocumentsPanel({
                   </p>
                 </div>
               </button>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {d.expiryDate && (
                   <span className={`font-mono text-[12.5px] ${d.status === "expired" ? "text-rose-300" : d.status === "expiring" ? "text-amber-300" : "text-muted-foreground"}`}>
                     {formatDate(new Date(d.expiryDate))}
@@ -229,6 +238,7 @@ export function DocumentsPanel({
             <input name="attachment" type="file" accept={Object.keys(DOCUMENT_ATTACHMENT_TYPES).join(",")} className="block w-full text-sm" />
             <span className="mt-1 block text-xs text-muted-foreground">PDF or image, up to 2 MB.</span>
           </label>
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" disabled={busy} onClick={() => setFormOpen(false)}>Cancel</Button>
             <Button type="submit" loading={busy}>{editing ? "Save document" : "Add document"}</Button>

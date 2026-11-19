@@ -19,7 +19,7 @@ import {
   type PolicyWorkspaceRecord,
 } from "@/lib/policy-workspace";
 import { istDateKey } from "@/lib/ist";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateIST } from "@/lib/dates";
 
 type RecordItem = PolicyWorkspaceRecord & { locationId: string | null };
 type LeaveType = {
@@ -105,7 +105,7 @@ export function LeavePolicyWorkspace(props: Props) {
       }
     : baseline;
   return (
-    <main className="mx-auto max-w-6xl space-y-5 py-6">
+    <div className="mx-auto max-w-6xl space-y-5 py-6">
       <header>
         <p className="text-xs font-semibold uppercase tracking-widest text-primary">
           Time off
@@ -123,9 +123,9 @@ export function LeavePolicyWorkspace(props: Props) {
       >
         <Link
           className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm hover:bg-tint"
-          href="/admin/leaves"
+          href="/admin/leaves?view=balances"
         >
-          Requests & balances
+          Leave balances
         </Link>
         <Link
           aria-current="page"
@@ -152,6 +152,11 @@ export function LeavePolicyWorkspace(props: Props) {
           ))}
         </Select>
       </Field>
+      <section aria-label="Policy status" className="grid gap-2 rounded-xl border border-edge bg-card p-4 text-sm sm:grid-cols-3">
+        <p><span className="block text-xs text-muted-foreground">Currently applies</span>{current ? (current.locationId === locationId ? `Effective ${formatDateIST(new Date(current.effectiveFrom))}` : "Company defaults") : "Leave type settings"}</p>
+        <p><span className="block text-xs text-muted-foreground">Next scheduled change</span>{scheduled ? formatDateIST(new Date(scheduled.effectiveFrom)) : "None scheduled"}</p>
+        <p><span className="block text-xs text-muted-foreground">Working changes</span>{working ? "Saved draft" : "No saved draft"}</p>
+      </section>
       <LeavePolicyEditor
         key={`${scope}:${source?.id ?? "new"}`}
         {...props}
@@ -160,7 +165,7 @@ export function LeavePolicyWorkspace(props: Props) {
         source={source}
         scopeRecords={scopeRecords}
       />
-    </main>
+    </div>
   );
 }
 
@@ -855,19 +860,14 @@ function LeavePolicyEditor({
           Change history
         </summary>
         <div className="mt-3 divide-y divide-edge">
-          {scopeRecords.map((record) => (
-            <p key={record.id} className="py-3 text-sm">
-              {record.active
-                ? "Applied settings"
-                : record.activatedAt
-                  ? "Earlier settings"
-                  : "Saved changes"}{" "}
-              · from {formatDate(new Date(record.effectiveFrom))}
-              {record.effectiveTo
-                ? ` through ${formatDate(new Date(record.effectiveTo))}`
-                : ""}
-            </p>
-          ))}
+          {!scopeRecords.length && <p className="py-3 text-sm text-muted-foreground">This scope has no saved policy versions.</p>}
+          {scopeRecords.map((record) => {
+            const allocations = periods.filter((period) => period.configurationId === record.id).reduce((sum, period) => sum + period.balances, 0);
+            return <div key={record.id} className="flex flex-wrap justify-between gap-2 py-3 text-sm">
+              <p>{record.active ? new Date(record.effectiveFrom) > new Date() ? "Scheduled" : "Published" : record.activatedAt ? "Earlier policy" : "Saved draft"} · from {formatDateIST(new Date(record.effectiveFrom))}{record.effectiveTo ? ` through ${formatDateIST(new Date(record.effectiveTo))}` : ""}</p>
+              {allocations > 0 && <p className="text-muted-foreground">{allocations} balance allocations</p>}
+            </div>;
+          })}
         </div>
       </details>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-edge bg-card p-4 md:sticky md:bottom-3">

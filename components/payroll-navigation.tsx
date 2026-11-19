@@ -47,7 +47,7 @@ export function PayrollNavigation({
       {links.map(({ icon: Icon, ...link }) => (
         <Link
           key={link.key}
-          href={link.key === "changes" ? link.href : payrollScopeHref(link.href, { locationId, period })}
+          href={payrollScopeHref(link.href, { locationId, period })}
           aria-current={active === link.key ? "page" : undefined}
           className={`inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring ${active === link.key ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}
         >

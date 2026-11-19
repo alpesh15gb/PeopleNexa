@@ -3,8 +3,11 @@ import ExcelJS from "exceljs";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { istDateKey, istStartOfDay, parseIST } from "@/lib/ist";
-import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { isMonthKey } from "@/lib/dates";
 import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, timeZoneDayRange } from "@/lib/workspace-time";
+import { countsAsLeaveDay } from "@/lib/leave-calendar";
 import {
   buildDeviceDaily,
   buildDeviceMonthly,
@@ -93,20 +96,23 @@ export async function GET(req: NextRequest) {
   const page = format !== "xlsx" && pageParam !== null ? Math.max(0, parseInt(pageParam, 10) || 0) : null;
   const q = (params.get("q") || "").trim().slice(0, 60);
 
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, config: true } });
+  const region = workspaceRegion(tenant?.config);
+  const today = dateKeyInTimeZone(new Date(), region.timeZone);
   let rangeStart: Date;
   let rangeEnd: Date;
   let dayKey = "";
   let monthKey = "";
   if (kind === "daily") {
-    dayKey = params.get("date") || istDateKey(new Date());
+    dayKey = params.get("date") || today;
     if (!isValidDateKey(dayKey)) {
       return NextResponse.json({ error: "date must use YYYY-MM-DD format." }, { status: 400 });
     }
     rangeStart = parseIST(`${dayKey} 00:00:00`)!;
     rangeEnd = new Date(rangeStart.getTime() + 86400000);
   } else {
-    monthKey = params.get("month") || monthKeyIST(new Date());
-    if (!isMonthKey(monthKey)) {
+    monthKey = params.get("month") || today.slice(0, 7);
+    if (!isMonthKey(monthKey) || monthKey < "1900-01" || monthKey > "9999-12") {
       return NextResponse.json({ error: "month must use YYYY-MM format." }, { status: 400 });
     }
     ({ start: rangeStart, end: rangeEnd } = monthRange(monthKey));
@@ -142,9 +148,8 @@ export async function GET(req: NextRequest) {
     ],
   };
 
-  const [total, tenant, branch, location] = await Promise.all([
+  const [total, branch, location] = await Promise.all([
     prisma.employee.count({ where: employeeWhere }),
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     branchId
       ? prisma.branch.findFirst({ where: { id: branchId, tenantId: session.tenantId }, select: { name: true } })
       : Promise.resolve(null),
@@ -161,7 +166,7 @@ export async function GET(req: NextRequest) {
       firstName: true,
       lastName: true,
       position: true,
-      shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } },
+      shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true, isNightShift: true } },
       department: { select: { name: true } },
     },
     orderBy: { employeeNumber: "asc" },
@@ -171,6 +176,7 @@ export async function GET(req: NextRequest) {
   // touches ~25 staff, not the whole company.
   const pageIds = employees.map((e) => e.id);
 
+  const punchWindow = kind === "daily" ? timeZoneDayRange(dayKey, region.timeZone) : null;
   const [department, runByEmployee, records, leaves, holidays, punches, rosters] = await Promise.all([
     departmentId
       ? prisma.department.findFirst({ where: { id: departmentId, tenantId: session.tenantId }, select: { name: true } })
@@ -192,7 +198,7 @@ export async function GET(req: NextRequest) {
         punchInTime: true,
         punchOutTime: true,
         punches: true,
-        shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } },
+        shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true, isNightShift: true } },
       },
       orderBy: { date: "asc" },
     }),
@@ -204,7 +210,7 @@ export async function GET(req: NextRequest) {
         fromDate: { lt: rangeEnd },
         toDate: { gte: rangeStart },
       },
-      select: { employeeId: true, fromDate: true, toDate: true, leaveType: { select: { name: true, code: true } } },
+      select: { employeeId: true, fromDate: true, toDate: true, leavePolicySnapshot: true, leaveType: { select: { name: true, code: true } } },
     }),
     prisma.holiday.findMany({
       where: {
@@ -213,19 +219,18 @@ export async function GET(req: NextRequest) {
       },
       select: { date: true, isRecurring: true },
     }),
-    prisma.punch.findMany({
+    punchWindow ? prisma.punch.findMany({
       where: {
         tenantId: session.tenantId,
         employeeId: { in: pageIds },
-        punchTime: { gte: rangeStart, lt: rangeEnd },
-        ...(kind === "daily" ? authorizedPunchDayFilter(rangeStart, rangeEnd) : {}),
+        ...authorizedPunchDayFilter(punchWindow.start, punchWindow.end),
       },
       select: { employeeId: true, punchTime: true, inOutHint: true },
-      orderBy: { punchTime: "asc" },
-    }),
+      orderBy: [{ punchTime: "asc" }, { id: "asc" }],
+    }) : [],
     prisma.rosterAssignment.findMany({
       where: { tenantId: session.tenantId, employeeId: { in: pageIds }, date: { gte: rangeStart, lt: rangeEnd } },
-      select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true } } },
+      select: { employeeId: true, date: true, shift: { select: { name: true, startTime: true, endTime: true, sundayWeeklyOff: true, weeklyOffDays: true, isNightShift: true } } },
     }),
   ]);
 
@@ -244,23 +249,23 @@ export async function GET(req: NextRequest) {
   const leaveKeys = new Set<string>(); // `${employeeId}|${dayKey}`
   const leaveLabels = new Map<string, string[]>();
   for (const l of leaves) {
-    const label = l.leaveType.code || l.leaveType.name;
-    const labels = leaveLabels.get(l.employeeId) ?? [];
-    if (!labels.includes(label)) labels.push(label);
-    leaveLabels.set(l.employeeId, labels);
     const lStart = istStartOfDay(l.fromDate);
     const lEnd = istStartOfDay(l.toDate);
     for (const day of dayKeys) {
       const dayStart = parseIST(`${day} 00:00:00`)!;
-      if (lStart.getTime() <= dayStart.getTime() && lEnd.getTime() >= dayStart.getTime()) {
+      if (lStart <= dayStart && lEnd >= dayStart && countsAsLeaveDay(l.leavePolicySnapshot, day)) {
         leaveKeys.add(`${l.employeeId}|${day}`);
+        const label = l.leaveType.code || l.leaveType.name;
+        const labels = leaveLabels.get(l.employeeId) ?? [];
+        if (!labels.includes(label)) labels.push(label);
+        leaveLabels.set(l.employeeId, labels);
       }
     }
   }
 
   const punchesByDay = new Map<string, SnapshotPunch[]>();
   for (const p of punches) {
-    const key = `${p.employeeId}|${istDateKey(p.punchTime)}`;
+    const key = `${p.employeeId}|${dayKey}`;
     if (!punchesByDay.has(key)) punchesByDay.set(key, []);
     punchesByDay.get(key)!.push({ time: p.punchTime, type: p.inOutHint });
   }
@@ -277,6 +282,7 @@ export async function GET(req: NextRequest) {
     }
     const output: DeviceDailyOutput = buildDeviceDaily({
       rosterShifts,
+      timeZone: region.timeZone,
       tenant: tenantInfo,
       branch: branchInfo,
       day: dayKey,
@@ -293,6 +299,7 @@ export async function GET(req: NextRequest) {
   if (kind === "monthly") {
     const output: DeviceMonthlyOutput = buildDeviceMonthly({
       rosterShifts,
+      timeZone: region.timeZone,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -309,6 +316,7 @@ export async function GET(req: NextRequest) {
   if (kind === "status-matrix") {
     const output: DeviceStatusMatrixOutput = buildStatusMatrix({
       rosterShifts,
+      timeZone: region.timeZone,
       tenant: tenantInfo,
       branch: branchInfo,
       department: departmentInfo,
@@ -326,17 +334,18 @@ export async function GET(req: NextRequest) {
 
   if (kind === "work-summary") {
     const runBy = runByEmployee ? `${runByEmployee.firstName} ${runByEmployee.lastName}`.trim() : "Admin";
-    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+    const generatedAt = new Intl.DateTimeFormat(region.locale, {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-      timeZone: "Asia/Kolkata",
+      timeZone: region.timeZone,
     }).format(new Date());
     const output: DeviceWorkSummaryOutput = buildWorkSummary({
       rosterShifts,
+      timeZone: region.timeZone,
       tenant: tenantInfo,
       branch: branchInfo,
       month: monthKey,
@@ -353,7 +362,8 @@ export async function GET(req: NextRequest) {
   }
 
   const output: DevicePerformanceOutput = buildPerformance({
-      rosterShifts,
+    rosterShifts,
+    timeZone: region.timeZone,
     tenant: tenantInfo,
     branch: branchInfo,
     month: monthKey,
@@ -403,7 +413,7 @@ function dailyXlsx(output: DeviceDailyOutput, dayKey: string) {
     ws.mergeCells(1, 9, 1, cols);
     ws.getCell("A1").value = output.header.left;
     ws.getCell("E1").value = output.header.center;
-    ws.getCell("I1").value = output.header.right;
+    ws.getCell("I1").value = `${output.header.right} · ${output.timeZone}`;
     styleTitleRow(ws.getRow(1));
     const headerRow = ws.addRow(output.columns);
     styleHeaderRow(headerRow);
@@ -444,7 +454,7 @@ function monthlyXlsx(output: DeviceMonthlyOutput, monthKey: string) {
     for (const block of output.blocks) {
       if (!isFirst) ws.addRow([]);
       isFirst = false;
-      const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+      const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}  |  ${output.timeZone}`]);
       ws.mergeCells(titleRow.number, 1, titleRow.number, cols);
       styleTitleRow(titleRow);
       borderAll(ws, titleRow.number, cols);
@@ -476,7 +486,7 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
     fixedColumns.forEach((width, index) => { ws.getColumn(index + 1).width = width; });
     for (let d = 1; d <= dayCount; d++) ws.getColumn(fixedColumns.length + d).width = 8;
     totalLabels.forEach((_, index) => { ws.getColumn(fixedColumns.length + dayCount + index + 1).width = 10; });
-    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}  |  ${output.timeZone}`]);
     ws.mergeCells(titleRow.number, 1, titleRow.number, cols);
     styleTitleRow(titleRow);
     titleRow.height = 24;
@@ -528,7 +538,7 @@ function workSummaryXlsx(output: DeviceWorkSummaryOutput, monthKey: string) {
     widths.forEach((w, i) => {
       ws.getColumn(i + 1).width = w;
     });
-    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+    const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}  |  ${output.timeZone}`]);
     ws.mergeCells(titleRow.number, 1, titleRow.number, cols);
     styleTitleRow(titleRow);
     borderAll(ws, titleRow.number, cols);
@@ -576,7 +586,7 @@ function performanceXlsx(output: DevicePerformanceOutput, monthKey: string) {
     for (const block of output.blocks) {
       if (!isFirst) ws.addRow([]);
       isFirst = false;
-      const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}`]);
+      const titleRow = ws.addRow([`${output.header.left}  |  ${output.header.center}  |  ${output.header.right}  |  ${output.timeZone}`]);
       ws.mergeCells(titleRow.number, 1, titleRow.number, Math.max(cols, 1));
       styleTitleRow(titleRow);
       borderAll(ws, titleRow.number, Math.max(cols, 1));

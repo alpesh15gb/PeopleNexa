@@ -61,12 +61,13 @@ export default async function PayrollQueuePage({ searchParams }: {
           {stage && <input type="hidden" name="stage" value={stage} />}
           {canManageSettings && (
             <Field label="Location" className="min-w-44 flex-1">
-              <Select name="location" defaultValue={locationId ?? ""}>
+              <Select aria-label="Payroll queue location" name="location" defaultValue={locationId ?? ""}>
                 <option value="">All active locations</option>
                 {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
               </Select>
             </Field>
           )}
+          {!canManageSettings && selectedLocation && <p className="text-sm text-muted-foreground">Location <strong className="ml-1 text-foreground">{selectedLocation.name}</strong></p>}
           <Field label="Pay month" className="min-w-36 flex-1">
             <Input name="period" type="month" defaultValue={period ?? ""} />
           </Field>
@@ -120,6 +121,7 @@ export default async function PayrollQueuePage({ searchParams }: {
           <div className="rounded-xl border border-edge bg-card px-5 py-10 text-center">
             <ClipboardCheck aria-hidden="true" className="mx-auto mb-3 size-7 text-muted-foreground" />
             <h2 className="font-semibold">{locations.length ? "No open runs in this view" : "No active payroll location"}</h2>
+            {locations.length === 0 && <p className="mt-2 text-sm text-muted-foreground">{canManageSettings ? "Create or activate a location in Company settings." : "Ask a workspace administrator to assign an active payroll location."}</p>}
             {locations.length > 0 && <Link href={payrollScopeHref("/admin/payroll", scope)} className="mt-3 inline-flex text-sm font-semibold text-primary hover:underline">Open monthly payroll</Link>}
           </div>
         )}

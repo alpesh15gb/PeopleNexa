@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, BarChart3, Cable, Cloud, MonitorCheck, Network } from "lucide-react";
 import { Card, CardContent, PageHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { EbioDeviceList } from "@/components/devices/ebio-device-list";
 import { deviceHealthState, ebioDeviceHealthState, realtimeDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
@@ -33,7 +35,7 @@ function fleetStats(states: DeviceHealthState[]) {
   };
 }
 
-export default async function AdminDevicesPage({ searchParams }: { searchParams: Promise<{ service?: string }> }) {
+export default async function AdminDevicesPage({ searchParams }: { searchParams: Promise<{ service?: string; q?: string }> }) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) redirect("/login");
   if (session.role !== "admin" && session.role !== "location_manager") redirect("/admin");
@@ -55,6 +57,8 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
 
   const nav = fleetNav.filter((item) => item.key !== "realtime" || isAdmin);
   const service = nav.find((item) => item.key === query.service || (item.key === "direct" && query.service === "essl"))?.key ?? "overview";
+  const term = typeof query.q === "string" ? query.q.trim().slice(0, 100) : "";
+  const matches = (row: { name: string; serialNumber: string; branchName?: string | null }) => `${row.name} ${row.serialNumber} ${row.branchName ?? ""}`.toLowerCase().includes(term.toLowerCase());
   const profile = tenant ? getEbioserverConfig(tenant) : null;
   const connectionConfigured = Boolean(profile?.enabled && profile.url && profile.passwordEnc);
   const now = Date.now();
@@ -76,16 +80,21 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
     { key: "ebio", title: "eBioserver", details: "Review devices discovered through your eBioserver connection and their latest heartbeat.", icon: Network, stats: fleetStats(ebioRows.map((row) => ebioDeviceHealthState(row.status, row.lastSeenAt, now))) },
     ...(isAdmin ? [{ key: "realtime", title: "Realtime", details: "Manage cloud-connected devices, credentials and synchronization links.", icon: Cloud, stats: fleetStats(realtimeRows.map((row) => realtimeDeviceHealthState(row.status, row.lastSeenAt, now))) }] : []),
   ];
-  const deviceHref = (key: string) => key === "overview" ? "/admin/devices" : `/admin/devices?service=${key}`;
+  const deviceHref = (key: string, value = term) => key === "overview" ? "/admin/devices" : `/admin/devices?${new URLSearchParams({ service: key, ...(value && { q: value }) })}`;
 
   return <div className="space-y-5">
     <PageHeader title="Attendance devices" description={isAdmin ? "Manage device connections and monitor punch delivery across your workspace." : `Device inventory for ${location?.name ?? "your assigned location"}.`} actions={<>
-      {isAdmin && access.modules.has("platform") && <Link href="/admin/device-health" className={actionLink}><MonitorCheck aria-hidden="true" className="h-4 w-4" /> Device health</Link>}
+      {isAdmin && access.modules.has("platform") && <Link href={service === "overview" ? "/admin/device-health" : `/admin/device-health?service=${service}`} className={actionLink}><MonitorCheck aria-hidden="true" className="h-4 w-4" /> Device health</Link>}
       {access.modules.has("reports") && <Link href="/admin/reports/punch-details" className={actionLink}><BarChart3 aria-hidden="true" className="h-4 w-4" /> Punch details</Link>}
     </>} />
     <nav aria-label="Device services" className="flex flex-wrap gap-x-5 border-b border-edge text-sm">
       {nav.map((item) => <Link key={item.key} href={deviceHref(item.key)} aria-current={service === item.key ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${service === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{item.label}</Link>)}
     </nav>
+    {service !== "overview" && <form action="/admin/devices" className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="service" value={service} />
+      <Input aria-label="Search device inventory" name="q" defaultValue={term} key={term} maxLength={100} type="search" placeholder="Find a device by name or serial" className="w-full sm:w-72" />
+      <Button variant="outline" type="submit">Search</Button>{term && <Link href={deviceHref(service, "")} className="inline-flex min-h-10 items-center p-2 text-sm text-primary hover:underline">Clear search</Link>}
+    </form>}
     {service === "overview" && <section aria-label="Device connection types" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {services.map(({ key, title, details, icon: Icon, stats }) => <Card key={key}>
         <CardContent className="flex h-full flex-col gap-4">
@@ -100,11 +109,13 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
         </CardContent>
       </Card>)}
     </section>}
-    {service === "direct" && <DevicesPanel rows={directRows} branches={branches} requireBranch={Boolean(ownLocationId)} />}
+    {term && (service === "direct" && !directRows.some(matches) || service === "realtime" && !realtimeRows.some(matches)) &&
+      <p role="status" className="text-sm text-muted-foreground">No devices match your search in this service.</p>}
+    {service === "direct" && <DevicesPanel rows={directRows.filter(matches)} branches={branches} requireBranch={Boolean(ownLocationId)} />}
     {service === "ebio" && <>
       <Card><CardContent className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-display font-semibold">eBioserver connection</h2><p className="mt-1 text-sm text-muted-foreground">{isAdmin ? connectionConfigured ? "Connection settings saved. Discovered devices appear after a successful sync." : "Configure the workspace connection to discover and sync devices." : "A workspace administrator manages the connection. The list shows devices assigned to your location."}</p></div>{isAdmin && <Link href="/admin/settings#device-connection" className={actionLink}>Connection settings <ArrowRight aria-hidden="true" className="h-4 w-4" /></Link>}</CardContent></Card>
-      {ebioRows.length ? <EbioDeviceList rows={ebioRows} /> : <Card><EmptyState title="No eBioserver devices in this scope" description={isAdmin ? "Check connection settings and sync devices to populate this list." : "Devices appear when they are discovered and assigned to your location."} /></Card>}
+      {ebioRows.some(matches) ? <EbioDeviceList rows={ebioRows.filter(matches)} /> : <Card><EmptyState title={term ? "No eBioserver devices match your search" : "No eBioserver devices in this scope"} description={isAdmin ? "Check connection settings and sync devices to populate this list." : "Devices appear when they are discovered and assigned to your location."} /></Card>}
     </>}
-    {service === "realtime" && isAdmin && <RealtimePanel rows={realtimeRows} webhookPath={tenant ? `/api/realtime/webhook/${tenant.code}/record` : null} />}
+    {service === "realtime" && isAdmin && <RealtimePanel rows={realtimeRows.filter(matches)} webhookPath={tenant ? `/api/realtime/webhook/${tenant.code}/record` : null} />}
   </div>;
 }

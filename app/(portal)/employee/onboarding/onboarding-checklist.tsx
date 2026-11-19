@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, Circle, PartyPopper, Rocket } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
+import { istDateKey } from "@/lib/ist";
+import { formatCalendarDate } from "@/lib/workspace-time";
 
 interface Task {
   id: string;
@@ -14,7 +15,7 @@ interface Task {
   completedAt: Date | null;
 }
 
-export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
+export function OnboardingChecklist({ tasks, locale, today }: { tasks: Task[]; locale: string; today: string }) {
   const router = useRouter();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -22,8 +23,10 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
   const done = tasks.filter((t) => t.status === "done").length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const allDone = tasks.length > 0 && done === tasks.length;
+  const orderedTasks = [...tasks].sort((left, right) => Number(left.status === "done") - Number(right.status === "done"));
 
   async function toggle(task: Task) {
+    if (busy) return;
     setBusy(task.id);
     try {
       const res = await fetch(`/api/onboarding/${task.id}`, {
@@ -37,6 +40,8 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
         return;
       }
       router.refresh();
+    } catch {
+      toast("error", "Could not update the task. Try again.");
     } finally {
       setBusy(null);
     }
@@ -44,7 +49,7 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
 
   return (
     <div className="p-5">
-      <div className="mb-5 rounded-2xl border border-edge bg-card-2 p-5">
+      {tasks.length > 0 && <div className="mb-5 rounded-2xl border border-edge bg-card-2 p-5">
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-brand text-white">
             <Rocket className="h-5 w-5" />
@@ -63,10 +68,10 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
             <p className="font-mono text-2xl font-bold">{pct}%</p>
           </div>
         </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-tint-strong">
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-tint-strong" role="progressbar" aria-label="Onboarding progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <div className="h-full rounded-full bg-gradient-brand transition-all" style={{ width: `${pct}%` }} />
         </div>
-      </div>
+      </div>}
 
       {tasks.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-14 text-center">
@@ -80,11 +85,11 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {tasks.map((t) => (
+          {orderedTasks.map((t) => (
             <button
               key={t.id}
               onClick={() => toggle(t)}
-              disabled={busy === t.id}
+              disabled={busy !== null}
               aria-pressed={t.status === "done"}
               className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
                 t.status === "done"
@@ -97,12 +102,11 @@ export function OnboardingChecklist({ tasks }: { tasks: Task[] }) {
               ) : (
                 <Circle className="h-5 w-5 shrink-0 text-muted-foreground" />
               )}
-              <span className={`flex-1 text-[13.5px] font-medium ${t.status === "done" ? "text-muted-foreground line-through" : ""}`}>
+              <span className={`min-w-0 flex-1 break-words text-[13.5px] font-medium ${t.status === "done" ? "text-muted-foreground line-through" : ""}`}>
                 {t.name}
               </span>
-              {t.dueBy && (
-                <span className="text-[11px] text-muted-foreground">Due {formatDate(t.dueBy)}</span>
-              )}
+              {t.status === "done" && t.completedAt ? <span className="text-xs text-muted-foreground">Completed {formatCalendarDate(istDateKey(t.completedAt), locale)}</span> : t.dueBy &&
+                <span className={`text-xs ${istDateKey(t.dueBy) < today ? "text-destructive" : "text-muted-foreground"}`}>{istDateKey(t.dueBy) < today ? "Overdue since" : "Due"} {formatCalendarDate(istDateKey(t.dueBy), locale)}</span>}
             </button>
           ))}
         </div>

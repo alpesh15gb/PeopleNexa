@@ -219,6 +219,8 @@ export function AssetsPanel({
       toast("success", editing ? "Asset updated" : "Asset added to inventory");
       setFormOpen(false);
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm the save. Refresh inventory before retrying.");
     } finally {
       setSaving(false);
     }
@@ -247,20 +249,29 @@ export function AssetsPanel({
       setAssignEmp("");
       setAssignNote("");
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm the assignment. Refresh to check the asset.");
     } finally {
       setAssignBusy(false);
     }
   }
 
+  const [returning, setReturning] = useState<string | null>(null);
+
   async function returnAsset(asset: AssetRow) {
-    const res = await fetch(`/api/assets/${asset.id}/return`, { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) {
-      toast("error", data.error ?? "Failed to return asset");
-      return;
+    if (returning) return;
+    setReturning(asset.id);
+    try {
+      const res = await fetch(`/api/assets/${asset.id}/return`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? "Could not return this asset.");
+      toast("success", `${asset.name} returned to available inventory.`);
+      router.refresh();
+    } catch (error) {
+      toast("error", error instanceof Error ? error.message : "Could not confirm the return. Refresh to check the asset.");
+    } finally {
+      setReturning(null);
     }
-    toast("success", `${asset.name} returned to the pool`);
-    router.refresh();
   }
 
   async function openHistory(asset: AssetRow) {
@@ -283,6 +294,8 @@ export function AssetsPanel({
         })),
         maintenance: (data.asset.maintenanceRecords ?? []).map((x: { id: string; type: string; description: string; provider: string | null; cost: number | null; performedAt: string; nextDueDate: string | null; status: string; notes: string | null }) => ({ ...x, performedAt: new Date(x.performedAt), nextDueDate: x.nextDueDate ? new Date(x.nextDueDate) : null })),
       });
+    } catch {
+      toast("error", "Could not load asset history. Try again.");
     } finally {
       setHistoryBusy(false);
     }
@@ -301,6 +314,8 @@ export function AssetsPanel({
       toast("success", "Asset removed");
       setDeleting(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm removal. Refresh inventory before retrying.");
     } finally {
       setDeleteBusy(false);
     }
@@ -319,6 +334,8 @@ export function AssetsPanel({
       toast("success", "Maintenance recorded");
       setMaintaining(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm the maintenance record. Check asset history before retrying.");
     } finally { setMaintenanceBusy(false); }
   }
 
@@ -332,6 +349,8 @@ export function AssetsPanel({
       toast(data.skipped ? "info" : "success", `${data.created} assets imported${data.assigned ? `, ${data.assigned} assigned` : ""}${data.skipped ? `, ${data.skipped} skipped` : ""}`);
       if (data.errors?.length) toast("info", data.errors[0]);
       setImportOpen(false); setImportFile(null); router.refresh();
+    } catch {
+      toast("error", "Could not confirm the import. Check inventory before retrying.");
     } finally { setImportBusy(false); }
   }
 
@@ -355,19 +374,20 @@ export function AssetsPanel({
         <div className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
+            aria-label="Search asset inventory"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name, tag, serial, assignee…"
             className="pl-9"
           />
         </div>
-        <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-40">
+        <Select aria-label="Asset category" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-40">
           <option value="all">All categories</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>{categoryLabel(c)}</option>
           ))}
         </Select>
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-40">
+        <Select aria-label="Asset status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-40">
           <option value="all">All statuses</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>
@@ -446,7 +466,7 @@ export function AssetsPanel({
                 <TD className="sticky right-0 z-10 bg-card">
                   <div className="flex items-center gap-2">
                     {a.assignee ? (
-                      <Button size="sm" variant="ghost" onClick={() => returnAsset(a)}>
+                      <Button size="sm" variant="ghost" disabled={returning !== null} onClick={() => returnAsset(a)}>
                         <Undo2 className="h-3.5 w-3.5" /> Return
                       </Button>
                     ) : a.status === "available" ? (

@@ -30,29 +30,32 @@ interface Device {
   punchesToday: number;
   logs: number;
   errors: number;
+  pending: number;
 }
 
-export function DeviceHealthGrid({ devices: rows, region, liveEbio, canViewInventory = true }: { devices: Device[]; region: WorkspaceRegion; liveEbio: boolean; canViewInventory?: boolean }) {
+export function DeviceHealthGrid({ devices: rows, region, liveEbio, canViewInventory = true, initialFleet, initialQuery }: { initialFleet: string; initialQuery: string; devices: Device[]; region: WorkspaceRegion; liveEbio: boolean; canViewInventory?: boolean }) {
   const { devices, now } = useLiveEbioDevices(rows, liveEbio);
   const [statusFilter, setStatusFilter] = useState<"all" | DeviceHealthState>("all");
-  const [fleetFilter, setFleetFilter] = useState("all");
-  const [query, setQuery] = useState("");
+  const [fleetFilter, setFleetFilter] = useState(fleets.some((fleet) => fleet.key === initialFleet) ? initialFleet : "all");
+  const [query, setQuery] = useState(initialQuery);
+  const [unprocessedOnly, setUnprocessedOnly] = useState(false);
   const statusRows = devices.map((device) => {
     const fleet = fleets.find((item) => item.key === device.fleet)!;
     const lastSeen = device.lastSeenAt ? new Date(device.lastSeenAt) : null;
     return { device, lastSeen, state: fleet.state(device.status, lastSeen, now) };
   });
   const search = query.trim().toLowerCase();
-  const visible = statusRows.filter(({ device, state }) => (statusFilter === "all" || state === statusFilter) && (fleetFilter === "all" || fleetFilter === device.fleet) && `${device.name} ${device.serialNumber} ${device.branchName ?? ""}`.toLowerCase().includes(search));
+  const visible = statusRows.filter(({ device, state }) => (statusFilter === "all" || state === statusFilter) && (fleetFilter === "all" || fleetFilter === device.fleet) && (!unprocessedOnly || device.pending > 0) && `${device.name} ${device.serialNumber} ${device.branchName ?? ""}`.toLowerCase().includes(search));
   const dateTime = new Intl.DateTimeFormat(region.locale, { dateStyle: "medium", timeStyle: "short", timeZone: region.timeZone });
   const totals = [
     { title: "Online or idle", value: statusRows.filter(({ state }) => state === "online" || state === "idle").length },
     { title: "Need attention", value: statusRows.filter(({ state }) => state === "offline" || state === "stale").length },
+    { title: "Unprocessed logs", value: devices.reduce((sum, device) => sum + device.pending, 0) },
     { title: "Device punches today", value: devices.reduce((sum, device) => sum + device.punchesToday, 0) },
   ];
 
   return <>
-    <dl className="grid min-w-0 gap-3 sm:grid-cols-3">
+    <dl className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
       {totals.map((total) => <div key={total.title} className="min-w-0 rounded-2xl border border-edge bg-card px-4 py-3">
         <dt className="text-sm text-muted-foreground">{total.title}</dt><dd className="mt-1 font-display text-2xl font-semibold tabular-nums">{total.value}</dd>
       </div>)}
@@ -65,6 +68,7 @@ export function DeviceHealthGrid({ devices: rows, region, liveEbio, canViewInven
       <Select aria-label="Filter by device status" className="w-full sm:w-48" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
         <option value="all">All statuses</option><option value="online">Online</option><option value="idle">Idle</option><option value="offline">Offline</option><option value="stale">Stale</option><option value="disabled">Admin disabled</option>
       </Select>
+      <label className="inline-flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={unprocessedOnly} onChange={(event) => setUnprocessedOnly(event.target.checked)} /> Unprocessed logs only</label>
     </div>}
     {visible.length === 0 && <Card><EmptyState title={devices.length ? "No devices match these filters" : "No devices registered"} description={devices.length ? "Change the search or filters." : "Register devices from Device inventory to see their status here."} /></Card>}
     {fleets.map(({ key, label, icon: Icon }) => {
@@ -79,11 +83,13 @@ export function DeviceHealthGrid({ devices: rows, region, liveEbio, canViewInven
                 <div className="min-w-0 flex-1"><h3 className="truncate font-semibold" title={device.name}>{device.name}</h3><p className="truncate font-mono text-xs text-muted-foreground" title={device.serialNumber}>{device.serialNumber}</p></div>
                 <DeviceStatusBadge state={state} />
               </div>
-              <dl className="grid grid-cols-3 gap-2 rounded-xl border border-edge bg-tint/40 p-3 text-sm">
+              <dl className="grid grid-cols-2 gap-2 rounded-xl border border-edge bg-tint/40 p-3 text-sm">
                 <div className="min-w-0"><dt className="text-xs text-muted-foreground">Punches</dt><dd className="font-semibold tabular-nums">{device.punchesToday}</dd></div>
                 <div className="min-w-0"><dt className="text-xs text-muted-foreground">All logs</dt><dd className="font-semibold tabular-nums">{device.logs}</dd></div>
                 <div className="min-w-0"><dt className="text-xs text-muted-foreground">Log errors</dt><dd className={`font-semibold tabular-nums ${device.errors ? "text-destructive" : ""}`}>{device.errors}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Unprocessed</dt><dd className={`font-semibold tabular-nums ${device.pending ? "text-destructive" : ""}`}>{device.pending}</dd></div>
               </dl>
+              {canViewInventory && <Link className="inline-flex min-h-9 items-center text-sm font-medium text-primary hover:underline" href={`/admin/devices?${new URLSearchParams({ service: device.fleet, q: device.serialNumber })}`}>Find device in inventory</Link>}
               <p className="break-words text-xs text-muted-foreground">{[device.branchName, device.protocol, lastSeen ? `Last seen ${dateTime.format(lastSeen)}` : "No heartbeat recorded"].filter(Boolean).join(" · ")}</p>
             </CardContent>
           </Card>)}

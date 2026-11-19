@@ -9,8 +9,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const body = await req.json().catch(() => null);
   const status = body?.action === "verify" ? "verified" : body?.action === "reject" ? "rejected" : null;
   const updatedAt = new Date(typeof body?.updatedAt === "string" ? body.updatedAt : NaN);
-  if (!status || Number.isNaN(updatedAt.getTime()) || (body.note !== undefined && (typeof body.note !== "string" || body.note.length > 2000))) {
+  if (!status || Number.isNaN(updatedAt.getTime())) {
     return NextResponse.json({ error: "Select a valid review action and refresh the declaration before reviewing." }, { status: 400 });
+  }
+  const note = typeof body.note === "string" ? body.note.trim() : "";
+  if ((status === "rejected" && !note) || note.length > 2000 || (body.note !== undefined && typeof body.note !== "string")) {
+    return NextResponse.json({ error: "Explain what the employee must correct in 2,000 characters or fewer." }, { status: 400 });
   }
   const where = { id, tenantId: session.tenantId };
   const conflict = () => NextResponse.json({ error: "The declaration changed. Refresh and review the latest figures." }, { status: 409 });
@@ -24,7 +28,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
     const [updated] = await tx.taxDeclaration.updateManyAndReturn({
       where: { ...where, updatedAt, status: current.status },
-      data: { status, note: body.note?.trim() || null },
+      data: { status, note: note || null },
     });
     if (!updated) return conflict();
     await tx.auditLog.create({ data: {

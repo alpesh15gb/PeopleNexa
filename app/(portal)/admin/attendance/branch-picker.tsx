@@ -28,6 +28,7 @@ export function BranchPicker({
           const next = new URLSearchParams(params.toString());
           if (e.target.value) next.set("branch", e.target.value);
           else next.delete("branch");
+          next.delete("page");
           const qs = next.toString();
           router.push(qs ? `${basePath}?${qs}` : basePath);
         }}

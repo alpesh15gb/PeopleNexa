@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { fyFromMonth } from "@/lib/payroll";
+import { monthKeyIST } from "@/lib/dates";
 import { TaxReviewPanel } from "./tax-review-panel";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminTaxPage() {
   const session = await requireSession();
   if (session.role !== "admin") return null;
-  const fy = fyFromMonth(new Date().toISOString().slice(0, 7));
+  const fy = fyFromMonth(monthKeyIST());
   const [declarations, fys] = await Promise.all([
     prisma.taxDeclaration.findMany({
       where: { tenantId: session.tenantId },

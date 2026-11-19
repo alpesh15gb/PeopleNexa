@@ -3,13 +3,15 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, PartyPopper, Repeat, Upload } from "lucide-react";
+import { isDateKey } from "@/lib/dates";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { istDateKey } from "@/lib/ist";
 import type { WorkspaceRegion } from "@/lib/workspace-region";
-import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
+import { formatCalendarDate } from "@/lib/workspace-time";
 
 interface Holiday {
   id: string;
@@ -19,9 +21,12 @@ interface Holiday {
   isHalfDay: boolean;
 }
 
-export function HolidaysManager({ holidays, region }: { holidays: Holiday[]; region: WorkspaceRegion }) {
+export function HolidaysManager({ holidays, region, today, canManage }: { holidays: Holiday[]; region: WorkspaceRegion; today: string; canManage: boolean }) {
   const router = useRouter();
   const toast = useToast();
+  const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
+  const [removing, setRemoving] = useState<Holiday | null>(null);
+  const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,14 +47,16 @@ export function HolidaysManager({ holidays, region }: { holidays: Holiday[]; reg
           isHalfDay: form.get("isHalfDay") === "on",
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to add holiday");
+        setError(data.error ?? "Could not add holiday.");
         return;
       }
       toast("success", "Holiday added");
       setOpen(false);
       router.refresh();
+    } catch {
+      setError("Could not confirm the save. Check the holiday list before trying again.");
     } finally {
       setLoading(false);
     }
@@ -65,48 +72,65 @@ export function HolidaysManager({ holidays, region }: { holidays: Holiday[]; reg
         return;
       }
       toast("success", "Holiday removed");
+      setRemoving(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm deletion. Refresh before trying again.");
     } finally {
       setLoading(false);
     }
   }
 
-  const today = dateKeyInTimeZone(new Date(), region.timeZone);
-  const upcoming = holidays.filter((h) => h.isRecurring || istDateKey(h.date) >= today);
-  const past = holidays.filter((h) => !h.isRecurring && istDateKey(h.date) < today);
+  function nextDate(holiday: Holiday) {
+    const key = istDateKey(holiday.date);
+    if (!holiday.isRecurring) return key;
+    for (let year = Number(today.slice(0, 4)); year <= Number(today.slice(0, 4)) + 8; year++) {
+      const candidate = `${year}${key.slice(4)}`;
+      if (candidate >= today && isDateKey(candidate)) return candidate;
+    }
+    return key;
+  }
+  const dated = holidays.map((holiday) => ({ holiday, key: nextDate(holiday) }));
+  const upcoming = dated.filter(({ key }) => key >= today).sort((a, b) => a.key.localeCompare(b.key));
+  const past = dated.filter(({ key }) => key < today).sort((a, b) => b.key.localeCompare(a.key));
+  const displayed = tab === "upcoming" ? upcoming : past;
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-edge px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-5 py-3">
         <p className="text-[13px] text-muted-foreground">{holidays.length} holidays · {upcoming.length} upcoming</p>
-        <div className="flex gap-2">
+        {canManage && <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
             <Upload className="h-3.5 w-3.5" /> Import
           </Button>
-          <Button size="sm" onClick={() => setOpen(true)}>
+          <Button size="sm" onClick={() => { setError(""); setOpen(true); }}>
             <Plus className="h-3.5 w-3.5" /> Add holiday
           </Button>
-        </div>
+        </div>}
       </div>
+      <nav className="flex gap-2 px-4 pt-3" aria-label="Holiday views">
+        <Button size="sm" variant={tab === "upcoming" ? "secondary" : "ghost"} aria-pressed={tab === "upcoming"} onClick={() => setTab("upcoming")}>Upcoming</Button>
+        <Button size="sm" variant={tab === "past" ? "secondary" : "ghost"} aria-pressed={tab === "past"} onClick={() => setTab("past")}>Past</Button>
+      </nav>
 
-      {holidays.length === 0 ? (
+      {displayed.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-14 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-edge-strong bg-tint text-muted-foreground">
             <PartyPopper className="h-5 w-5" />
           </div>
-          <p className="font-display text-sm font-semibold">No holidays yet</p>
+          <p className="font-display text-sm font-semibold">{tab === "upcoming" ? "No upcoming holidays" : "No past holidays"}</p>
           <p className="max-w-xs text-[13px] text-muted-foreground">
-            Add public holidays and they'll show as days off across attendance.
+            Company holidays appear here when configured.
           </p>
         </div>
       ) : (
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-          {holidays.map((h) => (
+          {displayed.map(({ holiday: h, key }) => (
             <div key={h.id} className="card-surface group flex items-start gap-3 rounded-xl p-4 transition-colors hover:border-edge-strong">
               <div className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl bg-violet-500/15 text-violet-300">
-                <span className="font-display text-[15px] font-bold leading-none">{h.date.getDate()}</span>
+                <span className="font-display text-[15px] font-bold leading-none">{Number(key.slice(-2))}</span>
                 <span className="text-[9px] font-semibold uppercase">
-                  {h.date.toLocaleString("en", { month: "short", timeZone: "Asia/Kolkata" })}
+                  {new Date(`${key}T00:00:00Z`).toLocaleString(region.locale, { month: "short", timeZone: "UTC" })}
                 </span>
               </div>
               <div className="min-w-0 flex-1">
@@ -120,27 +144,28 @@ export function HolidaysManager({ holidays, region }: { holidays: Holiday[]; reg
                   )}
                 </div>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">
-                  {h.isRecurring ? new Intl.DateTimeFormat(region.locale, { month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(`${istDateKey(h.date)}T00:00:00Z`)) : formatCalendarDate(istDateKey(h.date), region.locale)}
-                  {istDateKey(h.date) === today && <span className="ml-1.5 text-muted-foreground">(Today)</span>}
+                  {formatCalendarDate(key, region.locale)}{h.isRecurring ? " · Annual" : ""}{key === today && " · Today"}
                 </p>
               </div>
-              <Button size="icon" variant="ghost" className="text-rose-300 opacity-0 transition-opacity hover:bg-rose-500/10 group-hover:opacity-100" onClick={() => remove(h.id)}>
+              {canManage && <Button size="icon" variant="ghost" aria-label={`Remove ${h.name}`} className="shrink-0 text-destructive hover:bg-destructive/10" onClick={() => setRemoving(h)}>
                 <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              </Button>}
             </div>
           ))}
         </div>
       )}
 
+      <ConfirmDialog open={!!removing} busy={loading} title="Remove this holiday?" description="Removing the holiday changes the shared calendar for attendance and leave." confirmLabel="Remove holiday" onCancel={() => !loading && setRemoving(null)} onConfirm={() => removing && remove(removing.id)} />
       <Modal open={open} onClose={() => setOpen(false)} title="Add holiday" size="sm">
         <form onSubmit={onSubmit} className="space-y-4">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Field label="Holiday name">
-            <Input name="name" required placeholder="e.g. Diwali" />
+            <Input name="name" required maxLength={120} placeholder="e.g. Founders Day" />
           </Field>
           <Field label="Date">
             <Input name="date" type="date" required />
           </Field>
-          <div className="flex gap-6">
+          <div className="flex flex-wrap gap-3">
             <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <input type="checkbox" name="isRecurring" className="h-4 w-4 accent-indigo-500" />
               Repeats every year

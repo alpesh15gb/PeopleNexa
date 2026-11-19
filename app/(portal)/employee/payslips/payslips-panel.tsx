@@ -33,6 +33,7 @@ function statementState(status: string) {
 export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Payslip[]; locale: string; lang?: Lang }) {
   const [viewing, setViewing] = useState<Payslip | null>(null);
   const [year, setYear] = useState("all");
+  const [status, setStatus] = useState("all");
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState("");
   const formatter = new Intl.NumberFormat(locale, { style: "currency", currency: "INR" });
@@ -44,7 +45,8 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
   const money = (value: number) => formatter.format(value);
   const latest = payslips[0];
   const years = [...new Set(payslips.map(({ month }) => month.slice(0, 4)))];
-  const visible = payslips.filter(({ month }) => year === "all" || month.startsWith(year + "-"));
+  const statuses = [...new Set(payslips.map((payslip) => payslip.status))];
+  const visible = payslips.filter((item) => (year === "all" || item.month.startsWith(year + "-")) && (status === "all" || item.status === status));
 
   async function download(payslip: Payslip) {
     if (downloading || payslip.status === "reversed") return;
@@ -109,13 +111,20 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
         <CardHeader className="flex-wrap">
           <CardTitle id="payslip-history">Payslip history</CardTitle>
           {years.length > 1 && <Field label="Year">
-            <Select value={year} onChange={(event) => setYear(event.target.value)}>
+            <Select aria-label="Payslip year" value={year} onChange={(event) => setYear(event.target.value)}>
               <option value="all">All years</option>
               {years.map((value) => <option key={value} value={value}>{value}</option>)}
             </Select>
           </Field>}
+          {statuses.length > 1 && <Field label="Status">
+            <Select aria-label="Payslip status" value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="all">All statuses</option>
+              {statuses.map((value) => <option key={value} value={value}>{statementState(value).label}</option>)}
+            </Select>
+          </Field>}
         </CardHeader>
         <CardContent className="pt-2">
+          {visible.length === 0 && <p role="status" className="py-4 text-sm text-muted-foreground">No payslips match the selected year and status.</p>}
           <ul className="divide-y divide-edge">
             {visible.map((payslip) => (
               <li key={payslip.id} className="grid min-w-0 gap-3 py-4 sm:grid-cols-[minmax(9rem,1.1fr)_minmax(0,1fr)_auto] sm:items-center">

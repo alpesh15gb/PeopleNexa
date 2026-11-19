@@ -26,6 +26,7 @@ interface PunchRow {
 interface Row {
   employeeId: string;
   canEdit: boolean;
+  punchReceived: boolean;
   employeeNumber: string;
   name: string;
   department: string;
@@ -153,100 +154,107 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
     return `/admin/attendance?${params.toString()}`;
   };
 
+  const filterReset = `/admin/attendance?${new URLSearchParams({ date, ...(branchId && { branch: branchId }), size: String(pageSize) })}`;
+  const statusLabel = statusFilter === "present" ? "With punches" : statusFilter === "late" ? "Late" : statusFilter === "needs_review" ? "Needs review" : "";
+  const reviewLabels: Record<string, string> = { missed_punch: "Missing punch", needs_review: "Check punch times" };
+
+  function rowStatus(row: Row) {
+    const review = reviewLabels[row.record?.reviewStatus ?? ""];
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {row.record ? <StatusPill status={row.record.status} /> :
+          row.leave ? <Badge tone="info">On leave</Badge> :
+          row.punchReceived ? <Badge tone="info">Punch received</Badge> : <StatusPill status="no_record" />}
+        {review && <Badge tone="warning">{review}</Badge>}
+      </div>
+    );
+  }
+
+  function rowActions(row: Row, mobile = false) {
+    const labels = row.record ? ["View punches", "Edit status"] : ["View punches", "Record status"];
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {row.record && <Button size={mobile ? "sm" : "icon"} variant={mobile ? "outline" : "ghost"} title={labels[0]} aria-label={`${labels[0]} for ${row.name}`} onClick={() => openPunches(row)}>
+          <ListChecks aria-hidden="true" className="h-4 w-4" />{mobile && labels[0]}
+        </Button>}
+        {row.canEdit && <Button size={mobile ? "sm" : "icon"} variant={mobile ? "outline" : "ghost"} title={labels[1]} aria-label={`${labels[1]} for ${row.name}`} onClick={() => openStatus(row)}>
+          {row.record ? <Pencil aria-hidden="true" className="h-4 w-4" /> : <Plus aria-hidden="true" className="h-4 w-4" />}{mobile && labels[1]}
+        </Button>}
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className="border-b border-edge px-5 py-3">
-        <form action="/admin/attendance" className="flex max-w-xl gap-2">
+      <div className="space-y-3 border-b border-edge px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="font-display font-semibold">Employee records</h2>
+            <p className="text-sm text-muted-foreground">{totalEmployees === 0 ? "0 employees" : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, totalEmployees)} of ${totalEmployees} employees`}</p>
+          </div>
+          {(query || statusLabel) && <Link href={filterReset} className="inline-flex min-h-9 items-center text-sm font-medium text-primary hover:underline">Clear filters</Link>}
+        </div>
+        <form action="/admin/attendance" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="date" value={date} />
           {branchId && <input type="hidden" name="branch" value={branchId} />}
           {statusFilter && <input type="hidden" name="status" value={statusFilter} />}
-          <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={query} className="pl-9" placeholder="Search employee name or code" aria-label="Search attendance employees" />
+          <div className="relative min-w-40 flex-1 sm:max-w-xs">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input name="q" type="search" key={query} defaultValue={query} maxLength={100} className="pl-9" placeholder="Search by name or code" aria-label="Search attendance employees" />
           </div>
-          <Select name="size" defaultValue={String(pageSize)} className="w-20">
+          <Select name="size" aria-label="Rows per page" key={pageSize} defaultValue={String(pageSize)} className="w-20">
             {[50, 100, 200, 500].map((size) => <option key={size} value={size}>{size}</option>)}
           </Select>
-          <Button type="submit" size="sm">Search</Button>
+          <Button type="submit" variant="outline">Search</Button>
         </form>
-        <p className="mt-2 text-[12px] text-muted-foreground">Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalEmployees)} of {totalEmployees} employees</p>
+        {statusLabel && <Badge tone="info">{statusLabel}</Badge>}
       </div>
-      <Table>
-        <THead>
-          <TR>
-            <TH className="sticky left-0 z-20 bg-card">Employee</TH>
-            <TH className="hidden md:table-cell">Department</TH>
-            <TH className="hidden lg:table-cell">Branch</TH>
-            <TH className="hidden lg:table-cell">Shift</TH>
-            <TH>In</TH>
-            <TH>Out</TH>
-            <TH>Status</TH>
-            <TH className="sticky right-0 z-20 w-28 bg-card" />
-          </TR>
-        </THead>
-        <TBody>
-          {rows.map((row) => {
-            const statusNow = row.record?.status ?? (row.leave ? "on_leave" : "no_record");
-            return (
-              <TR key={row.employeeId}>
-                <TD className="sticky left-0 z-10 bg-card">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tint-strong text-[11px] font-bold text-muted-foreground">
-                      {row.name.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[13.5px] font-medium">{row.name}</p>
-                      <p className="text-[11.5px] text-muted-foreground">{row.employeeNumber}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground lg:hidden">Shift: {row.shift}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground md:hidden">{row.branch} · {row.department}</p>
-                    </div>
-                  </div>
-                </TD>
-                <TD className="hidden md:table-cell">
-                  <span className="text-[13px] text-muted-foreground">{row.department}</span>
-                </TD>
-                <TD className="hidden lg:table-cell">
-                  <span className="text-[13px] text-muted-foreground">{row.branch}</span>
-                </TD>
-                <TD className="hidden lg:table-cell">
-                  <span className="text-[13px] text-muted-foreground">{row.shift}</span>
-                </TD>
-                <TD className="font-mono text-[13px]">{row.record?.punchIn ?? "—"}</TD>
-                <TD className="font-mono text-[13px]">{row.record?.punchOut ?? "—"}</TD>
-                <TD className="sticky right-0 z-10 bg-card">
-                  {!row.record && row.leave ? (
-                    <Badge className="border-transparent" style={{ background: `${row.leave.color}22`, color: row.leave.color }}>
-                      On leave · {row.leave.type}
-                    </Badge>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <StatusPill status={statusNow} />
-                      {row.record?.reviewStatus && (
-                        <Badge tone="warning">Review</Badge>
-                      )}
-                    </div>
-                  )}
-                </TD>
-                <TD>
-                  <div className="flex items-center gap-1">
-                    {row.record && <Button size="icon" variant="ghost" title="View punches" aria-label={`View punches for ${row.name}`} onClick={() => openPunches(row)}>
-                      <ListChecks aria-hidden="true" className="h-4 w-4" />
-                    </Button>}
-                    {row.canEdit && <Button size="icon" variant="ghost" title={row.record ? "Edit status" : "Record status"} aria-label={`${row.record ? "Edit" : "Record"} status for ${row.name}`} onClick={() => openStatus(row)}>
-                      {row.record ? <Pencil aria-hidden="true" className="h-4 w-4" /> : <Plus aria-hidden="true" className="h-4 w-4" />}
-                    </Button>}
-                  </div>
-                </TD>
-              </TR>
-            );
-          })}
-          {rows.length === 0 && (
-            <TR>
-              <TD colSpan={8} className="py-10 text-center text-[13px] text-muted-foreground">No employees match your search.</TD>
-            </TR>
-          )}
-        </TBody>
-      </Table>
+
+      {rows.length === 0 ? (
+        <div className="px-5 py-8 text-center">
+          <p className="font-medium">{query || statusFilter ? "No employees match the current filters" : "No employees in this scope"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{query || statusFilter ? "Change the search or clear the filters to see more results." : "Choose another branch or check your employee assignments."}</p>
+        </div>
+      ) : (
+        <>
+          <ul aria-label="Employee attendance records" className="divide-y divide-edge md:hidden">
+            {rows.map((row) => <li key={row.employeeId} className="space-y-3 p-4">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0"><h3 className="break-words font-semibold">{row.name}</h3><p className="break-words text-xs text-muted-foreground">{row.employeeNumber} · {row.branch}</p></div>
+                {rowStatus(row)}
+              </div>
+              <dl className="grid grid-cols-3 gap-2 rounded-lg bg-tint/50 p-3 text-sm">
+                <div><dt className="text-xs text-muted-foreground">Clock-in</dt><dd className="font-medium tabular-nums">{row.record?.punchIn ?? "—"}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Clock-out</dt><dd className="font-medium tabular-nums">{row.record?.punchOut ?? "—"}</dd></div>
+                <div className="min-w-0"><dt className="text-xs text-muted-foreground">Shift</dt><dd className="break-words font-medium">{row.shift}</dd></div>
+              </dl>
+              {row.leave && <p className="text-xs text-muted-foreground">{row.leave.type}</p>}
+              {rowActions(row, true)}
+            </li>)}
+          </ul>
+          <div className="hidden md:block">
+            <Table>
+              <caption className="sr-only">Employee attendance records</caption>
+              <THead>
+                <TR><TH>Employee</TH><TH>Status</TH><TH>Clock-in</TH><TH>Clock-out</TH><TH>Shift</TH><TH className="text-right">Actions</TH></TR>
+              </THead>
+              <TBody>
+                {rows.map((row) => <TR key={row.employeeId}>
+                  <TD>
+                    <p className="font-medium">{row.name}</p>
+                    <p className="text-xs text-muted-foreground">{row.employeeNumber} · {row.branch} · {row.department}</p>
+                  </TD>
+                  <TD>{rowStatus(row)}{row.leave && <p className="mt-1 text-xs text-muted-foreground">{row.leave.type}</p>}</TD>
+                  <TD className="tabular-nums">{row.record?.punchIn ?? "—"}{row.record && row.record.lateMinutes > 0 && <p className="text-xs text-muted-foreground">{row.record.lateMinutes} min late</p>}</TD>
+                  <TD className="tabular-nums">{row.record?.punchOut ?? "—"}</TD>
+                  <TD className="text-sm text-muted-foreground">{row.shift}</TD>
+                  <TD><div className="flex justify-end">{rowActions(row)}</div></TD>
+                </TR>)}
+              </TBody>
+            </Table>
+          </div>
+        </>
+      )}
       {totalPages > 1 && (
         <div className="flex items-center justify-between border-t border-edge px-5 py-3 text-[13px]">
           {page > 1 ? <Link href={pageUrl(page - 1)} className="inline-flex h-8 items-center rounded-lg border border-edge-strong bg-card px-3 text-xs font-medium text-foreground hover:bg-tint">Previous</Link> : <span />}

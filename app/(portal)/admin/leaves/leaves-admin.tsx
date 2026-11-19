@@ -108,6 +108,7 @@ export function LeavesAdmin({
   reviewOnly = false,
   todayKey,
   locale,
+  tab, monthKey, branch, query, statusFilter, pending, awayToday, upcoming, resultCount,
 }: {
   requests: Request[];
   types: Type[];
@@ -118,15 +119,20 @@ export function LeavesAdmin({
   importBatches: ImportBatch[];
   reviewOnly?: boolean;
   todayKey: string;
+  monthKey: string;
+  branch: string;
+  tab: "requests" | "balances" | "types" | "calendar" | "reconciliation";
+  query: string;
+  statusFilter: string;
+  pending: number;
+  awayToday: number;
+  upcoming: number;
+  resultCount: number;
   locale: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const [tab, setTab] = useState<
-    "requests" | "balances" | "types" | "calendar" | "reconciliation"
-  >("requests");
-  const [requestSearch, setRequestSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [reviewRequest, setReviewRequest] = useState<Request | null>(null);
@@ -146,7 +152,7 @@ export function LeavesAdmin({
     hasMore?: boolean;
     error?: string;
   } | null>(null);
-  const [month, setMonth] = useState(() => fromDateKey(todayKey));
+
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importTypeId, setImportTypeId] = useState("");
@@ -373,46 +379,25 @@ export function LeavesAdmin({
     }
   }
 
-  const pending = requests.filter((r) => r.canReview && (r.status === "pending" || r.cancellationRequestedBy)).length;
-  const statusFilter = reviewOnly ? "pending" : searchParams.get("status") ?? "all";
-  const filteredRequests = requests
-    .filter((request) => {
-      const query = requestSearch.trim().toLowerCase();
-      return (
-        (statusFilter === "all" ||
-          (statusFilter === "needs_review" && request.canReview && (request.status === "pending" || Boolean(request.cancellationRequestedBy))) ||
-          (statusFilter === "cancellation_pending" && Boolean(request.cancellationRequestedBy)) ||
-          request.status === statusFilter ||
-          (reviewOnly && Boolean(request.cancellationRequestedBy))) &&
-        (!query ||
-          `${request.employee.firstName} ${request.employee.lastName} ${request.employee.employeeNumber} ${request.leaveType.name}`
-            .toLowerCase()
-            .includes(query))
-      );
-    })
-    .sort(
-      (a, b) => Number(b.status === "pending" || Boolean(b.cancellationRequestedBy)) - Number(a.status === "pending" || Boolean(a.cancellationRequestedBy)),
-    );
-  const awayToday = new Set(
-    requests
-      .filter(
-        (request) =>
-          request.status === "approved" &&
-          istDateKey(request.fromDate) <= todayKey &&
-          istDateKey(request.toDate) >= todayKey &&
-          countsAsLeaveDay(request.leavePolicySnapshot, todayKey),
-      )
-      .map((request) => request.employee.employeeNumber),
-  ).size;
-  const upcoming = requests.filter(
-    (request) =>
-      request.status === "approved" && istDateKey(request.fromDate) > todayKey,
-  ).length;
-  function setStatusFilter(value: string) {
+  const filteredRequests = requests;
+  const month = fromDateKey(`${monthKey}-01`);
+  function updateView(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value === "all") params.delete("status");
-    else params.set("status", value);
-    router.replace(`?${params.toString()}`, { scroll: false });
+    params.delete("page");
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    router.push(`?${params}`, { scroll: false });
+  }
+  function setTab(view: typeof tab) {
+    updateView({ view });
+  }
+  function setMonth(value: Date) {
+    updateView({ view: "calendar", month: `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}` });
+  }
+  function setStatusFilter(value: string) {
+    updateView({ view: "requests", status: value === "all" ? "" : value });
   }
   const currentEmployeeSearch = employeeSearch?.query === employeeQuery.trim() ? employeeSearch : null;
 
@@ -426,7 +411,6 @@ export function LeavesAdmin({
         <button
           type="button"
           onClick={() => {
-            setTab("requests");
             setStatusFilter("needs_review");
           }}
           className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-left focus-visible:ring-2 focus-visible:ring-ring"
@@ -440,7 +424,6 @@ export function LeavesAdmin({
         <button
           type="button"
           onClick={() => {
-            setTab("calendar");
             setMonth(fromDateKey(todayKey));
           }}
           className="rounded-xl border border-edge bg-card p-4 text-left focus-visible:ring-2 focus-visible:ring-ring"
@@ -560,7 +543,11 @@ export function LeavesAdmin({
       </>}
       {tab === "requests" && (
         <div className="flex flex-wrap items-center gap-3 border-b border-edge p-5">
-          <div className="relative min-w-48 flex-1">
+          <form action="/admin/leaves" className="flex min-w-0 flex-1 items-center gap-2">
+            <input type="hidden" name="view" value="requests" />
+            {branch && <input type="hidden" name="branch" value={branch} />}
+            {reviewOnly ? <input type="hidden" name="review" value="approvals" /> : statusFilter !== "all" && <input type="hidden" name="status" value={statusFilter} />}
+            <div className="relative min-w-0 flex-1">
             <Search
               aria-hidden="true"
               className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground"
@@ -568,11 +555,11 @@ export function LeavesAdmin({
             <Input
               aria-label="Search leave requests"
               className="pl-9"
-              value={requestSearch}
-              onChange={(event) => setRequestSearch(event.target.value)}
+              name="q" key={query} defaultValue={query} maxLength={100}
               placeholder="Search employee, ID or leave type"
             />
-          </div>
+            </div><Button type="submit" size="sm" variant="outline">Search</Button>
+          </form>
           {!reviewOnly && <>
           <label className="sr-only" htmlFor="leave-status-filter">
             Filter requests by status
@@ -593,7 +580,7 @@ export function LeavesAdmin({
           </Select>
           </>}
           <span aria-live="polite" className="text-xs text-muted-foreground">
-            {filteredRequests.length} requests
+            {resultCount} requests
           </span>
         </div>
       )}
@@ -653,7 +640,7 @@ export function LeavesAdmin({
             ))}
             {!filteredRequests.length && (
               <p className="p-8 text-center text-sm text-muted-foreground">
-                {requests.length
+                {(query || statusFilter !== "all") && !reviewOnly
                   ? "No matching requests. Change your search or status filter."
                   : reviewOnly ? "No leave requests need your review." : "No leave requests yet."}
               </p>
@@ -680,12 +667,12 @@ export function LeavesAdmin({
                       className="py-12 text-center text-[13px] text-muted-foreground"
                     >
                       <p className="font-medium text-foreground">
-                        {requests.length
+                        {(query || statusFilter !== "all") && !reviewOnly
                           ? "No matching requests"
                           : reviewOnly ? "No leave requests need your review" : "No leave requests yet"}
                       </p>
                       <p className="mt-2">
-                        {requests.length
+                        {(query || statusFilter !== "all") && !reviewOnly
                           ? "Change your search or status filter to see more requests."
                           : reviewOnly ? "New applications and cancellations within your scope will appear here." : "Employee requests will appear here for review."}
                       </p>

@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowUpRight, CalendarClock, MapPin, PartyPopper, Timer, Watch } from "lucide-react";
+import { ArrowUpRight, CalendarClock, ChevronLeft, ChevronRight, Clock3, ListChecks, MapPin, PartyPopper, Settings2, Timer, Watch } from "lucide-react";
 import { redirect } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { dayRangeIST, isDateKey } from "@/lib/dates";
 import { workspaceRegion } from "@/lib/workspace-region";
-import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, timeZoneDayRange } from "@/lib/workspace-time";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, offsetDateKey, timeZoneDayRange } from "@/lib/workspace-time";
 import { countsAsLeaveDay } from "@/lib/leave-calendar";
+import { pendingApprovalFilters } from "@/lib/approval-workspace";
+import { istDateKey } from "@/lib/ist";
 import { getTenantAccess } from "@/lib/modules-server";
 import { managerLocationId } from "@/lib/location-scope";
 import { PageHeader } from "@/components/ui/card";
@@ -17,7 +20,7 @@ import { BranchPicker } from "./branch-picker";
 import { EmptyState } from "@/components/ui/stat";
 import { holidaysForAttendanceDay, tallyDailyAttendance } from "@/lib/attendance-tally";
 import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
-import { attendanceDrilldownStatus, attendanceEmployeeScope, attendanceStatusFilter } from "@/lib/attendance-drilldown";
+import { ATTENDANCE_REVIEW_FLAGS, attendanceDrilldownStatus, attendanceEmployeeScope, attendanceStatusFilter } from "@/lib/attendance-drilldown";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZES = [50, 100, 200, 500] as const;
@@ -88,7 +91,7 @@ export default async function AdminAttendancePage({
        ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true } })
       : null;
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
-  const query = queryParam?.trim().slice(0, 100) ?? "";
+  const query = typeof queryParam === "string" ? queryParam.trim().slice(0, 100) : "";
   const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
   const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
   const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
@@ -112,6 +115,7 @@ export default async function AdminAttendancePage({
         employeeNumber: true,
         firstName: true,
         lastName: true,
+        joiningDate: true,
         department: { select: { name: true } },
         branch: { select: { name: true } },
         shift: { select: { name: true, startTime: true } },
@@ -127,16 +131,23 @@ export default async function AdminAttendancePage({
       select: { id: true, name: true },
        orderBy: { name: "asc" },
     }),
-    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true, punchInTime: true } }),
+    prisma.attendance.findMany({ where: { tenantId: session.tenantId, date: { gte: dayStart, lt: dayEnd }, employee: employeeScope }, select: { employeeId: true, status: true, punchInTime: true, reviewStatus: true } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, employee: employeeScope }, select: { employeeId: true, leavePolicySnapshot: true } }),
     prisma.punch.findMany({ where: { tenantId: session.tenantId, ...authorizedPunchDayFilter(punchWindow.start, punchWindow.end), employee: employeeScope }, select: { employeeId: true } }),
   ]);
 
   const employeeIds = employees.map((employee) => employee.id);
-  const [records, leaves] = await Promise.all([
+  const reviewer = await pendingApprovalFilters(session);
+  const reviewScope = branchId ? { employee: { branchId } } : {};
+  const [records, leaves, rosters, openCorrections, heldPunches] = await Promise.all([
     prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } }, shift: { select: { name: true } } } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, }, include: { employee: { select: { id: true } }, leaveType: true } }),
+    prisma.rosterAssignment.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: dayStart }, select: { employeeId: true, shift: { select: { name: true } } } }),
+    reviewer.correction ? prisma.punchCorrection.count({ where: { AND: [reviewer.correction, reviewScope, { date: { gte: dayStart, lt: dayEnd } }] } }) : 0,
+    reviewer.heldPunch ? prisma.punch.count({ where: { AND: [reviewer.heldPunch, reviewScope, { punchTime: { gte: punchWindow.start, lt: punchWindow.end } }] } }) : 0,
   ]);
+  const received = new Set(tallyPunches.map((punch) => punch.employeeId));
+  const rosterByEmp = new Map(rosters.map(({ employeeId, shift }) => [employeeId, shift.name]));
 
   const leaveByEmp = new Map(leaves.filter((leave) => countsAsLeaveDay(leave.leavePolicySnapshot, dateKey)).map((leave) => [leave.employee.id, leave]));
   const recordByEmp = new Map(records.map((r) => [r.employeeId, r]));
@@ -146,12 +157,13 @@ export default async function AdminAttendancePage({
     const leave = leaveByEmp.get(emp.id);
     return {
       employeeId: emp.id,
-      canEdit: emp.id !== session.sub && dateKey <= today && (!isLocationManager || Boolean(emp.branch)),
+      canEdit: emp.id !== session.sub && dateKey <= today && (!emp.joiningDate || istDateKey(emp.joiningDate) <= dateKey) && (!isLocationManager || Boolean(emp.branch)),
       employeeNumber: emp.employeeNumber,
+      punchReceived: received.has(emp.id),
       name: `${emp.firstName} ${emp.lastName}`.trim(),
       department: emp.department?.name ?? "Unassigned",
       branch: emp.branch?.name ?? "Unassigned",
-      shift: record?.shift?.name ?? emp.shift?.name ?? "—",
+      shift: record?.shift?.name ?? rosterByEmp.get(emp.id) ?? emp.shift?.name ?? "—",
       record: record
         ? {
             id: record.id,
@@ -169,77 +181,76 @@ export default async function AdminAttendancePage({
   });
 
   const counts = tallyDailyAttendance(tallyEmployees.map((employee) => employee.id), tallyRecords, tallyLeaves.filter((leave) => countsAsLeaveDay(leave.leavePolicySnapshot, dateKey)).map((leave) => leave.employeeId), tallyPunches.map((punch) => punch.employeeId));
-  const dashboardHref = branchId ? `/admin?branch=${encodeURIComponent(branchId)}` : "/admin";
-
-  const statCards = [
-    { label: "Present", value: counts.livePresent, cls: "text-emerald-300" },
-    { label: "Late", value: counts.late, cls: "text-amber-300" },
-    { label: "Half day", value: counts.halfDay, cls: "text-violet-300" },
-    { label: "Permission", value: counts.permission, cls: "text-sky-300" },
-    { label: "On leave", value: counts.onLeave, cls: "text-violet-300" },
-    { label: "Explicit absent", value: counts.absent, cls: "text-rose-300" },
-    { label: "No record", value: counts.noRecord, cls: "text-muted-foreground" },
+  const dayHref = (day: string, status: string | null = attendanceStatus) => `/admin/attendance?${new URLSearchParams({ date: day, ...(branchId && { branch: branchId }), ...(query && { q: query }), ...(status && { status }), ...(pageSize !== 50 && { size: String(pageSize) }) })}`;
+  const queueParams = new URLSearchParams({ date: dateKey, ...(branchId && { branch: branchId }) });
+  const scopeLabel = branchId ? isBranchManager ? ownBranchName : branches.find((branch) => branch.id === branchId)?.name : isLocationManager ? "Assigned location" : "All branches";
+  const reviewCount = tallyRecords.filter((record) => ATTENDANCE_REVIEW_FLAGS.includes(record.reviewStatus ?? "")).length;
+  const summary = [
+    { label: "Employees", value: counts.total, status: null },
+    { label: "With punches", value: counts.livePresent, status: "present" },
+    { label: "Late", value: counts.late, status: "late" },
+    { label: "Needs review", value: reviewCount, status: "needs_review" },
   ];
-
+  const recorded = [
+    { label: "Present", value: counts.present }, { label: "Half day", value: counts.halfDay },
+    { label: "Permission", value: counts.permission }, { label: "On leave", value: counts.onLeave },
+    { label: "Marked absent", value: counts.absent }, { label: "No attendance record", value: counts.noRecord },
+  ];
+  const buttonClass = "inline-flex min-h-10 items-center gap-2 rounded-lg border border-edge bg-card px-3 text-sm font-medium hover:bg-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
   const holidays = holidaysForAttendanceDay(holidayCandidates, dateKey);
 
   return (
-    <div className="animate-fade-up space-y-6">
-      {holidays.length > 0 && (
-        <div className="flex items-center gap-3 rounded-2xl border border-violet-400/20 bg-violet-500/10 px-5 py-4">
-          <PartyPopper className="h-5 w-5 shrink-0 text-violet-300" />
-          <div>
-            <p className="font-display text-sm font-semibold text-violet-200">
-              {holidays.map((h) => h.name).join(", ")}
-            </p>
-            <p className="text-[12.5px] text-violet-300/80">
-              {holidays.every((holiday) => holiday.isHalfDay) ? "Half-day company holiday" : "Company holiday"}
-            </p>
+    <div className="animate-fade-up space-y-5">
+      <PageHeader title="Daily attendance" description={`${formatCalendarDate(dateKey, region.locale)} · ${scopeLabel ?? "Branch"} · ${region.timeZone}`}
+        actions={setupLinks.length > 0 ? <Link href={`${dailyHref}&view=setup`} className={cn(buttonClass, "hidden sm:inline-flex")}><Settings2 className="h-4 w-4" aria-hidden="true" /> Attendance setup</Link> : undefined}
+      />
+      <section aria-label="Attendance day and branch" className="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-xl border border-edge bg-card p-3 sm:p-4">
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Work date</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Link href={dayHref(offsetDateKey(dateKey, -1))} aria-label="Previous attendance day" className={`${buttonClass} px-2.5`}><ChevronLeft className="h-4 w-4" aria-hidden="true" /></Link>
+            <DatePicker value={dateKey} />
+            {dateKey < today && <Link href={dayHref(offsetDateKey(dateKey, 1))} aria-label="Next attendance day" className={`${buttonClass} px-2.5`}><ChevronRight className="h-4 w-4" aria-hidden="true" /></Link>}
+            {dateKey !== today && <Link href={dayHref(today)} className={buttonClass}>Today</Link>}
           </div>
         </div>
-      )}
-      <PageHeader
-        title="Attendance"
-        description={`${attendanceStatus ? `${attendanceStatus === "present" ? "Present" : "Late"} employees · ` : "Daily attendance for "}${formatCalendarDate(dateKey, region.locale)}${branchId ? ` · ${isBranchManager ? ownBranchName : (branches.find((b) => b.id === branchId)?.name ?? "")}` : ""} · ${region.timeZone}`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {isBranchManager ? (
-              <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
-                Branch: {ownBranchName}
-              </span>
-            ) : (
-              <BranchPicker branches={branches} value={branchId ?? ""} />
-            )}
-            <DatePicker value={dateKey} />
-          </div>
-        }
-      />
-      <nav className="flex flex-wrap items-center gap-2" aria-label="Attendance workspace">
-        <Link href={`/admin/regularization?view=corrections&date=${dateKey}${branchId ? `&branch=${encodeURIComponent(branchId)}` : ""}`} className="inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint">Review corrections</Link>
-        <Link href={`/admin/regularization?view=punches&date=${dateKey}${branchId ? `&branch=${encodeURIComponent(branchId)}` : ""}`} className="inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint">Review held punches</Link>
-        {setupLinks.length > 0 && <Link href={`${dailyHref}&view=setup`} className="inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-sm font-medium hover:bg-tint">Attendance setup</Link>}
-      </nav>
-      {attendanceStatus && <Link href={dashboardHref} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-tint hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Back to dashboard</Link>}
+        {!isBranchManager && branches.length > 0 && <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Branch</p>
+          <BranchPicker branches={branches} value={branchId ?? ""} />
+        </div>}
+        {setupLinks.length > 0 && <Link href={`${dailyHref}&view=setup`} className={cn(buttonClass, "ml-auto sm:hidden")}><Settings2 className="h-4 w-4" aria-hidden="true" /> Attendance setup</Link>}
+      </section>
+      {holidays.length > 0 && <div className="flex items-center gap-2 rounded-xl border border-edge bg-tint px-4 py-2.5 text-sm">
+        <PartyPopper className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <p><strong>{holidays.every((holiday) => holiday.isHalfDay) ? "Half-day holiday" : "Company holiday"}</strong> · {holidays.map((holiday) => holiday.name).join(", ")}</p>
+      </div>}
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-        {statCards.map((s) => (
-          <div key={s.label} className="card-surface rounded-xl px-4 py-3">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{s.label}</p>
-            <p className={`mt-1 font-display text-2xl font-bold ${s.cls}`}>{s.value}</p>
-          </div>
-        ))}
-      </div>
+      <section aria-label="Attendance overview" className="space-y-3">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          {summary.map(({ label, value, status }) => (
+            <Link key={label} href={dayHref(dateKey, status)} aria-current={attendanceStatus === status ? "page" : undefined}
+              className={`rounded-xl border p-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-4 ${attendanceStatus === status ? "border-primary/40 bg-primary/5" : "border-edge bg-card hover:border-primary/30"}`}>
+              <p className="text-sm font-medium text-muted-foreground">{label}</p>
+              <p className="font-display text-2xl font-semibold tabular-nums">{value.toLocaleString(region.locale)}</p>
+            </Link>
+          ))}
+        </div>
+        <details className="rounded-lg border border-edge bg-card p-3 text-sm">
+          <summary className="cursor-pointer font-medium">Recorded statuses</summary>
+          <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {recorded.map(({ label, value }) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-semibold tabular-nums">{value.toLocaleString(region.locale)}</dd></div>)}
+          </dl>
+        </details>
+      </section>
+
+      <nav className="flex flex-wrap gap-2" aria-label="Attendance review queues">
+        <Link href={`/admin/regularization?${queueParams}&view=corrections`} className={buttonClass}><ListChecks className="h-4 w-4" aria-hidden="true" /> Review corrections <span className="tabular-nums text-muted-foreground">{openCorrections}</span></Link>
+        <Link href={`/admin/regularization?${queueParams}&view=punches`} className={buttonClass}><Clock3 className="h-4 w-4" aria-hidden="true" /> Review held punches <span className="tabular-nums text-muted-foreground">{heldPunches}</span></Link>
+      </nav>
 
       <Card>
-        <CardContent className="p-0 pt-0">
-          {totalEmployees === 0 ? (
-            <EmptyState
-              title={query || attendanceStatus ? "No matching attendance" : "No employees in this scope"}
-              description={query || attendanceStatus ? "Change the search, date or filters." : "Select another branch or check employee assignments."}
-            />
-          ) : (
-            <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} status={attendanceStatus ?? ""} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} region={region} />
-          )}
+        <CardContent className="p-0 sm:p-0">
+          <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} status={attendanceStatus ?? ""} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} region={region} />
         </CardContent>
       </Card>
     </div>

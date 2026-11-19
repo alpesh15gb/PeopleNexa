@@ -7,7 +7,11 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
 import { RouteMap } from "./route-map";
-import { formatDateIST, formatTime } from "@/lib/dates";
+import Link from "next/link";
+import { Field, Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
+import { formatCalendarDate, formatWorkspaceTime } from "@/lib/workspace-time";
 
 type Emp = { id: string; firstName: string; lastName: string; employeeNumber: string; position: string | null };
 type Point = { lat: number; lng: number; at: string; accuracy: number | null };
@@ -16,21 +20,19 @@ type Journey = { employee: Emp; pingCount: number; distanceKm: number; startAt: 
 const PALETTE = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#ef4444", "#84cc16"];
 
 export function JourneysPanel({
-  date,
+  date, today, tab, region,
   journeys,
-  locationOff,
-  untracked,
   live,
-  employees,
+  employeeCount,
 }: {
   date: string;
+  today: string;
+  tab: "replay" | "live";
+  region: WorkspaceRegion;
   journeys: Journey[];
-  locationOff: Emp[];
-  untracked: Emp[];
   live: { employee: Emp; lat: number; lng: number; at: string }[];
-  employees: Emp[];
+  employeeCount: number;
 }) {
-  const [tab, setTab] = useState<"replay" | "live">("replay");
   const router = useRouter();
   useEffect(() => {
     if (tab !== "live") return;
@@ -39,6 +41,9 @@ export function JourneysPanel({
   }, [tab, router]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  function formatTime(value: Date | null) {
+    return formatWorkspaceTime(value, region);
+  }
   const selected = journeys.find((j) => j.employee.id === selectedId) ?? null;
   const totalDistance = journeys.reduce((s, j) => s + j.distanceKm, 0);
 
@@ -56,40 +61,31 @@ export function JourneysPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Journey Tracker</h1>
-          <p className="text-[13px] text-muted-foreground">Field GPS — route replay & distance for {formatDateIST(date)}</p>
+          <h1 className="text-xl font-semibold">Field journeys</h1>
+          <p className="text-sm text-muted-foreground">{tab === "live" ? "Recent locations during active duty" : `Route replay for ${formatCalendarDate(date, region.locale)}`} · {region.timeZone}</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => router.refresh()} className="rounded-lg bg-tint px-3.5 py-2 text-[13px] font-medium text-muted-foreground">Refresh</button>
-          <button
-            onClick={() => setTab("replay")}
-            className={`rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors ${tab === "replay" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}
-          >
-            <Route className="mr-1.5 inline h-3.5 w-3.5" /> Route replay
-          </button>
-          <button
-            onClick={() => setTab("live")}
-            className={`rounded-lg px-3.5 py-2 text-[13px] font-medium transition-colors ${tab === "live" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}
-          >
-            <Radar className="mr-1.5 inline h-3.5 w-3.5" /> Live ({live.length})
-          </button>
-        </div>
+        <Button variant="outline" onClick={() => router.refresh()}>Refresh</Button>
       </div>
+      <nav aria-label="Journey views" className="flex flex-wrap gap-4 border-b border-edge text-sm">
+        <Link aria-current={tab === "replay" ? "page" : undefined} href={`/admin/journeys?date=${date}`} className="inline-flex min-h-10 items-center gap-2 hover:text-primary"><Route aria-hidden="true" className="h-4 w-4" /> Route replay</Link>
+        <Link aria-current={tab === "live" ? "page" : undefined} href={`/admin/journeys?view=live&date=${date}`} className="inline-flex min-h-10 items-center gap-2 hover:text-primary"><Radar aria-hidden="true" className="h-4 w-4" /> Live locations ({live.length})</Link>
+      </nav>
+      {tab === "replay" && <form action="/admin/journeys" className="flex flex-wrap items-end gap-2"><Field label="Work date"><Input type="date" name="date" defaultValue={date} max={today} required /></Field><Button type="submit" variant="outline">View route replay</Button></form>}
 
       <div className="rounded-2xl border border-indigo-400/20 bg-indigo-500/5 px-4 py-3 text-[12.5px] text-indigo-200/90">
         <Shield className="mr-1.5 inline h-3.5 w-3.5" />
-        Tracking is limited to <strong>work hours</strong> — pings are only collected from clock-in to clock-out (plus a short grace) and off-duty locations are rejected server-side. If an employee hasn't given location permission, their day is simply shown as “location not shared”.
+        Tracking is limited to <strong>eligible work sessions</strong>. Live locations shows updates from the last 10 minutes.
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      {tab === "replay" && <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-              <Users className="h-3.5 w-3.5" /> Tracked today
+              <Users className="h-3.5 w-3.5" /> Tracked this workday
             </div>
-            <p className="text-2xl font-bold">{journeys.length}<span className="text-sm font-normal text-muted-foreground"> / {employees.length} employees</span></p>
+            <p className="text-2xl font-bold">{journeys.length}<span className="text-sm font-normal text-muted-foreground"> / {employeeCount} employees</span></p>
           </CardHeader>
         </Card>
         <Card>
@@ -97,7 +93,7 @@ export function JourneysPanel({
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
               <Route className="h-3.5 w-3.5" /> Distance covered
             </div>
-            <p className="text-2xl font-bold">{totalDistance.toLocaleString("en-IN", { maximumFractionDigits: 1 })}<span className="text-sm font-normal text-muted-foreground"> km</span></p>
+            <p className="text-2xl font-bold">{totalDistance.toLocaleString(region.locale, { maximumFractionDigits: 1 })}<span className="text-sm font-normal text-muted-foreground"> km</span></p>
           </CardHeader>
         </Card>
         <Card>
@@ -108,7 +104,7 @@ export function JourneysPanel({
             <p className="text-2xl font-bold">{journeys.reduce((s, j) => s + j.pingCount, 0)}</p>
           </CardHeader>
         </Card>
-      </div>
+      </div>}
 
       {tab === "replay" ? (
         <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
@@ -116,11 +112,12 @@ export function JourneysPanel({
             <p className="border-b border-edge px-4 py-3 text-[13px] font-medium">Employees on field</p>
             <div className="max-h-[460px] divide-y divide-[color:var(--border)] overflow-y-auto">
               {journeys.length === 0 && (
-                <p className="px-4 py-6 text-[13px] text-muted-foreground">No location pings today yet.</p>
+                <p className="px-4 py-6 text-[13px] text-muted-foreground">No duty locations were recorded for this workday.</p>
               )}
               {journeys.map((j, i) => (
                 <button
                   key={j.employee.id}
+                  aria-pressed={selectedId === j.employee.id}
                   onClick={() => setSelectedId(selectedId === j.employee.id ? null : j.employee.id)}
                   className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-tint/60 ${selectedId === j.employee.id ? "bg-tint" : ""}`}
                 >
@@ -150,12 +147,9 @@ export function JourneysPanel({
             )}
           </div>
         </div>
-      ) : (
+      ) : live.length ? (
         <div className="space-y-3">
           <RouteMap markers={live.map((m) => ({ label: `${m.employee.firstName} ${m.employee.lastName}`, point: m }))} height={440} />
-          {live.length === 0 && (
-            <EmptyState icon={<Radar className="h-5 w-5" />} title="No live locations" description="Pings from the employee app will appear here in real time." />
-          )}
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {live.map((m) => (
               <div key={m.employee.id} className="flex items-center gap-3 rounded-xl border border-edge bg-card px-4 py-3">
@@ -171,15 +165,9 @@ export function JourneysPanel({
               </div>
             ))}
           </div>
-          {locationOff.length > 0 && (
-            <p className="text-[12px] text-amber-300">
-              Location not shared (permission off): {locationOff.map((e) => `${e.firstName} ${e.lastName}`).join(", ")}
-            </p>
-          )}
-          {untracked.length > 0 && (
-            <p className="text-[12px] text-muted-foreground">No attendance today: {untracked.map((e) => `${e.firstName} ${e.lastName}`).join(", ")}</p>
-          )}
         </div>
+      ) : (
+        <EmptyState icon={<Radar className="h-5 w-5" />} title="No live locations" description="Recent location updates from active work sessions will appear here." />
       )}
     </div>
   );

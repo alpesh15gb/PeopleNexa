@@ -95,6 +95,7 @@ export function ConfigurationManager({
   locations,
   records,
   section,
+  initialDashboardLocationId,
   showPayroll,
   showLeave,
 }: {
@@ -108,6 +109,7 @@ export function ConfigurationManager({
   locations: Location[];
   records: ConfigurationRecord[];
   section: ConfigurationSection;
+  initialDashboardLocationId?: string;
   showPayroll: boolean;
   showLeave: boolean;
 }) {
@@ -117,8 +119,8 @@ export function ConfigurationManager({
   const [locationId, setLocationId] = useState(locations[0]?.id ?? "");
   const [idCardScope, setIdCardScope] = useState("");
   const [idCardFormKey, setIdCardFormKey] = useState(0);
-  const [dashboardScope, setDashboardScope] = useState("");
-  const [widgets, setWidgets] = useState<Widget[]>(() => editableDashboardWidgets(records, null));
+  const [dashboardScope, setDashboardScope] = useState(initialDashboardLocationId ?? "");
+  const [widgets, setWidgets] = useState<Widget[]>(() => editableDashboardWidgets(records, initialDashboardLocationId ?? null));
   const [preview, setPreview] = useState(false);
   async function request(method: string, body: unknown) {
     const response = await fetch("/api/configuration", {

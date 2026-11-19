@@ -41,31 +41,45 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   const [importResult, setImportResult] = useState<{ total: number; created: number; activated: number; skipped: number; failed: number; reprocessed: number; locationAssigned: number; message?: string } | null>(null);
   const [syncingTopology, setSyncingTopology] = useState(false);
   const [topologyResult, setTopologyResult] = useState<{ locations: number; branches: number; devices: number; skipped: number; cleanedBranches: number; cleanedLocations: number } | null>(null);
+  const [savedConnection, setSavedConnection] = useState(initial);
+  const [saveError, setSaveError] = useState("");
+  const dirty = url !== savedConnection.url || username !== savedConnection.username || Boolean(password) || enabled !== savedConnection.enabled || interval !== savedConnection.pollIntervalMinutes;
+  const connectionBusy = saving || testing || importing || syncingTopology;
+  const canUseConnection = Boolean(savedConnection.url) && !dirty && !connectionBusy;
 
   async function save() {
+    if (!dirty || connectionBusy) return;
     setSaving(true);
+    setSaveError("");
     try {
       const res = await fetch("/api/settings/ebioserver", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, username, password, enabled, pollIntervalMinutes: interval }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        toast("error", data.error ?? "Failed to save");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        setSaveError(data?.error ?? "Could not save the connection.");
         return;
       }
+      setSavedConnection((previous) => ({ ...previous, ...data.profile }));
+      setUrl(data.profile.url);
+      setUsername(data.profile.username);
+      setEnabled(data.profile.enabled);
+      setInterval(data.profile.pollIntervalMinutes);
       setPassword("");
+      setTestResult(null);
       setStatus((s) => ({ ...s, hasPassword: data.profile.hasPassword }));
       toast("success", enabled ? "eBioserver connection saved" : "Settings saved — connection disabled");
     } catch {
-      toast("error", "Something went wrong.");
+      setSaveError("Could not confirm the save. Refresh to check the connection before retrying.");
     } finally {
       setSaving(false);
     }
   }
 
   async function importEmployees() {
+    if (!canUseConnection) return;
     setImporting(true);
     setImportResult(null);
     try {
@@ -85,6 +99,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   }
 
   async function syncTopology() {
+    if (!canUseConnection) return;
     setSyncingTopology(true);
     setTopologyResult(null);
     try {
@@ -101,6 +116,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
   }
 
   async function test() {
+    if (!canUseConnection) return;
     setTesting(true);
     setTestResult(null);
     try {
@@ -184,17 +200,20 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
         </div>
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
-          <Button onClick={save} loading={saving}>
+          <Button onClick={save} disabled={!dirty || connectionBusy} loading={saving}>
             <Save className="h-4 w-4" /> Save connection
           </Button>
-          <Button variant="outline" onClick={test} loading={testing}>
+          <Button variant="outline" onClick={test} disabled={!canUseConnection} loading={testing}>
             {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
             Test connection
           </Button>
         </div>
+        {saveError && <p role="alert" className="mt-3 text-sm text-destructive">{saveError}</p>}
+        {(dirty || !savedConnection.url) && <p className="mt-3 text-sm text-muted-foreground">Save the gateway details before testing or importing.</p>}
 
-        {testResult && (
+        {!dirty && testResult && (
           <p
+            role={testResult.ok ? "status" : "alert"}
             className={cn(
               "mt-4 rounded-xl border px-3.5 py-2.5 text-[13px]",
               testResult.ok
@@ -215,7 +234,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             Match eBio device groups to PeopleNexa locations and worksites to branches. Use this after adding or moving devices in eBioserver.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Button variant="outline" onClick={syncTopology} loading={syncingTopology}>
+              <Button variant="outline" onClick={syncTopology} disabled={!canUseConnection} loading={syncingTopology}>
                 <Link2 className="h-4 w-4" /> Sync topology
             </Button>
             {topologyResult && (
@@ -236,7 +255,7 @@ export function SettingsPanel({ initial }: { initial: InitialProfile }) {
             Import missing employee codes for review in the employee directory.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <Button variant="outline" onClick={importEmployees} loading={importing}>
+            <Button variant="outline" onClick={importEmployees} disabled={!canUseConnection} loading={importing}>
               {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               Import employees
             </Button>

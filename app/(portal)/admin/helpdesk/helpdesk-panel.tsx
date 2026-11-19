@@ -25,7 +25,7 @@ type Ticket = {
 };
 
 const prioTone: Record<string, "neutral" | "info" | "warning" | "danger"> = { low: "neutral", medium: "info", high: "warning", urgent: "danger" };
-const statusTone: Record<string, "warning" | "info" | "success"> = { open: "warning", in_progress: "info", resolved: "success", closed: "neutral" as never };
+const statusTone: Record<string, "warning" | "info" | "success" | "neutral"> = { open: "warning", in_progress: "info", resolved: "success", closed: "neutral" };
 
 export function HelpdeskPanel() {
   const toast = useToast();
@@ -41,6 +41,9 @@ export function HelpdeskPanel() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<HelpdeskPage | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
+  const [updating, setUpdating] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const params = new URLSearchParams({ filter, page: String(page), pageSize: "25" });
@@ -55,11 +58,13 @@ export function HelpdeskPanel() {
   }, [filter, page]);
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
+    setLoadError("");
     void load(controller.signal).catch((error) => {
       if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load tickets.");
-    });
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [load]);
+  }, [load, retry]);
 
   async function act(id: string, payload: Record<string, unknown>) {
     const res = await fetch(`/api/helpdesk/${id}`, {
@@ -73,7 +78,7 @@ export function HelpdeskPanel() {
 
   async function sendReply(e: React.FormEvent, id: string) {
     e.preventDefault();
-    if (!reply.trim()) return;
+    if (!reply.trim() || busy) return;
     setBusy(true);
     try {
       await act(id, { action: "message", body: reply });
@@ -88,22 +93,30 @@ export function HelpdeskPanel() {
   }
 
   async function changeStatus(id: string, status: string) {
+    if (updating) return;
+    setUpdating(id);
     try {
       await act(id, { action: "update", status });
       toast("success", `Ticket ${status.replace("_", " ")}.`);
       await load();
     } catch (err) {
-      toast("error", err instanceof Error ? err.message : "Failed");
+      toast("error", err instanceof Error ? err.message : "Could not update the ticket.");
+    } finally {
+      setUpdating(null);
     }
   }
 
   async function assign(id: string, assigneeId: string) {
+    if (updating) return;
+    setUpdating(id);
     try {
       await act(id, { action: "update", assigneeId });
       toast("success", "Assignee updated.");
       await load();
     } catch (err) {
-      toast("error", err instanceof Error ? err.message : "Failed");
+      toast("error", err instanceof Error ? err.message : "Could not update the assignee.");
+    } finally {
+      setUpdating(null);
     }
   }
 
@@ -119,10 +132,15 @@ export function HelpdeskPanel() {
       if (res.ok) {
         toast("success", "Ticket deleted.");
         await load();
-      } else toast("error", "Failed");
+        setConfirmTarget(null);
+      } else {
+        const result = await res.json().catch(() => null);
+        toast("error", result?.error ?? "Could not delete the ticket.");
+      }
+    } catch {
+      toast("error", "Could not confirm deletion. Refresh to check the ticket.");
     } finally {
       setConfirmBusy(false);
-      setConfirmTarget(null);
     }
   }
 
@@ -143,9 +161,9 @@ export function HelpdeskPanel() {
         </div>
       </div>
 
-      {loadError && <p role="alert" className="text-sm text-destructive">{loadError}</p>}
-      {tickets.length === 0 && !loadError ? (
-        <EmptyState icon={<LifeBuoy className="h-5 w-5" />} title="No tickets" description="Employee-raised support tickets will appear here." />
+      {loadError && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 p-3 text-sm"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => setRetry((value) => value + 1)}>Retry</Button></div>}
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Loading tickets…</p> : tickets.length === 0 && !loadError ? (
+        <EmptyState icon={<LifeBuoy className="h-5 w-5" />} title={filter === "all" ? "No tickets" : `No ${filter} tickets`} description={filter === "all" ? "Employee-raised support tickets will appear here." : undefined} />
       ) : (
         <div className="space-y-3">
           {tickets.map((t) => (
@@ -177,18 +195,18 @@ export function HelpdeskPanel() {
                     ))}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <select aria-label="Ticket assignee" value={t.assignee?.id ?? ""} onChange={(e) => assign(t.id, e.target.value)} className="rounded-lg border border-edge bg-card px-2.5 py-2 text-[12.5px] outline-none">
+                    <select disabled={updating !== null} aria-label="Ticket assignee" value={t.assignee?.id ?? ""} onChange={(e) => assign(t.id, e.target.value)} className="rounded-lg border border-edge bg-card px-2.5 py-2 text-[12.5px] outline-none">
                       <option value="">Unassigned</option>
                       {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                     </select>
-                    <Button size="sm" variant="outline" onClick={() => changeStatus(t.id, "in_progress")} disabled={t.status === "in_progress"}>{t.status === "closed" || t.status === "resolved" ? "Reopen" : "Start work"}</Button>
-                    <Button size="sm" variant={t.status === "resolved" ? "success" : "outline"} onClick={() => changeStatus(t.id, "resolved")} disabled={t.status === "resolved" || t.status === "closed"}>Resolve</Button>
-                    <Button size="sm" variant="ghost" onClick={() => changeStatus(t.id, "closed")} disabled={t.status === "closed"}>Close</Button>
-                    <Button size="icon" variant="ghost" onClick={() => del(t.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
+                    <Button size="sm" variant="outline" onClick={() => changeStatus(t.id, "in_progress")} disabled={updating !== null || t.status === "in_progress"}>{t.status === "closed" || t.status === "resolved" ? "Reopen" : "Start work"}</Button>
+                    <Button size="sm" variant={t.status === "resolved" ? "success" : "outline"} onClick={() => changeStatus(t.id, "resolved")} disabled={updating !== null || t.status === "resolved" || t.status === "closed"}>Resolve</Button>
+                    <Button size="sm" variant="ghost" onClick={() => changeStatus(t.id, "closed")} disabled={updating !== null || t.status === "closed"}>Close</Button>
+                    <Button size="icon" variant="ghost" aria-label={`Delete ticket ${t.subject}`} disabled={updating !== null} onClick={() => del(t.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
                   </div>
                   {t.status !== "closed" && <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
                     <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply to employee…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
-                    <Button type="submit" size="sm" loading={busy}><Send className="h-3.5 w-3.5" /> Send</Button>
+                    <Button type="submit" size="sm" disabled={!reply.trim()} loading={busy}><Send className="h-3.5 w-3.5" /> Send</Button>
                   </form>}
                 </div>
               )}

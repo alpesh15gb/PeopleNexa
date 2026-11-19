@@ -10,6 +10,7 @@ export function canOpenApprovals(role: string) {
 export type PendingApprovalFilters = {
   leave?: Prisma.LeaveRequestWhereInput;
   correction?: Prisma.PunchCorrectionWhereInput;
+  heldPunch?: Prisma.PunchWhereInput;
   expense?: Prisma.ExpenseClaimWhereInput;
   exit?: Prisma.ExitRequestWhereInput;
 };
@@ -40,7 +41,11 @@ export async function pendingApprovalFilters(session: SessionPayload): Promise<P
     // Correction reviews use the employee's branch location in their handler.
     employee: locationId ? { tenantId, branch: { locationId } } : employee,
   };
-  if (role === "supervisor") return { correction };
+  const heldPunch: Prisma.PunchWhereInput = {
+    tenantId, employee, employeeId: { not: sub },
+    OR: [{ faceStatus: { in: ["review", "rejected"] } }, { authStatus: "pending" }],
+  };
+  if (role === "supervisor") return { correction, heldPunch };
 
   const leave: Prisma.LeaveRequestWhereInput = {
     tenantId,
@@ -54,7 +59,7 @@ export async function pendingApprovalFilters(session: SessionPayload): Promise<P
       ] },
     ],
   };
-  if (role === "branch_manager") return { correction, leave };
+  if (role === "branch_manager") return { correction, heldPunch, leave };
 
-  return { correction, leave, expense: { ...pending, employeeId: { not: sub } }, exit: { ...pending, employeeId: { not: sub } } };
+  return { correction, heldPunch, leave, expense: { ...pending, employeeId: { not: sub } }, exit: { ...pending, employeeId: { not: sub } } };
 }

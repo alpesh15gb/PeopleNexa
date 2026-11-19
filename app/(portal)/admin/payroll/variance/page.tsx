@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { isMonthKey, monthKey } from "@/lib/dates";
+import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";
 import {
   comparePayrollRuns,
@@ -26,7 +26,7 @@ export default async function PayrollVariancePage({
   const params = await searchParams;
   const current = isMonthKey(params.current ?? "")
     ? params.current!
-    : monthKey(new Date());
+    : monthKeyIST();
   const previousMonth = new Date(`${current}-01T00:00:00Z`);
   previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1);
   const reference = isMonthKey(params.reference ?? "")
@@ -86,7 +86,7 @@ export default async function PayrollVariancePage({
     ]),
   );
   const comparison =
-    referenceSlips.length && currentSlips.length
+    reference !== current && referenceSlips.length && currentSlips.length
       ? comparePayrollRuns(referenceSlips, currentSlips)
       : null;
   return (
@@ -101,6 +101,7 @@ export default async function PayrollVariancePage({
           ? {
               status: referenceRuns.map((run) => run.status).join(", "),
               count: referenceSlips.length,
+              id: referenceRuns.length === 1 ? referenceRuns[0].id : undefined,
             }
           : null
       }
@@ -109,6 +110,7 @@ export default async function PayrollVariancePage({
           ? {
               status: currentRuns.map((run) => run.status).join(", "),
               count: currentSlips.length,
+              id: currentRuns.length === 1 ? currentRuns[0].id : undefined,
             }
           : null
       }

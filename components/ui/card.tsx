@@ -43,12 +43,12 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-end justify-between gap-5", className)}>
-      <div className="min-w-0">
-        <h1 className="font-display text-[26px] font-bold tracking-[-0.025em] text-balance">{title}</h1>
-        {description && <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">{description}</p>}
+    <header className={cn("flex flex-col gap-3 border-b border-edge pb-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-6 sm:pb-5", className)}>
+      <div className="min-w-0 sm:flex-1 sm:basis-64">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">{title}</h1>
+        {description && <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-    </div>
+      {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
+    </header>
   );
 }

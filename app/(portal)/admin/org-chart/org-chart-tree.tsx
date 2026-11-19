@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, ChevronDown, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { Input } from "@/components/ui/input";
 
 interface Node {
   id: string;
@@ -16,6 +18,11 @@ interface Node {
 
 export function OrgChartTree({ employees }: { employees: Node[] }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const term = query.trim().toLowerCase();
+  const matches = term ? employees.filter((employee) =>
+    `${employee.firstName} ${employee.lastName} ${employee.employeeNumber} ${employee.department?.name ?? ""}`.toLowerCase().includes(term)
+  ) : [];
 
   const childrenOf = useMemo(() => {
     const map = new Map<string, Node[]>();
@@ -72,7 +79,7 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
         <div key={`${e.id}-cycle`}>
           <div
             className="group flex items-center gap-2.5 rounded-xl border border-edge px-3 py-2.5"
-            style={{ marginLeft: depth * 28 }}
+            style={{ marginLeft: Math.min(5, depth) * 12 }}
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-tint-strong text-muted-foreground">
               <User className="h-4 w-4" />
@@ -105,23 +112,17 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
             "group flex items-center gap-2.5 rounded-xl border border-edge px-3 py-2.5 transition-colors hover:border-edge-strong",
             isAdmin ? "bg-indigo-500/[0.08]" : "bg-card-2"
           )}
-          style={{ marginLeft: depth * 28 }}
+          style={{ marginLeft: Math.min(5, depth) * 12 }}
         >
-          <button
-            onClick={() => hasTeam && toggle(e.id)}
-            className={cn(
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg",
-              hasTeam ? "text-muted-foreground hover:bg-tint-strong" : "pointer-events-none opacity-0"
-            )}
-          >
-            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
+          {hasTeam ? <button type="button" onClick={() => toggle(e.id)} aria-expanded={!isCollapsed} aria-label={`${isCollapsed ? "Expand" : "Collapse"} reports for ${e.firstName} ${e.lastName}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-tint-strong">
+            {isCollapsed ? <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" /> : <ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />}
+          </button> : <span aria-hidden="true" className="w-9 shrink-0" />}
           <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", isAdmin ? "bg-gradient-brand text-white" : "bg-tint-strong text-muted-foreground")}>
             <User className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1 leading-tight">
-            <p className="truncate text-[13px] font-semibold">
-              {e.firstName} {e.lastName}
+            <p className="break-words text-[13px] font-semibold">
+              <Link href={`/admin/employee-master?employee=${encodeURIComponent(e.id)}#employee-record`} className="hover:text-primary hover:underline">{e.firstName} {e.lastName}</Link>
               {isAdmin && <span className="ml-1.5 rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-indigo-300">Admin</span>}
             </p>
             <p className="truncate text-[11px] text-muted-foreground">
@@ -144,7 +145,21 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
 
   return (
     <div className="p-5">
-      {roots.length === 0 ? (
+      {employees.length > 0 && <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Input aria-label="Find an employee on the organization chart" className="max-w-sm" placeholder="Find employee, code or department" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {!term && roots.length > 0 && <button type="button" className="px-3 py-2 text-sm font-medium text-primary hover:underline" onClick={() => setCollapsed(collapsed.size ? new Set() : new Set(employees.filter((employee) => childrenOf.has(employee.id)).map((employee) => employee.id)))}>{collapsed.size ? "Expand all" : "Collapse all"}</button>}
+      </div>}
+      {term ? (
+        matches.length ? <ul className="divide-y divide-edge">
+          {matches.map((employee) => {
+            const manager = employees.find((person) => person.id === employee.managerId);
+            return <li key={employee.id} className="py-3">
+              <Link href={`/admin/employee-master?employee=${encodeURIComponent(employee.id)}#employee-record`} className="font-medium hover:text-primary hover:underline">{employee.firstName} {employee.lastName}</Link>
+              <p className="text-xs text-muted-foreground">{employee.employeeNumber}{employee.department ? ` · ${employee.department.name}` : ""}{manager ? ` · Reports to ${manager.firstName} ${manager.lastName}` : ""}</p>
+            </li>;
+          })}
+        </ul> : <p className="py-6 text-sm text-muted-foreground">No employees match this search.</p>
+      ) : roots.length === 0 ? (
         <>
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-edge-strong bg-tint text-muted-foreground">
@@ -178,10 +193,7 @@ export function OrgChartTree({ employees }: { employees: Node[] }) {
         </>
       ) : (
         <>
-          <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-[12.5px] text-warning/90">
-            {roots.length} top-level {roots.length === 1 ? "manager" : "managers"} · {employees.length - roots.length} direct reports ·
-            {orphanCount > 0 ? ` ${orphanCount} employees have a manager that isn't active — they appear as top-level` : " structure complete"}
-          </div>
+          {orphanCount > 0 && <p className="mb-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3 text-sm text-warning">{orphanCount} employees appear at the top level because their assigned manager is inactive or unavailable.</p>}
           <div className="space-y-1.5">{roots.map((r) => renderNode(r, 0, new Set()))}</div>
           {unreachable.length > 0 && (
             <div className="mt-4 rounded-xl border border-edge bg-card-2 p-4">

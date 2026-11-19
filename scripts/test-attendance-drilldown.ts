@@ -7,9 +7,13 @@ const end = new Date("2026-09-26T00:00:00.000Z");
 
 assert.equal(attendanceDrilldownStatus("present"), "present");
 assert.equal(attendanceDrilldownStatus("late"), "late");
+assert.equal(attendanceDrilldownStatus("needs_review"), "needs_review");
 assert.equal(attendanceDrilldownStatus("half_day"), null);
 assert.deepEqual(attendanceStatusFilter("present", start, end), {
   punches: { some: { punchTime: { gte: start, lt: end }, authStatus: { in: ["auto", "approved"] } } },
+});
+assert.deepEqual(attendanceStatusFilter("needs_review", start, end), {
+  attendance: { some: { reviewStatus: { in: ["missed_punch", "needs_review"] }, date: { gte: start, lt: end } } },
 });
 assert.deepEqual(authorizedPunchDayFilter(start, end), {
   punchTime: { gte: start, lt: end }, authStatus: { in: ["auto", "approved"] },

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { payrollScopeHref } from "@/lib/payroll-work-queue";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileWarning, Search } from "lucide-react";
@@ -23,8 +25,8 @@ type Props = {
   current: string;
   locationId: string | null;
   locations: { id: string; name: string }[];
-  referenceRun: { status: string; count: number } | null;
-  currentRun: { status: string; count: number } | null;
+  referenceRun: { status: string; count: number; id?: string } | null;
+  currentRun: { status: string; count: number; id?: string } | null;
   comparison: Comparison | null;
   canManageSettings?: boolean;
 };
@@ -122,6 +124,16 @@ export function PayrollVariance({
           month.
         </p>
       </section>
+      {locationId && (referenceRun || currentRun) && <section aria-label="Recorded payroll periods" className="grid gap-3 sm:grid-cols-2">
+        {([{ label: "Reference month", period: reference, run: referenceRun }, { label: "Comparison month", period: current, run: currentRun }]).map(({ label, period, run }) => (
+          <div key={label} className="rounded-xl border border-edge bg-card p-4">
+            <h2 className="text-sm font-semibold">{label} · {period}</h2>
+            {run ? <><p className="mt-1 text-sm text-muted-foreground">{run.count} {run.count === 1 ? "payslip" : "payslips"}</p>
+              <Link href={payrollScopeHref("/admin/payroll", { locationId, period, runId: run.id })} className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open {period} payroll</Link></>
+              : <p className="mt-1 text-sm text-muted-foreground">No completed payroll</p>}
+          </div>
+        ))}
+      </section>}
       {!comparison ? (
         <section className="flex gap-4 rounded-2xl border border-dashed border-edge p-8">
           <FileWarning
@@ -135,7 +147,9 @@ export function PayrollVariance({
             <p className="mt-2 text-sm text-muted-foreground">
               {!locationId
                 ? "Select a location to get started."
-                : !referenceRun && !currentRun
+                : reference === current
+                  ? "Select a different comparison month."
+                  : !referenceRun && !currentRun
                   ? "Neither selected month has completed payroll."
                   : !referenceRun
                     ? "The first month has no completed payroll."

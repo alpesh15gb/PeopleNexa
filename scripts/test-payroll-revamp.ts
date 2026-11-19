@@ -24,7 +24,7 @@ assert.match(reporting, /FINANCIAL_HISTORY_RUN_STATUSES/, "financial exports per
 assert.match(reporting, /payrollRunId: null, status: "paid"/, "only explicitly paid legacy slips are exported");
 assert.match(registerExport, /payrollOperationLocationId\(session, new URL\(req\.url\)\.searchParams\.get\("locationId"\)\)/);
 assert.match(panel, /register\?\$\{new URLSearchParams\(\{ locationId: locationId \?\? "" \}\)/);
-assert.match(processRoute, /redirect\(`\/admin\/payroll/);
+assert.match(processRoute, /redirect\(payrollScopeHref\("\/admin\/payroll"/);
 assert.match(processRoute, /params\.run/);
 assert.match(generate, /No effective published payroll policy exists for this scope and period/);
 assert.match(panel, /Only employees in this monthly payroll run are shown/);

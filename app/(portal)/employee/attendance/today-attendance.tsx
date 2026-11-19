@@ -19,12 +19,14 @@ type ClockEmployee = {
   branch: { name: string; latitude: number | null; longitude: number | null; geofenceRadius: number } | null;
 };
 
-export async function TodayAttendance({ employee, region, lang, now, showCorrection }: {
+export async function TodayAttendance({ employee, region, lang, now, earliestCorrection, keepReviewFilter, selectedMonth }: {
   employee: ClockEmployee;
   region: WorkspaceRegion;
   lang: Lang;
   now: Date;
-  showCorrection: boolean;
+  earliestCorrection: string | null;
+  keepReviewFilter: boolean;
+  selectedMonth: string;
 }) {
   const scope = { tenantId: employee.tenantId, employeeId: employee.id };
   const workDay = await attendanceDayForPunch(employee, now, region.timeZone);
@@ -43,7 +45,8 @@ export async function TodayAttendance({ employee, region, lang, now, showCorrect
     if (+await attendanceDayForPunch(employee, punch.punchTime, region.timeZone) === +workDay) punches.push(punch);
   }
   const pending = punches.filter((punch) => punch.authStatus === "pending");
-  const href = `/employee/attendance?view=corrections&month=${dayKey.slice(0, 7)}`;
+  const href = `/employee/attendance?view=corrections&month=${dayKey.slice(0, 7)}${keepReviewFilter ? "&focus=review" : ""}`;
+  const showCorrection = !earliestCorrection || dayKey >= earliestCorrection;
   const today = dateKeyInTimeZone(now, region.timeZone);
 
   return (
@@ -64,7 +67,7 @@ export async function TodayAttendance({ employee, region, lang, now, showCorrect
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display font-semibold">Punch status</h2>
-            {correction ? <Link href={`${href}#corrections-${dayKey}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">View pending correction</Link> : showCorrection && <Link href={`${href}&action=request&date=${dayKey}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">Request a correction</Link>}
+            {correction ? <Link href={`${href}#corrections-${dayKey}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">View pending correction</Link> : showCorrection && <Link href={`${href}&action=request&date=${dayKey}&from=today&fromMonth=${selectedMonth}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">Request a correction</Link>}
           </div>
           {punches.length > 0 ? (
             <ul className="space-y-2 text-sm">{punches.map((punch) => (

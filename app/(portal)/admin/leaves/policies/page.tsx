@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { LeavePolicyWorkspace } from "./policy-workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeavePoliciesPage() {
-  const session = await requireSession();
+  const session = await requireActiveSession();
   if (session.role !== "admin") redirect("/admin/leaves");
   const [locations, types, records, periods] = await Promise.all([
     prisma.location.findMany({

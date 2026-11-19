@@ -79,6 +79,9 @@ export function LeavesPanel({
   today,
   view,
   range,
+  requestFilter,
+  page,
+  submittedRequest,
   canApply,
   openOnLoad,
 }: {
@@ -89,6 +92,9 @@ export function LeavesPanel({
   today: string;
   view: "summary" | "requests";
   range: "upcoming" | "past" | "all";
+  requestFilter: string;
+  page: number;
+  submittedRequest: Pick<Req, "id" | "fromDate" | "toDate" | "status" | "days" | "leaveType"> | null;
   canApply: boolean;
   openOnLoad: boolean;
 }) {
@@ -110,15 +116,18 @@ export function LeavesPanel({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [halfDay, setHalfDay] = useState(false);
-  const [requestFilter, setRequestFilter] = useState("all");
   const leaveTypeField = useRef<HTMLSelectElement>(null);
-  const upcoming = requests.filter((request) => istDateKey(request.toDate) >= today).sort((a, b) => a.fromDate.getTime() - b.fromDate.getTime());
-  const past = requests.filter((request) => istDateKey(request.toDate) < today).sort((a, b) => b.toDate.getTime() - a.toDate.getTime());
-  const nextLeave = upcoming.filter((request) => request.status === "approved" || request.status === "pending").slice(0, 3);
-  const visibleRequests = (range === "upcoming" ? upcoming : range === "past" ? past : requests).filter((request) => {
-    if (requestFilter === "cancellation_pending") return Boolean(request.cancellationRequestedBy);
-    return requestFilter === "all" || request.status === requestFilter;
-  });
+  const nextLeave = view === "summary" ? requests : [];
+  const visibleRequests = requests;
+  function leaveHref(targetView: "summary" | "requests", nextRange = range, status = requestFilter, pageNumber = 1, submittedId?: string) {
+    const params = new URLSearchParams();
+    if (targetView === "requests") params.set("view", "requests");
+    if (nextRange !== "all") params.set("range", nextRange);
+    if (status !== "all") params.set("status", status);
+    if (pageNumber > 1) params.set("page", String(pageNumber));
+    if (submittedId) params.set("submitted", submittedId);
+    return params.size ? `/employee/leaves?${params}` : "/employee/leaves";
+  }
   const selectedBalance = balance.find((item) => item.id === selectedTypeId);
   const previewInput = new URLSearchParams({ from: fromDate, to: toDate, type: selectedTypeId, halfDay: String(halfDay) }).toString();
   const dateError =
@@ -129,7 +138,7 @@ export function LeavesPanel({
   const activeEstimate = currentPreview && "data" in currentPreview ? currentPreview.data : null;
   const estimateError = currentPreview && "error" in currentPreview ? currentPreview.error : "";
   const estimating = needsEstimate && !currentPreview;
-  const baseHref = view === "summary" ? "/employee/leaves" : `/employee/leaves?view=requests&range=${range}`;
+  const baseHref = leaveHref(view, range, requestFilter, page);
 
   function openApplication(typeId?: string) {
     if (typeId) setSelectedTypeId(typeId);
@@ -197,8 +206,11 @@ export function LeavesPanel({
       setFromDate("");
       setToDate("");
       setHalfDay(false);
-      setRequestFilter("all");
-      router.replace(`/employee/leaves?view=requests&range=${toDate < today ? "past" : "upcoming"}`, { scroll: false });
+      const submittedHref = view === "requests"
+        ? leaveHref("requests", range, requestFilter, page, data.request.id)
+        : leaveHref("requests", "all", "all", 1, data.request.id);
+      if (openOnLoad) router.replace(submittedHref, { scroll: false });
+      else router.push(submittedHref, { scroll: false });
       router.refresh();
     } catch {
       setFormError("Could not send your request. Try again.");
@@ -239,8 +251,8 @@ export function LeavesPanel({
     <>
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-edge">
         <nav aria-label="My leave views" className="flex gap-6 text-sm">
-          <Link href="/employee/leaves" aria-current={view === "summary" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "summary" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Summary</Link>
-          <Link href="/employee/leaves?view=requests" aria-current={view === "requests" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Requests</Link>
+          <Link href={leaveHref("summary", range, requestFilter, page)} aria-current={view === "summary" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "summary" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Summary</Link>
+          <Link href={leaveHref("requests", range, requestFilter, page)} aria-current={view === "requests" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Requests</Link>
         </nav>
         <Button className="mb-2" onClick={() => openApplication()} disabled={!canApply}>
           <CalendarPlus aria-hidden="true" className="h-4 w-4" />{" "}
@@ -355,6 +367,16 @@ export function LeavesPanel({
       </Card>
       </>}
 
+      {submittedRequest && <section aria-labelledby="submitted-leave-title" className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
+        <div className="min-w-0 flex-1">
+          <h2 id="submitted-leave-title" className="text-sm font-semibold">Submitted request</h2>
+          <p className="mt-1 break-words text-sm text-muted-foreground">
+            {submittedRequest.leaveType.name} · {dateLabel(submittedRequest.fromDate)}{istDateKey(submittedRequest.toDate) !== istDateKey(submittedRequest.fromDate) && ` – ${dateLabel(submittedRequest.toDate)}`}
+          </p>
+        </div>
+        <StatusPill status={submittedRequest.status} lang={lang} />
+        <Link href={baseHref} replace scroll={false} className="rounded-lg px-3 py-2 text-sm text-primary hover:bg-tint">Dismiss</Link>
+      </section>}
       {view === "requests" && <Card>
         <CardHeader className="flex-wrap items-end">
           <div>
@@ -367,9 +389,10 @@ export function LeavesPanel({
             aria-label="Filter my leave requests"
             className="w-auto min-w-36"
             value={requestFilter}
-            onChange={(event) => setRequestFilter(event.target.value)}
+            onChange={(event) => router.push(leaveHref("requests", range, event.target.value), { scroll: false })}
           >
             <option value="all">All statuses</option>
+            <option value="awaiting_review">Awaiting review (leave and cancellations)</option>
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
@@ -380,29 +403,27 @@ export function LeavesPanel({
         <CardContent className="pt-4">
           <nav aria-label="Leave request dates" className="mb-3 flex flex-wrap gap-2">
             {([ ["upcoming", "Current and upcoming"], ["past", "Past"], ["all", "All dates"] ] as const).map(([key, label]) => (
-              <Link key={key} href={`/employee/leaves?view=requests&range=${key}`} aria-current={range === key ? "page" : undefined} className={`rounded-lg border border-edge px-3 py-2 text-sm ${range === key ? "bg-primary/10 font-semibold text-primary" : "hover:bg-tint"}`}>
+              <Link key={key} href={leaveHref("requests", key)} aria-current={range === key ? "page" : undefined} className={`rounded-lg border border-edge px-3 py-2 text-sm ${range === key ? "bg-primary/10 font-semibold text-primary" : "hover:bg-tint"}`}>
                 {label}
               </Link>
             ))}
           </nav>
           {visibleRequests.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">
-              {requests.length
-                ? "No requests match the selected dates and status."
-                : t(lang, "common.noLeaveRequests")}
+              {range !== "all" || requestFilter !== "all" ? "No requests match the selected dates and status." : t(lang, "common.noLeaveRequests")}
             </p>
           ) : (
             <div className="divide-y divide-[color:var(--border)]">
               {visibleRequests.map((r) => (
                 <div
                   key={r.id}
-                  className="flex flex-wrap items-center gap-3 py-3.5"
+                  className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"
                 >
                   <span
-                    className="h-2.5 w-2.5 rounded-full"
+                    className="mt-1.5 h-2.5 w-2.5 rounded-full sm:mt-0"
                     style={{ background: r.leaveType.color }}
                   />
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0">
                     <p className="text-[13.5px] font-medium">
                       {r.leaveType.name} ·{" "}
                       {r.days > 1
@@ -410,7 +431,7 @@ export function LeavesPanel({
                         : t(lang, "leaves.day", { n: r.days })}
                     </p>
                     <p className="text-[11.5px] text-muted-foreground">
-                      {dateLabel(r.fromDate)} – {dateLabel(r.toDate)}
+                      {dateLabel(r.fromDate)}{istDateKey(r.fromDate) !== istDateKey(r.toDate) && ` – ${dateLabel(r.toDate)}`}
                       {r.source === "admin_on_behalf"
                         ? " · Recorded on your behalf"
                         : ""}
@@ -422,19 +443,21 @@ export function LeavesPanel({
                       {r.cancellationDecision.approved ? "Cancellation approved" : "Cancellation declined. Leave remains approved."}{r.cancellationDecision.note && ` · ${r.cancellationDecision.note}`}
                     </p>}
                   </div>
-                  {r.status === "cancelled" && !r.cancellationDecision ? <span className="rounded-full bg-tint px-2 py-1 text-xs">Withdrawn</span> : <StatusPill status={r.status} lang={lang} />}
-                  {r.cancellationRequestedBy && <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Cancellation awaiting review</span>}
-                  {r.status === "approved" && !r.cancellationRequestedBy && <Button size="sm" variant="outline" disabled={loading} onClick={() => { setCancelId(r.id); setCancelReason(""); setCancelError(""); }}>Request cancellation</Button>}
-                  {r.status === "pending" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => setWithdrawId(r.id)}
-                    >
-                      Withdraw
-                    </Button>
-                  )}
+                  <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:justify-end">
+                    {r.status === "cancelled" && !r.cancellationDecision ? <span className="rounded-full bg-tint px-2 py-1 text-xs">Withdrawn</span> : <StatusPill status={r.status} lang={lang} />}
+                    {r.cancellationRequestedBy && <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Cancellation awaiting review</span>}
+                    {r.status === "approved" && !r.cancellationRequestedBy && <Button size="sm" variant="outline" disabled={loading} onClick={() => { setCancelId(r.id); setCancelReason(""); setCancelError(""); }}>Request cancellation</Button>}
+                    {r.status === "pending" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={loading}
+                        onClick={() => setWithdrawId(r.id)}
+                      >
+                        Withdraw
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

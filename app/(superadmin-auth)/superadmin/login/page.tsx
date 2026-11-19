@@ -3,6 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { SuperAdminLoginForm } from "./superadmin-login-form";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export const metadata: Metadata = {
   title: "Super Admin | PeopleNexa",
@@ -14,24 +16,21 @@ export default async function SuperAdminLoginPage() {
   if (session?.role === "superadmin") redirect("/superadmin");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
-      <div className="w-full max-w-sm">
-        <div className="mb-8">
-          <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-brand text-lg font-bold text-white">
-            SA
-          </div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Super Admin</h1>
+    <main className="min-h-dvh bg-background px-5 py-8 sm:py-14">
+      <div className="mx-auto w-full max-w-md">
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <Link href="/login" className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary hover:underline"><ArrowLeft aria-hidden="true" className="size-4" /> Workspace sign-in</Link>
+          <ThemeToggle />
+        </div>
+        <div className="mb-6">
+          <span className="mb-4 grid size-11 place-items-center rounded-xl bg-primary/10 text-primary"><ShieldCheck aria-hidden="true" className="size-5" /></span>
+          <h1 className="font-display text-3xl font-bold tracking-tight">Platform sign-in</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Platform console — manage tenants, modules and licenses.
+            Use your platform administrator account to manage workspaces, plans and licenses.
           </p>
         </div>
         <SuperAdminLoginForm />
-        <p className="mt-8 text-center text-[13px] text-muted-foreground">
-          <Link href="/login" className="font-medium text-indigo-300 transition-colors hover:text-indigo-200">
-            ← Back to workspace login
-          </Link>
-        </p>
       </div>
-    </div>
+    </main>
   );
 }

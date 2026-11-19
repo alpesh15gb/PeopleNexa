@@ -8,7 +8,7 @@ import {
   payrollOperationLocationId,
 } from "@/lib/location-scope";
 import { canUsePayrollPolicyFallback, requiresPublishedPayrollPolicy, resolvePayrollPolicy } from "@/lib/payroll-policy";
-import { resolveSalaryRevision } from "@/lib/salary-revisions";
+import { resolveSalaryRevision, salaryRevisionPeriodStart } from "@/lib/salary-revisions";
 import { payrollMonthAnchor } from "@/lib/payroll-component-assignments";
 import { payrollGenerationTotals, type PayrollGenerationResult } from "@/lib/payroll-generation-results";
 import type { ReviewedAttendanceRow } from "@/lib/payroll-attendance-import";
@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
         where: {
           tenantId: session.tenantId,
           status: "approved",
-          effectiveFrom: { lte: new Date(`${month}-01T00:00:00.000Z`) },
+          effectiveFrom: { lte: salaryRevisionPeriodStart(month) },
         },
         select: {
           id: true,
@@ -255,6 +255,7 @@ export async function POST(req: NextRequest) {
       return {
         id: e.id,
         salary: revision?.newSalary ?? e.salary!,
+        salaryRevisionId: revision?.id ?? null,
         salaryStructure: e.salaryStructure,
         payMode: e.payMode,
         workBasisRate: e.workBasisRate,

@@ -18,6 +18,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (loading) return;
     setError("");
     setLoading(true);
     const form = new FormData(e.currentTarget);
@@ -40,7 +41,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
         return;
       }
       toast("success", "Login successful — welcome back!");
-      router.push(data.mustChangePassword ? "/change-password" : data.role === "admin" || data.role === "branch_manager" || data.role === "location_manager" ? "/admin" : data.role === "supervisor" ? "/admin/attendance" : "/employee");
+      router.replace(data.next);
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
@@ -50,7 +51,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
+    <form onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
       <div className="space-y-4">
         {!workspace && <Field label="Workspace" hint="The first part of your workspace address">
           <Input
@@ -59,6 +60,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
             autoComplete="off"
             spellCheck={false}
             placeholder="your-workspace"
+            autoCapitalize="none"
             className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>}
@@ -74,10 +76,11 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
             className={`h-11 ${BLUE_FOCUS}`}
           />
         </Field>
-        <Field label="Password">
-          <div className="relative">
+        <Field label="Password" htmlFor="workspace-password">
+          <div id="workspace-password-controls" className="relative">
             <Input
               name="password"
+              id="workspace-password"
               type={showPassword ? "text" : "password"}
               required
               autoComplete="current-password"
@@ -98,7 +101,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
       </div>
 
       {error && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">
+        <p role="alert" className="mt-4 rounded-xl border border-destructive/25 bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
           {error}
         </p>
       )}
@@ -107,7 +110,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
         type="submit"
         size="lg"
         loading={loading}
-        className="mt-6 w-full bg-accent text-accent-foreground shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
+        className="mt-6 w-full"
       >
         <LogIn className="h-4 w-4" aria-hidden="true" />
         Sign in

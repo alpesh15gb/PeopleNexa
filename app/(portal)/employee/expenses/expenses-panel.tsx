@@ -10,7 +10,8 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
-import { formatDate } from "@/lib/dates";
+import { formatRegionalMoney, type WorkspaceRegion } from "@/lib/workspace-region";
+import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
 import { t, type Lang } from "@/lib/i18n";
 import { useRouteAction } from "@/components/use-route-action";
 
@@ -42,13 +43,14 @@ const tone: Record<string, "warning" | "info" | "success" | "danger"> = {
   rejected: "danger",
 };
 
-export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Claim[]; totalClaims: number; lang?: Lang }) {
+export function ExpensesPanel({ claims, totalClaims, filtered, region, lang = "en" }: { claims: Claim[]; totalClaims: number; filtered: boolean; region: WorkspaceRegion; lang?: Lang }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useRouteAction("new");
   const [loading, setLoading] = useState(false);
   const [receipt, setReceipt] = useState<{ file: File; preview: string } | null>(null);
   const [viewing, setViewing] = useState<Claim | null>(null);
+  const [formError, setFormError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => {
@@ -73,11 +75,14 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
   function closeClaimForm() {
     if (loading) return;
     setReceipt(null);
+    setFormError("");
     setOpen(false);
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (loading) return;
+    setFormError("");
     setLoading(true);
     const form = new FormData(e.currentTarget);
     try {
@@ -97,9 +102,10 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
       toast("success", t(lang, "expenses.submitted"));
       setOpen(false);
       setReceipt(null);
+      if (filtered) router.push("/employee/expenses?status=pending", { scroll: false });
       router.refresh();
     } catch (e) {
-      toast("error", e instanceof Error ? e.message : "Failed to submit");
+      setFormError(e instanceof Error ? e.message : "Could not submit the claim.");
     } finally {
       setLoading(false);
     }
@@ -119,8 +125,8 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
       {claims.length === 0 ? (
         <EmptyState
           icon={<Receipt className="h-5 w-5" />}
-          title={t(lang, "expenses.none")}
-          description={t(lang, "expenses.noneDesc")}
+          title={filtered ? "No claims with this status" : t(lang, "expenses.none")}
+          description={filtered ? "Select All claims to see the rest of your history." : t(lang, "expenses.noneDesc")}
         />
       ) : (
         <div className="divide-y divide-[color:var(--border)]">
@@ -132,13 +138,13 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] font-medium">{c.title}</p>
                 <p className="text-[11.5px] text-muted-foreground">
-                  {t(lang, `expenses.cat.${c.category}`)} · {formatDate(new Date(c.createdAt))}
+                  {t(lang, `expenses.cat.${c.category}`)} · {formatCalendarDate(dateKeyInTimeZone(new Date(c.createdAt), region.timeZone), region.locale)}
                 </p>
               </div>
               {c.receiptUrl && (
                 <img src={c.receiptUrl} alt="Receipt" className="h-9 w-9 rounded-lg border border-edge object-cover" />
               )}
-              <span className="font-mono text-[13.5px] font-bold">₹{c.amount.toLocaleString("en-IN")}</span>
+              <span className="font-mono text-[13.5px] font-bold">{formatRegionalMoney(c.amount, region)}</span>
               <Badge tone={tone[c.status] ?? "neutral"} className="capitalize">{c.status}</Badge>
             </button>
           ))}
@@ -148,8 +154,8 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
       <Modal open={Boolean(viewing)} onClose={() => setViewing(null)} title={viewing?.title} size="sm">
         {viewing && <div className="space-y-4 text-sm">
           <p className="flex flex-wrap items-center gap-3">
-            <span className="font-semibold">₹{viewing.amount.toLocaleString("en-IN")}</span>
-            <span className="text-muted-foreground">{t(lang, `expenses.cat.${viewing.category}`)} · {formatDate(new Date(viewing.createdAt))}</span>
+            <span className="font-semibold">{formatRegionalMoney(viewing.amount, region)}</span>
+            <span className="text-muted-foreground">{t(lang, `expenses.cat.${viewing.category}`)} · {formatCalendarDate(dateKeyInTimeZone(new Date(viewing.createdAt), region.timeZone), region.locale)}</span>
             <Badge tone={tone[viewing.status] ?? "neutral"} className="capitalize">{viewing.status}</Badge>
           </p>
           {viewing.description && <p className="whitespace-pre-wrap text-muted-foreground">{viewing.description}</p>}
@@ -203,6 +209,7 @@ export function ExpensesPanel({ claims, totalClaims, lang = "en" }: { claims: Cl
               </button>
             )}
           </div>
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" disabled={loading} onClick={closeClaimForm}>{t(lang, "common.cancel")}</Button>
             <Button type="submit" loading={loading}>{t(lang, "expenses.submit")}</Button>

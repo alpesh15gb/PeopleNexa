@@ -39,6 +39,8 @@ interface Staff {
   employeeNumber: string;
   role: string;
   branchId: string | null;
+  loginOnly: boolean;
+  hasPortalLogin: boolean;
 }
 
 // Tiny local loader for the geofence picker. Returns null (keeping the manual
@@ -111,10 +113,14 @@ export function BranchesManager({
   branches,
   employees,
   locations,
+  canCreate,
+  canManageAccess,
 }: {
   branches: Branch[];
   employees: Staff[];
   locations: BranchLocation[];
+  canCreate: boolean;
+  canManageAccess: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -123,6 +129,10 @@ export function BranchesManager({
   const [loading, setLoading] = useState(false);
   const [managingBranch, setManagingBranch] = useState<Branch | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  const [expectedStaffManagers, setExpectedStaffManagers] = useState<string[]>([]);
+  const [currentManagerId, setCurrentManagerId] = useState("");
+  const [replacementId, setReplacementId] = useState("");
+  const [managerError, setManagerError] = useState("");
   // New manager-login form (non-employee account: email + password only).
   const [mgrName, setMgrName] = useState("");
   const [mgrEmail, setMgrEmail] = useState("");
@@ -132,8 +142,11 @@ export function BranchesManager({
   const [geoLat, setGeoLat] = useState("");
   const [geoLng, setGeoLng] = useState("");
   const [geoRadius, setGeoRadius] = useState("200");
+  const [query, setQuery] = useState("");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
+    setFormError("");
     if (editing && typeof editing === "object") {
       setGeoLat(editing.latitude != null ? String(editing.latitude) : "");
       setGeoLng(editing.longitude != null ? String(editing.longitude) : "");
@@ -155,6 +168,8 @@ export function BranchesManager({
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (loading) return;
+    setFormError("");
     setLoading(true);
     const form = new FormData(e.currentTarget);
     const payload = {
@@ -164,6 +179,7 @@ export function BranchesManager({
       latitude: form.get("latitude"),
       longitude: form.get("longitude"),
       geofenceRadius: form.get("geofenceRadius"),
+      ...(isNew && canManageAccess ? { locationId: form.get("locationId") || null } : {}),
     };
     try {
       const res = await fetch(editing && typeof editing === "object" ? `/api/branches/${editing.id}` : "/api/branches", {
@@ -173,12 +189,14 @@ export function BranchesManager({
       });
       const data = await res.json();
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to save branch");
+        setFormError(data.error ?? "Could not save the branch.");
         return;
       }
-      toast("success", editing ? "Branch updated" : "Branch created");
+      toast("success", isNew ? "Branch created" : "Branch updated");
       setEditing(null);
       router.refresh();
+    } catch {
+      setFormError("Could not save the branch. Try again.");
     } finally {
       setLoading(false);
     }
@@ -196,56 +214,51 @@ export function BranchesManager({
       toast("success", "Branch removed");
       setConfirmDelete(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not delete the branch. Try again.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function setManager(branchId: string, employeeId: string | null, currentManagerId?: string | null) {
+  function openBranchAccess(branch: Branch) {
+    const ids = employees.filter((person) => person.branchId === branch.id && person.role === "branch_manager" && !person.loginOnly).map((person) => person.id);
+    setExpectedStaffManagers(ids);
+    setCurrentManagerId(ids[0] ?? "");
+    setReplacementId(ids[0] ?? "");
+    setManagerError("");
+    setManagingBranch(branch);
+  }
+
+  async function setManager(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!managingBranch || savingManager || creatingMgr || currentManagerId === replacementId) return;
     setSavingManager(true);
+    setManagerError("");
     try {
-      // Promote first, demote after: a failed second step leaves two managers
-      // (visible and fixable) instead of zero (silent loss of coverage).
-      if (employeeId) {
-        const res = await fetch(`/api/employees/${employeeId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "branch_manager", branchId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          toast("error", data.error ?? "Failed to assign manager");
-          return;
-        }
-        if (currentManagerId && currentManagerId !== employeeId) {
-          await fetch(`/api/employees/${currentManagerId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "employee" }),
-          });
-        }
-        toast("success", "Branch manager assigned");
-      } else {
-        if (currentManagerId) {
-          await fetch(`/api/employees/${currentManagerId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "employee" }),
-          });
-        }
-        toast("success", "Branch manager removed");
+      const response = await fetch(`/api/branches/${managingBranch.id}/manager`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentManagerId: currentManagerId || null, employeeId: replacementId || null, expectedManagerIds: expectedStaffManagers }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setManagerError(data.error ?? "Could not change the staff manager.");
+        if (response.status === 409) router.refresh();
+        return;
       }
+      toast("success", replacementId ? "Branch manager access updated." : "Staff manager access removed.");
       setManagingBranch(null);
       router.refresh();
     } catch {
-      toast("error", "Something went wrong.");
+      setManagerError("Could not change the staff manager. Try again.");
     } finally {
       setSavingManager(false);
     }
   }
 
   async function createManagerLogin() {
-    if (!managingBranch || creatingMgr) return;
+    if (!managingBranch || creatingMgr || savingManager) return;
     if (!mgrName.trim() || !mgrEmail.trim() || mgrPassword.length < 12) {
       toast("error", "Enter a name, a valid email, and a password of at least 12 characters.");
       return;
@@ -354,7 +367,10 @@ export function BranchesManager({
   }
 
   // Cards sorted by location, then name — the hierarchy reads top to bottom.
-  const sortedBranches = [...branches].sort((a, b) => {
+  const term = query.trim().toLowerCase();
+  const sortedBranches = branches.filter((branch) =>
+    [branch.name, branch.code, locationName(branch.locationId)].some((part) => part?.toLowerCase().includes(term)),
+  ).sort((a, b) => {
     const la = locationName(a.locationId) ?? "";
     const lb = locationName(b.locationId) ?? "";
     return la.localeCompare(lb) || a.name.localeCompare(b.name);
@@ -362,14 +378,18 @@ export function BranchesManager({
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-edge px-5 py-3">
-        <p className="text-[13px] text-muted-foreground">{branches.length} branches</p>
-        <Button size="sm" onClick={() => setEditing("new")}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
+        {branches.length > 0 ? <Input aria-label="Search branches" placeholder="Branch name, code or location" value={query} onChange={(event) => setQuery(event.target.value)} className="max-w-sm" /> : <p className="text-sm text-muted-foreground">Branches</p>}
+        {canCreate && <Button size="sm" onClick={() => setEditing("new")}>
           <Plus className="h-3.5 w-3.5" /> New branch
-        </Button>
+        </Button>}
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        {!sortedBranches.length && <div className="col-span-full rounded-xl border border-dashed border-edge p-6 text-sm">
+          <p className="font-semibold">{term ? "No matching branches" : canCreate ? "No branches yet" : "No location assigned"}</p>
+          <p className="mt-1 text-muted-foreground">{term ? "Search for another branch name, code, or location." : canCreate ? "Create a branch to assign employees. Add a geofence if it will verify on-site attendance." : "Ask a workspace admin to assign your account to a location."}</p>
+        </div>}
         {sortedBranches.map((b) => (
           <div key={b.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
             <div className="flex items-start justify-between gap-2">
@@ -395,19 +415,18 @@ export function BranchesManager({
               <span className="rounded-md bg-tint px-2 py-1">{b.geofenceRadius}m</span>
             </div>
             {(() => {
-              const manager = employees.find((e) => e.role === "branch_manager" && e.branchId === b.id);
+              const branchManagers = employees.filter((e) => e.role === "branch_manager" && e.branchId === b.id);
+              const staffManagers = branchManagers.filter((e) => !e.loginOnly);
+              const loginCount = branchManagers.length - staffManagers.length;
               return (
                 <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-edge bg-tint px-2.5 py-1.5">
-                  <p className="min-w-0 truncate text-[12px] text-muted-foreground">
-                    {manager ? (
-                      <>Manager: <span className="font-semibold text-foreground">{manager.firstName} {manager.lastName}</span></>
-                    ) : (
-                      "No branch manager"
-                    )}
+                  <p className="min-w-0 break-words text-xs text-muted-foreground">
+                    {staffManagers.length > 0 ? <span className="font-semibold text-foreground">{staffManagers.map((manager) => `${manager.firstName} ${manager.lastName}`.trim()).join(", ")}</span> : "No staff manager"}
+                    {loginCount > 0 && <span className="mt-1 block">{loginCount} manager-only {loginCount === 1 ? "login" : "logins"}</span>}
                   </p>
-                  <Button size="sm" variant="ghost" onClick={() => setManagingBranch(b)}>
-                    {manager ? "Change" : "Assign"}
-                  </Button>
+                  {canManageAccess && <Button size="sm" variant="ghost" aria-label={`Manage access for ${b.name}`} onClick={() => openBranchAccess(b)}>
+                    Manage access
+                  </Button>}
                 </div>
               );
             })()}
@@ -416,7 +435,7 @@ export function BranchesManager({
                 <Pencil className="h-3 w-3" /> Edit
               </Button>
               {!b.isDefault && (
-                <Button size="sm" variant="outline" className="text-rose-300" onClick={() => setConfirmDelete(b)}>
+                <Button size="sm" variant="outline" className="text-rose-300" aria-label={`Delete ${b.name}`} onClick={() => setConfirmDelete(b)}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
               )}
@@ -427,7 +446,7 @@ export function BranchesManager({
 
       <Modal
         open={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={() => !loading && setEditing(null)}
         title={isNew ? "New branch" : `Edit ${editing && typeof editing === "object" ? editing.name : ""}`}
         description="Set coordinates and a geofence radius to verify employee clock-ins by location."
       >
@@ -448,6 +467,7 @@ export function BranchesManager({
             <Field label="Branch code">
               <Input name="code" required defaultValue={editing && typeof editing === "object" ? editing.code : ""} placeholder="e.g. MAIN" />
             </Field>
+            {isNew && canManageAccess && <Field label="Location"><Select name="locationId"><option value="">Unassigned</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select></Field>}
             <Field label="Address" className="sm:col-span-2">
               <Input name="address" defaultValue={editing && typeof editing === "object" ? editing.address ?? "" : ""} />
             </Field>
@@ -466,8 +486,9 @@ export function BranchesManager({
               </Button>
             </div>
           </div>
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button type="button" variant="ghost" disabled={loading} onClick={() => setEditing(null)}>Cancel</Button>
             <Button type="submit" loading={loading}>Save</Button>
           </div>
         </form>
@@ -478,7 +499,7 @@ export function BranchesManager({
         title={`Delete ${confirmDelete?.name ?? "branch"}?`}
         description={
           confirmDelete && confirmDelete._count.employees > 0
-            ? `${confirmDelete._count.employees} employee(s) are assigned to this branch. They will become unassigned.`
+            ? `Reassign the ${confirmDelete._count.employees} employees before deleting this branch. Branches with attendance history are kept.`
             : "This cannot be undone."
         }
         busy={loading}
@@ -488,41 +509,52 @@ export function BranchesManager({
 
       <Modal
         open={managingBranch !== null}
-        onClose={() => setManagingBranch(null)}
-        title={managingBranch ? `Manager — ${managingBranch.name}` : "Branch manager"}
-        description="They sign in with a scoped login: this branch's dashboard, attendance, employees and leaves."
+        onClose={() => !savingManager && !creatingMgr && setManagingBranch(null)}
+        title={managingBranch ? `Branch access · ${managingBranch.name}` : "Branch access"}
+        description="Branch managers can administer this branch’s attendance, employees and leave."
       >
-        {(() => {
-          const current = managingBranch
-            ? employees.find((e) => e.role === "branch_manager" && e.branchId === managingBranch.id)?.id ?? ""
-            : "";
-          return (
-            <div className="space-y-4">
-              <Field label="Branch manager">
+        {managingBranch && <div className="space-y-4">
+            <form onSubmit={setManager} className="space-y-3">
+              {expectedStaffManagers.length > 1 && <Field label="Staff manager to change">
+                <Select value={currentManagerId} disabled={savingManager || creatingMgr} onChange={(event) => {
+                  setCurrentManagerId(event.target.value);
+                  setReplacementId(event.target.value);
+                  setManagerError("");
+                }}>
+                  {employees.filter((person) => expectedStaffManagers.includes(person.id)).map((person) => <option key={person.id} value={person.id}>{person.firstName} {person.lastName} ({person.employeeNumber})</option>)}
+                </Select>
+              </Field>}
+              <Field label={currentManagerId ? "Replace or remove staff manager" : "Assign staff manager"}>
                 <Select
-                  value={current}
-                  disabled={savingManager}
-                  onChange={(e) => managingBranch && setManager(managingBranch.id, e.target.value || null, current || null)}
+                  value={replacementId}
+                  disabled={savingManager || creatingMgr}
+                  onChange={(event) => { setReplacementId(event.target.value); setManagerError(""); }}
                 >
-                  <option value="">None</option>
+                  <option value="">{currentManagerId ? "Remove this staff manager" : "Choose an employee"}</option>
                   {employees
-                    .filter((e) => e.role !== "admin")
+                    .filter((person) => person.id === currentManagerId || (
+                      person.branchId === managingBranch.id && !person.loginOnly && person.hasPortalLogin &&
+                      (person.role === "employee" || person.role === "supervisor")
+                    ))
                     .map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.firstName} {e.lastName} ({e.employeeNumber})
-                        {e.role === "branch_manager" && e.branchId !== managingBranch?.id ? " — manages elsewhere" : ""}
                       </option>
                     ))}
                 </Select>
               </Field>
               <p className="text-[12px] leading-relaxed text-muted-foreground">
-                Assigning sets their role to branch manager for this branch. Removing demotes them back to employee.
+                Choose an employee with a portal login. An outgoing staff manager returns to the employee role and signs in again.
               </p>
+              {managerError && <p role="alert" className="text-sm text-destructive">{managerError}</p>}
+              <div className="flex justify-end">
+                <Button type="submit" size="sm" loading={savingManager} disabled={creatingMgr || currentManagerId === replacementId}>Save staff manager</Button>
+              </div>
+            </form>
               <div className="rounded-xl border border-edge bg-tint p-3.5">
-                <p className="text-[13px] font-semibold">Or create a manager-only login</p>
+                <p className="text-[13px] font-semibold">Create a manager-only login</p>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">
-                  For someone who is not staff — just email + password. They can run this branch but never
-                  appear in attendance, payroll, or seat counts.
+                  Give someone a separate login for branch administration. It is excluded from attendance, payroll and seat counts.
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <Field label="Full name">
@@ -542,14 +574,12 @@ export function BranchesManager({
                   </Field>
                 </div>
                 <div className="mt-3 flex justify-end">
-                  <Button size="sm" onClick={createManagerLogin} loading={creatingMgr}>
+                  <Button type="button" size="sm" onClick={createManagerLogin} loading={creatingMgr} disabled={savingManager}>
                     Create manager login
                   </Button>
                 </div>
               </div>
-            </div>
-          );
-        })()}
+            </div>}
       </Modal>
     </>
   );

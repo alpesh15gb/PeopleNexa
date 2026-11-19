@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { moduleFor } from "@/lib/modules";
 import { PageHeader } from "@/components/ui/card";
 import { requireSession } from "@/lib/session";
@@ -15,26 +15,12 @@ export default async function AdminModuleUnavailablePage({
   const mod = m ? moduleFor(m) : undefined;
 
   return (
-    <div className="animate-fade-up space-y-6">
-      <PageHeader title="Module not available" description="Your workspace plan does not include this module" />
-      <div className="card-surface flex flex-col items-center gap-4 rounded-2xl px-6 py-16 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-400/20 bg-amber-500/10 text-amber-300">
-          <Lock className="h-6 w-6" />
-        </div>
-        <div>
-          <h2 className="font-display text-lg font-bold">{mod ? `${mod.label} module` : "This module"} is not enabled</h2>
-          <p className="mx-auto mt-1.5 max-w-md text-[13.5px] leading-relaxed text-muted-foreground">
-            {mod
-              ? `Your current plan does not include ${mod.label.toLowerCase()}. Contact the workspace owner or your PeopleNexa account manager to upgrade.`
-              : "Your current plan does not include this feature. Contact the workspace owner or your PeopleNexa account manager to upgrade."}
-          </p>
-        </div>
-        <Link
-          href={session.role === "supervisor" ? "/employee" : "/admin"}
-          className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-brand px-4 text-sm font-medium text-white transition-all hover:brightness-110"
-        >
-          Back to dashboard
-        </Link>
+    <div className="max-w-2xl rounded-2xl border border-edge bg-card p-6 sm:p-8">
+      <span className="mb-4 grid size-11 place-items-center rounded-xl bg-primary/10 text-primary"><Lock aria-hidden="true" className="size-5" /></span>
+      <PageHeader title={mod ? `${mod.label} is unavailable` : "Service unavailable"} description="This service is disabled for your workspace. Ask your workspace administrator about access." />
+      <div className="mt-6 flex flex-wrap gap-3">
+        {session.role !== "supervisor" && <Link href="/admin" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:brightness-110">HR dashboard <ArrowRight aria-hidden="true" className="size-4" /></Link>}
+        <Link href="/employee" className="inline-flex min-h-11 items-center rounded-lg border border-edge px-4 text-sm font-medium hover:bg-tint">Go to My work</Link>
       </div>
     </div>
   );

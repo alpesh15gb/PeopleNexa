@@ -35,6 +35,8 @@ export function CorrectionsPanel({
   initialDate,
   openOnLoad,
   closeHref,
+  returnToSource,
+  keepReviewFilter,
 }: {
   corrections: Correction[];
   lang?: Lang;
@@ -44,6 +46,8 @@ export function CorrectionsPanel({
   initialDate: string;
   openOnLoad: boolean;
   closeHref: string;
+  returnToSource: boolean;
+  keepReviewFilter: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -57,7 +61,7 @@ export function CorrectionsPanel({
     setOpen(false);
     setError("");
     setDate(today);
-    if (openOnLoad) router.replace(closeHref, { scroll: false });
+    if (openOnLoad) router.replace(closeHref, { scroll: closeHref.includes("#") });
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -97,7 +101,8 @@ export function CorrectionsPanel({
       if (!res.ok) throw new Error(data.error ?? "The request could not be confirmed. Check your correction history before trying again.");
       toast("success", t(lang, "corrections.submitted"));
       setOpen(false);
-      router.replace(`/employee/attendance?month=${date.slice(0, 7)}&view=corrections`, { scroll: false });
+      const listHref = `/employee/attendance?month=${date.slice(0, 7)}&view=corrections${keepReviewFilter ? "&focus=review" : ""}#corrections-${date}`;
+      router.replace(returnToSource && date === initialDate ? closeHref : listHref, { scroll: true });
       router.refresh();
     } catch (e) {
       setError(e instanceof Error && e.name !== "TypeError" ? e.message : "The request could not be confirmed. Check your correction history before trying again.");

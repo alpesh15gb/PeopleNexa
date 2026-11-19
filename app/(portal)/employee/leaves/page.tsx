@@ -1,7 +1,11 @@
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { dayRangeIST } from "@/lib/dates";
+import { recordPageNumber, recordPagination, type RecordSearchParams } from "@/lib/document-expense-pagination";
+import type { Prisma } from "@/generated/prisma/client";
 import { configurationEffectiveAtISTDay } from "@/lib/configuration";
 import { prisma } from "@/lib/prisma";
 import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
-import { requireSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader } from "@/components/ui/card";
@@ -9,6 +13,7 @@ import { workspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone } from "@/lib/workspace-time";
 import { LeavesPanel } from "./leaves-panel";
 import { leaveCancellationHistory } from "@/lib/leave-request-history";
+import { leaveAwaitingReview } from "@/lib/leave-lifecycle";
 import { resolveLeavePolicy } from "@/lib/leave-policy";
 import {
   calculateLeaveBalance,
@@ -19,20 +24,20 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function EmployeeLeavesPage({ searchParams }: {
-  searchParams: Promise<{ view?: string; range?: string; action?: string }>;
+  searchParams: Promise<RecordSearchParams>;
 }) {
-  const session = await requireSession();
+  const session = await requireActiveSession();
   const [lang, query] = await Promise.all([getLang(), searchParams]);
 
-  const [types, requests, employee] = await Promise.all([
+  const view = query.view === "requests" ? "requests" : "summary";
+  const range = query.range === "past" || query.range === "upcoming" ? query.range : "all";
+  const allowedStatuses = ["awaiting_review", "pending", "approved", "rejected", "cancelled", "cancellation_pending"];
+  const status = typeof query.status === "string" && allowedStatuses.includes(query.status) ? query.status : "all";
+  const scope = { tenantId: session.tenantId, employeeId: session.sub };
+  const [types, employee] = await Promise.all([
     prisma.leaveType.findMany({
       where: { tenantId: session.tenantId },
       orderBy: { createdAt: "asc" },
-    }),
-    prisma.leaveRequest.findMany({
-      where: { tenantId: session.tenantId, employeeId: session.sub },
-      include: { leaveType: true },
-      orderBy: { appliedAt: "desc" },
     }),
     prisma.employee.findFirst({
       where: { id: session.sub, tenantId: session.tenantId },
@@ -50,9 +55,28 @@ export default async function EmployeeLeavesPage({ searchParams }: {
   }
   const region = workspaceRegion(employee?.tenant.config);
   const today = dateKeyInTimeZone(new Date(), region.timeZone);
+  const day = dayRangeIST(today).start;
+  const where: Prisma.LeaveRequestWhereInput = {
+    ...scope,
+    ...(range === "past" && { toDate: { lt: day } }),
+    ...(range === "upcoming" && { toDate: { gte: day } }),
+    ...(status === "awaiting_review" ? leaveAwaitingReview : status === "cancellation_pending" ? { status: "approved", cancellationRequestedAt: { not: null } } : status !== "all" ? { status } : {}),
+  };
+  const requestedPage = recordPageNumber(query.page) ?? 1;
+  const pagination = recordPagination(view === "requests" ? await prisma.leaveRequest.count({ where }) : 0, requestedPage, 25);
+  const requests = await prisma.leaveRequest.findMany({
+    where: view === "requests" ? where : { ...scope, status: { in: ["pending", "approved"] }, toDate: { gte: day } },
+    include: { leaveType: true },
+    orderBy: view === "summary" || range === "upcoming" ? [{ fromDate: "asc" }, { id: "asc" }] :
+      range === "past" ? [{ toDate: "desc" }, { id: "desc" }] : [{ appliedAt: "desc" }, { id: "desc" }],
+    skip: view === "requests" ? pagination.offset : 0,
+    take: view === "requests" ? pagination.pageSize : 3,
+  });
+
   const policyDate = configurationEffectiveAtISTDay(new Date(`${today}T00:00:00Z`));
   const locationId = employee?.branch?.locationId ?? employee?.locationId ?? null;
-  const [policyBalances, policyRecords, importedBalances, cancellationHistory] = await Promise.all([
+  const submittedId = typeof query.submitted === "string" && query.submitted.length <= 128 ? query.submitted : null;
+  const [policyBalances, policyRecords, importedBalances, cancellationHistory, submittedRequest] = await Promise.all([
     prisma.leavePolicyBalance.findMany({
       where: {
         tenantId: session.tenantId,
@@ -95,34 +119,31 @@ export default async function EmployeeLeavesPage({ searchParams }: {
       orderBy: { periodEnd: "desc" },
     }),
     leaveCancellationHistory(session.tenantId, requests.filter((request) => request.status === "approved" || request.status === "cancelled").map((request) => request.id)),
+    submittedId && view === "requests" ? prisma.leaveRequest.findFirst({
+      where: { ...scope, id: submittedId },
+      select: { id: true, fromDate: true, toDate: true, status: true, days: true, leaveType: { select: { name: true, color: true } } },
+    }) : null,
   ]);
 
-  const balance = types.map((t) => {
+  const balance = await Promise.all(types.map(async (t) => {
     const policy = resolveLeavePolicy(policyRecords, locationId, policyDate, t.code);
     const allocated = policy && policyBalances.find((item) =>
       item.leaveTypeId === t.id && item.policyPeriod.configurationId === policy.configurationId,
     );
     const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
-    const policyRequests = allocated
-      ? requests.filter(
-          (request) =>
-            request.leaveTypeId === t.id &&
-            request.leavePolicySnapshot &&
-            typeof request.leavePolicySnapshot === "object" &&
-            (request.leavePolicySnapshot as Record<string, unknown>)
-              .policyPeriodId === allocated.policyPeriodId,
-        )
-      : requests.filter(
-          (request) =>
-            request.leaveTypeId === t.id &&
-            (!imported || request.fromDate >= imported.periodEnd),
-        );
-    const used = policyRequests
-      .filter((request) => request.status === "approved")
-      .reduce((sum, request) => sum + request.days, 0);
-    const pending = policyRequests
-      .filter((request) => request.status === "pending")
-      .reduce((sum, request) => sum + request.days, 0);
+    const commitments = await prisma.leaveRequest.groupBy({
+      by: ["status"],
+      where: {
+        ...scope,
+        leaveTypeId: t.id,
+        status: { in: ["pending", "approved"] },
+        ...(allocated ? { leavePolicySnapshot: { path: ["policyPeriodId"], equals: allocated.policyPeriodId } } :
+          imported ? { fromDate: { gte: imported.periodEnd } } : {}),
+      },
+      _sum: { days: true },
+    });
+    const used = commitments.find((row) => row.status === "approved")?._sum.days ?? 0;
+    const pending = commitments.find((row) => row.status === "pending")?._sum.days ?? 0;
     const entitlement = allocated
       ? (allocated.entitlement ?? 0) + allocated.carryForward
       : imported
@@ -173,10 +194,7 @@ export default async function EmployeeLeavesPage({ searchParams }: {
         effectiveTo: allocated?.policyPeriod.effectiveTo?.toISOString().slice(0, 10) ?? null,
       },
     };
-  });
-
-  const view = query.view === "requests" ? "requests" : "summary";
-  const range = query.range === "past" || query.range === "upcoming" ? query.range : "all";
+  }));
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -194,9 +212,13 @@ export default async function EmployeeLeavesPage({ searchParams }: {
         today={today}
         view={view}
         range={range}
+        requestFilter={status}
+        page={view === "requests" ? pagination.page : requestedPage}
+        submittedRequest={submittedRequest}
         canApply={!!employee && employee.status === "active" && !employee.loginOnly && balance.length > 0}
         openOnLoad={query.action === "apply"}
       />
+      {view === "requests" && <DocumentExpensePagination path="/employee/leaves" params={{ view, range, status: status !== "all" ? status : undefined }} pagination={pagination} label="leave requests" />}
     </div>
   );
 }

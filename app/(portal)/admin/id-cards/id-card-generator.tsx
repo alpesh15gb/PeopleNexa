@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type FormEvent } from "react";
 import { Download, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/toast";
+import { Select } from "@/components/ui/select";
 import { ID_CARD_ARTBOARD, ID_CARD_FONT, ID_CARD_LAYOUT, ID_CARD_SIZE, idCardDetails } from "@/lib/id-card-content";
 import { safeLogoUrl } from "@/lib/branding-url";
 import { idCardDownloadUrl } from "@/lib/id-card-generation";
@@ -14,7 +14,8 @@ import type { IdCardTemplate } from "@/lib/configuration";
 type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; joiningDate: string | null; phone: string | null; profilePicture: string | null; profile: { bloodGroup: string | null } | null };
 
 export function IdCardGenerator() {
-  const [deviceCode, setDeviceCode] = useState("");
+  const [code, setCode] = useState("");
+  const [mode, setMode] = useState<"employeeNumber" | "deviceCode">("employeeNumber");
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branding, setBranding] = useState<CompanyBranding | null>(null);
   const [template, setTemplate] = useState<IdCardTemplate | null>(null);
@@ -22,29 +23,37 @@ export function IdCardGenerator() {
   const [photoX, setPhotoX] = useState(50);
   const [photoY, setPhotoY] = useState(50);
   const [validTill, setValidTill] = useState("");
-  const toast = useToast();
+  const [error, setError] = useState("");
 
   async function lookup(event: FormEvent) {
     event.preventDefault();
+    if (loading || !code.trim()) return;
+    setError("");
     setLoading(true);
     try {
-      const response = await fetch(`/api/id-cards?deviceCode=${encodeURIComponent(deviceCode.trim())}`);
+      const response = await fetch(`/api/id-cards?${new URLSearchParams({ [mode]: code.trim() })}`);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Could not find employee.");
       setEmployee(data.employee); setBranding(data.branding); setTemplate(data.template); setPhotoX(50); setPhotoY(50); setValidTill("");
     } catch (error) {
       setEmployee(null); setBranding(null); setTemplate(null);
-      toast("error", error instanceof Error ? error.message : "Could not find employee.");
+      setError(error instanceof Error ? error.message : "Could not find employee.");
     } finally { setLoading(false); }
   }
 
   return <div className="space-y-6">
-    <form onSubmit={lookup} className="flex max-w-xl gap-3"><Field label="Device ID"><Input value={deviceCode} onChange={(event) => setDeviceCode(event.target.value)} placeholder="Enter biometric Device ID" required /></Field><Button className="mt-6" type="submit" loading={loading}><Search className="h-4 w-4" /> Find employee</Button></form>
+    <form onSubmit={lookup} className="flex max-w-2xl flex-wrap items-end gap-3">
+      <Field label="Look up by"><Select value={mode} onChange={(event) => { setMode(event.target.value as typeof mode); setCode(""); setError(""); }}><option value="employeeNumber">Employee code</option><option value="deviceCode">Biometric Device ID</option></Select></Field>
+      <Field label={mode === "employeeNumber" ? "Employee code" : "Device ID"} className="min-w-40 flex-1"><Input value={code} onChange={(event) => { setCode(event.target.value); setError(""); }} maxLength={100} required /></Field>
+      <Button type="submit" loading={loading}><Search aria-hidden="true" className="h-4 w-4" /> Find employee</Button>
+    </form>
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {employee && <>
+      <h2 className="font-semibold">Card for {employee.firstName} {employee.lastName} <span className="text-sm font-normal text-muted-foreground">· {employee.employeeNumber}</span></h2>
       <section className="flex max-w-xl flex-wrap items-end gap-3 rounded-xl border border-edge bg-tint p-4"><Field label="Valid up to"><Input type="date" value={validTill} onChange={(event) => setValidTill(event.target.value)} /></Field><p className="pb-2 text-xs text-muted-foreground">Optional. Applies only to this PDF.</p></section>
-      <div className="grid gap-6 lg:grid-cols-2"><IdCardPreviewSide title="Front" employee={employee} branding={branding} template={template} photoPosition={{ x: photoX, y: photoY }} validTill={validTill || null} front /><IdCardPreviewSide title="Back" employee={employee} branding={branding} template={template} /></div>
+      <div className="grid gap-6 overflow-auto xl:grid-cols-2"><IdCardPreviewSide title="Front" employee={employee} branding={branding} template={template} photoPosition={{ x: photoX, y: photoY }} validTill={validTill || null} front /><IdCardPreviewSide title="Back" employee={employee} branding={branding} template={template} /></div>
       {employee.profilePicture && <section className="max-w-[306px] space-y-3 rounded-xl border border-edge bg-tint p-4"><div><h2 className="text-sm font-semibold">Photo framing</h2><p className="mt-1 text-xs text-muted-foreground">Adjust the photo position for this card. The PDF uses the same framing.</p></div><Field label="Horizontal position"><Input type="range" min="0" max="100" value={photoX} onChange={(event) => setPhotoX(Number(event.target.value))} /></Field><Field label="Vertical position"><Input type="range" min="0" max="100" value={photoY} onChange={(event) => setPhotoY(Number(event.target.value))} /></Field></section>}
-      <a href={idCardDownloadUrl(deviceCode, photoX, photoY, validTill)}><Button><Download className="h-4 w-4" /> Download front and back PDF</Button></a>
+      <a className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90" href={idCardDownloadUrl(employee.employeeNumber, photoX, photoY, validTill, "employeeNumber")}><Download aria-hidden="true" className="h-4 w-4" /> Download front and back PDF</a>
     </>}
   </div>;
 }

@@ -1,5 +1,5 @@
-export function idCardDownloadUrl(deviceCode: string, photoX: number, photoY: number, validTill: string) {
-  const params = new URLSearchParams({ deviceCode: deviceCode.trim(), format: "pdf", photoX: String(photoX), photoY: String(photoY) });
+export function idCardDownloadUrl(code: string, photoX: number, photoY: number, validTill: string, lookup: "deviceCode" | "employeeNumber" = "deviceCode") {
+  const params = new URLSearchParams({ [lookup]: code.trim(), format: "pdf", photoX: String(photoX), photoY: String(photoY) });
   if (validTill) params.set("validTill", validTill);
   return `/api/id-cards?${params.toString()}`;
 }

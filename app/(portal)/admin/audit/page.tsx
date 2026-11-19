@@ -5,8 +5,8 @@ import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/stat";
 import { AuditFilter } from "./audit-filter";
-import { auditFilters, auditLogPage } from "@/lib/audit-log-query";
-import { recordPageNumber } from "@/lib/document-expense-pagination";
+import { auditFilters, auditLogPage, auditRangeInvalid } from "@/lib/audit-log-query";
+import { recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
 import { DocumentExpensePagination } from "@/components/document-expense-pagination";
 import { workspaceRegion } from "@/lib/workspace-region";
 
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminAuditPage({
   searchParams,
 }: {
-  searchParams: Promise<{ action?: string; entity?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ action?: string; entity?: string; q?: string; from?: string; to?: string; page?: string }>;
 }) {
   const session = await getSession();
   if (!session || session.role !== "admin") {
@@ -39,11 +39,10 @@ export default async function AdminAuditPage({
 
   const params = await searchParams;
   const filters = auditFilters(params);
-  const [{ rows, pagination }, tenant] = await Promise.all([
-    auditLogPage(session.tenantId, filters, recordPageNumber(params.page) ?? 1),
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
-  ]);
+  const invalid = auditRangeInvalid(filters);
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
   const region = workspaceRegion(tenant?.config);
+  const { rows, pagination } = invalid ? { rows: [], pagination: recordPagination(0, 1) } : await auditLogPage(session.tenantId, filters, recordPageNumber(params.page) ?? 1, 50, region.timeZone);
 
   const entries = await enrichAuditEntries(rows, session.tenantId);
 
@@ -54,13 +53,14 @@ export default async function AdminAuditPage({
         description="Sensitive changes across employees, attendance, leaves, payroll and exits"
       />
       <AuditFilter {...filters} />
+      {invalid && <p role="alert" className="text-sm text-destructive">Enter a valid date range with the first date on or before the last date.</p>}
       <Card>
         <CardContent className="p-0 pt-0">
           {entries.length === 0 ? (
             <EmptyState
               title="No audit entries"
               description={
-                filters.action || filters.entity || filters.q
+                filters.action || filters.entity || filters.q || filters.from || filters.to
                   ? "Try clearing the filters."
                   : "Sensitive changes will appear here."
               }

@@ -39,6 +39,17 @@ PeopleNexa uses its own server rules for leave eligibility, date intervals, atte
 
 The signed-in reference exposed Compensation setup. The actual PeopleNexa pay run and approval rules below were exercised using its own source and test records.
 
+## Workspace and service navigation follow-up
+
+| Signed-in observation | PeopleNexa workflow | REA evidence |
+| --- | --- | --- |
+| My Space, Team and Organization have distinct views. My Space offers Overview, Dashboard and Calendar. | Use My work for personal records and notifications. Give authorized managers a separate operations dashboard with branch-scoped representations of today’s activity and reviewable requests. | `ev_944b7f3f480788bdf99c9427a31240c11b99312ea22d4b15f319d01e1a16157b` |
+| Settings groups Manage Accounts, Employee Information, Files, Marketplace, Compensation and Custom Services. | Discover settings by their owning service and deep-link into the corresponding editor. A dashboard location opens its matching layout editor. | `ev_e3f8cd8ff50d4193037b1efedbe7c24fd98b7e121754d4617c2585203533e1a9` |
+| Employee Information configuration has separate policy, HR process, service extension, automation and access-control views. | Keep the employee and organization directories focused on records and lifecycle actions, with access and templates configured in dedicated editors. | `ev_e72f61266ebf059789a3cb637468ce1f4287ddd11e6cef4477990d1f8e7d0d8a` |
+| Files Operations separates organization files, employee files, HR forms/templates and folders. The empty states offer the matching creation action. | Give employees a self-service document view and give administrators scoped record creation, filters and pagination for the documents they manage. | `ev_b8f9132171856c9d7416212da6b4a35c46b43a5e2964a595b3be65710d14ca6d` |
+
+REA inspected visible browser states and shipped client behavior. PeopleNexa’s transactions, payroll rules and access scopes come from its own source and are exercised against synthetic local workspaces. The [screen ledger](screen-revamp-ledger.md) maps that work to individual routes.
+
 ## PeopleNexa implementation
 
 - **Portal shell** gives managers a switch between personal work and administration, with contextual service navigation and a keyboard-accessible launcher for enabled pages and forms.
@@ -48,3 +59,15 @@ The signed-in reference exposed Compensation setup. The actual PeopleNexa pay ru
 - **Payroll** puts monthly payroll, the work queue, history, salary changes, and policy settings in one workspace. The queue groups open runs by their current stage and links to the specific run, location, and pay month.
 - **Device administration** organizes the attendance fleet by connection type. Device inventory and health are separate views, and location managers see their assigned inventory and supported actions.
 - **Settings** groups administrative tools by HR service. The directory leads to focused editors for workspace and location profiles, dashboard layouts, ID cards, and existing integration settings.
+## Fresh signed-in workflow review
+
+The November 20 review opened each of the 16 Operations service entries using normal navigation. The home workspace distinguished personal, team and organization activity. Approvals opened with pending requests selected and exposed filters for the employee population. The performance setup surface separated assessment methods, goals and competencies. The attendance and shift entries separated employee punches, data exchange, shift definitions and employee assignment. Leave Requests supported employee lookup. Travel Requests and Travel Expenses had separate entries. These observations describe the visible signed-in experience. Zoho's private server rules and unvisited nested states remain unverified.
+
+| Surface | REA capture |
+| --- | --- |
+| Signed-in home | `ev_7aa13361e3cf1e6a92fac72056f01450850c43861fd51b89a3824af8813260ce` |
+| Operations service directory | `ev_d43b6715be5380c03f1d2b558cde550973b3d629b88b4bcce20644128a7718da` |
+| Approval filters | `ev_1ebd1c4932af5221bc8a303a54e0ed87f3454ce4bb5c449557f3f3bd28899708` |
+| Performance setup | `ev_981352bbd4409f484cafdf388ca77f40ae8572fb6020820f95827975c5603b74` |
+
+PeopleNexa now opens Approvals on queues with pending decisions, retains direct access to every enabled queue, and displays a caught-up state. Performance administrators can search and filter the full permitted review history. Employees can page through their own assessments and the separate peer-feedback queue.

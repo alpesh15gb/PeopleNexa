@@ -9,7 +9,7 @@ export function DatePicker({ value, label = "Attendance date" }: { value: string
   const params = useSearchParams();
   return (
     <div className="relative">
-      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <CalendarDays className="pointer-events-none absolute left-3 top-1/2 hidden h-4 w-4 -translate-y-1/2 text-muted-foreground sm:block" />
       <input
         type="date"
         aria-label={label}
@@ -22,7 +22,7 @@ export function DatePicker({ value, label = "Attendance date" }: { value: string
           next.delete("page");
           router.push(`${pathname}?${next.toString()}`);
         }}
-        className="h-10 w-full appearance-none rounded-xl border border-input bg-tint pl-9 pr-3 text-sm text-foreground transition-all focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring/40 sm:w-44"
+        className="h-10 w-[9rem] appearance-none rounded-xl border border-input bg-tint px-2 text-sm sm:px-3 sm:pl-9 text-foreground transition-all focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-ring/40 sm:w-44"
       />
     </div>
   );

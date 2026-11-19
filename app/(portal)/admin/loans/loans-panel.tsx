@@ -59,9 +59,12 @@ export function LoansPanel({
   const [closing, setClosing] = useState<string | null>(null);
   const [closingBusy, setClosingBusy] = useState(false);
   const [loanType, setLoanType] = useState("advance");
+  const [createError, setCreateError] = useState("");
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (saving) return;
+    setCreateError("");
     setSaving(true);
     const form = new FormData(e.currentTarget);
     try {
@@ -77,26 +80,21 @@ export function LoansPanel({
           note: form.get("note"),
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to create");
+        setCreateError(data?.error ?? "Could not create the loan or advance.");
         return;
       }
       toast(
         "success",
         data.loan.type === "loan"
-          ? "Loan created — deducted from payslips"
-          : "Advance given — will be deducted from the next payslip",
+          ? "Loan recorded for payroll deductions."
+          : "Advance recorded for payroll deduction.",
       );
       setOpen(false);
       router.refresh();
     } catch (error) {
-      toast(
-        "error",
-        error instanceof Error
-          ? error.message
-          : "Could not create the loan or advance.",
-      );
+      setCreateError(error instanceof Error ? error.message : "Could not confirm the loan. Check the list before retrying.");
     } finally {
       setSaving(false);
     }
@@ -131,19 +129,21 @@ export function LoansPanel({
   async function doRemoveLoan() {
     if (!confirmDelete) return;
     setDeleting(true);
-    const res = await fetch(`/api/loans/${confirmDelete}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) {
-      const result = await res.json().catch(() => null);
-      toast("error", result?.error ?? "Failed to delete");
+    try {
+      const res = await fetch(`/api/loans/${confirmDelete}`, { method: "DELETE" });
+      if (!res.ok) {
+        const result = await res.json().catch(() => null);
+        toast("error", result?.error ?? "Could not delete the record.");
+        return;
+      }
+      toast("success", "Loan removed");
+      setConfirmDelete(null);
+      router.refresh();
+    } catch {
+      toast("error", "Could not confirm deletion. Refresh to check the record.");
+    } finally {
       setDeleting(false);
-      return;
     }
-    toast("success", "Loan removed");
-    setConfirmDelete(null);
-    setDeleting(false);
-    router.refresh();
   }
 
   const active = loans.filter((l) => l.status === "active");
@@ -162,7 +162,7 @@ export function LoansPanel({
         <p className="text-[13px] text-muted-foreground">
           {active.length} active · {formatMoney(totalOutstanding)} outstanding
         </p>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button size="sm" disabled={!employees.length} onClick={() => { setCreateError(""); setLoanType("advance"); setOpen(true); }}>
           <Plus className="h-3.5 w-3.5" /> Give advance / loan
         </Button>
       </div>
@@ -420,6 +420,7 @@ export function LoansPanel({
               placeholder="Optional — e.g. festival advance, bike loan"
             />
           </Field>
+          {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"

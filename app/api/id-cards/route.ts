@@ -6,6 +6,7 @@ import { photoPosition } from "@/lib/id-card-content";
 import { resolveCompanyBranding } from "@/lib/company-branding";
 import { idCardTemplate, resolveConfiguration } from "@/lib/configuration";
 import { validTillFromRequest } from "@/lib/id-card-generation";
+import { employeeLocationScope } from "@/lib/location-scope";
 
 export async function GET(request: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -15,14 +16,15 @@ export async function GET(request: NextRequest) {
     : null;
   if (session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
   const deviceCode = request.nextUrl.searchParams.get("deviceCode")?.trim();
-  if (!deviceCode) return NextResponse.json({ error: "Device ID is required." }, { status: 400 });
+  const employeeNumber = request.nextUrl.searchParams.get("employeeNumber")?.trim();
+  if ((!deviceCode && !employeeNumber) || (deviceCode && employeeNumber) || (deviceCode ?? employeeNumber ?? "").length > 100) return NextResponse.json({ error: "Enter one employee code or Device ID." }, { status: 400 });
   const validTill = validTillFromRequest(request.nextUrl.searchParams.get("validTill"));
   if (validTill === undefined) return NextResponse.json({ error: "Valid up to must be a valid date." }, { status: 400 });
   const [tenant, employee] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, address: true, phone: true, email: true, profile: true } }),
-    prisma.employee.findFirst({ where: { tenantId: session.tenantId, deviceCode, ...(locationId ? { branch: { locationId } } : {}) }, select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
+    prisma.employee.findFirst({ where: { tenantId: session.tenantId, loginOnly: false, ...(employeeNumber ? { employeeNumber } : { deviceCode }), ...(locationId ? employeeLocationScope(locationId) : {}) }, select: { id: true, employeeNumber: true, deviceCode: true, firstName: true, lastName: true, position: true, joiningDate: true, phone: true, profilePicture: true, locationId: true, profile: { select: { bloodGroup: true } }, branch: { select: { locationId: true, location: { select: { profile: true } } } }, location: { select: { profile: true } } } }),
   ]);
-  if (!employee) return NextResponse.json({ error: "No employee matches this Device ID." }, { status: 404 });
+  if (!employee) return NextResponse.json({ error: employeeNumber ? "No employee matches this employee code." : "No employee matches this Device ID." }, { status: 404 });
   const branding = resolveCompanyBranding(tenant, employee.branch?.location ?? employee.location);
   const employeeLocationId = employee.branch?.locationId ?? employee.locationId;
   const records = await prisma.configurationRecord.findMany({ where: { tenantId: session.tenantId, kind: "id_card", active: true }, select: { id: true, locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true } });
@@ -31,5 +33,6 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("format") !== "pdf") return NextResponse.json({ employee, branding, template });
   // The issued date is captured only in this generated PDF; employee master data remains unchanged.
   const pdf = await renderIdCardPdf(employee, { x: photoPosition(request.nextUrl.searchParams.get("photoX")), y: photoPosition(request.nextUrl.searchParams.get("photoY")) }, branding, template, { issuedAt: new Date(), validTill });
-  return new NextResponse(new Uint8Array(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="id-card-${employee.deviceCode ?? employee.employeeNumber}.pdf"` } });
+  const filename = (employee.deviceCode ?? employee.employeeNumber).replace(/[^a-zA-Z0-9_.-]/g, "-");
+  return new NextResponse(new Uint8Array(pdf), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="id-card-${filename}.pdf"` } });
 }

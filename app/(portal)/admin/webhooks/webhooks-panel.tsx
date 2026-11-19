@@ -36,33 +36,41 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
   // Copy-once flow: the API omits secrets on list, so the full secret is only
   // available in local state right after creation.
   const [justCreated, setJustCreated] = useState<{ id: string; secret: string } | null>(null);
 
   async function create(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (creating) return;
     const form = new FormData(e.currentTarget);
     const events = Array.from(form.getAll("event")) as string[];
+    if (!events.length) return setCreateError("Select at least one event to send.");
+    setCreating(true);
+    setCreateError("");
     try {
       const res = await fetch("/api/webhooks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: form.get("name"), url: form.get("url"), events }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to create");
+        setCreateError(data?.error ?? "Could not create the endpoint.");
         return;
       }
       toast("success", "Webhook created — secret generated");
-      if (data.endpoint?.id && data.endpoint?.secret) {
+      if (data?.endpoint?.id && data.endpoint.secret) {
         setJustCreated({ id: data.endpoint.id, secret: data.endpoint.secret });
       }
       setOpen(false);
       router.refresh();
     } catch {
-      toast("error", "Failed to create");
+      setCreateError("Could not confirm creation. Check the endpoint list before retrying.");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -80,6 +88,8 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
         return;
       }
       router.refresh();
+    } catch {
+      toast("error", "Could not update the endpoint. Refresh to check its status.");
     } finally {
       setBusy(null);
     }
@@ -99,6 +109,8 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
         return;
       }
       toast("success", "Test event sent — check your receiver");
+    } catch {
+      toast("error", "Could not confirm delivery of the test event.");
     } finally {
       setBusy(null);
     }
@@ -116,6 +128,8 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
       toast("success", "Webhook removed");
       setDeleteId(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not confirm deletion. Refresh to check the endpoint list.");
     } finally {
       setDeleteBusy(false);
     }
@@ -126,7 +140,7 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
       setCopied(id);
       toast("success", "Secret copied");
       setTimeout(() => setCopied(null), 1500);
-    });
+    }).catch(() => toast("error", "Clipboard unavailable. Select the secret to copy it."));
   }
 
   return (
@@ -136,10 +150,21 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
           {endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"} · payloads signed with HMAC-SHA256 ·
           secrets shown once at creation
         </p>
-        <Button size="sm" onClick={() => setOpen(true)}>
+        <Button size="sm" onClick={() => { setCreateError(""); setOpen(true); }}>
           <Plus className="h-3.5 w-3.5" /> New endpoint
         </Button>
       </div>
+      {justCreated && (
+        <section aria-label="New signing secret" className="border-b border-edge bg-primary/5 px-5 py-4">
+          <p className="text-sm font-semibold">Save the new signing secret</p>
+          <p className="mt-1 text-xs text-muted-foreground">Store it in your receiver before leaving this page.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input readOnly aria-label="Signing secret" value={justCreated.secret} onFocus={event => event.currentTarget.select()} className="min-w-48 flex-1 font-mono" />
+            <Button size="sm" variant="outline" onClick={() => copySecret(justCreated.secret, justCreated.id)}>{copied === justCreated.id ? "Copied" : "Copy secret"}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setJustCreated(null)}>Done</Button>
+          </div>
+        </section>
+      )}
 
       {endpoints.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-14 text-center">
@@ -196,7 +221,7 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
                 <Button size="sm" variant="ghost" disabled={busy === ep.id} onClick={() => toggle(ep)}>
                   {ep.active ? "Pause" : "Resume"}
                 </Button>
-                <Button size="icon" variant="ghost" className="text-rose-300" onClick={() => setDeleteId(ep.id)}>
+                <Button size="icon" variant="ghost" aria-label={`Delete ${ep.name}`} className="text-rose-300" onClick={() => setDeleteId(ep.id)}>
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -205,7 +230,7 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New webhook endpoint" size="md">
+      <Modal open={open} onClose={() => { if (!creating) setOpen(false); }} title="New webhook endpoint" size="md">
         <form onSubmit={create} className="space-y-4">
           <Field label="Name">
             <Input name="name" required placeholder="e.g. ERP sync, WhatsApp gateway" />
@@ -217,15 +242,16 @@ export function WebhooksPanel({ endpoints }: { endpoints: Endpoint[] }) {
             <div className="grid gap-2 sm:grid-cols-2">
               {Object.entries(EVENT_LABELS).map(([ev, label]) => (
                 <label key={ev} className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-edge px-3 py-2.5 text-[13px] hover:bg-tint">
-                  <input type="checkbox" name="event" value={ev} defaultChecked className="h-4 w-4 accent-indigo-500" />
+                  <input type="checkbox" name="event" value={ev} className="h-4 w-4 accent-indigo-500" />
                   {label}
                 </label>
               ))}
             </div>
           </Field>
+          {createError && <p role="alert" className="text-sm text-destructive">{createError}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit">Create endpoint</Button>
+            <Button type="button" variant="ghost" disabled={creating} onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" loading={creating}>Create endpoint</Button>
           </div>
         </form>
       </Modal>

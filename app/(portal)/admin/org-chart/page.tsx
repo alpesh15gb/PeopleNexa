@@ -3,6 +3,7 @@ import { requireActiveSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { OrgChartTree } from "./org-chart-tree";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +31,9 @@ export default async function AdminOrgChartPage() {
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
-        title="Org Chart"
-        description="Who reports to whom — set the manager on each employee profile to shape this tree"
+        title="Organization chart"
+        description="Explore reporting lines and open an employee record to update their manager."
+        actions={<Link href="/admin/employee-master" className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint">Employee directory</Link>}
       />
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>

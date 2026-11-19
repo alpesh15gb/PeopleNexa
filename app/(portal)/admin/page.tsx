@@ -5,20 +5,23 @@ import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { getTenantAccess } from "@/lib/modules-server";
 import { employeeLocationScope } from "@/lib/location-scope";
-import { dayRangeIST, monthKeyIST } from "@/lib/dates";
+import { dayRangeIST } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
 import { workspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, offsetDateKey, timeZoneDayRange } from "@/lib/workspace-time";
 import { EmptyState, StatCard } from "@/components/ui/stat";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
-import { BranchPicker } from "./attendance/branch-picker";
 import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
 import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
 import { dashboardLayout, defaultDashboardWidgets, resolveConfiguration, type DashboardWidgetKey, type DashboardWidgetSize } from "@/lib/configuration";
 import { payrollScopeHref } from "@/lib/payroll-work-queue";
+import { pendingApprovalFilters } from "@/lib/approval-workspace";
+import { recordPageNumber, type RecordSearchParams } from "@/lib/document-expense-pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -41,10 +44,11 @@ function dashboardWidgetColumns(key: DashboardWidgetKey, size: DashboardWidgetSi
 export default async function AdminDashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ branch?: string; attendancePage?: string }>;
+  searchParams: Promise<RecordSearchParams>;
 }) {
   const session = await requireActiveSession();
-  const { branch: branchParam, attendancePage: attendancePageParam } = await searchParams;
+  const params = await searchParams;
+  const branchParam = typeof params.branch === "string" ? params.branch : undefined;
 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
@@ -83,28 +87,11 @@ export default async function AdminDashboardPage({
   const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
   const selectedBranchLocationId = branchFilter && "locationId" in branchFilter ? branchFilter.locationId : null;
   const dashboardLocationId = ownLocationId ?? (isBranchManager ? ownScope?.branch?.locationId ?? null : selectedBranchLocationId);
-  const attendanceScope = new URLSearchParams({ date: todayKey, ...(branchId && !isBranchManager ? { branch: branchId } : {}) });
-  const payScope = { locationId: dashboardLocationId, period: monthKeyIST() };
-  const workflowLinks = [
-    ...(canSeeAttendance ? [{
-      title: "Attendance", icon: CalendarClock,
-      primary: { href: "/admin/attendance?" + attendanceScope, label: "View today’s records" },
-      secondary: { href: "/admin/regularization?view=corrections", label: "Review corrections" },
-      setup: session.role === "admin" ? { href: "/admin/attendance?view=setup", label: "Attendance setup" } : null,
-    }] : []),
-    ...(canSeeLeaves ? [{
-      title: "Leave", icon: CalendarCheck2,
-      primary: { href: "/admin/leaves?review=approvals", label: "Review leave requests" },
-      secondary: { href: "/admin/leaves", label: "View leave workspace" },
-      setup: session.role === "admin" ? { href: "/admin/leaves/policies", label: "Leave policies" } : null,
-    }] : []),
-    ...(!isBranchManager && modules.has("payroll") ? [{
-      title: "Payroll", icon: Banknote,
-      primary: { href: payrollScopeHref("/admin/payroll", payScope), label: "Open monthly payroll" },
-      secondary: { href: payrollScopeHref("/admin/payroll/queue", payScope), label: "View payroll work queue" },
-      setup: session.role === "admin" ? { href: payrollScopeHref("/admin/payroll/configuration", payScope), label: "Payroll setup" } : null,
-    }] : []),
-  ];
+  const layoutEditorHref = `/admin/configuration?${new URLSearchParams({ section: "dashboard", ...(dashboardLocationId ? { location: dashboardLocationId } : {}) })}#dashboard-layouts`;
+  const branchScope: Record<string, string> = branchId && !isBranchManager ? { branch: branchId } : {};
+  const attendanceScope = new URLSearchParams({ date: todayKey, ...branchScope });
+  const leaveReviewHref = `/admin/leaves?${new URLSearchParams({ status: "needs_review", ...branchScope })}`;
+  const correctionReviewHref = `/admin/regularization?${new URLSearchParams({ view: "corrections", ...branchScope })}`;
   const activeDashboardRecords = await prisma.configurationRecord.findMany({
     where: { tenantId: session.tenantId, kind: "dashboard", active: true },
     select: { locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
@@ -113,8 +100,8 @@ export default async function AdminDashboardPage({
   const activeDashboardLayout = dashboardLayout(resolveConfiguration(activeDashboardRecords.filter((record) => dashboardLayout(record.payload)), dashboardLocationId)?.payload);
   const layout = activeDashboardLayout?.widgets ?? defaultDashboardWidgets();
   const visibleWidgets = layout.filter(({ key, enabled }) => {
-    if (!enabled || (key === "on_leave" && !canSeeLeaves)) return false;
-    if (key === "pending_leaves" || key === "pending_leave_requests") {
+    if (!enabled) return false;
+    if (key === "on_leave" || key === "pending_leaves" || key === "pending_leave_requests") {
       if (!canSeeLeaves) return false;
     } else if (["total_employees", "driving_license_expiry", "birthdays", "anniversaries", "new_joiners", "departments", "gender_ratio"].includes(key)) {
       if (!canSeePeople) return false;
@@ -128,7 +115,7 @@ export default async function AdminDashboardPage({
   const empScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = todayKey.slice(0, 7);
   const attendancePageSize = 25;
-  const requestedPage = Math.max(1, Number.parseInt(attendancePageParam ?? "1", 10) || 1);
+  const requestedPage = recordPageNumber(params.attendancePage) ?? 1;
   const [year, month] = currentMonth.split("-").map(Number);
   const currentMonthStart = dayRangeIST(`${currentMonth}-01`).start;
   const monthPunchStart = timeZoneDayRange(`${currentMonth}-01`, region.timeZone).start;
@@ -142,8 +129,10 @@ export default async function AdminDashboardPage({
     date: { gte: today, lt: tomorrow },
     employee: empScope,
   };
-  const pendingLeaveWhere = { tenantId: session.tenantId, status: "pending", employee: empScope };
-  const [employees, attendance, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
+  const reviewFilters = canReview ? await pendingApprovalFilters(session) : {};
+  const requestedBranch = branchId ? { employee: { branchId } } : {};
+  const pendingLeaveWhere = reviewFilters.leave ? { AND: [reviewFilters.leave, requestedBranch] } : { id: { in: [] } };
+  const [employees, attendance, approvedLeaves, departments, pendingLeaves, pendingLeaveCount, correctionCount, branches, expiringLicenses, newJoiners, celebrationProfiles, todayPunches] = await Promise.all([
     prisma.employee.findMany({
       where: empScope,
       select: { id: true, department: { select: { name: true } }, branch: { select: { id: true, name: true } }, profile: { select: { gender: true } } },
@@ -155,7 +144,7 @@ export default async function AdminDashboardPage({
       },
       orderBy: { punchInTime: "asc" },
     }) : [],
-    canSeeAttendance && canSeeLeaves ? prisma.leaveRequest.findMany({
+    canSeeLeaves && (canSeeAttendance || widgetEnabled("on_leave")) ? prisma.leaveRequest.findMany({
       where: { tenantId: session.tenantId, status: "approved", fromDate: { lt: tomorrow }, toDate: { gte: today }, employee: empScope },
       select: { employeeId: true },
     }) : [],
@@ -171,9 +160,8 @@ export default async function AdminDashboardPage({
       orderBy: [{ appliedAt: "desc" }, { id: "asc" }],
       take: 4,
     }) : [],
-    widgetEnabled("pending_leaves") || widgetEnabled("pending_leave_requests")
-      ? prisma.leaveRequest.count({ where: pendingLeaveWhere })
-      : 0,
+    canSeeLeaves && reviewFilters.leave ? prisma.leaveRequest.count({ where: pendingLeaveWhere }) : 0,
+    canSeeAttendance && reviewFilters.correction ? prisma.punchCorrection.count({ where: { AND: [reviewFilters.correction, requestedBranch] } }) : 0,
     prisma.branch.findMany({ where: { tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     widgetEnabled("driving_license_expiry") ? prisma.employee.findMany({
       where: {
@@ -212,6 +200,30 @@ export default async function AdminDashboardPage({
   ]) : [[], []];
 
   const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
+  const payScope = { locationId: dashboardLocationId, period: currentMonth };
+  const workflowLinks = [
+    ...(canSeeAttendance ? [{
+      title: "Attendance", icon: CalendarClock,
+      summary: `${counts.livePresent.toLocaleString(region.locale)} of ${counts.total.toLocaleString(region.locale)} active employees clocked in`,
+      primary: { href: `/admin/attendance?${attendanceScope}`, label: "View today’s records" },
+      secondary: { href: correctionReviewHref, label: `Review corrections (${correctionCount})` },
+      setup: session.role === "admin" ? { href: `/admin/attendance?${new URLSearchParams({ view: "setup", ...branchScope })}`, label: "Attendance setup" } : null,
+    }] : []),
+    ...(canSeeLeaves ? [{
+      title: "Leave", icon: CalendarCheck2,
+      summary: `${pendingLeaveCount.toLocaleString(region.locale)} ${pendingLeaveCount === 1 ? "request needs" : "requests need"} review`,
+      primary: { href: leaveReviewHref, label: "Review leave requests" },
+      secondary: { href: `/admin/leaves?${new URLSearchParams({ view: "calendar", ...branchScope })}`, label: "Open leave calendar" },
+      setup: session.role === "admin" ? { href: "/admin/leaves/policies", label: "Leave policies" } : null,
+    }] : []),
+    ...(!isBranchManager && modules.has("payroll") ? [{
+      title: "Payroll", icon: Banknote,
+      summary: `${new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${currentMonth}-01T00:00:00Z`))} · ${region.currency}`,
+      primary: { href: payrollScopeHref("/admin/payroll/queue", payScope), label: "Open payroll work queue" },
+      secondary: { href: payrollScopeHref("/admin/payroll", payScope), label: "View monthly payroll" },
+      setup: session.role === "admin" ? { href: payrollScopeHref("/admin/payroll/configuration", payScope), label: "Payroll setup" } : null,
+    }] : []),
+  ];
   const maleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "male").length;
   const femaleEmployees = employees.filter((employee) => employee.profile?.gender?.toLowerCase() === "female").length;
   const reportedGenderTotal = maleEmployees + femaleEmployees;
@@ -324,13 +336,13 @@ export default async function AdminDashboardPage({
     permission: <StatCard label="Permission" value={counts.permission} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="sky" className={statCardClass} />,
     absent: <StatCard label="Absent" value={counts.absent} icon={<TimerOff className="h-4.5 w-4.5" />} tone="rose" className={statCardClass} />,
     pending_leaves: (
-      <StatCard
+      <Link href={leaveReviewHref} className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><StatCard
           label="Pending leave requests"
           value={pendingLeaveCount}
           icon={<CalendarCheck2 className="h-4.5 w-4.5" />}
           tone="violet"
           className={statCardClass}
-         />
+         /></Link>
     ),
     attendance_trend: (
       <Card className="h-full">
@@ -349,7 +361,27 @@ export default async function AdminDashboardPage({
       <Card className="h-full"><CardHeader><div><CardTitle>Biometric device attendance</CardTitle><CardDescription>Distinct active employees who punched today</CardDescription></div><Fingerprint className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{deviceAttendance.size ? <div className="divide-y divide-edge">{[...deviceAttendance.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => <div key={name} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count} employees</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No biometric attendance today.</p>}</CardContent></Card>
     ),
     project_attendance: (
-      <Card className="h-full"><CardHeader><div><CardTitle>Attendance by branch</CardTitle><CardDescription>Today&apos;s attendance by branch</CardDescription></div><Building2 className="h-4.5 w-4.5 text-primary" /></CardHeader><CardContent>{branchAttendance.length ? <div className="divide-y divide-edge">{branchAttendance.map(({ id, name, tally: count }) => <div key={id} className="flex items-center justify-between py-2.5 text-sm"><span>{name}</span><strong className="font-mono">{count.livePresent}/{count.total} present · {count.absent} absent</strong></div>)}</div> : <p className="py-4 text-center text-sm text-muted-foreground">No attendance by branch today.</p>}</CardContent></Card>
+      <Card className="h-full">
+        <CardHeader><div><CardTitle>Attendance by branch</CardTitle><CardDescription>Today&apos;s attendance by branch</CardDescription></div><Building2 aria-hidden="true" className="h-4.5 w-4.5 text-primary" /></CardHeader>
+        <CardContent>
+          {branchAttendance.length ? (
+            <ul className="divide-y divide-edge">
+              {branchAttendance.map(({ id, name, tally: count }) => {
+                const rowClass = "flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg px-2 py-2 text-sm";
+                const totals = <span className="tabular-nums text-muted-foreground">{count.livePresent}/{count.total} clocked in · {count.absent} absent</span>;
+                return <li key={id}>
+                  {id === "unassigned" ? <div className={rowClass}><span>{name}</span>{totals}</div> : (
+                    <Link href={`/admin/attendance?${new URLSearchParams({ date: todayKey, branch: id })}`} className={`${rowClass} hover:bg-tint focus-visible:ring-2 focus-visible:ring-ring`}>
+                      <span className="min-w-0 wrap-break-word font-medium text-primary">{name}</span>
+                      {totals}
+                    </Link>
+                  )}
+                </li>;
+              })}
+            </ul>
+          ) : <p className="py-4 text-center text-sm text-muted-foreground">No attendance by branch today.</p>}
+        </CardContent>
+      </Card>
     ),
     todays_attendance: (
       <Card className="h-full">
@@ -531,7 +563,7 @@ export default async function AdminDashboardPage({
           <CardTitle>Leave requests waiting for review</CardTitle>
           <CardDescription>{pendingLeaveCount} request{pendingLeaveCount === 1 ? "" : "s"} currently need your approval</CardDescription>
           </div>
-          <Link href="/admin/leaves?review=approvals&status=pending" className="shrink-0 rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-tint">Review leave requests</Link>
+          <Link href={leaveReviewHref} className="shrink-0 rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-tint">Review leave requests</Link>
         </CardHeader>
         <CardContent className="pt-4">
           {pendingLeaves.length === 0 ? (
@@ -549,7 +581,7 @@ export default async function AdminDashboardPage({
                       {l.leaveType.name} · {dateLabel(l.fromDate)} → {dateLabel(l.toDate)} · {l.days}d
                     </p>
                   </div>
-                  <StatusPill status="pending" />
+                  {l.cancellationRequestedBy ? <span className="rounded-md bg-tint px-2 py-1 text-xs text-muted-foreground">Cancellation requested</span> : <StatusPill status="pending" />}
                 </div>
               ))}
             </div>
@@ -562,12 +594,12 @@ export default async function AdminDashboardPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-edge bg-card p-5 sm:p-6">
         <div>
           <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">HR dashboard</h1>
           <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
             {todayLabel} · {region.timeZone}
-            {branchFilter ? ` · ${branchFilter.name}` : ""}.
+            {branchFilter ? ` · ${branchFilter.name}` : " · All branches in your scope"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">{isBranchManager ? (
@@ -575,8 +607,14 @@ export default async function AdminDashboardPage({
             Branch: {ownBranchName}
           </span>
         ) : (
-          <BranchPicker branches={branches} value={branchId ?? ""} basePath="/admin" />
-        )}{session.role === "admin" && <Link href="/admin/configuration#dashboard-layouts" className="rounded-lg border border-edge px-3 py-2 text-xs font-medium hover:bg-tint">Customize dashboard</Link>}{canReview && <Link href="/admin/approvals" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:brightness-110">Review requests</Link>}</div>
+          <form key={branchId ?? "all"} action="/admin" aria-label="Dashboard branch" className="flex min-w-0 flex-wrap items-center gap-2">
+            <Select name="branch" aria-label="Filter by branch" defaultValue={branchId ?? ""} className="min-w-40 max-w-full">
+              <option value="">All branches</option>
+              {branches.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+            </Select>
+            <Button type="submit" size="sm" variant="outline">Apply branch</Button>
+          </form>
+        )}{session.role === "admin" && <Link href={layoutEditorHref} className="rounded-lg border border-edge px-3 py-2 text-xs font-medium hover:bg-tint">Customize dashboard</Link>}{canReview && <Link href="/admin/approvals" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:brightness-110">All approval queues</Link>}</div>
       </div>
 
       {session.role === "admin" && !branchId && canSeePeople && employees.every((employee) => employee.id === session.sub) && (
@@ -595,13 +633,15 @@ export default async function AdminDashboardPage({
       )}
 
       {workflowLinks.length > 0 && (
-        <section aria-label="Attendance, leave and payroll workflows" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {workflowLinks.map(({ title, icon: Icon, primary, secondary, setup }) => (
+        <section aria-labelledby="operations-heading" className="space-y-3">
+          <h2 id="operations-heading" className="font-display text-lg font-semibold">HR operations</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {workflowLinks.map(({ title, icon: Icon, summary, primary, secondary, setup }) => (
             <Card key={title} className="min-w-0">
               <CardHeader className="gap-3">
                 <div className="flex items-center gap-2.5">
                   <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon aria-hidden="true" className="size-4" /></span>
-                  <CardTitle>{title}</CardTitle>
+                  <div><CardTitle>{title}</CardTitle><CardDescription>{summary}</CardDescription></div>
                 </div>
               </CardHeader>
               <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-3">
@@ -613,6 +653,7 @@ export default async function AdminDashboardPage({
               </CardContent>
             </Card>
           ))}
+          </div>
         </section>
       )}
 

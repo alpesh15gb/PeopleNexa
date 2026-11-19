@@ -131,12 +131,13 @@ export default async function EmployeeMasterPage({
       <PageHeader
         title="Employee directory"
         description={isAdmin ? "Find employees and manage their employment records." : `Employee records for your assigned ${isLocationManager ? "location" : "branch"}.`}
-        actions={isAdmin || isLocationManager ? <div className="flex flex-wrap items-center gap-2">
+        actions={isAdmin || (isLocationManager && locationId) ? <div className="flex flex-wrap items-center gap-2">
           <EmployeeMasterCreate branches={branches} departments={departments} positions={positions.map(row => row.name)} requireBranch={isLocationManager} showDevices={showDevices} />
           {isAdmin && <EmployeeMasterImportExport legacyWorkbookEnabled={ylrWorkbookImportEnabled(tenant?.config)} />}
           {access.modules.has("reports") && <Link href="/api/reports/master-data" className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint">Download detailed records</Link>}
         </div> : undefined}
       />
+      {requestedEmployee && selectedId && <a href="#employee-record" className="inline-flex rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint xl:hidden">Go to selected employee details</a>}
       {isLocationManager && !locationId && (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">
@@ -174,9 +175,11 @@ export default async function EmployeeMasterPage({
           </CardContent>
         </Card>
 
-        <Suspense key={`${status}:${selectedId ?? "empty"}`} fallback={<Card><CardContent className="p-10 text-sm text-muted-foreground" role="status">Loading employee details…</CardContent></Card>}>
-          <EmployeeMasterDetails selectedId={selectedId} where={scope} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} />
-        </Suspense>
+        <section id="employee-record" aria-label="Employee record" tabIndex={-1} className="min-w-0 scroll-mt-4">
+          <Suspense key={`${status}:${selectedId ?? "empty"}`} fallback={<Card><CardContent className="p-10 text-sm text-muted-foreground" role="status">Loading employee details…</CardContent></Card>}>
+            <EmployeeMasterDetails selectedId={selectedId} where={scope} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} />
+          </Suspense>
+        </section>
       </div>
     </div>
   );

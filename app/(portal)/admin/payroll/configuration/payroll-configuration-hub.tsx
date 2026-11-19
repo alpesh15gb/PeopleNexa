@@ -162,9 +162,9 @@ export function PayrollConfigurationHub({
   const draft = payrollPolicyEditorDraft(editableRecord?.payload, baseline);
   useEffect(() => {
     setEffectiveFrom(
-      editableRecord && editableRecord.locationId === selectedLocationId
+      requestedEffectiveFrom ?? (editableRecord && editableRecord.locationId === selectedLocationId
         ? dateKey(editableRecord.effectiveFrom)
-        : requestedEffectiveFrom ?? `${todayKey().slice(0, 7)}-01`,
+        : `${todayKey().slice(0, 7)}-01`),
     );
   }, [selectedScope, editableRecord?.id, requestedEffectiveFrom]);
 
@@ -239,7 +239,7 @@ export function PayrollConfigurationHub({
             <Field
               label="Apply from payroll month"
               error={!effectiveFrom ? "Choose a payroll month." : undefined}
-              hint="New payroll calculations use these settings from the first day of this month."
+              hint="Review the month before applying changes to new payroll calculations."
             >
               <Input
                 aria-label="Policy effective from"

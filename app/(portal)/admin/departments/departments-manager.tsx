@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -22,9 +23,14 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
   const [editing, setEditing] = useState<Dept | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Dept | null>(null);
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
+  const matches = departments.filter((department) => department.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (loading) return;
+    setError("");
     setLoading(true);
     const form = new FormData(e.currentTarget);
     const payload = { name: form.get("name"), description: form.get("description") };
@@ -36,12 +42,14 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to save");
+        setError(data.error ?? "Could not save the department.");
         return;
       }
-      toast("success", editing ? "Department updated" : "Department created");
+      toast("success", editing === "new" ? "Department created" : "Department updated");
       setEditing(null);
       router.refresh();
+    } catch {
+      setError("Could not save the department. Try again.");
     } finally {
       setLoading(false);
     }
@@ -59,6 +67,8 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
       toast("success", "Department removed");
       setConfirmDelete(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not delete the department. Try again.");
     } finally {
       setLoading(false);
     }
@@ -68,40 +78,39 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-edge px-5 py-3">
-        <p className="text-[13px] text-muted-foreground">{departments.length} departments</p>
-        <Button size="sm" onClick={() => setEditing("new")}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
+        {departments.length > 0 ? <Input aria-label="Search departments" placeholder="Search departments" value={query} onChange={(event) => setQuery(event.target.value)} className="max-w-sm" /> : <p className="text-sm text-muted-foreground">Departments</p>}
+        <Button size="sm" onClick={() => { setError(""); setEditing("new"); }}>
           <Plus className="h-3.5 w-3.5" /> New department
         </Button>
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-        {departments.map((d) => (
+        {matches.map((d) => (
           <div key={d.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="font-display text-[15px] font-semibold">{d.name}</p>
                 <p className="mt-0.5 text-[12px] text-muted-foreground">{d.description || "No description"}</p>
               </div>
-              <span className="rounded-full bg-tint-strong px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-                {d._count.employees}
-              </span>
+              <Link href={`/admin/employee-master?department=${encodeURIComponent(d.id)}`} className="shrink-0 rounded-lg border border-edge px-2.5 py-1 text-xs hover:bg-tint">{d._count.employees} employees</Link>
             </div>
-            <div className="mt-3 flex gap-1.5 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
-              <Button size="sm" variant="outline" onClick={() => setEditing(d)}>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => { setError(""); setEditing(d); }}>
                 <Pencil className="h-3 w-3" /> Edit
               </Button>
-              <Button size="sm" variant="outline" className="text-rose-300" onClick={() => setConfirmDelete(d)}>
+              <Button size="sm" variant="outline" className="text-rose-300" aria-label={`Delete ${d.name}`} onClick={() => setConfirmDelete(d)}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </div>
           </div>
         ))}
+        {!matches.length && departments.length > 0 && <p className="col-span-full p-4 text-sm text-muted-foreground">No departments match your search.</p>}
         {departments.length === 0 && (
           <div className="col-span-full rounded-xl border border-dashed border-edge bg-tint/40 px-5 py-10 text-center">
             <p className="font-display text-sm font-semibold">No departments yet</p>
             <p className="mt-1 text-[13px] text-muted-foreground">Create your first department to organize employees into teams.</p>
-            <Button size="sm" className="mt-4" onClick={() => setEditing("new")}>
+            <Button size="sm" className="mt-4" onClick={() => { setError(""); setEditing("new"); }}>
               <Plus className="h-3.5 w-3.5" /> New department
             </Button>
           </div>
@@ -110,7 +119,7 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
 
       <Modal
         open={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={() => !loading && setEditing(null)}
         title={isNew ? "New department" : `Edit ${editing && typeof editing === "object" ? editing.name : ""}`}
         size="sm"
       >
@@ -121,8 +130,9 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
           <Field label="Description">
             <Textarea name="description" defaultValue={editing && typeof editing === "object" ? editing.description ?? "" : ""} />
           </Field>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button type="button" variant="ghost" disabled={loading} onClick={() => setEditing(null)}>Cancel</Button>
             <Button type="submit" loading={loading}>Save</Button>
           </div>
         </form>
@@ -133,7 +143,7 @@ export function DepartmentsManager({ departments }: { departments: Dept[] }) {
         title={`Delete ${confirmDelete?.name ?? "department"}?`}
         description={
           confirmDelete && confirmDelete._count.employees > 0
-            ? `${confirmDelete._count.employees} employee(s) are assigned to this department. They will become unassigned.`
+            ? `Reassign the ${confirmDelete._count.employees} employees in this department before deleting it.`
             : "This cannot be undone."
         }
         busy={loading}

@@ -5,6 +5,7 @@ import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { notifyEmployee } from "@/lib/notifications";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { EXPENSE_REIMBURSEMENT_PREFIX, hasPaidExpenseReimbursement } from "@/lib/expense-reimbursement";
+import { getTenantAccess } from "@/lib/modules-server";
 import { supportsIndiaPayroll, workspaceRegion } from "@/lib/workspace-region";
 
 const FLOW = ["approved", "rejected", "settled"] as const;
@@ -35,6 +36,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (status === "approved" && (typeof payrollMonth !== "string" || !isMonthKey(payrollMonth))) {
     return NextResponse.json({ error: "Select a valid payroll month for this reimbursement." }, { status: 400 });
   }
+  const payrollEnabled = status === "approved" && (await getTenantAccess(session.tenantId)).modules.has("payroll");
   const result = await prisma.$transaction(async (tx) => {
     // Another review can advance the row by at most two states. Reload after
     // a lost update so retries see the committed transition and its effects.
@@ -53,6 +55,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         return { outcome: "blocked", message: "This reimbursement must appear in a paid payroll before it can be marked settled." } as const;
       }
       if (status === "approved") {
+        if (!payrollEnabled) return { outcome: "blocked", message: "Payroll is disabled. Record an external payment after paying this claim separately." } as const;
         const [tenant, employee] = await Promise.all([
           tx.tenant.findUniqueOrThrow({ where: { id: claim.tenantId }, select: { config: true } }),
           tx.employee.findFirst({ where: { id: claim.employeeId, tenantId: claim.tenantId }, select: { salary: true, status: true, loginOnly: true, branchId: true, locationId: true, branch: { select: { locationId: true } } } }),

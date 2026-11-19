@@ -1,3 +1,5 @@
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import type { Prisma } from "@/generated/prisma/client";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
@@ -8,7 +10,7 @@ import { dayRangeIST, isDateKey } from "@/lib/dates";
 import { employeeLocationScope } from "@/lib/location-scope";
 import { workspaceRegion } from "@/lib/workspace-region";
 import { formatCalendarDate, timeZoneDayRange } from "@/lib/workspace-time";
-import type { RecordSearchParams } from "@/lib/document-expense-pagination";
+import { recordPageNumber, recordPagination, type RecordSearchParams } from "@/lib/document-expense-pagination";
 import { RegularizationPanel } from "./regularization-panel";
 
 export const dynamic = "force-dynamic";
@@ -48,28 +50,34 @@ export default async function AdminRegularizationPage({ searchParams }: { search
   if (branch) attendanceParams.set("branch", branch.id);
   const attendanceHref = attendanceParams.size ? `/admin/attendance?${attendanceParams}` : "/admin/attendance";
   const employeeDetails = { select: { id: true, firstName: true, lastName: true, employeeNumber: true } } as const;
+  const correctionWhere: Prisma.PunchCorrectionWhereInput = {
+    tenantId, employee: correctionScope, ...(reviewed ? { status: { in: ["approved", "rejected"] } } : { status: "pending", employeeId: { not: session.sub } }),
+    ...(correctionDay && { date: { gte: correctionDay.start, lt: correctionDay.end } }),
+  };
+  const punchWhere: Prisma.PunchWhereInput = {
+    tenantId, employee: employeeScope, employeeId: { not: session.sub },
+    OR: [{ faceStatus: { in: ["review", "rejected"] } }, { authStatus: "pending" }],
+    ...(punchDay && { punchTime: { gte: punchDay.start, lt: punchDay.end } }),
+  };
+  const total = view === "corrections" ? await prisma.punchCorrection.count({ where: correctionWhere }) : await prisma.punch.count({ where: punchWhere });
+  const pagination = recordPagination(total, recordPageNumber(params.page) ?? 1, 25);
   const corrections = view === "corrections" ? await prisma.punchCorrection.findMany({
-    where: {
-      tenantId, employee: correctionScope, ...(reviewed ? { status: { in: ["approved", "rejected"] } } : { status: "pending", employeeId: { not: session.sub } }),
-      ...(correctionDay && { date: { gte: correctionDay.start, lt: correctionDay.end } }),
-    },
+    where: correctionWhere,
     include: { employee: employeeDetails },
     orderBy: reviewed ? [{ reviewedAt: "desc" }, { id: "desc" }] : [{ createdAt: "asc" }, { id: "asc" }],
-    ...(reviewed && !date ? { take: 100 } : {}),
+    skip: pagination.offset,
+    take: pagination.pageSize,
   }) : [];
   const faceReviews = view === "punches" ? await prisma.punch.findMany({
-    where: {
-      tenantId, employee: employeeScope, employeeId: { not: session.sub },
-      OR: [{ faceStatus: { in: ["review", "rejected"] } }, { authStatus: "pending" }],
-      ...(punchDay && { punchTime: { gte: punchDay.start, lt: punchDay.end } }),
-    },
+    where: punchWhere,
     select: {
       id: true, punchTime: true, faceStatus: true, inOutHint: true, locationAccuracy: true,
       locationStatus: true, faceScore: true, lat: true, lng: true, authStatus: true, holdReason: true,
       employee: employeeDetails,
     },
     orderBy: [{ punchTime: "asc" }, { id: "asc" }],
-    take: 100,
+    skip: pagination.offset,
+    take: pagination.pageSize,
   }) : [];
   const photoIds = new Set(faceReviews.length ? (await prisma.punch.findMany({
     where: { tenantId, id: { in: faceReviews.map((punch) => punch.id) }, selfie: { not: null } }, select: { id: true },
@@ -111,6 +119,7 @@ export default async function AdminRegularizationPage({ searchParams }: { search
           }))}
         />
       </CardContent></Card>
+      <DocumentExpensePagination path="/admin/regularization" params={{ view, status: reviewed ? "reviewed" : undefined, date: date || undefined, branch: branch?.id, review: reviewOnly ? "approvals" : undefined }} pagination={pagination} label={view === "corrections" ? "corrections" : "punches"} />
     </div>
   );
 }

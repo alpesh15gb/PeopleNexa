@@ -11,10 +11,9 @@ export default async function RegisterPage() {
   return (
     <div className="animate-fade-up motion-reduce:animate-none">
       <div className="mb-7">
-        <p className="mb-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-primary dark:text-[#93C5FD]">Start with the essentials</p>
-        <h2 className="font-display text-[30px] font-bold tracking-[-0.035em]">Create your workspace</h2>
+        <h1 className="font-display text-[30px] font-bold tracking-[-0.035em]">Create your workspace</h1>
         <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-          We&apos;ll set up the sensible defaults so you can invite your team and get moving in minutes.
+          Set your organization’s workspace address and create its first administrator account.
         </p>
       </div>
       <RegisterForm baseDomain={process.env.APP_BASE_DOMAIN ?? "peoplenexa.in"} />

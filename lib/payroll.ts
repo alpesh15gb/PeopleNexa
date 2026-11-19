@@ -8,6 +8,7 @@ import type { Prisma } from "../generated/prisma/client";
 import { istStartOfDay, parseIST } from "./ist";
 import { minutesOfDay } from "./dates";
 import { round2 } from "./utils";
+import { salaryRevisionPeriodStart } from "./salary-revisions";
 import type { PayrollPolicySnapshot } from "./payroll-policy";
 import type {
   EarnedSalaryAggregation,
@@ -1365,6 +1366,7 @@ export async function generatePayslipForEmployee(
   employee: {
     id: string;
     salary: number;
+    salaryRevisionId?: string | null;
     salaryStructure?: unknown;
     payMode?: string | null;
     workBasisRate?: number | null;
@@ -1446,6 +1448,17 @@ export async function generatePayslipForEmployee(
             "Employees can be added only while the payroll run is Draft.",
           );
       }
+      if (employee.salaryRevisionId !== undefined) {
+        const revision = await tx.salaryRevision.findFirst({
+          where: { tenantId, employeeId: employee.id, status: "approved", effectiveFrom: { lte: salaryRevisionPeriodStart(month) } },
+          orderBy: { effectiveFrom: "desc" },
+          select: { id: true },
+        });
+        if ((revision?.id ?? null) !== employee.salaryRevisionId) {
+          throw new Error("The approved salary changed during generation. Retry this employee.");
+        }
+      }
+
       const existing = payrollRunId
         ? await tx.payslip.findUnique({
             where: {

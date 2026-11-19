@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { optionalDateInput } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
@@ -28,8 +28,9 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json();
-    if (!body.name || !body.date) {
-      return NextResponse.json({ error: "Name and date are required." }, { status: 400 });
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 120 || !body.date) {
+      return NextResponse.json({ error: "Enter a holiday name of up to 120 characters and a date." }, { status: 400 });
     }
     const date = optionalDateInput(body.date);
     if (!date || date === "invalid") {
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
     const holiday = await prisma.holiday.create({
       data: {
         tenantId: session.tenantId,
-        name: String(body.name).trim(),
+        name,
         date,
         isRecurring: Boolean(body.isRecurring),
         isHalfDay: Boolean(body.isHalfDay),

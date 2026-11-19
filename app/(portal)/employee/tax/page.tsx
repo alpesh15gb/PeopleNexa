@@ -2,16 +2,17 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
 import { fyFromMonth } from "@/lib/payroll";
+import { monthKeyIST } from "@/lib/dates";
 import { TaxDeclarationPanel } from "./tax-declaration-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function EmployeeTaxPage() {
   const session = await requireSession();
-  const fy = fyFromMonth(new Date().toISOString().slice(0, 7));
+  const fy = fyFromMonth(monthKeyIST());
   const employee = await prisma.employee.findUnique({
     where: { id: session.sub },
-    select: { firstName: true, lastName: true, salary: true },
+    select: { salary: true },
   });
   const declarations = await prisma.taxDeclaration.findMany({
     where: { tenantId: session.tenantId, employeeId: session.sub },
@@ -22,7 +23,7 @@ export default async function EmployeeTaxPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Tax declarations"
-        description="Declare investments to reduce TDS deducted from your salary"
+        description="Submit declared amounts for HR review and track the decision."
       />
       <Card>
         <CardContent className="p-6">
@@ -37,7 +38,6 @@ export default async function EmployeeTaxPage() {
               updatedAt: d.updatedAt.toISOString(),
             }))}
             monthlySalary={employee?.salary ?? 0}
-            name={`${employee?.firstName ?? ""} ${employee?.lastName ?? ""}`.trim()}
           />
         </CardContent>
       </Card>

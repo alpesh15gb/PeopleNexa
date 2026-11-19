@@ -6,6 +6,10 @@ import { Plus, Target, ClipboardList, Trash2, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
+import { PageHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { formatDate } from "@/lib/dates";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useToast } from "@/components/ui/toast";
@@ -28,8 +32,23 @@ type Review = {
 };
 
 const statusTone: Record<string, "warning" | "info" | "success"> = { draft: "warning", self_done: "info", completed: "success" };
+const reviewStatusText: Record<string, string> = { draft: "Awaiting self-review", self_done: "Ready for manager", completed: "Completed" };
 
-export function PerformancePanel({ kpis, reviews, employees, canManageKpis, actorId }: { canManageKpis: boolean; actorId: string; kpis: Kpi[]; reviews: Review[]; employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[] }) {
+type PerformancePanelProps = {
+  kpis: Kpi[];
+  reviews: Review[];
+  employees: { id: string; firstName: string; lastName: string; employeeNumber: string }[];
+  canManageKpis: boolean;
+  actorId: string;
+  query: string;
+  status: string;
+  pending: number;
+  pager: React.ReactNode;
+};
+
+export function PerformancePanel({
+  kpis, reviews, employees, canManageKpis, actorId, query, status, pending, pager,
+}: PerformancePanelProps) {
   const router = useRouter();
   const toast = useToast();
   const [tab, setTab] = useState<"reviews" | "kpis">("reviews");
@@ -165,26 +184,36 @@ export function PerformancePanel({ kpis, reviews, employees, canManageKpis, acto
     }
   }
 
-  const pending = reviews.filter((r) => r.status !== "completed").length;
   const readOnly = scoring?.status === "completed" || scoring?.employee.id === actorId;
+  const hasKpi = kpis.some((kpi) => kpi.enabled);
 
   return (
     <div className="space-y-6">
+      <PageHeader title="Performance reviews" description="Set review criteria, assign assessments and track submissions through manager review." />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
-          <button onClick={() => setTab("reviews")} className={`rounded-lg px-3.5 py-2 text-[13px] font-medium ${tab === "reviews" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
+          <button type="button" aria-pressed={tab === "reviews"} onClick={() => setTab("reviews")} className={`rounded-lg px-3.5 py-2 text-[13px] font-medium ${tab === "reviews" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
             <ClipboardList className="mr-1.5 inline h-3.5 w-3.5" /> Reviews ({pending} active)
           </button>
-          <button onClick={() => setTab("kpis")} className={`rounded-lg px-3.5 py-2 text-[13px] font-medium ${tab === "kpis" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
+          <button type="button" aria-pressed={tab === "kpis"} onClick={() => setTab("kpis")} className={`rounded-lg px-3.5 py-2 text-[13px] font-medium ${tab === "kpis" ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
             <Target className="mr-1.5 inline h-3.5 w-3.5" /> KPIs ({kpis.length})
           </button>
         </div>
         {tab === "reviews" ? (
-          <Button size="sm" disabled={!employees.length || !kpis.some((kpi) => kpi.enabled)} onClick={() => setCreatingReview(true)}><Plus className="h-3.5 w-3.5" /> Start review</Button>
+          <Button size="sm" disabled={!employees.length || !hasKpi} onClick={() => setCreatingReview(true)}><Plus className="h-3.5 w-3.5" /> Start review</Button>
         ) : (
           canManageKpis && <Button size="sm" onClick={() => setAddingKpi(true)}><Plus className="h-3.5 w-3.5" /> Add KPI</Button>
         )}
       </div>
+      {tab === "reviews" && !hasKpi && <p className="rounded-xl border border-edge bg-card p-4 text-sm text-muted-foreground">A review needs at least one active KPI. {canManageKpis ? <button type="button" onClick={() => setTab("kpis")} className="font-medium text-primary hover:underline">Set up KPIs</button> : "Ask a workspace admin to add one."}</p>}
+      {tab === "reviews" && (reviews.length > 0 || query || status) && <form action="/admin/performance" className="flex flex-wrap gap-2 rounded-xl border border-edge bg-card p-3">
+        <Input aria-label="Search performance reviews" placeholder="Employee, code or review period" className="max-w-xs" name="q" defaultValue={query} />
+        <Select aria-label="Review status" className="w-auto" name="status" defaultValue={status}>
+          <option value="">All reviews</option>{Object.entries(reviewStatusText).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+        </Select>
+        <Button type="submit" size="sm">Apply filters</Button>
+        {(query || status) && <a href="/admin/performance" className="self-center text-sm text-primary">Clear filters</a>}
+      </form>}
 
       {tab === "kpis" ? (
         kpis.length === 0 ? (
@@ -203,7 +232,7 @@ export function PerformancePanel({ kpis, reviews, employees, canManageKpis, acto
           </div>
         )
       ) : reviews.length === 0 ? (
-        <EmptyState icon={<ClipboardList className="h-5 w-5" />} title="No reviews yet" description="Start an employee review to collect a self-assessment, peer feedback, and a manager assessment." />
+        <EmptyState icon={<ClipboardList className="h-5 w-5" />} title={query || status ? "No matching reviews" : "No reviews yet"} description={query || status ? "Change the employee search or review status." : "Start an employee review to collect a self-assessment, peer feedback, and a manager assessment."} />
       ) : (
         <div className="divide-y divide-[color:var(--border)] rounded-2xl border border-edge bg-card">
           {reviews.map((r) => (
@@ -215,14 +244,15 @@ export function PerformancePanel({ kpis, reviews, employees, canManageKpis, acto
                 <div className="min-w-0">
                   <p className="truncate text-[13.5px] font-medium">{r.employee.firstName} {r.employee.lastName}</p>
                   <p className="text-[11.5px] text-muted-foreground">{r.period} · {r.employee.position ?? r.employee.employeeNumber}{r.overallRating ? ` · rating ${r.overallRating}/5` : ""}</p>
+                  {r.dueDate && <p className="text-xs text-muted-foreground">Due {formatDate(new Date(r.dueDate))}</p>}
                 </div>
               </div>
-              <div className="flex items-center gap-2.5">
-                <Badge tone={statusTone[r.status] ?? "neutral"} className="capitalize">{r.status.replace("_", " ")}</Badge>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Badge tone={statusTone[r.status] ?? "neutral"}>{reviewStatusText[r.status] ?? r.status}</Badge>
                 <Button size="sm" variant="outline" onClick={() => openScoring(r)}>
-                  {r.status === "completed" || r.employee.id === actorId ? "View" : "Score"}
+                  {r.status === "completed" || r.employee.id === actorId ? "View review" : "Review and score"}
                 </Button>
-                <Button size="icon" variant="ghost" onClick={() => deleteReview(r.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
+                <Button size="icon" variant="ghost" aria-label={`Delete ${r.period} review for ${r.employee.firstName} ${r.employee.lastName}`} onClick={() => deleteReview(r.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
               </div>
             </div>
           ))}
@@ -230,6 +260,7 @@ export function PerformancePanel({ kpis, reviews, employees, canManageKpis, acto
       )}
 
       {/* Add KPI */}
+      {tab === "reviews" && pager}
       <Modal open={addingKpi} onClose={() => setAddingKpi(false)} title="Add KPI" size="sm">
         <form onSubmit={addKpi} className="space-y-4">
           <label className="block">

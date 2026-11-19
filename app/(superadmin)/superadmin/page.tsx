@@ -1,8 +1,15 @@
-import { Building2, Users, ShieldAlert, Timer, Sparkles, IndianRupee } from "lucide-react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { Building2, ShieldAlert, Timer, CheckCircle2 } from "lucide-react";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/superadmin";
 import { StatCard } from "@/components/ui/stat";
 import { PageHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { recordPageNumber, recordPageRedirect, recordPagination, type RecordSearchParams } from "@/lib/document-expense-pagination";
 import { formatDate } from "@/lib/dates";
 import { getEffectivePlans } from "@/lib/plans-server";
 import { TenantsTable } from "./tenants-table";
@@ -10,97 +17,109 @@ import { PlansTable } from "./plans-table";
 
 export const dynamic = "force-dynamic";
 
-export default async function SuperadminOverviewPage() {
+export default async function SuperadminOverviewPage({ searchParams }: { searchParams: Promise<RecordSearchParams> }) {
   await requireSuperAdmin();
+  const params = await searchParams;
+  const plansView = params.view === "plans";
+  const now = new Date();
+  const expiringWhere = { status: "active", subscriptionExpiry: { lt: new Date(now.getTime() + 30 * 86_400_000) } };
+  const activeWhere: Prisma.TenantWhereInput = { status: "active", OR: [{ subscriptionExpiry: null }, { subscriptionExpiry: { gte: now } }] };
 
-  const [stats, tenants] = await Promise.all([
-    prisma.$transaction([
-      prisma.tenant.count(),
-      prisma.tenant.count({ where: { status: "active" } }),
-      prisma.tenant.count({ where: { status: "suspended" } }),
-      prisma.employee.count(),
-      prisma.tenant.count({ where: { plan: "trial" } }),
-      prisma.tenant.count({
-        where: { subscriptionExpiry: { not: null, lt: new Date(Date.now() + 30 * 24 * 3600 * 1000) } },
-      }),
-      prisma.tenant.groupBy({
-        by: ["plan"],
-        _sum: { seats: true },
-        _count: { _all: true },
-        orderBy: { plan: "asc" },
-      }),
-    ]),
-    prisma.tenant.findMany({
-      omit: { config: true },
-      include: {
-        _count: { select: { employees: true } },
-        modules: { select: { module: true, enabled: true } },
-        licenses: { orderBy: { createdAt: "desc" }, take: 1 },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
+  const [total, active, suspended, renewal, plans] = await Promise.all([
+    prisma.tenant.count(),
+    prisma.tenant.count({ where: activeWhere }),
+    prisma.tenant.count({ where: { status: "suspended" } }),
+    prisma.tenant.count({ where: expiringWhere }),
+    getEffectivePlans(),
   ]);
 
-  const [total, active, suspended, employees, trials, expiringSoon, seatRows] = stats;
+  const section = plansView
+    ? await planPricingSection(plans)
+    : await workspaceDirectorySection({ params, plans, now, activeWhere, expiringWhere });
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Platform administration" description="Manage customer workspaces, subscriptions and plan defaults." />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Workspaces" value={total} icon={<Building2 className="size-4" />} tone="indigo" />
+        <StatCard label="Active access" value={active} icon={<CheckCircle2 className="size-4" />} tone="emerald" />
+        <StatCard label="Suspended" value={suspended} icon={<ShieldAlert className="size-4" />} tone="rose" />
+        <Link href="/superadmin?status=renewal" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <StatCard className="h-full hover:bg-tint" label="Needs renewal" value={renewal} icon={<Timer className="size-4" />} tone="amber" />
+        </Link>
+      </div>
+      <nav aria-label="Platform sections" className="flex flex-wrap gap-2 border-b border-edge pb-3">
+        {[{ href: "/superadmin", label: "Workspaces", selected: !plansView }, { href: "/superadmin?view=plans", label: "Plans & pricing", selected: plansView }].map(({ href, label, selected }) => (
+          <Link key={href} href={href} aria-current={selected ? "page" : undefined} className={`rounded-lg px-3 py-2.5 text-sm font-semibold hover:bg-tint ${selected ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{label}</Link>
+        ))}
+      </nav>
+      {section}
+    </div>
+  );
+}
 
-  const plans = await getEffectivePlans();
-  const overrides = await prisma.planOverride.findMany({ select: { planKey: true } });
-  let mrr = 0;
-  let arr = 0;
-  const usage: Record<string, { count: number; seats: number }> = {};
-  for (const p of plans) {
-    const row = seatRows.find((r) => r.plan === p.key) as { _sum?: { seats?: number | null }; _count?: { _all?: number } } | undefined;
-    const seats = row?._sum?.seats ?? 0;
-    const count = row?._count?._all ?? 0;
-    const planMrr = count > 0 ? seats * p.pricePerSeat : 0;
-    const planArr = count > 0 ? seats * p.annualPricePerSeat * 12 : 0;
-    usage[p.key] = { count, seats };
-    mrr += planMrr;
-    arr += planArr;
-  }
-  const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+type Plans = Awaited<ReturnType<typeof getEffectivePlans>>;
+
+async function planPricingSection(plans: Plans) {
+  const [overrides, seatRows] = await Promise.all([
+    prisma.planOverride.findMany({ select: { planKey: true } }),
+    prisma.tenant.groupBy({ by: ["plan"], _sum: { seats: true }, _count: { _all: true }, orderBy: { plan: "asc" } }),
+  ]);
+  const usage = Object.fromEntries(seatRows.map((row) => [row.plan, { count: row._count._all, seats: row._sum.seats ?? 0 }]));
+  return (
+    <section aria-label="Plans and pricing" className="space-y-3">
+      <p className="text-sm text-muted-foreground">Edit list pricing, seat limits and included modules for each plan.</p>
+      <PlansTable plans={plans} usage={usage} customized={overrides.map((row) => row.planKey)} />
+    </section>
+  );
+}
+
+async function workspaceDirectorySection({ params, plans, now, activeWhere, expiringWhere }: {
+  params: RecordSearchParams;
+  plans: Plans;
+  now: Date;
+  activeWhere: Prisma.TenantWhereInput;
+  expiringWhere: Prisma.TenantWhereInput;
+}) {
+  const search = typeof params.q === "string" ? params.q.trim().slice(0, 100) : "";
+  const filter = params.status === "suspended" || params.status === "active" || params.status === "renewal" ? params.status : "";
+  const searchMatch = { contains: search, mode: "insensitive" } as const;
+  const where: Prisma.TenantWhereInput = {
+    AND: [
+      filter === "renewal" ? expiringWhere : filter === "active" ? activeWhere : filter ? { status: filter } : {},
+      search ? { OR: [{ name: searchMatch }, { slug: searchMatch }, { code: searchMatch }] } : {},
+    ],
+  };
+  const pagination = recordPagination(await prisma.tenant.count({ where }), recordPageNumber(params.page) ?? 1, 25);
+  const canonical = recordPageRedirect("/superadmin", params, pagination);
+  if (canonical) redirect(canonical);
+  const tenants = await prisma.tenant.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    skip: pagination.offset,
+    take: pagination.pageSize,
+    select: {
+      id: true, name: true, slug: true, status: true, plan: true, seats: true, subscriptionExpiry: true,
+      _count: { select: { employees: true } },
+      modules: { where: { enabled: true }, orderBy: { module: "asc" }, select: { module: true } },
+    },
+  });
 
   return (
-    <div className="animate-fade-up space-y-6">
-      <PageHeader
-        title="Platform Overview"
-        description="Tenants, licenses and module usage across the platform"
-      />
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Tenants" value={total} icon={<Building2 className="h-4.5 w-4.5" />} tone="indigo" />
-        <StatCard label="Active" value={active} icon={<Sparkles className="h-4.5 w-4.5" />} tone="emerald" />
-        <StatCard label="Suspended" value={suspended} icon={<ShieldAlert className="h-4.5 w-4.5" />} tone="rose" />
-        <StatCard label="Trial" value={trials} icon={<Timer className="h-4.5 w-4.5" />} tone="amber" />
-        <StatCard label="MRR (est.)" value={inr(mrr)} icon={<IndianRupee className="h-4.5 w-4.5" />} tone="emerald" />
-        <StatCard label="ARR (est.)" value={inr(arr)} icon={<IndianRupee className="h-4.5 w-4.5" />} tone="violet" />
-      </div>
-
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg font-bold tracking-tight">Plans & pricing</h2>
-          <p className="text-[12px] text-muted-foreground">Click ✎ on a plan to edit pricing, seats or modules</p>
-        </div>
-        <PlansTable plans={plans} usage={usage} customized={overrides.map((o) => o.planKey)} />
-      </div>
-
-      <div>
-        <h2 className="mb-3 font-display text-lg font-bold tracking-tight">Tenants</h2>
-        <TenantsTable
-          plans={plans}
-          tenants={tenants.map(({ _count, modules, licenses, ...t }) => ({
-            ...t,
-            subscriptionExpiry: t.subscriptionExpiry ? t.subscriptionExpiry.toISOString() : null,
-            createdAt: t.createdAt.toISOString(),
+        <section aria-label="Workspaces" className="space-y-3">
+          <form key={`${search}:${filter}`} action="/superadmin" className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-card p-4">
+            <label className="min-w-44 flex-1 space-y-1.5 text-sm font-medium">Find a workspace<Input name="q" defaultValue={search} maxLength={100} placeholder="Name, address or workspace code" /></label>
+            <label className="min-w-40 space-y-1.5 text-sm font-medium">Workspace status<select name="status" defaultValue={filter} className="block h-11 w-full rounded-[11px] border border-input bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="">All statuses</option><option value="active">Active accounts</option><option value="renewal">Expired or due within 30 days</option><option value="suspended">Suspended</option></select></label>
+            <Button type="submit">Apply filters</Button>
+            {(search || filter) && <Link href="/superadmin" className="inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-medium hover:bg-tint">Clear</Link>}
+          </form>
+          <TenantsTable plans={plans} baseDomain={process.env.APP_BASE_DOMAIN ?? "peoplenexa.in"} tenants={tenants.map(({ _count, modules, ...tenant }) => ({
+            ...tenant,
             employeeCount: _count.employees,
-            enabledModules: modules.filter((m) => m.enabled).map((m) => m.module),
-            currentLicense: licenses[0] ? { ...licenses[0], startsAt: licenses[0].startsAt.toISOString(), expiresAt: licenses[0].expiresAt ? licenses[0].expiresAt.toISOString() : null, createdAt: licenses[0].createdAt.toISOString() } : null,
-            expiryLabel: t.subscriptionExpiry ? formatDate(t.subscriptionExpiry) : null,
-            createdAtLabel: formatDate(t.createdAt),
-          }))}
-        />
-      </div>
-
-    </div>
+            enabledModules: modules.map(({ module }) => module),
+            expiryLabel: tenant.subscriptionExpiry ? formatDate(tenant.subscriptionExpiry) : null,
+            expired: Boolean(tenant.subscriptionExpiry && tenant.subscriptionExpiry < now),
+          }))} />
+          <DocumentExpensePagination path="/superadmin" params={params} pagination={pagination} label="workspaces" />
+        </section>
   );
 }

@@ -1,74 +1,40 @@
 import type { ReactNode } from "react";
-import { MapPin, ShieldCheck, CalendarClock, BarChart3, ArrowUpRight } from "lucide-react";
+import Link from "next/link";
+import { Building2, KeyRound, Users } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
-
-const proofPoints = [
-  { icon: MapPin, title: "Verified attendance", text: "Location-aware punch-ins for distributed teams." },
-  { icon: ShieldCheck, title: "Built for trust", text: "Role-based access keeps people data in the right hands." },
-  { icon: CalendarClock, title: "Fewer follow-ups", text: "Leave, shifts, and regularisation stay in one place." },
-];
 
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div
-      className="min-h-screen bg-background lg:grid lg:grid-cols-[minmax(420px,0.95fr)_1.05fr]"
-    >
-      <style>{`@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}html{scroll-behavior:auto !important}}`}</style>
-      <aside className="relative hidden overflow-hidden border-r border-edge bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-10 xl:p-14">
-        <div className="pointer-events-none absolute -left-32 -top-32 h-[440px] w-[440px] rounded-full bg-primary/10 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -bottom-48 -right-24 h-[520px] w-[520px] rounded-full bg-[#3B82F6]/10 blur-3xl" aria-hidden />
-        <div className="relative flex items-center justify-between">
-          <div className="flex h-11 items-center rounded-[11px] bg-white px-3 shadow-[0_8px_28px_-12px_rgba(16,24,40,0.35)]">
+    <div className="min-h-dvh bg-background">
+      <header className="border-b border-edge bg-card">
+        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
+          <Link href="/" className="rounded-lg bg-white px-2.5 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="PeopleNexa logo" className="h-6 w-auto" />
-          </div>
-          <span className="rounded-full border border-edge bg-tint px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            HR workspace
-          </span>
-        </div>
-
-        <div className="relative max-w-xl py-16">
-          <p className="mb-5 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.15em] text-primary dark:text-[#93C5FD]">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden /> People operations, made clear
-          </p>
-          <h1 className="max-w-lg font-display text-[clamp(2.6rem,4vw,4.5rem)] font-bold leading-[1.04] tracking-[-0.05em] text-foreground">
-            Give every workday a better backbone.
-          </h1>
-          <p className="mt-6 max-w-lg text-[15px] leading-7 text-muted-foreground">
-            PeopleNexa brings attendance, leave, payroll, and employee care into one dependable place — so your team can focus on the work, not the paperwork.
-          </p>
-
-          <div className="mt-10 grid gap-3">
-            {proofPoints.map(({ icon: Icon, title, text }) => (
-              <div key={title} className="flex items-start gap-3 rounded-2xl border border-white/20 bg-card/65 p-3.5 shadow-[0_10px_30px_-26px_rgba(16,24,40,0.35)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:bg-white/5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary dark:text-[#93C5FD]">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-semibold text-foreground">{title}</p>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">{text}</p>
-                </div>
-                <ArrowUpRight className="ml-auto mt-1 h-4 w-4 shrink-0 text-muted-foreground/50" aria-hidden="true" />
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-8 flex items-center gap-3 text-[12px] text-muted-foreground">
-            <BarChart3 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
-            <span>One view for the moments that need your attention.</span>
-          </div>
-        </div>
-
-        <p className="relative text-[12px] text-muted-foreground/70">© {new Date().getFullYear()} PeopleNexa · Apex Integrations</p>
-      </aside>
-
-      <main className="relative flex min-h-screen items-center justify-center px-4 py-10 sm:px-8 lg:px-16">
-        <div className="absolute right-5 top-5 flex items-center gap-3 sm:right-8 sm:top-8">
-          <span className="hidden text-[12px] text-muted-foreground sm:block">Your team&apos;s workspace</span>
+            <img src="/logo.png" alt="PeopleNexa home" className="h-6 w-auto" />
+          </Link>
           <ThemeToggle />
         </div>
-        <div className="w-full max-w-[430px]">{children}</div>
-      </main>
+      </header>
+      <div className="mx-auto grid max-w-5xl gap-8 px-5 py-8 sm:px-8 sm:py-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)] lg:gap-20">
+        <main className="mx-auto w-full max-w-lg">{children}</main>
+        <aside aria-labelledby="access-help" className="mx-auto w-full max-w-lg self-start rounded-2xl border border-edge bg-tint/60 p-5 lg:mt-8 lg:p-7">
+          <h2 id="access-help" className="font-display text-lg font-semibold">Workspace access</h2>
+          <dl className="mt-4 space-y-4 text-sm">
+            <div className="grid grid-cols-[1.25rem_1fr] gap-x-3">
+              <Building2 aria-hidden="true" className="mt-0.5 size-4 text-primary" />
+              <div><dt className="font-medium">Find your workspace</dt><dd className="mt-0.5 text-muted-foreground">Use the workspace address shared by your organization.</dd></div>
+            </div>
+            <div className="grid grid-cols-[1.25rem_1fr] gap-x-3">
+              <Users aria-hidden="true" className="mt-0.5 size-4 text-primary" />
+              <div><dt className="font-medium">Use your own account</dt><dd className="mt-0.5 text-muted-foreground">Sign in with the employee ID or work email assigned to you.</dd></div>
+            </div>
+            <div className="grid grid-cols-[1.25rem_1fr] gap-x-3">
+              <KeyRound aria-hidden="true" className="mt-0.5 size-4 text-primary" />
+              <div><dt className="font-medium">Get help signing in</dt><dd className="mt-0.5 text-muted-foreground">Ask your workspace administrator for your account details or a password reset.</dd></div>
+            </div>
+          </dl>
+        </aside>
+      </div>
     </div>
   );
 }

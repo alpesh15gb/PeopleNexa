@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getWhatsAppConfig, saveWhatsAppConfig } from "@/lib/whatsapp";
 
@@ -26,25 +26,26 @@ export async function PUT(req: NextRequest) {
   if (!session || session.role !== "admin") {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const body = await req.json().catch(() => ({}));
-  const enabled = Boolean(body.enabled);
-  // Undefined = field not sent → keep existing. Blank token = keep existing (eBio-style).
-  const apiUrlRaw = body.apiUrl === undefined ? undefined : String(body.apiUrl);
-  const apiTokenRaw =
-    body.apiToken == null || String(body.apiToken) === "" ? undefined : String(body.apiToken);
-  const senderRaw = body.sender === undefined ? undefined : String(body.sender ?? "");
-  if (apiUrlRaw !== undefined && apiUrlRaw !== "" && !/^https?:\/\//i.test(apiUrlRaw)) {
-    return NextResponse.json({ error: "API URL must start with http:// or https://" }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.enabled !== undefined && typeof body.enabled !== "boolean")) {
+    return NextResponse.json({ error: "Send valid gateway settings." }, { status: 400 });
   }
-  if (enabled) {
-    let effectiveUrl = apiUrlRaw;
-    if (effectiveUrl === undefined) {
-      const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
-      effectiveUrl = getWhatsAppConfig(tenant?.config ?? null).apiUrl;
+  const enabled = body.enabled as boolean | undefined;
+  // Undefined = field not sent → keep existing. Blank token = keep existing (eBio-style).
+  const apiUrlRaw = body.apiUrl === undefined ? undefined : String(body.apiUrl).trim();
+  const apiTokenRaw =
+    typeof body.apiToken === "string" && body.apiToken.trim() ? body.apiToken.trim() : undefined;
+  const senderRaw = body.sender === undefined ? undefined : String(body.sender ?? "").trim();
+  if (apiUrlRaw) {
+    const url = URL.canParse(apiUrlRaw) ? new URL(apiUrlRaw) : null;
+    if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+      return NextResponse.json({ error: "Enter an HTTP or HTTPS gateway URL without embedded credentials." }, { status: 400 });
     }
-    if (!effectiveUrl || !effectiveUrl.trim()) {
-      return NextResponse.json({ error: "Cannot enable WhatsApp without an API URL." }, { status: 400 });
-    }
+  }
+  const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
+  const current = getWhatsAppConfig(tenant?.config);
+  if ((enabled ?? current.enabled) && !(apiUrlRaw ?? current.apiUrl).trim()) {
+    return NextResponse.json({ error: "Enter a gateway URL before enabling notifications." }, { status: 400 });
   }
   const cfg = await saveWhatsAppConfig(session.tenantId, {
     enabled,

@@ -40,13 +40,14 @@ export function ReportControls({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
-  const departmentId = searchParams.get("departmentId") ?? effectiveDepartmentId;
-  const branchId = searchParams.get("branchId") ?? effectiveBranchId;
+  const departmentId = effectiveDepartmentId;
+  const branchId = effectiveBranchId;
   const deviceDate = effectiveDate;
   const deviceMonth = effectiveMonth;
 
   function update(overrides: Record<string, string>) {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("page");
     for (const [k, v] of Object.entries(overrides)) {
       if (v) params.set(k, v);
       else params.delete(k);
@@ -66,7 +67,7 @@ export function ReportControls({
             key={t.key}
             type="button"
             aria-pressed={type === t.key}
-            onClick={() => update({ type: t.key })}
+            onClick={() => update({ type: t.key, ...(t.key !== "inactive-employees" && { q: "" }) })}
             className={`rounded-full px-4 py-2 text-[13px] font-medium transition-all ${
               type === t.key
                 ? "bg-gradient-brand text-white shadow-[0_4px_16px_-6px_rgba(99,102,241,0.6)]"

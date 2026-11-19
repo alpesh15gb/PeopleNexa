@@ -1,3 +1,4 @@
+import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
@@ -76,11 +77,24 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const { id } = await ctx.params;
-  const shift = await prisma.shift.findFirst({ where: { id, tenantId: session.tenantId } });
-  if (!shift) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (shift.isDefault) {
-    return NextResponse.json({ error: "The default shift cannot be deleted." }, { status: 400 });
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const shift = await tx.shift.findFirst({
+        where: { id, tenantId: session.tenantId },
+        select: { isDefault: true, _count: { select: { employees: true, rosters: true, attendance: true } } },
+      });
+      if (!shift) return "missing";
+      if (shift.isDefault) return "default";
+      if (shift._count.employees || shift._count.rosters || shift._count.attendance) return "used";
+      await tx.shift.delete({ where: { id } });
+      return "deleted";
+    }, { isolationLevel: "Serializable" });
+    if (result === "missing") return NextResponse.json({ error: "Shift not found." }, { status: 404 });
+    if (result === "default") return NextResponse.json({ error: "The default shift cannot be deleted." }, { status: 400 });
+    if (result === "used") return NextResponse.json({ error: "This shift is assigned to employees or used in roster or attendance records." }, { status: 409 });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (isTransactionWriteConflict(error)) return NextResponse.json({ error: "Shift assignments changed. Refresh before trying again." }, { status: 409 });
+    throw error;
   }
-  await prisma.shift.delete({ where: { id } });
-  return NextResponse.json({ success: true });
 }

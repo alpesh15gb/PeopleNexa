@@ -5,7 +5,8 @@ import { CheckCheck, Info, CheckCircle2, AlertTriangle, XCircle, Inbox } from "l
 import { cn } from "@/lib/utils";
 import { t, type Lang } from "@/lib/i18n";
 import { EmptyState } from "@/components/ui/stat";
-import { formatDateTime } from "@/lib/dates";
+import { type WorkspaceRegion } from "@/lib/workspace-region";
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useToast } from "@/components/ui/toast";
 
@@ -25,20 +26,18 @@ const icons = {
   danger: <XCircle className="h-4 w-4 text-rose-400" />,
 };
 
-function formatWhen(dateStr: string | Date) {
-  return formatDateTime(new Date(dateStr));
-}
-
-export function NotificationsList({ notifications, lang = "en" }: { notifications: Notif[]; lang?: Lang }) {
+export function NotificationsList({ notifications, unread, unreadOnly, region, lang = "en" }: { notifications: Notif[]; unread: number; unreadOnly: boolean; region: WorkspaceRegion; lang?: Lang }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, setPending] = useState<string | null>(null);
 
-  async function markRead(id: string) {
-    setPending(id);
+  const formatter = new Intl.DateTimeFormat(region.locale, { timeZone: region.timeZone, dateStyle: "medium", timeStyle: "short" });
+  async function markRead(id?: string) {
+    if (pending) return;
+    setPending(id ?? "all");
     try {
       const response = await fetch("/api/notifications/mark-read", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(id ? { id } : { all: true }),
       });
       if (!response.ok) throw new Error("Could not mark the notification as read.");
       router.refresh();
@@ -53,14 +52,15 @@ export function NotificationsList({ notifications, lang = "en" }: { notification
     return (
       <EmptyState
         icon={<Inbox className="h-5 w-5" />}
-        title={t(lang, "notifications.none")}
-        description={t(lang, "notifications.noneDesc")}
+        title={unreadOnly ? "No unread notifications" : t(lang, "notifications.none")}
+        description={unreadOnly ? "Open All activity to see previous updates." : t(lang, "notifications.noneDesc")}
       />
     );
   }
 
   return (
     <div className="divide-y divide-[color:var(--border)]">
+      {unread > 0 && <div className="flex justify-end px-4 py-2"><Button size="sm" variant="ghost" loading={pending === "all"} disabled={pending !== null} onClick={() => markRead()}>Mark all as read</Button></div>}
       {notifications.map((n) => (
         <div
           key={n.id}
@@ -75,12 +75,12 @@ export function NotificationsList({ notifications, lang = "en" }: { notification
               <p className="text-[13.5px] font-semibold">{n.title}</p>
               {!n.isRead && (
                 <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-300">
-                  {t(lang, "notifications.new")}
+                  Unread
                 </span>
               )}
             </div>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{n.message}</p>
-            <p className="mt-1.5 text-[11px] text-muted-foreground/70">{formatWhen(n.createdAt)}</p>
+            <p className="mt-1 break-words text-[13px] leading-relaxed text-muted-foreground">{n.message}</p>
+            <time dateTime={new Date(n.createdAt).toISOString()} className="mt-1.5 block text-[11px] text-muted-foreground">{formatter.format(new Date(n.createdAt))}</time>
           </div>
           {!n.isRead && (
             <button

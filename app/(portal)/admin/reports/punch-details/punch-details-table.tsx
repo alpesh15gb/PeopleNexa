@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Printer, Search } from "lucide-react";
+import { Download, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { istDateKey } from "@/lib/ist";
+import { formatCalendarDate } from "@/lib/workspace-time";
+import type { WorkspaceRegion } from "@/lib/workspace-region";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 
 interface AttendanceRow {
@@ -30,14 +31,6 @@ interface AttendanceRow {
   deviceOut: { name: string; serialNumber: string } | null;
 }
 
-function time(value: string | null) {
-  return value ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)) : "—";
-}
-
-function date(value: string) {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
-}
-
 function workingHours(minutes: number | null) {
   return minutes == null ? "—" : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
@@ -45,48 +38,46 @@ function workingHours(minutes: number | null) {
 export function PunchDetailsTable({
   from,
   to,
-  initialQuery,
-  initialPage,
-  initialSize,
+  query,
+  requestedPage,
+  size,
+  region,
 }: {
   from: string;
   to: string;
-  initialQuery: string;
-  initialPage: number;
-  initialSize: number;
+  query: string;
+  requestedPage: number;
+  size: number;
+  region: WorkspaceRegion;
 }) {
   const router = useRouter();
-  const [query, setQuery] = useState(initialQuery);
-  const [debounced, setDebounced] = useState(initialQuery);
-  const [page, setPage] = useState(initialPage);
-  const [size, setSize] = useState(initialSize);
-  const [data, setData] = useState<{ total: number; rows: AttendanceRow[] } | null>(null);
+  const [data, setData] = useState<{ total: number; page: number; rows: AttendanceRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const page = data?.page ?? requestedPage;
+  function time(value: string | null) {
+    return value ? new Intl.DateTimeFormat(region.locale, { timeZone: region.timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date(value)) : "—";
+  }
+  function date(value: string) {
+    return formatCalendarDate(istDateKey(new Date(value)), region.locale);
+  }
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 400);
-    return () => clearTimeout(t);
-  }, [query]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [debounced, from, to]);
-
-  useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const qs = new URLSearchParams({ from, to, page: String(page), size: String(size) });
-    if (debounced) qs.set("q", debounced);
-    fetch(`/api/reports/punch-details?${qs.toString()}`)
+    const qs = new URLSearchParams({ from, to, page: String(requestedPage), size: String(size) });
+    if (query) qs.set("q", query);
+    fetch(`/api/reports/punch-details?${qs.toString()}`, { signal: controller.signal })
       .then(async (res) => {
         const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error ?? `Request failed (${res.status})`);
         return json;
       })
       .then((json) => {
-        if (!cancelled) setData({ total: json.total ?? 0, rows: json.rows ?? [] });
+        if (!cancelled) setData({ total: json.total ?? 0, page: json.page ?? requestedPage, rows: json.rows ?? [] });
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load attendance details.");
@@ -96,8 +87,9 @@ export function PunchDetailsTable({
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [from, to, debounced, page, size]);
+  }, [from, to, query, requestedPage, size, retry]);
 
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / size));
@@ -106,15 +98,14 @@ export function PunchDetailsTable({
 
   function exportExcel() {
     const qs = new URLSearchParams({ from, to, format: "xlsx" });
-    if (debounced) qs.set("q", debounced);
+    if (query) qs.set("q", query);
     window.location.href = `/api/reports/punch-details?${qs.toString()}`;
   }
 
   function gotoPage(next: number) {
-    const qs = new URLSearchParams({ from, to, page: String(next) });
-    if (debounced) qs.set("q", debounced);
+    const qs = new URLSearchParams({ from, to, size: String(size), page: String(next) });
+    if (query) qs.set("q", query);
     router.push(`/admin/reports/punch-details?${qs.toString()}`);
-    setPage(next);
   }
 
   return (
@@ -127,15 +118,6 @@ export function PunchDetailsTable({
 }`}</style>
 
       <div className="no-print flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" placeholder="Search name or code" aria-label="Search attendance details" />
-        </div>
-        <Select value={String(size)} onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }} className="w-20" aria-label="Rows per page">
-          {[50, 100, 200, 500].map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </Select>
         <Button variant="outline" size="sm" onClick={exportExcel}>
           <Download className="h-3.5 w-3.5" /> Export Excel
         </Button>
@@ -148,7 +130,7 @@ export function PunchDetailsTable({
       </div>
 
       {error ? (
-        <p className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-300">{error}</p>
+        <div className="flex flex-wrap items-center gap-3"><p role="alert" className="text-sm text-destructive">{error}</p><Button size="sm" variant="outline" onClick={() => setRetry((value) => value + 1)}>Retry report</Button></div>
       ) : (
         <div className="print-report overflow-x-auto rounded-xl border border-edge">
           <Table>

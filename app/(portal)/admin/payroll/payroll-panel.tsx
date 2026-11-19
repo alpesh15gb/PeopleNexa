@@ -347,14 +347,19 @@ export function PayrollPanel({
       const response = await fetch(
         `/api/payroll/export?${new URLSearchParams({ month, bank, runId: payroll.id, locationId: locationId ?? "" })}`,
       );
-      if (!response.ok) return toast("error", "Bank export failed.");
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        return toast("error", result?.error ?? "Could not export this bank file.");
+      }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = `salary-${month}.csv`;
       link.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      toast("error", "Could not download this bank file. Try again.");
     } finally {
       setBusy(null);
     }

@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
-import { Banknote, BookOpen, Building2, CalendarClock, CalendarDays, ClipboardCheck, FileText, Globe2, IdCard, LayoutDashboard, MapPin, Network, UsersRound, Webhook } from "lucide-react";
+import { Banknote, BookOpen, Building2, CalendarClock, CalendarDays, ClipboardCheck, FileText, Globe2, IdCard, LayoutDashboard, MapPin, MessageSquareText, Network, UsersRound, Webhook } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/card";
 import { getTenantAccess } from "@/lib/modules-server";
 import { prisma } from "@/lib/prisma";
@@ -10,8 +13,10 @@ import { WorkspaceRegionForm } from "./workspace-region-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function CompanySettingsPage() {
-  const session = await requireActiveSession();
+export default async function CompanySettingsPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
+  const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
+  const search = typeof params.q === "string" ? params.q.trim().slice(0, 80) : "";
+  const query = search.toLowerCase();
   if (session.role !== "admin") redirect("/admin");
   const tenantId = session.tenantId;
   const { modules } = await getTenantAccess(tenantId);
@@ -67,17 +72,23 @@ export default async function CompanySettingsPage() {
     ] },
     { id: "integrations", title: "Integrations", links: [
       { href: "/admin/settings", title: "Workspace connections", description: "Configure eBioserver, face match and SMS notifications.", icon: Network },
+      { href: "/admin/whatsapp", title: "WhatsApp notifications", description: "Connect a gateway for leave and exit updates.", module: "platform", icon: MessageSquareText },
       { href: "/admin/webhooks", title: "Webhooks", description: "Manage endpoints that receive workspace events.", module: "platform", icon: Webhook },
     ] },
   ];
   const enabledServices = services
-    .map((service) => ({ ...service, links: service.links.filter(({ module }) => !module || modules.has(module)) }))
+    .map((service) => ({ ...service, links: service.links.filter(({ module, title, description }) => (!module || modules.has(module)) && (!query || `${service.title} ${title} ${description}`.toLowerCase().includes(query))) }))
     .filter((service) => service.links.length > 0);
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader title="Company settings" description="Manage workspace details and configure each HR service." />
-      <SettingsDirectory services={enabledServices} />
+      <form action="/admin/configuration/company-settings" aria-label="Find a setting" className="flex flex-wrap items-center gap-2">
+        <Input name="q" type="search" aria-label="Search company settings" placeholder="Search settings by name or service" maxLength={80} defaultValue={search} className="w-full sm:max-w-sm" />
+        <Button type="submit" variant="outline">Find setting</Button>
+        {search && <Link href="/admin/configuration/company-settings" className="text-sm text-primary hover:underline">Clear search</Link>}
+      </form>
+      {enabledServices.length ? <SettingsDirectory services={enabledServices} /> : <p role="status" className="rounded-xl border border-edge bg-card p-4 text-sm">No enabled settings match that search.</p>}
       <WorkspaceRegionForm initial={region} hasAttendance={Boolean(punch || attendance || correction)} />
     </div>
   );

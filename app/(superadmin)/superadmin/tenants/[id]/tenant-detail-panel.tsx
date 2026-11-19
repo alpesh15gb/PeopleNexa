@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Building2, CalendarClock, Check, Save, Users } from "lucide-react";
-import Link from "next/link";
+import { Building2, CalendarClock, Check, Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,6 +94,7 @@ export function TenantDetailPanel({ tenant, plans }: { tenant: TenantDetail; pla
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      if (plan !== tenant.plan) setEnabled(new Set(planDef(plan).modules));
       toast("success", "License updated.");
       router.refresh();
     } catch (e) {
@@ -125,33 +125,19 @@ export function TenantDetailPanel({ tenant, plans }: { tenant: TenantDetail; pla
 
   return (
     <div className="space-y-6">
-      <Link href="/superadmin" className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
-        <ArrowLeft className="h-3.5 w-3.5" /> Back to overview
-      </Link>
-
       <div className="grid gap-6 xl:grid-cols-2">
         {/* License */}
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>License</CardTitle>
-              <CardDescription>Plan, seats and subscription window</CardDescription>
+              <CardTitle>Workspace & subscription</CardTitle>
+              <CardDescription>Manage contact details, the assigned plan and when access expires.</CardDescription>
             </div>
             <CalendarClock className="h-4.5 w-4.5 text-muted-foreground" />
           </CardHeader>
           <CardContent className="pt-5">
-            <div className="mb-4 flex items-center gap-2">
-              <Badge tone={planTone[tenant.plan] ?? "neutral"} className="capitalize">
-                {tenant.plan}
-              </Badge>
-              <Badge tone={tenant.status === "active" ? "success" : "danger"}>{tenant.status}</Badge>
-              <span className="ml-auto flex items-center gap-1 text-[12px] text-muted-foreground">
-                <Users className="h-3.5 w-3.5" /> {tenant.employeeCount}/{seats || tenant.seats} seats used
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Company name" className="col-span-2">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Company name" className="sm:col-span-2">
                 <Input value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
               <Field label="Contact email">

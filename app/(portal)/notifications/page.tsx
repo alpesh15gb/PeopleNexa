@@ -5,28 +5,36 @@ import { getLang } from "@/lib/i18n-server";
 import { PageHeader } from "@/components/ui/card";
 import { Card, CardContent } from "@/components/ui/card";
 import { NotificationsList } from "./notifications-list";
-import { recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
+import { recordPageNumber, recordPageRedirect, recordPagination } from "@/lib/document-expense-pagination";
 import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { workspaceRegion } from "@/lib/workspace-region";
+import { redirect } from "next/navigation";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ page?: string; filter?: string }> }) {
   const session = await requireSession();
-  const lang = await getLang();
-  const requestedPage = recordPageNumber((await searchParams).page) ?? 1;
+  const [lang, params, tenant] = await Promise.all([
+    getLang(), searchParams, prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
+  ]);
+  const requestedPage = recordPageNumber(params.page) ?? 1;
+  const unreadOnly = params.filter === "unread";
   const where = { tenantId: session.tenantId, employeeId: session.sub };
   const { notifications, unread, pagination } = await prisma.$transaction(async (tx) => {
-    const pagination = recordPagination(await tx.notification.count({ where }), requestedPage);
     const unread = await tx.notification.count({ where: { ...where, isRead: false } });
+    const pagination = recordPagination(unreadOnly ? unread : await tx.notification.count({ where }), requestedPage);
     const notifications = await tx.notification.findMany({
-      where,
-      orderBy: [{ isRead: "asc" }, { createdAt: "desc" }, { id: "desc" }],
+      where: { ...where, ...(unreadOnly ? { isRead: false } : {}) },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: pagination.offset,
       take: pagination.pageSize,
       select: { id: true, type: true, title: true, message: true, isRead: true, createdAt: true },
     });
     return { notifications, unread, pagination };
   }, { isolationLevel: "RepeatableRead" });
+  const canonical = recordPageRedirect("/notifications", params, pagination);
+  if (canonical) redirect(canonical);
 
   return (
     <div className="animate-fade-up mx-auto max-w-3xl space-y-6">
@@ -36,10 +44,14 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       />
       <Card>
         <CardContent className="p-0 pt-0">
-          <NotificationsList notifications={notifications} lang={lang} />
+          <nav aria-label="Notification filters" className="flex flex-wrap gap-2 border-b border-edge px-4 py-3">
+            <Link href="/notifications" aria-current={!unreadOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${!unreadOnly ? "bg-tint font-semibold" : ""}`}>All activity</Link>
+            <Link href="/notifications?filter=unread" aria-current={unreadOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${unreadOnly ? "bg-tint font-semibold" : ""}`}>Unread ({unread})</Link>
+          </nav>
+          <NotificationsList notifications={notifications} unread={unread} unreadOnly={unreadOnly} region={workspaceRegion(tenant?.config)} lang={lang} />
         </CardContent>
       </Card>
-      <DocumentExpensePagination path="/notifications" params={{}} pagination={pagination} label="notifications" />
+      <DocumentExpensePagination path="/notifications" params={params} pagination={pagination} label="notifications" />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, ExternalLink, MoreHorizontal, Pencil, Plus, ShieldOff, Trash2 } from "lucide-react";
+import { Building2, ExternalLink, MoreHorizontal, Plus, ShieldOff, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -19,13 +19,11 @@ type TenantRow = {
   status: string;
   plan: string;
   seats: number;
-  subscriptionExpiry: string | null;
   employeeCount: number;
   enabledModules: string[];
-  createdAt: string;
   /** Pre-formatted date strings (avoid toLocaleDateString hydration mismatch). */
   expiryLabel?: string | null;
-  createdAtLabel?: string | null;
+  expired: boolean;
 };
 
 const planTone: Record<string, "neutral" | "success" | "warning" | "info" | "violet"> = {
@@ -36,7 +34,7 @@ const planTone: Record<string, "neutral" | "success" | "warning" | "info" | "vio
   enterprise: "violet",
 };
 
-export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: PlanDef[] }) {
+export function TenantsTable({ tenants, plans, baseDomain }: { tenants: TenantRow[]; plans: PlanDef[]; baseDomain: string }) {
   const router = useRouter();
   const toast = useToast();
   const [creating, setCreating] = useState(false);
@@ -123,13 +121,13 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
     <>
     <div className="card-surface overflow-hidden rounded-2xl">
       <div className="flex items-center justify-between border-b border-edge px-5 py-4">
-        <p className="text-[13px] text-muted-foreground">{tenants.length} workspace(s)</p>
+        <h2 className="text-sm font-semibold">Workspace directory</h2>
         <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5" /> New tenant
+          <Plus className="h-3.5 w-3.5" /> New workspace
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
+      {tenants.length ? <div className="overflow-x-auto">
         <table className="w-full text-left text-[13px]">
           <thead>
             <tr className="border-b border-edge text-[11px] uppercase tracking-wider text-muted-foreground/70">
@@ -139,7 +137,7 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
               <th className="px-3 py-3 font-medium">Status</th>
               <th className="px-3 py-3 font-medium">Expiry</th>
               <th className="px-3 py-3 font-medium">Modules</th>
-              <th className="px-3 py-3 font-medium" />
+              <th className="px-3 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[color:var(--border)]">
@@ -151,8 +149,8 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
                       {t.name.slice(0, 2).toUpperCase()}
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{t.name}</p>
-                      <p className="text-[11.5px] text-muted-foreground">{t.slug}.peoplenexa.in</p>
+                      <Link href={`/superadmin/tenants/${t.id}`} className="font-medium text-primary hover:underline">{t.name}</Link>
+                      <p className="text-[11.5px] text-muted-foreground">{t.slug}.{baseDomain}</p>
                     </div>
                   </div>
                 </td>
@@ -165,7 +163,7 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
                   {t.employeeCount}/{t.seats}
                 </td>
                 <td className="px-3 py-3.5">
-                  <Badge tone={t.status === "active" ? "success" : "danger"}>{t.status}</Badge>
+                  <Badge tone={t.status === "active" ? (t.expired ? "warning" : "success") : "danger"} className="capitalize">{t.status === "active" && t.expired ? "Expired" : t.status}</Badge>
                 </td>
                 <td className="px-3 py-3.5 text-muted-foreground">{t.expiryLabel ?? "—"}</td>
                 <td className="px-3 py-3.5">
@@ -184,21 +182,21 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
                 </td>
                 <td className="px-3 py-3.5">
                   <div className="flex items-center gap-1">
-                    <Link href={`/superadmin/tenants/${t.id}`} className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-foreground" title="Manage tenant">
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Link>
                     <a
-                      href={`https://${t.slug}.peoplenexa.in`}
+                      href={`https://${t.slug}.${baseDomain}`}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-foreground"
                       title="Open workspace"
+                      aria-label={`Open ${t.name} workspace in a new tab`}
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                     <div className="relative">
                       <button
                         onClick={(e) => openMenu(e, t)}
+                        aria-label={`Actions for ${t.name}`}
+                        aria-expanded={menuFor === t.id}
                         className="rounded-lg p-1.5 text-muted-foreground hover:bg-tint hover:text-foreground"
                       >
                         <MoreHorizontal className="h-3.5 w-3.5" />
@@ -235,7 +233,7 @@ export function TenantsTable({ tenants, plans }: { tenants: TenantRow[]; plans: 
             ))}
           </tbody>
         </table>
-      </div>
+      </div> : <p className="px-5 py-8 text-sm text-muted-foreground">No workspaces match the current filters.</p>}
 
       {creating && (
         <CreateTenantModal

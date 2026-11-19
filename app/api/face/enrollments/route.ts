@@ -46,6 +46,15 @@ export async function POST(req: NextRequest) {
     const session = await requireActiveSession().catch(() => null);
     if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+    const employee = await prisma.employee.findFirst({
+      where: { id: session.sub, tenantId: session.tenantId, status: "active" },
+      select: { loginOnly: true, tenant: { select: { config: true } } },
+    });
+    const config = employee?.tenant.config as { faceMatch?: { enabled?: boolean } } | null;
+    if (!employee || employee.loginOnly || config?.faceMatch?.enabled === false) {
+      return NextResponse.json({ error: "Face matching is unavailable for this account." }, { status: 403 });
+    }
+
     const body = await req.json().catch(() => null);
     const photos: unknown = body?.photos;
     const consentVersion: unknown = body?.consentVersion;

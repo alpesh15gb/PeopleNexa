@@ -26,41 +26,39 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
   const [error, setError] = useState("");
 
   const [slug, setSlug] = useState("");
-  const [slugState, setSlugState] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const address = normalize(slug);
+  const [availability, setAvailability] = useState<{ slug: string; status: "available" | "taken" | "unknown" } | null>(null);
+  const slugState = address.length < 2 ? "idle" : availability?.slug === address ? availability.status : "checking";
 
   // Debounced availability check as the user types.
   useEffect(() => {
-    const s = normalize(slug);
-    if (s.length < 2) {
-      setSlugState("idle");
-      return;
-    }
-    let cancelled = false;
-    setSlugState("checking");
+    if (address.length < 2) return;
+    const controller = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/auth/slug?slug=${encodeURIComponent(s)}`);
+        const res = await fetch(`/api/auth/slug?slug=${encodeURIComponent(address)}`, { signal: controller.signal });
         const data = await res.json();
-        if (!cancelled) setSlugState(data.available ? "available" : "taken");
+        if (!controller.signal.aborted) setAvailability({ slug: address, status: res.ok && typeof data.available === "boolean" ? (data.available ? "available" : "taken") : "unknown" });
       } catch {
-        if (!cancelled) setSlugState("idle");
+        if (!controller.signal.aborted) setAvailability({ slug: address, status: "unknown" });
       }
     }, 350);
     return () => {
-      cancelled = true;
+      controller.abort();
       clearTimeout(t);
     };
-  }, [slug]);
+  }, [address]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (loading) return;
     setError("");
     const s = normalize(slug);
     if (s.length < 2) {
       setError("Please choose a workspace subdomain.");
       return;
     }
-    if (slugState !== "available") {
+    if (slugState === "taken") {
       setError("That subdomain is not available. Pick another one.");
       return;
     }
@@ -111,23 +109,23 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
   }
 
   return (
-    <form onSubmit={onSubmit} className="card-surface rounded-2xl border-white/20 bg-white/70 p-6 shadow-xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
+    <form onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
           <Input name="companyName" required maxLength={120} placeholder="Acme Corp" className={`h-11 ${BLUE_FOCUS}`} />
         </Field>
 
-        <Field label="Workspace subdomain" hint="This becomes your team's web address">
-          <div className="flex items-center overflow-hidden rounded-xl border border-input bg-card-2 transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/40 motion-reduce:transition-none">
-            <label htmlFor="register-slug" className="sr-only">
-              Workspace subdomain
-            </label>
+        <Field label="Workspace subdomain" htmlFor="register-slug" hint="This becomes your team's web address">
+          <div id="register-slug-controls" className="flex items-center overflow-hidden rounded-xl border border-input bg-card-2 transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/40 motion-reduce:transition-none">
             <input
               id="register-slug"
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
               placeholder="acme-corp"
               autoComplete="off"
+              autoCapitalize="none"
+              required
+              aria-invalid={slugState === "taken" || undefined}
               spellCheck={false}
               aria-describedby="slug-availability"
               className="h-11 w-2/5 min-w-0 flex-1 bg-transparent px-3.5 text-base text-foreground outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm"
@@ -147,11 +145,13 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
             aria-live="polite"
             className={cn(
               "mt-1.5 text-[12px]",
-              slugState === "taken" ? "text-rose-300" : slugState === "available" ? "text-emerald-400" : "text-muted-foreground"
+              slugState === "taken" ? "text-destructive" : "text-muted-foreground"
             )}
           >
-            {slugState === "available" && `Great — ${normalize(slug)}.${baseDomain} is yours!`}
-            {slugState === "taken" && `${normalize(slug)}.${baseDomain} is already taken.`}
+            {slugState === "available" && `${address}.${baseDomain} is available.`}
+            {slugState === "taken" && `${address}.${baseDomain} is already taken.`}
+            {slugState === "checking" && `Checking ${address}.${baseDomain}…`}
+            {slugState === "unknown" && "The address will be checked when you create the workspace."}
             {slugState === "idle" && "Letters, numbers and dashes — e.g. acme-corp, my-company"}
           </p>
         </Field>
@@ -168,7 +168,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
       </div>
 
       {error && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3.5 py-2.5 text-[13px] text-rose-300">
+        <p role="alert" className="mt-4 rounded-xl border border-destructive/25 bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
           {error}
         </p>
       )}
@@ -177,10 +177,10 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         type="submit"
         size="lg"
         loading={loading}
-        className="mt-6 w-full bg-accent text-accent-foreground shadow-[0_8px_24px_-10px_rgba(194,65,12,0.7)] hover:bg-accent-hover focus-visible:ring-ring motion-reduce:transition-none"
+        className="mt-6 w-full"
       >
         <Rocket className="h-4 w-4" aria-hidden="true" />
-        Create company
+        Create workspace
       </Button>
     </form>
   );

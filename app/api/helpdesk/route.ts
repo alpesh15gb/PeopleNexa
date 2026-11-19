@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     "info",
     "New support ticket",
     `${subject} (${category}, ${priority})`
-  );
+  ).catch(() => console.warn("[helpdesk] Ticket saved; admin notification failed."));
   await dispatchWebhook(session.tenantId, "ticket.created", {
     ticketId: ticket.id,
     category: ticket.category,

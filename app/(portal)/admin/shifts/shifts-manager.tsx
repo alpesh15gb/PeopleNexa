@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, Clock3, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Modal } from "@/components/ui/modal";
 import { Field, Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +29,9 @@ interface Shift {
 export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { shifts: Shift[]; unassignedHalfDay: boolean; canManageShifts: boolean }) {
   const router = useRouter();
   const toast = useToast();
+  const [search, setSearch] = useState("");
+  const [removing, setRemoving] = useState<Shift | null>(null);
+  const [formError, setFormError] = useState("");
   const [editing, setEditing] = useState<Shift | "new" | null>(null);
   const [loading, setLoading] = useState(false);
   const [unassignedRule, setUnassignedRule] = useState(unassignedHalfDay);
@@ -47,6 +51,7 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setFormError("");
     const form = new FormData(e.currentTarget);
     const payload = {
       name: form.get("name"),
@@ -64,14 +69,16 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast("error", data.error ?? "Failed to save shift");
+        setFormError(data.error ?? "Could not save the shift.");
         return;
       }
       toast("success", editing ? "Shift updated" : "Shift created");
       setEditing(null);
       router.refresh();
+    } catch {
+      setFormError("Could not confirm the save. Check existing shifts before retrying.");
     } finally {
       setLoading(false);
     }
@@ -87,13 +94,17 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
         return;
       }
       toast("success", "Shift removed");
+      setRemoving(null);
       router.refresh();
+    } catch {
+      toast("error", "Could not delete the shift. Refresh before retrying.");
     } finally {
       setLoading(false);
     }
   }
 
   const isNew = editing === "new";
+  const visible = shifts.filter((shift) => `${shift.name} ${shift.code ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()));
 
   return (
     <>
@@ -103,15 +114,16 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
         <p className="text-xs text-muted-foreground">After the attendance day closes, one punch means half day present and half day absent, without a missing-punch review flag. The missing time stays empty. Assigned, rostered and automatically selected shifts use their own rules. Finalized historical attendance is preserved.</p>
         <Button loading={savingUnassigned} onClick={saveUnassigned}>Save unassigned employee rule</Button>
       </section>}
-      <div id="shifts-manager" className="flex scroll-mt-4 items-center justify-between border-b border-edge px-5 py-3">
-        <p className="text-[13px] text-muted-foreground">{shifts.length} shifts</p>
-        {canManageShifts && <Button size="sm" onClick={() => setEditing("new")}>
+      <div id="shifts-manager" className="flex scroll-mt-4 flex-wrap items-center justify-between gap-3 border-b border-edge px-5 py-3">
+        <Input aria-label="Find a shift" type="search" placeholder="Find a shift by name or code" value={search} onChange={(event) => setSearch(event.target.value)} className="sm:max-w-xs" />
+        {canManageShifts && <Button size="sm" onClick={() => { setFormError(""); setEditing("new"); }}>
           <Plus className="h-3.5 w-3.5" /> New shift
         </Button>}
       </div>
 
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-        {shifts.map((s) => (
+        {visible.length === 0 && shifts.length > 0 && <p className="text-sm text-muted-foreground">No shifts match your search.</p>}
+        {visible.map((s) => (
           <div key={s.id} className="card-surface group rounded-xl p-4 transition-colors hover:border-edge-strong">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -136,11 +148,11 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
                 {s.singlePunchHalfDay && <span className="block">Single punch: half day absent</span>}
               </p>
               {canManageShifts && <div className="flex gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100">
-                <Button size="sm" variant="outline" aria-label={`Edit ${s.name}`} onClick={() => setEditing(s)}>
+                <Button size="sm" variant="outline" aria-label={`Edit ${s.name}`} onClick={() => { setFormError(""); setEditing(s); }}>
                   <Pencil className="h-3 w-3" />
                 </Button>
                 {!s.isDefault && (
-                  <Button size="sm" variant="outline" aria-label={`Delete ${s.name}`} className="text-rose-300" onClick={() => remove(s)}>
+                  <Button size="sm" variant="outline" aria-label={`Delete ${s.name}`} className="text-rose-300" onClick={() => setRemoving(s)}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 )}
@@ -150,12 +162,14 @@ export function ShiftsManager({ shifts, unassignedHalfDay, canManageShifts }: { 
         ))}
       </div>
 
+      <ConfirmDialog open={Boolean(removing)} title="Delete this shift?" description="A shift with employee, roster, or attendance records cannot be deleted." confirmLabel="Delete shift" busy={loading} onCancel={() => !loading && setRemoving(null)} onConfirm={() => removing && remove(removing)} />
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={isNew ? "New shift" : `Edit ${editing && typeof editing === "object" ? editing.name : ""}`}
       >
         <form onSubmit={onSubmit} className="space-y-4">
+          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Shift name">
               <Input name="name" required defaultValue={editing && typeof editing === "object" ? editing.name : ""} />

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { optionalDateInput } from "@/lib/dates";
 
+import { recordApiPaging, recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
+
 /** GET — KPIs + reviews (role-aware). */
 export async function GET(req: NextRequest) {
   const session = await requireActiveSession().catch(() => null);
@@ -12,24 +14,37 @@ export async function GET(req: NextRequest) {
   const personal = req.nextUrl.searchParams.get("scope") === "self";
   const locationId = personal ? null : await managerLocationId(session);
   if (!personal && session.role === "location_manager" && !locationId) return NextResponse.json({ error: "no location assigned" }, { status: 403 });
+  const params = req.nextUrl.searchParams;
+  const paging = recordApiPaging(params, 100);
+  const peerPage = recordPageNumber(params.get("peerPage") ?? "1");
+  if (!paging || !peerPage || params.getAll("peerPage").length > 1) return NextResponse.json({ error: "Invalid page" }, { status: 400 });
+  const where = {
+    tenantId: session.tenantId,
+    ...(locationId ? { employee: employeeLocationScope(locationId) } : !personal && session.role === "admin" ? {} : { employeeId: session.sub }),
+  };
+  const peerWhere = { tenantId: session.tenantId, employeeId: { not: session.sub }, status: "self_done" };
+  const [total, peerTotal] = await Promise.all([
+    prisma.performanceReview.count({ where }),
+    session.role === "employee" ? prisma.performanceReview.count({ where: peerWhere }) : 0,
+  ]);
+  const pagination = recordPagination(total, paging.page, paging.pageSize);
+  const peerPagination = recordPagination(peerTotal, peerPage, Math.min(50, paging.pageSize));
   const [kpis, reviews] = await Promise.all([
     prisma.kpi.findMany({
       where: { tenantId: session.tenantId },
       orderBy: { createdAt: "asc" },
     }),
     prisma.performanceReview.findMany({
-      where: {
-        tenantId: session.tenantId,
-        ...(locationId ? { employee: employeeLocationScope(locationId) } : !personal && session.role === "admin" ? {} : { employeeId: session.sub }),
-      },
+      where,
       include: {
         employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true } },
         reviewer: { select: { firstName: true, lastName: true } },
         scores: { include: { kpi: { select: { id: true, name: true } } } },
         feedbacks: { include: { rater: { select: { firstName: true, lastName: true } } } },
       },
-      orderBy: { createdAt: "desc" },
-      take: 100,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: pagination.pageSize,
+      skip: pagination.offset,
     }),
   ]);
 
@@ -37,17 +52,20 @@ export async function GET(req: NextRequest) {
   const peerReviews =
     session.role === "employee"
       ? await prisma.performanceReview.findMany({
-          where: { tenantId: session.tenantId, employeeId: { not: session.sub }, status: "self_done" },
+          where: peerWhere,
           include: {
             employee: { select: { id: true, firstName: true, lastName: true, employeeNumber: true, position: true } },
             feedbacks: { where: { raterId: session.sub }, include: { rater: { select: { firstName: true, lastName: true } } } },
           },
-          orderBy: { createdAt: "desc" },
-          take: 50,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: peerPagination.pageSize,
+          skip: peerPagination.offset,
         })
       : [];
 
   return NextResponse.json({
+    pagination,
+    peerPagination,
     kpis: kpis.map((k) => ({ ...k, createdAt: k.createdAt.toISOString() })),
     peerReviews: peerReviews.map((r) => ({
       id: r.id,
@@ -67,7 +85,7 @@ export async function GET(req: NextRequest) {
       createdAt: r.createdAt.toISOString(),
       employee: r.employee,
       reviewer: r.reviewer,
-      scores: r.scores.map((s) => ({ id: s.id, kpi: s.kpi.name, selfScore: s.selfScore, managerScore: s.managerScore, managerComment: s.managerComment })),
+      scores: r.scores.map((s) => ({ id: s.id, kpiId: s.kpiId, kpi: s.kpi.name, selfScore: s.selfScore, managerScore: s.managerScore, managerComment: s.managerComment })),
       feedbacks: r.status === "completed" || (r.employeeId !== session.sub && !personal && (session.role === "admin" || session.role === "location_manager"))
         ? r.feedbacks.map((f) => ({ id: f.id, rater: `${f.rater.firstName} ${f.rater.lastName}`, comment: f.comment, rating: f.rating, createdAt: f.createdAt.toISOString() }))
         : [],

@@ -13,25 +13,29 @@ export function WorkspaceRegionForm({ initial, hasAttendance }: { initial: Works
   const [saved, setSaved] = useState(initial);
   const [region, setRegion] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const isDirty = region.countryCode !== saved.countryCode || region.currency !== saved.currency || region.locale !== saved.locale || region.timeZone !== saved.timeZone;
 
   function edit(field: keyof WorkspaceRegion, value: string) {
+    setError("");
     setRegion((current) => ({ ...current, [field]: value }));
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving || !isDirty) return;
     setSaving(true);
+    setError("");
     try {
       const response = await fetch("/api/settings/workspace-region", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(region) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not save regional settings.");
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.region) throw new Error(data?.error ?? "Could not save regional settings.");
       setRegion(data.region);
       setSaved(data.region);
       toast("success", "Regional settings saved.");
       router.refresh();
     } catch (error) {
-      toast("error", error instanceof Error ? error.message : "Could not save regional settings.");
+      setError(error instanceof Error ? error.message : "Could not save regional settings.");
     } finally {
       setSaving(false);
     }
@@ -55,13 +59,14 @@ export function WorkspaceRegionForm({ initial, hasAttendance }: { initial: Works
             <Input required disabled={hasAttendance} maxLength={100} value={region.timeZone} onChange={(event) => edit("timeZone", event.target.value)} />
           </Field>
         </div>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1 text-sm text-muted-foreground">
             <p>Current currency format {formatRegionalMoney(1234.5, saved)}</p>
             <p>{supportsIndiaPayroll(saved) ? "India payroll formats are available. Verify statutory policy and filing inputs for each establishment and pay period." : "Use a local payroll provider for statutory calculation and filing in this region."}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {isDirty && <Button type="button" variant="ghost" disabled={saving} onClick={() => setRegion(saved)}>Reset</Button>}
+            {isDirty && <Button type="button" variant="ghost" disabled={saving} onClick={() => { setRegion(saved); setError(""); }}>Reset</Button>}
             <Button type="submit" disabled={!isDirty} loading={saving}>Save regional settings</Button>
           </div>
         </div>

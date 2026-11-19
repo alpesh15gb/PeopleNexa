@@ -10,8 +10,8 @@ export default async function PoliciesPage() {
   if (session.role !== "admin") redirect("/employee/policies");
 
   const policies = await prisma.policy.findMany({
-    where: { tenantId: session.tenantId, active: true },
-    orderBy: [{ category: "asc" }, { updatedAt: "desc" }],
+    where: { tenantId: session.tenantId },
+    orderBy: [{ active: "desc" }, { category: "asc" }, { updatedAt: "desc" }],
   });
 
   return (
@@ -22,6 +22,7 @@ export default async function PoliciesPage() {
         category: p.category,
         body: p.body,
         version: p.version,
+        active: p.active,
         updatedAt: p.updatedAt.toISOString(),
       }))}
     />

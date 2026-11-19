@@ -12,17 +12,24 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const policy = await prisma.policy.findFirst({ where: { id, tenantId: session.tenantId } });
   if (!policy) return NextResponse.json({ error: "Policy not found" }, { status: 404 });
 
-  const body = await req.json().catch(() => ({}));
-  const data: Record<string, unknown> = {};
-  if (body.title !== undefined) data.title = String(body.title).trim();
-  if (body.category !== undefined) data.category = String(body.category).trim();
-  if (body.active !== undefined) data.active = Boolean(body.active);
-  if (body.body !== undefined) {
-    data.body = String(body.body).trim();
-    data.version = policy.version + 1; // versioned edits
+  const input = await req.json().catch(() => null);
+  if (!input || typeof input !== "object" || Array.isArray(input)) return NextResponse.json({ error: "Policy changes are required." }, { status: 400 });
+  const { title = policy.title, category = policy.category, body = policy.body, active = policy.active, expectedUpdatedAt } = input;
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 180 ||
+      typeof body !== "string" || !body.trim() || body.trim().length > 50_000 ||
+      typeof category !== "string" || !category.trim() || category.trim().length > 80 || typeof active !== "boolean") {
+    return NextResponse.json({ error: "Provide a title, a category and policy text within the field limits." }, { status: 400 });
   }
-
-  const updated = await prisma.policy.update({ where: { id }, data });
+  if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== policy.updatedAt.toISOString()) {
+    return NextResponse.json({ error: "This policy changed. Refresh before editing it again." }, { status: 409 });
+  }
+  const contentChanged = title.trim() !== policy.title || category.trim() !== policy.category || body.trim() !== policy.body;
+  const changed = await prisma.policy.updateMany({
+    where: { id, tenantId: session.tenantId, updatedAt: policy.updatedAt },
+    data: { title: title.trim(), category: category.trim(), body: body.trim(), active, ...(contentChanged ? { version: { increment: 1 } } : {}) },
+  });
+  if (!changed.count) return NextResponse.json({ error: "This policy changed. Refresh before editing it again." }, { status: 409 });
+  const updated = await prisma.policy.findFirst({ where: { id, tenantId: session.tenantId } });
   return NextResponse.json({ policy: updated });
 }
 

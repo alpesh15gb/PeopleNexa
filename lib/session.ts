@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { verifyToken, SESSION_COOKIE, type SessionPayload } from "./auth";
 import { prisma } from "./prisma";
 
-async function readActiveIdentity(): Promise<{ session: SessionPayload; mustChangePassword: boolean } | null> {
+export async function readActiveIdentity(): Promise<{ session: SessionPayload; mustChangePassword: boolean } | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
