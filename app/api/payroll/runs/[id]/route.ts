@@ -89,9 +89,9 @@ export async function PATCH(
             { error: "The run creator cannot approve their own payroll run." },
             { status: 403 },
           );
-        if (target === "reviewed" && run.payslips.length === 0)
+        if (["reviewed", "approved", "finalized", "paid"].includes(target) && run.payslips.length === 0)
           return NextResponse.json(
-            { error: "A run with no payslips cannot be reviewed." },
+            { error: "Payroll needs at least one payslip before it can be reviewed, approved, finalized or paid." },
             { status: 409 },
           );
         if (["reviewed", "approved", "finalized"].includes(target)) {

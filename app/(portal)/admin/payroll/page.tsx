@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { DocumentExpensePagination } from "@/components/document-expense-pagination";
+import { recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/card";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
@@ -18,7 +21,7 @@ export const dynamic = "force-dynamic";
 const payrollPath = "/admin/payroll";
 
 export default async function PayrollPage({ searchParams }: {
-  searchParams: Promise<{ month?: string; period?: string; location?: string; run?: string }>;
+  searchParams: Promise<{ month?: string; period?: string; location?: string; run?: string; view?: string; page?: string }>;
 }) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) redirect("/login");
@@ -111,10 +114,31 @@ export default async function PayrollPage({ searchParams }: {
       AND: [employeeLocationScope(locationId), { OR: [{ joiningDate: null }, { joiningDate: { lt: payrollPreparationEnd(month) } }] }],
     }
     : null;
+  const missingSalaryWhere = { ...staffScope, OR: [{ salary: null }, { salary: { lte: 0 } }] };
   const [staffCount, missingSalary] = staffScope ? await Promise.all([
     prisma.employee.count({ where: staffScope }),
-    prisma.employee.count({ where: { ...staffScope, OR: [{ salary: null }, { salary: { lte: 0 } }] } }),
+    prisma.employee.count({ where: missingSalaryWhere }),
   ]) : [0, 0];
+  if (params.view === "missing-salaries" && staffScope && locationId) {
+    const pagination = recordPagination(missingSalary, recordPageNumber(params.page) ?? 1, 25);
+    const employees = await prisma.employee.findMany({
+      where: missingSalaryWhere,
+      select: { id: true, firstName: true, lastName: true, employeeNumber: true },
+      orderBy: [{ employeeNumber: "asc" }, { id: "asc" }],
+      skip: pagination.offset,
+      take: pagination.pageSize,
+    });
+    return <div className="space-y-5">
+      <Link className="text-sm font-medium text-primary underline" href={payrollScopeHref("/admin/payroll", { locationId, period: month })}>Back to monthly payroll</Link>
+      <PageHeader title="Employees missing a salary" description={`${selectedLocation?.name} · ${month}. Open an employee record to update their salary.`} />
+      {employees.length ? <ul className="divide-y divide-edge rounded-xl border border-edge bg-card">
+        {employees.map(employee => <li key={employee.id}><Link className="flex items-center justify-between gap-3 p-4 hover:bg-tint" href={`/admin/employee-master?${new URLSearchParams({ employee: employee.id, payPeriod: month, payLocation: locationId, payPage: String(pagination.page) })}`}>
+          <span>{employee.firstName} {employee.lastName}</span><span className="text-sm text-muted-foreground">{employee.employeeNumber}</span>
+        </Link></li>)}
+      </ul> : <p role="status">All employees in this location and period have a salary recorded.</p>}
+      <DocumentExpensePagination path="/admin/payroll" params={{ location: locationId, period: month, view: "missing-salaries" }} pagination={pagination} label="employees" />
+    </div>;
+  }
   const rows = payslips.map(({ employee, id, grossEarnings, deductions, netSalary, status, adjustments, documentSnapshot }) => ({
     employee: {
       id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName,

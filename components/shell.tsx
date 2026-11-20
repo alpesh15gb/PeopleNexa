@@ -566,7 +566,7 @@ export function Shell({
           </div>
         </header>
         {servicePages.length > 1 && (
-          <nav aria-label={`${current?.section} pages`} className="border-b border-edge bg-card px-4 sm:px-7">
+          <nav aria-label={`${current?.section} pages`} className="border-b border-edge bg-card px-4 sm:px-7 lg:hidden">
             <label className="flex min-h-12 items-center gap-3 text-xs font-semibold text-muted-foreground sm:hidden">
               {current?.section}
               <select aria-label={`Open a page in ${current?.section}`} value={current?.href} onChange={(event) => router.push(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-edge bg-background p-2 text-sm text-foreground">

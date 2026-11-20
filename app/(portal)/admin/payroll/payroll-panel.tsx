@@ -8,12 +8,9 @@ import {
   ArrowRight,
   Download,
   Landmark,
-  Settings2,
   Check,
   Search,
-  Wallet,
   Users,
-  CircleAlert,
   RefreshCw,
 } from "lucide-react";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -325,6 +322,7 @@ export function PayrollPanel({
           return;
         }
         if (confirmation === status) setConfirmation(null);
+        setInputsChecked(Array.isArray(data.preflight));
         setSourceIssues(Array.isArray(data.preflight) ? data.preflight : [error]);
         return toast("error", "Payroll needs attention. Review the issues shown on this page.");
       }
@@ -425,10 +423,13 @@ export function PayrollPanel({
     ["finalized", "paid"].includes(payroll.status) &&
     generated === 0,
   );
+  const emptyRun = Boolean(payroll && generated === 0);
+  const needsPayslips = emptyRun && ["draft", "reviewed", "approved"].includes(payroll?.status ?? "");
+  const inputsNeedCorrection = inputsChecked && sourceIssues.length > 0;
   const state = !locationId
-    ? "Not started"
+    ? "Choose a payroll location"
     : !payroll
-      ? (generationUnavailableReason ? "Payroll generation unavailable" : payrollSettingsRequired ? "Payroll settings required" : "Not started")
+      ? (generationUnavailableReason ? "Payroll generation unavailable" : payrollSettingsRequired ? "Set up payroll for this location" : isWorkbookSource ? "Prepare attendance workbook" : "Prepare draft payroll")
       : missingTerminalPayslips
         ? "Payroll record needs attention"
         : payroll.status === "cancelled"
@@ -446,7 +447,7 @@ export function PayrollPanel({
                     : payroll.status === "finalized"
                       ? "Ready to record payment"
                       : "Paid";
-  const action = !locationId
+  const action = !locationId || emptyRun
     ? null
     : !payroll
       ? (canGenerateRecorded ? { label: "Create draft payroll", onClick: () => create(), busy: "create" } : null)
@@ -497,9 +498,7 @@ export function PayrollPanel({
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-primary">
-              Pay & people
-            </p>
+
             <h1 className="font-display text-3xl font-semibold tracking-tight">
               Monthly payroll
             </h1>
@@ -507,15 +506,7 @@ export function PayrollPanel({
               Prepare salaries, review the details, and record payment.
             </p>
           </div>
-          {canManageSettings && (
-            <Button
-              variant="outline"
-              onClick={() => router.push(payrollScopeHref("/admin/payroll/configuration", { locationId, period: month }))}
-            >
-              <Settings2 aria-hidden="true" className="h-4 w-4" />
-              Settings
-            </Button>
-          )}
+
         </header>
         <PayrollNavigation active="payroll" canManageSettings={canManageSettings} locationId={locationId} period={month} />
         <section
@@ -573,109 +564,34 @@ export function PayrollPanel({
               </Select>
             </Field>
           )}
-          <Badge
-            tone={payroll?.status === "paid" ? "success" : "neutral"}
+          {payroll && <Badge
+            tone={payroll.status === "paid" ? "success" : "neutral"}
             className="mb-3 capitalize"
           >
-            {payroll?.status ?? "Not started"}
-          </Badge>
+            {payroll.status}
+          </Badge>}
         </section>
-        {locationId && !payroll && (
-          <fieldset className="rounded-2xl border border-edge bg-card p-5">
-            <legend className="px-2 font-semibold">Attendance source</legend>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
-                <input className="mt-1" type="radio" name="attendance-source" checked={!isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("recorded")} />
-                <span><strong className="block text-sm">Recorded attendance</strong><span className="mt-1 block text-sm text-muted-foreground">Use attendance and approved leave in PeopleNexa.</span></span>
-              </label>
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
-                <input className="mt-1" type="radio" name="attendance-source" checked={isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("workbook")} />
-                <span><strong className="block text-sm">Attendance workbook</strong><span className="mt-1 block text-sm text-muted-foreground">Upload daily attendance marks and review the worksheet before calculation.</span></span>
-              </label>
-            </div>
-            {preparation && !isWorkbookSource && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                {preparation.eligible} {preparation.eligible === 1 ? "employee has" : "employees have"} a recorded salary for this month.
-                {preparation.missingSalary > 0 && <> {preparation.missingSalary} {preparation.missingSalary === 1 ? "needs" : "need"} a salary in <a className="font-medium text-primary underline" href="/admin/employee-master">Employees</a>.</>}
-              </p>
-            )}
-          </fieldset>
-        )}
-        {attendanceSource && payroll && (
-          <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-edge bg-card p-4 text-sm">
-            <div>
-              <p className="font-semibold">{attendanceSource === "workbook" ? "Reviewed workbook" : "Recorded attendance"}</p>
-              <p className="mt-1 text-muted-foreground">{payroll.status === "draft" ? "The draft uses this source for every payslip." : "Attendance source recorded for this run."}</p>
-            </div>
-            {payroll.status === "draft" && canGenerate && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => setConfirmation("cancelled")}>Change source by cancelling draft</Button>}
-          </div>
-        )}
-        {sourceIssues.length > 0 && (
-          <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5">
-            <h2 className="font-semibold">Resolve before continuing</h2>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
-            {payroll?.status === "draft" && <a href="#payroll-employee-review" className="mt-3 inline-block text-sm font-medium text-primary underline">Find a draft payslip</a>}
-            {payroll && ["reviewed", "approved"].includes(payroll.status) && <Button className="mt-3" variant="outline" disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>}
-          </section>
-        )}
-        {inputsChecked && sourceIssues.length === 0 && <p role="status" className="rounded-xl border border-edge bg-card p-4 text-sm">Attendance and adjustments match the recorded payslips.</p>}
-        {generationUnavailableReason && payroll?.status === "draft" && <p className="text-sm text-muted-foreground">{generationUnavailableReason}</p>}
-        {locationId && isWorkbookSource && <ManualAttendancePanel key={`${locationId}:${month}:${payroll?.id ?? "new"}`} month={month} locationId={locationId} runId={payroll?.id} runUploadId={workbookUploadId} includedEmployeeIds={rows.filter(row => row.payslip).map(row => row.employee.id)} editable={!payroll || payroll.status === "draft"} canGenerate={canGenerate} />}
-        {generationIssues.length > 0 && (
-          <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
-            <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Resolve these reasons before retrying the affected employees. Payslips that were created remain in the draft.</p>
-            <div className="mt-4 overflow-x-auto">
-              <Table>
-                <THead><TR><TH>Employee</TH><TH>Result</TH><TH>Reason</TH></TR></THead>
-                <TBody>{generationIssues.map((result) => (
-                  <TR key={result.employeeId}>
-                    <TD>{result.employeeName}</TD>
-                    <TD><Badge tone={result.error ? "danger" : "warning"}>{result.error ? "Failed" : "Skipped"}</Badge></TD>
-                    <TD className="min-w-64 whitespace-normal break-words">{payrollGenerationReason(result)}</TD>
-                  </TR>
-                ))}</TBody>
-              </Table>
-            </div>
-          </section>
-        )}
-        <ol
-          aria-label="Payroll progress"
-          className="grid grid-cols-5 gap-1 rounded-2xl border border-edge bg-card p-3 sm:gap-4 sm:p-5"
-        >
-          {steps.map((step, index) => (
-            <li
-              key={step}
-              aria-current={index === currentStep ? "step" : undefined}
-              className={`flex flex-col items-center gap-2 text-center text-[10px] font-medium sm:flex-row sm:text-sm ${index <= currentStep ? "text-primary" : "text-muted-foreground"}`}
-            >
-              <span
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${index < currentStep ? "border-primary bg-primary text-primary-foreground" : index === currentStep ? "border-primary bg-primary/10" : "border-edge bg-tint"}`}
-              >
-                {index < currentStep ? (
-                  <Check aria-hidden="true" className="h-4 w-4" />
-                ) : (
-                  index + 1
-                )}
-              </span>
-              {step}
-            </li>
-          ))}
-        </ol>
         <section className="rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="max-w-2xl">
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">
                 {locationId
                   ? `${locationLabel} · ${monthName(month)}`
-                  : "Let's get started"}
+                  : "Payroll period"}
+                {payroll && currentStep >= 0 && currentStep < steps.length && ` · Step ${currentStep + 1} of ${steps.length}: ${steps[currentStep]}`}
               </p>
               <h2 className="mt-2 font-display text-xl font-semibold">
-                {state}
+                {needsPayslips ? (payroll?.status === "draft" ? "Add employees to this draft" : "This run has no payslips") : inputsNeedCorrection ? "Resolve payroll inputs" : state}
               </h2>
               <p className="mt-2 text-sm text-muted-foreground">
                 {!locationId
                   ? "Choose a location and pay month above to begin."
+                  : emptyRun && payroll?.status === "draft" && !isWorkbookSource
+                    ? "Choose employees to generate payslips before submitting this draft for review."
+                  : needsPayslips && payroll?.status !== "draft"
+                    ? "Return this run to draft to prepare employee payslips."
+                  : inputsNeedCorrection
+                    ? "Review the input check below. After correcting the listed items, check payroll inputs again."
                   : missingTerminalPayslips
                     ? "This finalized payroll has no linked payslips. Contact an administrator to resolve the record."
                     : blockers.length
@@ -683,7 +599,7 @@ export function PayrollPanel({
                       : !payroll
                         ? (generationUnavailableReason ?? (payrollSettingsRequired
                           ? "An administrator needs to publish payroll settings for this location and month."
-                          : isWorkbookSource ? "Review the worksheet above, then generate a draft from the reviewed upload."
+                          : isWorkbookSource ? "Review the worksheet below, then generate a draft from the reviewed upload."
                             : preparation?.eligible === 0 ? "Add a salary for at least one employee in this location and month before creating a draft."
                               : "Create a draft, then check the inputs and review employee payslips."))
                         : payroll.status === "draft"
@@ -699,48 +615,28 @@ export function PayrollPanel({
                                   : "This historical run is closed."}
               </p>
             </div>
-            {action && (
-              <Button
-                disabled={Boolean(busy) || (blockers.length > 0 && ["reviewed", "approved"].includes(action.busy))}
-                aria-describedby={blockers.length > 0 && ["reviewed", "approved"].includes(action.busy) ? "payroll-action-blockers" : undefined}
-                loading={busy === action.busy}
-                onClick={action.onClick}
-              >
-                {action.label}
-                <ArrowRight aria-hidden="true" className="h-4 w-4" />
-              </Button>
-            )}
-            {payroll && ["draft", "reviewed", "approved"].includes(payroll.status) && (
-              <Button variant="outline" loading={busy === "check-inputs"} disabled={Boolean(busy)} onClick={() => void checkPayrollInputs()}>
-                Check payroll inputs
-              </Button>
-            )}
-            {payroll && ["cancelled", "reversed"].includes(payroll.status) && (
-              <Button variant="outline" onClick={() => changeScope()}>
-                Return to monthly payroll
-              </Button>
-            )}
-            {!payroll && payrollSettingsRequired && !generationUnavailableReason && canManageSettings && locationId && (
-              <Button onClick={() => router.push(`/admin/payroll/configuration?${new URLSearchParams({ location: locationId, period: month })}`)}>
-                Review payroll settings
-                <ArrowRight aria-hidden="true" className="h-4 w-4" />
-              </Button>
-            )}
           </div>
-          {action && blockers.length > 0 && ["reviewed", "approved"].includes(action.busy) && (
-            <p id="payroll-action-blockers" className="mt-4 text-sm text-muted-foreground">
-              {action.label} is unavailable until the employee issues are resolved.{" "}
-              <a href="#payroll-issues" className="font-medium text-primary underline underline-offset-4">
-                View issues and how to resolve them
-              </a>
-            </p>
-          )}
-          {payroll?.status === "reviewed" && (
-            <p className="mt-4 text-sm text-muted-foreground">
-              Approval requires a different authorized reviewer from the person who created this payroll.
-              {waitingForApproval && <a className="ml-2 font-medium text-primary underline" href={payrollScopeHref("/admin/payroll/queue", { locationId, period: month, stage: "reviewed" })}>Open approval queue</a>}
-            </p>
-          )}
+        {canGenerate && !payroll && (
+          <fieldset className="mt-4 rounded-xl border border-edge bg-card p-4">
+            <legend className="px-2 font-semibold">Attendance source</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
+                <input className="mt-1" type="radio" name="attendance-source" checked={!isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("recorded")} />
+                <span><strong className="block text-sm">Recorded attendance</strong><span className="mt-1 block text-sm text-muted-foreground">Use attendance and approved leave in PeopleNexa.</span></span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-edge p-4">
+                <input className="mt-1" type="radio" name="attendance-source" checked={isWorkbookSource} disabled={Boolean(busy)} onChange={() => setSourceChoice("workbook")} />
+                <span><strong className="block text-sm">Attendance workbook</strong><span className="mt-1 block text-sm text-muted-foreground">Upload daily attendance marks and review the worksheet before calculation.</span></span>
+              </label>
+            </div>
+            {preparation && !isWorkbookSource && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                {preparation.eligible} {preparation.eligible === 1 ? "employee has" : "employees have"} a recorded salary for this month.
+                {preparation.missingSalary > 0 && <> {preparation.missingSalary} {preparation.missingSalary === 1 ? "needs" : "need"} a salary. <a className="font-medium text-primary underline" href={`/admin/payroll?${new URLSearchParams({ location: locationId ?? "", period: month, view: "missing-salaries" })}`}>View employees missing a salary</a></>}
+              </p>
+            )}
+          </fieldset>
+        )}
           {!payroll && canGenerateRecorded && (
             <fieldset className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-primary/15 pt-4">
               <legend className="sr-only">Employees to include</legend>
@@ -774,60 +670,109 @@ export function PayrollPanel({
               )}
             </fieldset>
           )}
+          {payroll && (
+            <section aria-label="Payroll summary" className="mt-4 rounded-xl border border-edge bg-card px-4 py-3">
+              <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+                {[
+                  ["Employees in this run", generated],
+                  ["Gross pay", formatMoney(totals.gross)],
+                  ["Deductions", formatMoney(totals.deductions)],
+                  [["approved", "finalized", "paid"].includes(payroll.status) ? "Approved net payout" : "Estimated net payout", formatMoney(totals.net)],
+                ].map(([label, value]) => <div key={label}>
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="mt-1 font-semibold tabular-nums">{value}</dd>
+                </div>)}
+              </dl>
+              {notIncludedCount > 0 && <p className="mt-3 text-xs text-muted-foreground">{notIncludedCount} active employees outside this run</p>}
+              {issueCount > 0 && <a href="#payroll-issues" className="mt-2 inline-block text-sm text-primary underline">Review issues for {issueCount} {issueCount === 1 ? "employee" : "employees"}</a>}
+            </section>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {emptyRun && canAddEmployees && <Button onClick={() => { setSelectionMode("selected"); setPickerOpen(true); }}>Choose employees for draft</Button>}
+            {needsPayslips && payroll?.status !== "draft" && <Button disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>}
+            {action && (
+              <Button
+                disabled={Boolean(busy) ||
+                  (action.busy === "create" && selectionMode === "selected" && !selectedEmployeeIds.length) ||
+                  ((blockers.length > 0 || inputsNeedCorrection) && ["reviewed", "approved", "finalized"].includes(action.busy))}
+                aria-describedby={blockers.length > 0 && ["reviewed", "approved", "finalized"].includes(action.busy) ? "payroll-action-blockers" : undefined}
+                loading={busy === action.busy}
+                onClick={action.onClick}
+              >
+                {action.label}
+                <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            )}
+            {payroll && ["draft", "reviewed", "approved"].includes(payroll.status) && (
+              <Button variant="outline" loading={busy === "check-inputs"} disabled={Boolean(busy)} onClick={() => void checkPayrollInputs()}>
+                Check payroll inputs
+              </Button>
+            )}
+            {payroll && ["cancelled", "reversed"].includes(payroll.status) && (
+              <Button variant="outline" onClick={() => changeScope()}>
+                Return to monthly payroll
+              </Button>
+            )}
+            {!payroll && payrollSettingsRequired && !generationUnavailableReason && canManageSettings && locationId && (
+              <Button onClick={() => router.push(`/admin/payroll/configuration?${new URLSearchParams({ location: locationId, period: month })}`)}>
+                Review payroll settings
+                <ArrowRight aria-hidden="true" className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {action && blockers.length > 0 && ["reviewed", "approved", "finalized"].includes(action.busy) && (
+            <p id="payroll-action-blockers" className="mt-4 text-sm text-muted-foreground">
+              {action.label} is unavailable until the employee issues are resolved.{" "}
+              <a href="#payroll-issues" className="font-medium text-primary underline underline-offset-4">
+                View issues and how to resolve them
+              </a>
+            </p>
+          )}
+          {payroll?.status === "reviewed" && (
+            <p className="mt-4 text-sm text-muted-foreground">
+              Approval requires a different authorized reviewer from the person who created this payroll.
+              {waitingForApproval && <a className="ml-2 font-medium text-primary underline" href={payrollScopeHref("/admin/payroll/queue", { locationId, period: month, stage: "reviewed" })}>Open approval queue</a>}
+            </p>
+          )}
         </section>
-        <section
-          aria-label="Payroll summary"
-          className="grid grid-cols-2 gap-3 sm:grid-cols-3"
-        >
-          <div className="col-span-2 rounded-2xl border border-edge bg-card p-5 sm:col-span-1">
-            <Wallet aria-hidden="true" className="mb-3 h-5 w-5 text-primary" />
-            <p className="text-xs text-muted-foreground">
-              {["approved", "finalized", "paid"].includes(payroll?.status ?? "")
-                ? "Approved net payout"
-                : "Estimated net payout"}
-            </p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {formatMoney(totals.net)}
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Gross {formatMoney(totals.gross)} · Deductions{" "}
-              {formatMoney(totals.deductions)}
-            </p>
+        {attendanceSource && payroll && (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-edge bg-card p-4 text-sm">
+            <div>
+              <p className="font-semibold">{attendanceSource === "workbook" ? "Reviewed workbook" : "Recorded attendance"}</p>
+              <p className="mt-1 text-muted-foreground">{payroll.status === "draft" ? "The draft uses this source for every payslip." : "Attendance source recorded for this run."}</p>
+            </div>
+        {payroll.status === "draft" && canGenerate && <Button variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => setConfirmation("cancelled")}>Change source by cancelling draft</Button>}
           </div>
-          <div className="rounded-2xl border border-edge bg-card p-5">
-            <Users aria-hidden="true" className="mb-3 h-5 w-5 text-primary" />
-            <p className="text-xs text-muted-foreground">
-              Employees in this run
-            </p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {generated}
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {payroll
-                ? `${notIncludedCount} active employees not included in this monthly payroll`
-                : "Employees appear after creating a preview"}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-edge bg-card p-5">
-            <CircleAlert
-              aria-hidden="true"
-              className={`mb-3 h-5 w-5 ${issueCount ? "text-amber-300" : "text-primary"}`}
-            />
-            <p className="text-xs text-muted-foreground">
-              Employees needing attention
-            </p>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">
-              {issueCount}
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {issueCount
-                ? "Check payroll issues and payout details"
-                : payroll
-                  ? "No employee issues flagged"
-                  : "Checks run when the preview is created"}
-            </p>
-          </div>
-        </section>
+        )}
+        {sourceIssues.length > 0 && (
+          <section role="alert" className="rounded-2xl border border-warning/30 bg-card p-5">
+            <h2 className="font-semibold">Resolve before continuing</h2>
+            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{sourceIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+            {payroll?.status === "draft" && <a href="#payroll-employee-review" className="mt-3 inline-block text-sm font-medium text-primary underline">Find a draft payslip</a>}
+            {payroll && ["reviewed", "approved"].includes(payroll.status) && <Button className="mt-3" variant="outline" disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>}
+          </section>
+        )}
+        {inputsChecked && sourceIssues.length === 0 && <p role="status" className="rounded-xl border border-edge bg-card p-4 text-sm">Attendance and adjustments match the recorded payslips.</p>}
+        {generationUnavailableReason && payroll?.status === "draft" && <p className="text-sm text-muted-foreground">{generationUnavailableReason}</p>}
+        {locationId && isWorkbookSource && (payroll || canGenerate) && <ManualAttendancePanel key={`${locationId}:${month}:${payroll?.id ?? "new"}`} month={month} locationId={locationId} runId={payroll?.id} runUploadId={workbookUploadId} includedEmployeeIds={rows.filter(row => row.payslip).map(row => row.employee.id)} editable={!payroll || payroll.status === "draft"} canGenerate={canGenerate} />}
+        {generationIssues.length > 0 && (
+          <section role="alert" aria-label="Payroll generation issues" className="rounded-2xl border border-warning/30 bg-card p-4 sm:p-5">
+            <h2 className="font-semibold text-foreground">Some employees have no new payslip</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Resolve these reasons before retrying the affected employees. Payslips that were created remain in the draft.</p>
+            <div className="mt-4 overflow-x-auto">
+              <Table>
+                <THead><TR><TH>Employee</TH><TH>Result</TH><TH>Reason</TH></TR></THead>
+                <TBody>{generationIssues.map((result) => (
+                  <TR key={result.employeeId}>
+                    <TD>{result.employeeName}</TD>
+                    <TD><Badge tone={result.error ? "danger" : "warning"}>{result.error ? "Failed" : "Skipped"}</Badge></TD>
+                    <TD className="min-w-64 whitespace-normal break-words">{payrollGenerationReason(result)}</TD>
+                  </TR>
+                ))}</TBody>
+              </Table>
+            </div>
+          </section>
+        )}
         {issues.length > 0 && (
           <section
             id="payroll-issues"
@@ -890,7 +835,7 @@ export function PayrollPanel({
                   payslip for the full breakdown.
                 </p>
               </div>
-              {canAddEmployees && (
+              {canAddEmployees && !emptyRun && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1139,7 +1084,7 @@ export function PayrollPanel({
             </div>
           </section>
         )}
-        <details className="rounded-xl border border-edge bg-card p-4">
+        {payroll && <details className="rounded-xl border border-edge bg-card p-4">
           <summary className="cursor-pointer font-medium focus-visible:ring-2 focus-visible:ring-ring">
             Payroll rules used
           </summary>
@@ -1148,8 +1093,8 @@ export function PayrollPanel({
               ? "The rules recorded with this monthly payroll are available for audit."
               : "The active payroll rules for this location will be recorded when monthly payroll is created."}
           </p>
-        </details>
-        {(payroll || canManageSettings) && (
+        </details>}
+        {(payroll || (canManageSettings && canGenerate)) && (
           <details className="mt-4 rounded-xl border border-edge bg-card p-4">
             <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               Advanced tools
@@ -1175,7 +1120,7 @@ export function PayrollPanel({
                   </Button>
                 </>
               )}
-              {canAddEmployees && (
+              {canAddEmployees && !emptyRun && (
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -1186,7 +1131,7 @@ export function PayrollPanel({
                   Add employees to draft payroll
                 </Button>
               )}
-              {payroll && ["reviewed", "approved"].includes(payroll.status) && (
+              {payroll && !needsPayslips && ["reviewed", "approved"].includes(payroll.status) && (
                 <Button variant="outline" disabled={Boolean(busy)} onClick={() => setConfirmation("draft")}>Return to draft for corrections</Button>
               )}
               {payroll &&

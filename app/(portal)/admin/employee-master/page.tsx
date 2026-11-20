@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { BriefcaseBusiness, Building2, CreditCard, FileText, GraduationCap, IdCard, UserRound } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
-import { formatDateIST, toDateKey } from "@/lib/dates";
+import { formatDateIST, toDateKey, isMonthKey } from "@/lib/dates";
 import { maskAadhaar, maskPan } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
@@ -24,7 +24,7 @@ import { getTenantAccess } from "@/lib/modules-server";
 export const dynamic = "force-dynamic";
 
 type Field = { label: string; value: unknown };
-type DirectoryParams = Partial<Record<"employee" | "q" | "page" | "status" | "department" | "branch", string | string[]>>;
+type DirectoryParams = Partial<Record<"employee" | "payLocation" | "payPage" | "payPeriod" | "q" | "page" | "status" | "department" | "branch", string | string[]>>;
 
 function filterValue(value: string | string[] | undefined) {
   return typeof value === "string" ? value.trim().slice(0, 150) : "";
@@ -98,6 +98,21 @@ export default async function EmployeeMasterPage({
   const status = params.status === "active" || params.status === "inactive" || (showDevices && params.status === "assignment_pending") ? params.status : "all";
   const pageSize = 50;
   const page = Math.min(1_000_000, Math.max(1, Number.parseInt(filterValue(params.page), 10) || 1));
+  const filters = Object.fromEntries(Object.entries({ q: query, department, branch }).filter(([, value]) => value));
+  if (requestedEmployee) {
+    const directory = new URLSearchParams({ ...filters, status, page: String(page) });
+    const payPeriod = filterValue(params.payPeriod);
+    const payLocation = filterValue(params.payLocation);
+    const payrollReturn = (isAdmin || isLocationManager) && isMonthKey(payPeriod) && payLocation
+      ? new URLSearchParams({ period: payPeriod, location: payLocation, view: "missing-salaries", page: filterValue(params.payPage) || "1" })
+      : null;
+    return <div id="employee-record" className="space-y-5">
+      <Link href={payrollReturn ? `/admin/payroll?${payrollReturn}` : `/admin/employee-master?${directory}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">← {payrollReturn ? "Back to payroll salary checks" : "Back to employee directory"}</Link>
+      <Suspense key={requestedEmployee} fallback={<p role="status">Loading employee details…</p>}>
+        <EmployeeMasterDetails selectedId={requestedEmployee} where={scope} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} />
+      </Suspense>
+    </div>;
+  }
   const baseWhere: Prisma.EmployeeWhereInput = {
     AND: [
       scope,
@@ -121,10 +136,8 @@ export default async function EmployeeMasterPage({
     isBranchManager ? [] : prisma.designation.findMany({ where: { tenantId: session.tenantId, active: true }, select: { name: true }, orderBy: { name: "asc" } }),
   ]);
   const { total, employees, counts } = list;
-  const selectedId = requestedEmployee || employees[0]?.id;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const filters = Object.fromEntries(Object.entries({ q: query, department, branch }).filter(([, value]) => value));
-  if (page > pageCount) redirect(`/admin/employee-master?${new URLSearchParams({ ...filters, status, page: String(pageCount), ...(requestedEmployee ? { employee: requestedEmployee } : {}) })}`);
+  if (page > pageCount) redirect(`/admin/employee-master?${new URLSearchParams({ ...filters, status, page: String(pageCount) })}`);
 
   return (
     <div className="animate-fade-up space-y-6">
@@ -137,7 +150,6 @@ export default async function EmployeeMasterPage({
           {access.modules.has("reports") && <Link href="/api/reports/master-data" className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint">Download detailed records</Link>}
         </div> : undefined}
       />
-      {requestedEmployee && selectedId && <a href="#employee-record" className="inline-flex rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint xl:hidden">Go to selected employee details</a>}
       {isLocationManager && !locationId && (
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">
@@ -146,41 +158,33 @@ export default async function EmployeeMasterPage({
         </Card>
       )}
       {isBranchManager && !branchId && <Card><CardContent className="p-6 text-sm text-muted-foreground">Your Branch Manager account has no branch assigned. Ask an administrator to assign your branch before viewing the employee directory.</CardContent></Card>}
-      <div className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
-        <Card className="h-fit xl:sticky xl:top-6">
-          <CardHeader className="flex-col gap-0">
-            <CardTitle>Employees</CardTitle>
-            <CardDescription>{total} employee{total === 1 ? "" : "s"}{query || department || branch ? " matching your filters" : ""}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form action="/admin/employee-master" className="space-y-2">
-              <input type="hidden" name="status" value={status} />
-              <input name="q" aria-label="Search employees" defaultValue={query} placeholder="Name, employee code or email" maxLength={150} className="w-full rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
-              <div className="grid grid-cols-2 gap-2">
-                <select name="department" aria-label="Department" defaultValue={department} className="min-w-0 rounded-lg border border-edge bg-card px-2 py-2 text-sm">
-                  <option value="">All departments</option>
-                  {departments.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-                </select>
-                <select name="branch" aria-label="Branch" defaultValue={branch} className="min-w-0 rounded-lg border border-edge bg-card px-2 py-2 text-sm">
-                  <option value="">All branches</option>
-                  {branches.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-3">
-                <button className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint" type="submit">Apply filters</button>
-                {Object.keys(filters).length > 0 && <Link className="text-sm text-primary hover:underline" href={`/admin/employee-master?${new URLSearchParams({ status })}`}>Clear filters</Link>}
-              </div>
-            </form>
-            <EmployeeMasterList key={`${query}:${department}:${branch}:${status}:${page}`} employees={employees} selectedId={selectedId} filters={filters} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} showDevices={showDevices} />
-          </CardContent>
-        </Card>
-
-        <section id="employee-record" aria-label="Employee record" tabIndex={-1} className="min-w-0 scroll-mt-4">
-          <Suspense key={`${status}:${selectedId ?? "empty"}`} fallback={<Card><CardContent className="p-10 text-sm text-muted-foreground" role="status">Loading employee details…</CardContent></Card>}>
-            <EmployeeMasterDetails selectedId={selectedId} where={scope} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} />
-          </Suspense>
-        </section>
-      </div>
+      <Card>
+        <CardHeader className="flex-col gap-0">
+          <CardTitle>Employees</CardTitle>
+          <CardDescription>{total} employee{total === 1 ? "" : "s"}{query || department || branch ? " matching your filters" : ""}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <form action="/admin/employee-master" className="grid items-end gap-2 lg:grid-cols-[1fr_1fr_auto]">
+            <input type="hidden" name="status" value={status} />
+            <input name="q" aria-label="Search employees" defaultValue={query} placeholder="Name, employee code or email" maxLength={150} className="w-full rounded-lg border border-edge bg-card px-3 py-2 text-sm outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/40" />
+            <div className="grid grid-cols-2 gap-2">
+              <select name="department" aria-label="Department" defaultValue={department} className="min-w-0 rounded-lg border border-edge bg-card px-2 py-2 text-sm">
+                <option value="">All departments</option>
+                {departments.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+              </select>
+              <select name="branch" aria-label="Branch" defaultValue={branch} className="min-w-0 rounded-lg border border-edge bg-card px-2 py-2 text-sm">
+                <option value="">All branches</option>
+                {branches.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3">
+              <button className="rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint" type="submit">Apply filters</button>
+              {Object.keys(filters).length > 0 && <Link className="text-sm text-primary hover:underline" href={`/admin/employee-master?${new URLSearchParams({ status })}`}>Clear filters</Link>}
+            </div>
+          </form>
+          <EmployeeMasterList key={`${query}:${department}:${branch}:${status}:${page}`} employees={employees} filters={filters} status={status} page={page} pageCount={pageCount} counts={counts} canChangeStatus={isAdmin || isLocationManager} actorId={session.sub} showDevices={showDevices} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -221,23 +225,24 @@ async function EmployeeMasterDetails({ selectedId, where, isAdmin, isLocationMan
   const canManageEmployee = isAdmin || Boolean(employee && !employee.loginOnly && !["admin", "branch_manager", "location_manager"].includes(employee.role));
   const scheduledTransfer = employee?.transfers[0];
   const destinationBranch = scheduledTransfer ? await prisma.branch.findFirst({ where: { id: scheduledTransfer.destinationBranchId, tenantId: employee!.tenantId }, select: { name: true } }) : null;
-  return <>        {!employee ? <Card><CardContent className="p-10 text-center text-sm text-muted-foreground">Select an employee to view their record.</CardContent></Card> : (
+  return <>        {!employee ? <Card><CardContent className="p-10 text-center text-sm text-muted-foreground">This employee record is unavailable. Return to the directory to choose another employee.</CardContent></Card> : (
           <div className="space-y-6">
             <Card>
               <CardContent className="p-6">
                 <div className="flex flex-wrap items-start gap-5">
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-brand text-xl font-bold text-white">{(employee.firstName[0] ?? "") + (employee.lastName[0] ?? "")}</div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold">{employee.firstName} {employee.lastName}</h2><Badge tone={employee.status === "active" ? "success" : "neutral"}>{employee.status}</Badge></div>
+                    <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold">{employee.firstName} {employee.lastName}</h1><Badge tone={employee.status === "active" ? "success" : "neutral"}>{employee.status}</Badge></div>
                     <p className="mt-1 text-sm text-muted-foreground">{employee.position ?? "No designation"} · {employee.branch?.name ?? "No branch assigned"}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span>{showDevices && employee.deviceCode && <span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode}</span>}<span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2">{canManageEmployee && showDevices && employee.deviceCode && (isAdmin || isLocationManager) && <EmployeeDeviceAccess employeeId={employee.id} />}{canManageEmployee && (isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} showDeviceNotice={showDevices && Boolean(employee.deviceCode)} />{(employee.status === "active" || scheduledTransfer) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={[]} departments={[]} shifts={[]} managers={[]} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: destinationBranch?.name ?? "selected branch" } : null} />}</>}{canManageEmployee && <EmployeeMasterQuickEdit canIssueEssLogin={isAdmin} canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={[]} departments={[]} shifts={[]} managers={[]} positions={[]} subdepartments={[]} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: isBranchManager ? null : employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} />}</div>
+                  <div className="flex flex-wrap gap-2">{canManageEmployee && <EmployeeMasterQuickEdit canIssueEssLogin={isAdmin} canEditEmail={isAdmin || isLocationManager || isBranchManager} canEditMaster={isAdmin || isLocationManager || isBranchManager} canEditPan={isAdmin || isLocationManager} branches={[]} departments={[]} shifts={[]} managers={[]} positions={[]} subdepartments={[]} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture, aadhaarNumber: employee.aadhaarNumber, pan: isBranchManager ? null : employee.pan, drivingLicenseNumber: employee.drivingLicenseNumber, drivingLicenseClassification: employee.drivingLicenseClassification, drivingLicenseType: employee.drivingLicenseType, drivingLicenseExpiresAt: employee.drivingLicenseExpiresAt ? toDateKey(employee.drivingLicenseExpiresAt) : "" }} />}
+                    {canManageEmployee && showDevices && employee.deviceCode && (isAdmin || isLocationManager) && <EmployeeDeviceAccess employeeId={employee.id} />}{canManageEmployee && (isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} showDeviceNotice={showDevices && Boolean(employee.deviceCode)} />{(employee.status === "active" || scheduledTransfer) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={[]} departments={[]} shifts={[]} managers={[]} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: destinationBranch?.name ?? "selected branch" } : null} />}</>}</div>
                 </div>
               </CardContent>
             </Card>
 
-            <section className="grid gap-6 2xl:grid-cols-2">
+            <section className="grid gap-6 lg:grid-cols-2">
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="h-4 w-4 text-primary" /> Employment</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Branch", value: employee.branch?.name ?? "—" }, { label: "Department", value: employee.department?.name ?? "—" }, { label: "Shift", value: employee.shift?.name ?? "—" }, { label: "Reporting manager", value: employee.manager ? `${employee.manager.firstName} ${employee.manager.lastName} (${employee.manager.employeeNumber})` : "—" }, { label: "Joining date", value: formatDateIST(employee.joiningDate) }, { label: "Subdepartment", value: employee.employmentProfile?.subDepartment ?? "—" }, { label: "Grade", value: employee.employmentProfile?.grade ?? "—" }, ...(isAdmin ? [{ label: "Pay mode", value: employee.payMode }, { label: "Monthly gross", value: employee.salary == null ? "—" : `₹${employee.salary}` }, { label: "CTC", value: employee.employmentProfile?.ctc == null ? "—" : `₹${employee.employmentProfile.ctc}` } ] : [])]}/></CardContent></Card>
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /> Personal details</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Email", value: employee.profile?.personalEmail ?? employee.email }, { label: "Phone", value: employee.phone ?? "—" }, { label: "Gender", value: employee.profile?.gender ?? "—" }, { label: "Date of birth", value: formatDateIST(employee.profile?.actualDateOfBirth ?? employee.profile?.dateOfBirthCertificate) }, { label: "Marital status", value: employee.profile?.maritalStatus ?? "—" }, ...(shouldShowSpouseDetails(employee.profile?.maritalStatus) ? [{ label: "Spouse name", value: employee.profile?.spouseName ?? "—" }, { label: "Spouse contact number", value: employee.profile?.spouseContactNumber ?? "—" }] : []), { label: "Current address", value: employee.profile?.currentAddress }, { label: "Permanent address", value: employee.profile?.permanentAddress }, { label: "Emergency contact name", value: employee.profile?.emergencyContactName ?? "—" }, { label: "Emergency contact number", value: employee.profile?.emergencyContactNumber ?? "—" }]}/></CardContent></Card>
               {isAdmin && <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-primary" /> Bank and statutory</CardTitle></CardHeader><CardContent><DetailGrid fields={[{ label: "Bank name", value: employee.bankName ?? "—" }, { label: "Account number", value: employee.accountNumber ?? "—" }, { label: "IFSC", value: employee.ifscCode ?? "—" }, { label: "PAN", value: maskPan(employee.pan) }, { label: "UAN", value: employee.uan ?? "—" }, { label: "ESI / IP number", value: employee.esiIpNumber ?? "—" }]}/></CardContent></Card>}
@@ -246,14 +251,14 @@ async function EmployeeMasterDetails({ selectedId, where, isAdmin, isLocationMan
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-4 w-4 text-primary" /> Employee documents</CardTitle></CardHeader><CardContent>{employee.documents.length ? <div className="space-y-3">{employee.documents.map((document) => <div key={document.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{document.name}</p><div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2"><p>Type: {document.docType}</p><p>Number: {document.number ?? "—"}</p><p>Issue: {formatDateIST(document.issuedDate)}</p><p>Expiry: {formatDateIST(document.expiryDate)}</p></div>{document.fileUrl && <a href={document.fileUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open file</a>}</div>)}</div> : <p className="text-sm text-muted-foreground">No documents available.</p>}</CardContent></Card>
             </section>
 
-            <section className="grid gap-6 2xl:grid-cols-2">
+            <section className="grid gap-6 lg:grid-cols-2">
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><GraduationCap className="h-4 w-4 text-primary" /> Education</CardTitle></CardHeader><CardContent>{employee.education.length ? <div className="space-y-3">{employee.education.map((entry) => <div key={entry.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{entry.qualification}{entry.specialization ? ` · ${entry.specialization}` : ""}</p><p className="mt-1 text-sm text-muted-foreground">{entry.institution}{entry.board ? ` · ${entry.board}` : ""}{entry.completionYear ? ` · ${entry.completionYear}` : ""}</p></div>)}</div> : <p className="text-sm text-muted-foreground">No education records available.</p>}</CardContent></Card>
               <Card><CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" /> Work experience</CardTitle></CardHeader><CardContent>{employee.workExperience.length ? <div className="space-y-3">{employee.workExperience.map((entry) => <div key={entry.id} className="rounded-xl border border-edge bg-tint/30 p-3"><p className="font-medium">{entry.employer} · {entry.jobTitle}</p><p className="mt-1 text-sm text-muted-foreground">{formatDateIST(entry.startDate)} to {entry.isCurrent ? "Present" : formatDateIST(entry.endDate)}{entry.location ? ` · ${entry.location}` : ""}</p></div>)}</div> : <p className="text-sm text-muted-foreground">No work history available.</p>}</CardContent></Card>
             </section>
             {importGroups.length > 0 && (
               <details className="rounded-2xl border border-edge bg-card p-5">
                 <summary className="cursor-pointer font-medium">Historical import fields</summary>
-                <div className="mt-4 grid gap-6 2xl:grid-cols-2">
+                <div className="mt-4 grid gap-6 lg:grid-cols-2">
                   {importGroups.map((group) => (
                     <div key={group.label}>
                       <h3 className="text-sm font-semibold">{group.label}</h3>

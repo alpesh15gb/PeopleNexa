@@ -12,8 +12,8 @@ import { EmployeeStatusAction } from "./employee-status-action";
 
 type Employee = { id: string; employeeNumber: string; deviceCode: string | null; firstName: string; lastName: string; position: string | null; status: string; role: string; branch: { name: string } | null; department: { name: string } | null; assignmentPending?: boolean };
 
-export function EmployeeMasterList({ employees, selectedId, filters, status, page, pageCount, counts, canChangeStatus, actorId, showDevices }: {
-  employees: Employee[]; selectedId?: string; filters: Record<string, string>; status: "all" | EmployeeStatus | "assignment_pending";
+export function EmployeeMasterList({ employees, filters, status, page, pageCount, counts, canChangeStatus, actorId, showDevices }: {
+  employees: Employee[]; filters: Record<string, string>; status: "all" | EmployeeStatus | "assignment_pending";
   page: number; pageCount: number; counts: { all: number; active: number; inactive: number; assignment_pending: number }; canChangeStatus: boolean; actorId: string; showDevices: boolean;
 }) {
   const router = useRouter();
@@ -56,7 +56,7 @@ export function EmployeeMasterList({ employees, selectedId, filters, status, pag
       <nav aria-label="Employee status filter" className="flex flex-wrap gap-1">
         {(["all", "active", "inactive"] as const).map((value) => <Link prefetch={false} scroll={false} onClick={navigate} key={value} href={href(1, value)} aria-current={status === value ? "page" : undefined} className={`rounded-md px-2 py-1.5 text-xs font-medium ${status === value ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{value === "all" ? "All" : value === "active" ? "Active" : "Inactive"} ({counts[value]})</Link>)}
       </nav>
-      {canChangeStatus && !selecting && <Button size="sm" variant="ghost" disabled={!eligible.length} onClick={() => setSelecting(true)}>Select</Button>}
+      {canChangeStatus && !selecting && <Button size="sm" variant="ghost" disabled={!eligible.length} onClick={() => setSelecting(true)}>Bulk status change</Button>}
     </div>
     {showDevices && (counts.assignment_pending > 0 || status === "assignment_pending") && <Link prefetch={false} scroll={false} onClick={navigate} href={href(1, "assignment_pending")} aria-current={status === "assignment_pending" ? "page" : undefined} className={`mb-2 inline-block rounded-md px-2 py-1.5 text-xs ${status === "assignment_pending" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>Pending device assignments ({counts.assignment_pending})</Link>}
     {selecting && <div className="space-y-2 rounded-lg border border-edge bg-muted/30 p-2">
@@ -68,10 +68,10 @@ export function EmployeeMasterList({ employees, selectedId, filters, status, pag
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSelecting(false); setSelection([]); }}>Cancel</Button>
       </div>
     </div>}
-    <div className="max-h-[60vh] divide-y divide-edge overflow-y-auto rounded-xl border border-edge">
-      {employees.map((item) => <div key={item.id} className={`flex items-center gap-1 px-3 py-3 transition-colors hover:bg-tint ${item.id === selectedId ? "bg-primary/[0.08]" : ""}`}>
+    <div className="divide-y divide-edge rounded-xl border border-edge">
+      {employees.map((item) => <div key={item.id} className="flex items-center gap-2 px-3 py-3 transition-colors hover:bg-tint">
         {selecting && <input type="checkbox" className="mr-2" aria-label={`Select ${item.firstName} ${item.lastName} (${item.employeeNumber})`} disabled={busy || !eligible.some((employee) => employee.id === item.id)} checked={selection.includes(item.id)} onChange={(event) => setSelection((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />}
-        <Link prefetch={false} scroll={false} onClick={navigate} href={href(page, status, item.id)} aria-current={item.id === selectedId ? "true" : undefined} className="min-w-0 flex-1">
+        <Link prefetch={false} href={href(page, status, item.id)} className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{[item.position, item.department?.name, item.branch?.name].filter(Boolean).join(" · ") || "Unassigned"}</p>
           <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber}{item.assignmentPending ? " · Assignment pending" : ""}</p>

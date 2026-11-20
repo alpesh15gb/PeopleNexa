@@ -34,5 +34,5 @@ assert.match(panel, /Add employees to draft payroll/);
 assert.match(panel, /Select all visible eligible/);
 assert.match(panel, /Clear selection/);
 assert.match(page, /notIncludedCount/);
-assert.match(panel, /not included in this monthly payroll/);
+assert.match(panel, /\{notIncludedCount\} active employees outside this run/, "show the count of active employees excluded from the selected run");
 console.log("selected payroll membership safety checks passed");
