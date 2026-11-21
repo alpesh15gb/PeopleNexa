@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useHydrated } from "@/components/use-hydrated";
 
 const BLUE_FOCUS = "focus:border-primary focus:ring-ring/25 focus-visible:ring-ring/40";
 
@@ -22,6 +23,7 @@ const normalize = (s: string) =>
 export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: string }) {
   const router = useRouter();
   const toast = useToast();
+  const ready = useHydrated();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -109,7 +111,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
   }
 
   return (
-    <form onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
+    <form method="post" onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
       <div className="space-y-4">
         <Field label="Company name">
           <Input name="companyName" required maxLength={120} placeholder="Acme Corp" className={`h-11 ${BLUE_FOCUS}`} />
@@ -177,6 +179,7 @@ export function RegisterForm({ baseDomain = "peoplenexa.in" }: { baseDomain?: st
         type="submit"
         size="lg"
         loading={loading}
+        disabled={!ready}
         className="mt-6 w-full"
       >
         <Rocket className="h-4 w-4" aria-hidden="true" />

@@ -16,6 +16,7 @@ export type WorkspaceDestination = {
 
 export function WorkspaceLauncher({ actions, pages }: { actions: WorkspaceDestination[]; pages: WorkspaceDestination[] }) {
   const router = useRouter();
+  const [actionsOnly, setActionsOnly] = useState(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const input = useRef<HTMLInputElement>(null);
@@ -37,9 +38,15 @@ export function WorkspaceLauncher({ actions, pages }: { actions: WorkspaceDestin
   }).sort((left, right) => right.score - left.score);
   const visibleActions = rank(actions);
   const visiblePages = rank(pages);
+  const directory = pages.find((page) => page.href === "/admin/employee-master");
+  const directoryResults = directory && search ? [{ score: -1, destination: {
+    ...directory, href: directory.href + "?" + new URLSearchParams({ q: query.trim() }),
+    label: "Search employee directory", description: query.trim(),
+  } }] : [];
   const groups = [
+    { title: "People", results: actionsOnly ? [] : directoryResults },
     { title: "Common actions", results: visibleActions },
-    { title: "Workspace pages", results: visiblePages },
+    { title: "Workspace pages", results: actionsOnly ? [] : visiblePages },
   ].filter(({ results }) => results.length > 0)
     .sort((left, right) => right.results[0].score - left.results[0].score);
   const first = groups[0]?.results[0].destination;
@@ -49,6 +56,7 @@ export function WorkspaceLauncher({ actions, pages }: { actions: WorkspaceDestin
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k" || event.altKey || event.shiftKey) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       event.preventDefault();
+      setActionsOnly(false);
       setQuery("");
       setOpen(true);
     }
@@ -78,13 +86,16 @@ export function WorkspaceLauncher({ actions, pages }: { actions: WorkspaceDestin
 
   return (
     <>
-      <button type="button" aria-label="Find a page or action" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setQuery(""); setOpen(true); }}
+      {actions.length > 0 && <button type="button" aria-label="Quick actions" title="Quick actions" aria-haspopup="dialog"
+        className="hidden size-10 shrink-0 items-center justify-center rounded-lg border border-edge text-lg hover:bg-tint sm:flex"
+        onClick={() => { setActionsOnly(true); setQuery(""); setOpen(true); }}>+</button>}
+      <button type="button" aria-label="Find a page or action" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setActionsOnly(false); setQuery(""); setOpen(true); }}
         className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-edge bg-card px-3 text-sm text-muted-foreground hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Search aria-hidden="true" className="size-4" />
         <span className="hidden lg:inline">Find a page or action</span>
         <kbd className="ml-2 hidden rounded border border-edge bg-tint px-1.5 py-0.5 text-[10px] xl:inline">Ctrl K</kbd>
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Find a page or action" initialFocus={input} size="lg">
+      <Modal open={open} onClose={() => setOpen(false)} title={actionsOnly ? "Quick actions" : "Find a page or action"} initialFocus={input} size="lg">
         <form onSubmit={openFirst}>
           <label className="sr-only" htmlFor="workspace-launcher-search">Search pages and actions</label>
           <input id="workspace-launcher-search" ref={input} type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search pages and actions…"

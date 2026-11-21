@@ -20,6 +20,7 @@ import { attendanceDayForPunch } from "@/lib/reconcile";
 import { timeZoneDayRange } from "@/lib/workspace-time";
 import { TodayAttendance } from "./today-attendance";
 import { CorrectionsPanel } from "./corrections-panel";
+import { AttendanceMonth, AttendanceTimeline, type CalendarDay } from "./attendance-month";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ function moveMonth(month: string, offset: number) {
 }
 
 export default async function EmployeeAttendancePage({ searchParams }: {
-  searchParams: Promise<{ month?: string; view?: string; action?: string; date?: string; focus?: string; from?: string; fromMonth?: string }>;
+  searchParams: Promise<{ month?: string; view?: string; action?: string; date?: string; focus?: string; from?: string; fromMonth?: string; layout?: string }>;
 }) {
   const session = await requireActiveSession();
   const [lang, employee, query] = await Promise.all([
@@ -58,9 +59,10 @@ export default async function EmployeeAttendancePage({ searchParams }: {
   const earliestCorrection = joined && (!backdate || joined > backdate) ? joined : backdate;
   const view = employee.loginOnly ? "entries" : query.view === "corrections" || query.action === "request" ? "corrections" : query.view === "entries" || (requested && query.view !== "today") ? "entries" : "today";
   const canRequest = !earliestCorrection || earliestCorrection <= today;
+  const prefill = isDateKey(dateParam) && dateParam >= from && dateParam <= lastDay && (!earliestCorrection || dateParam >= earliestCorrection) ? dateParam : "";
   const scope = { employeeId: session.sub, tenantId: session.tenantId };
   const showEntries = view === "entries" && !employee.loginOnly;
-  const [records, leaves, holidays, corrections, roster, reviewPunches] = await Promise.all([
+  const [records, leaves, holidays, corrections, roster, reviewPunches, recordedCorrectionDay] = await Promise.all([
     showEntries ? prisma.attendance.findMany({ where: { ...scope, date: bounds }, include: { shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
     showEntries ? prisma.leaveRequest.findMany({ where: { ...scope, status: "approved", fromDate: { lt: bounds.lt }, toDate: { gte: bounds.gte } }, select: { fromDate: true, toDate: true, leavePolicySnapshot: true, leaveType: { select: { name: true } } } }) : [],
     showEntries ? prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: bounds }] } }) : [],
@@ -68,17 +70,19 @@ export default async function EmployeeAttendancePage({ searchParams }: {
     showEntries ? prisma.rosterAssignment.findMany({ where: { ...scope, date: bounds }, select: { date: true, shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
     showEntries ? prisma.punch.findMany({
       where: { ...scope, authStatus: { in: ["pending", "declined"] }, punchTime: { gte: timeZoneDayRange(from, region.timeZone).start, lt: timeZoneDayRange(offsetDateKey(lastDay, 1), region.timeZone).end } },
-      select: { authStatus: true, punchTime: true },
+      select: { authStatus: true, punchTime: true, inOutHint: true },
       orderBy: { punchTime: "desc" },
     }) : [],
+    view === "corrections" && query.action === "request" && prefill ? prisma.attendance.findFirst({ where: { ...scope, date: { gte: dayRangeIST(prefill).start, lt: dayRangeIST(prefill).end } }, select: { punchInTime: true, punchOutTime: true } }) : null,
   ]);
 
-  const reviewByDay = new Map<string, { pending: boolean; declined: boolean }>();
+  const reviewByDay = new Map<string, { pending: boolean; declined: boolean; attempts: (typeof reviewPunches)[number][] }>();
   for (const punch of reviewPunches) {
     const date = istDateKey(await attendanceDayForPunch(employee, punch.punchTime, region.timeZone));
-    const outcome = reviewByDay.get(date) ?? { pending: false, declined: false };
+    const outcome = reviewByDay.get(date) ?? { pending: false, declined: false, attempts: [] };
     if (punch.authStatus === "pending") outcome.pending = true;
     if (punch.authStatus === "declined") outcome.declined = true;
+    outcome.attempts.push(punch);
     reviewByDay.set(date, outcome);
   }
   const correctionByDay = new Map<string, string>();
@@ -92,23 +96,42 @@ export default async function EmployeeAttendancePage({ searchParams }: {
   const days = Array.from({ length: Number(lastDay.slice(-2)) }, (_, index) => offsetDateKey(lastDay, -index));
   const attentionFilter = query.focus === "review";
   const attentionOnly = view === "entries" && attentionFilter;
+  const layout = query.layout === "list" || (query.layout !== "calendar" && attentionFilter) ? "list" : "calendar";
   const reviewDays = days.filter((day) => reviewByDay.has(day) || correctionByDay.get(day) === "pending" || ["missed_punch", "needs_review"].includes(recordByDay.get(day)?.reviewStatus ?? ""));
   const visibleDays = attentionOnly ? reviewDays : days;
+  const selected = visibleDays.includes(dateParam) ? dateParam : visibleDays[0];
   const monthLabel = new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${from}T00:00:00Z`));
 
-  function href(monthKey: string, section = view, filter = attentionFilter) {
+  function href(monthKey: string, section = view, filter = attentionFilter, presentation = layout) {
     return `/employee/attendance?${new URLSearchParams({
       view: section,
       ...(section !== "today" || monthKey !== currentMonth ? { month: monthKey } : {}),
       ...(filter ? { focus: "review" } : {}),
+      ...(section !== "today" ? { layout: presentation } : {}),
     })}`;
   }
 
-  const prefill = isDateKey(dateParam) && dateParam >= from && dateParam <= lastDay && (!earliestCorrection || dateParam >= earliestCorrection) ? dateParam : "";
   const fromEntries = query.from === "entries";
   const fromToday = query.from === "today";
   const priorMonth = typeof query.fromMonth === "string" && isMonthKey(query.fromMonth) && isDateKey(`${query.fromMonth}-01`) && query.fromMonth <= currentMonth ? query.fromMonth : month;
-  const closeHref = fromToday ? href(priorMonth, "today") : fromEntries ? `${href(month, "entries")}${prefill ? `#attendance-${prefill}` : ""}` : href(month, "corrections");
+  const closeHref = fromToday ? href(priorMonth, "today") : fromEntries ? `${href(month, "entries")}${prefill ? `&date=${prefill}#attendance-${prefill}` : ""}` : href(month, "corrections");
+  const needsReview = new Set(reviewDays);
+  const entryByDate = new Map(visibleDays.map((date) => {
+    const record = recordByDay.get(date);
+    const shift = shiftByDay.get(date) ?? record?.shift ?? employee.shift;
+    const holiday = holidaysForAttendanceDay(holidays, date)[0];
+    const leave = leaveRanges.find((item) => date >= item.from && date <= item.to && countsAsLeaveDay(item.leavePolicySnapshot, date));
+    const beforeJoining = Boolean(joined && date < joined);
+    const weeklyOff = isShiftWeeklyOff(shift, date);
+    const correction = correctionByDay.get(date);
+    const punchReview = reviewByDay.get(date);
+    const recordTone = { present: "present", late: "late", half_day: "half", absent: "missing", on_leave: "leave", holiday: "holiday" } as const;
+    const tone = record ? recordTone[record.status as keyof typeof recordTone] ?? "neutral" : holiday ? "holiday" : leave ? "leave" : beforeJoining || weeklyOff || date === today ? "neutral" : "missing";
+    const status = record ? t(lang, `status.${record.status}`) : holiday ? holiday.isHalfDay ? "Half-day holiday" : "Holiday" : leave ? t(lang, "common.onLeave") : beforeJoining ? "Before joining" : weeklyOff ? t(lang, "attendance.weeklyOff") : "No entry";
+    const calendarDay: CalendarDay = { date, status, tone, needsReview: needsReview.has(date) };
+    return [date, { calendarDay, record, shift, holiday, leave, beforeJoining, punchReview, correction, canCorrect: !beforeJoining && (!earliestCorrection || date >= earliestCorrection) }];
+  }));
+  const chosen = selected ? entryByDate.get(selected) : undefined;
 
   return (
     <div className="space-y-5">
@@ -128,6 +151,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
         </div>
         <form action="/employee/attendance" className="flex flex-wrap items-end gap-2">
           <input type="hidden" name="view" value={view} />
+          <input type="hidden" name="layout" value={layout} />
           {attentionFilter && <input type="hidden" name="focus" value="review" />}
           <Field label="Attendance month"><Input type="month" name="month" max={currentMonth} defaultValue={month} required /></Field>
           <Button type="submit" variant="outline"><CalendarDays aria-hidden="true" className="h-4 w-4" /> View month</Button>
@@ -138,28 +162,31 @@ export default async function EmployeeAttendancePage({ searchParams }: {
         <TodayAttendance employee={employee} region={region} lang={lang} now={new Date()} earliestCorrection={earliestCorrection} keepReviewFilter={attentionFilter} selectedMonth={month} />
       ) : view === "corrections" ? (
         <Card><CardContent>
-          <CorrectionsPanel key={`${month}-${query.action}-${prefill}-${closeHref}`} corrections={corrections} lang={lang} region={region} today={today} earliestDate={earliestCorrection} openOnLoad={query.action === "request" && canRequest} initialDate={prefill} closeHref={closeHref} returnToSource={fromEntries || fromToday} keepReviewFilter={attentionFilter} />
+          <CorrectionsPanel key={`${month}-${query.action}-${prefill}-${closeHref}`} corrections={corrections} lang={lang} region={region} today={today} earliestDate={earliestCorrection} openOnLoad={query.action === "request" && canRequest} initialDate={prefill} recordedDay={recordedCorrectionDay} closeHref={closeHref} returnToSource={fromEntries || fromToday} keepReviewFilter={attentionFilter} />
         </CardContent></Card>
       ) : employee.loginOnly ? (
         <Card><CardContent><p className="text-sm text-muted-foreground">Attendance entries are available for staff accounts.</p></CardContent></Card>
       ) : (
         <Card>
-          <nav aria-label="Filter attendance entries" className="flex flex-wrap gap-2 border-b border-edge p-3 text-sm">
-            <Link aria-current={!attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${!attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", false)}>All dates</Link>
-            <Link aria-current={attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", true)}>Review and corrections ({reviewDays.length})</Link>
-          </nav>
-          {visibleDays.length ? <Table>
+          <div className="flex flex-wrap justify-between gap-2 border-b border-edge p-3 text-sm">
+            <nav aria-label="Filter attendance entries" className="flex flex-wrap gap-2">
+              <Link aria-current={!attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${!attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", false)}>All dates</Link>
+              <Link aria-current={attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", true, "list")}>Review and corrections ({reviewDays.length})</Link>
+            </nav>
+            <nav aria-label="Attendance layout" className="flex gap-2">
+              {([ ["calendar", "Calendar"], ["list", "List"] ] as const).map(([key, label]) => <Link key={key} aria-current={layout === key ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${layout === key ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", attentionOnly, key)}>{label}</Link>)}
+            </nav>
+          </div>
+          {chosen && layout === "calendar" ? <>
+            <AttendanceMonth days={Array.from(entryByDate.values(), (entry) => entry.calendarDay)} month={month} chosen={chosen.calendarDay.date} today={today} locale={region.locale} dayHref={(day) => `${href(month, "entries")}&date=${day}#attendance-${day}`} />
+            <AttendanceTimeline day={chosen.calendarDay} today={today} shift={chosen.shift?.name} record={chosen.record} attempts={chosen.punchReview?.attempts ?? []} region={region} details={[
+              chosen.holiday?.name, chosen.leave?.leaveType.name,
+              chosen.record?.reviewStatus === "missed_punch" ? "Missing punch" : chosen.record?.reviewStatus === "needs_review" ? "Needs review" : undefined,
+            ].filter((detail): detail is string => Boolean(detail))} correctionHref={chosen.canCorrect ? `${href(month, "corrections")}&action=request&date=${chosen.calendarDay.date}&from=entries` : undefined} pendingHref={chosen.correction === "pending" ? `${href(month, "corrections")}#corrections-${chosen.calendarDay.date}` : undefined} />
+          </> : visibleDays.length ? <Table>
             <caption className="sr-only">Daily attendance for {monthLabel}</caption>
             <THead><TR><TH>{t(lang, "attendance.date")}</TH><TH>{t(lang, "attendance.status")}</TH><TH>{t(lang, "attendance.in")}</TH><TH>{t(lang, "attendance.out")}</TH><TH className="hidden xl:table-cell">Shift</TH><TH>Correction</TH></TR></THead>
-            <TBody>{visibleDays.map((day) => {
-              const record = recordByDay.get(day);
-              const shift = shiftByDay.get(day) ?? record?.shift ?? employee.shift;
-              const holiday = holidaysForAttendanceDay(holidays, day)[0];
-              const leave = leaveRanges.find((request) => day >= request.from && day <= request.to && countsAsLeaveDay(request.leavePolicySnapshot, day));
-              const punchReview = reviewByDay.get(day);
-              const correctionStatus = correctionByDay.get(day);
-              const beforeJoining = Boolean(joined && day < joined);
-              const canCorrect = !beforeJoining && (!earliestCorrection || day >= earliestCorrection);
+            <TBody>{Array.from(entryByDate.entries()).map(([day, { record, shift, holiday, leave, beforeJoining, punchReview, canCorrect, correction: correctionStatus }]) => {
               return <TR key={day} id={`attendance-${day}`} className="scroll-mt-24">
                 <TH scope="row" className="whitespace-nowrap py-3 text-sm font-medium normal-case tracking-normal text-foreground"><time dateTime={day}>{formatCalendarDate(day, region.locale)}</time>{day === today && <span className="ml-1 text-xs text-muted-foreground">Today</span>}</TH>
                 <TD className="whitespace-nowrap">

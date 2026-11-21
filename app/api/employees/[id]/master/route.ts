@@ -7,7 +7,6 @@ import { documentAttachment } from "@/lib/document-attachment";
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_RE = /^[0-9]{6,20}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
 function text(value: unknown, field: string, required = false): string | null | { error: string } {
@@ -253,8 +252,14 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
         return { error: "Document expiry date must be on or after the issue date.", status: 400 } as const;
       }
     }
-    if (profile !== undefined) profile === null ? await tx.employeeProfile.deleteMany({ where: { employeeId: id } }) : await tx.employeeProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...profile as Prisma.EmployeeProfileCreateWithoutEmployeeInput }, update: profile as Prisma.EmployeeProfileUpdateWithoutEmployeeInput });
-    if (employment !== undefined) employment === null ? await tx.employeeEmploymentProfile.deleteMany({ where: { employeeId: id } }) : await tx.employeeEmploymentProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...employment as Prisma.EmployeeEmploymentProfileCreateWithoutEmployeeInput }, update: employment as Prisma.EmployeeEmploymentProfileUpdateWithoutEmployeeInput });
+    if (profile !== undefined) {
+      if (profile === null) await tx.employeeProfile.deleteMany({ where: { employeeId: id } });
+      else await tx.employeeProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...profile as Prisma.EmployeeProfileCreateWithoutEmployeeInput }, update: profile as Prisma.EmployeeProfileUpdateWithoutEmployeeInput });
+    }
+    if (employment !== undefined) {
+      if (employment === null) await tx.employeeEmploymentProfile.deleteMany({ where: { employeeId: id } });
+      else await tx.employeeEmploymentProfile.upsert({ where: { employeeId: id }, create: { employeeId: id, ...employment as Prisma.EmployeeEmploymentProfileCreateWithoutEmployeeInput }, update: employment as Prisma.EmployeeEmploymentProfileUpdateWithoutEmployeeInput });
+    }
     if (body.dependents !== undefined) { await tx.employeeDependent.deleteMany({ where: { employeeId: id } }); if (dependentRows.length) await tx.employeeDependent.createMany({ data: dependentRows.map(({ employeeId: _employeeId, ...data }) => ({ ...data, employeeId: id })) }); }
     if (body.references !== undefined) { await tx.employeeReference.deleteMany({ where: { employeeId: id } }); if (referenceRows.length) await tx.employeeReference.createMany({ data: referenceRows.map(({ employeeId: _employeeId, ...data }) => ({ ...data, employeeId: id })) }); }
     if (updateBankAccounts) { await tx.employeeBankAccount.deleteMany({ where: { employeeId: id } }); if (bankAccountRows.length) await tx.employeeBankAccount.createMany({ data: bankAccountRows.map(({ employeeId: _employeeId, ...data }) => ({ ...data, employeeId: id })) }); }

@@ -6,12 +6,14 @@ import { Eye, EyeOff, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { useHydrated } from "@/components/use-hydrated";
 
 const BLUE_FOCUS = "focus:border-primary focus:ring-ring/25 focus-visible:ring-ring/40";
 
 export function LoginForm({ workspace }: { workspace: string | null }) {
   const router = useRouter();
   const toast = useToast();
+  const ready = useHydrated();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -51,7 +53,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
   }
 
   return (
-    <form onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
+    <form method="post" onSubmit={onSubmit} aria-busy={loading} className="rounded-2xl border border-edge bg-card p-5 sm:p-7">
       <div className="space-y-4">
         {!workspace && <Field label="Workspace" hint="The first part of your workspace address">
           <Input
@@ -110,6 +112,7 @@ export function LoginForm({ workspace }: { workspace: string | null }) {
         type="submit"
         size="lg"
         loading={loading}
+        disabled={!ready}
         className="mt-6 w-full"
       >
         <LogIn className="h-4 w-4" aria-hidden="true" />

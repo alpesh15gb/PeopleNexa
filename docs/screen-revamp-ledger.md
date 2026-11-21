@@ -103,7 +103,11 @@ The ledger lists all 71 App Router pages. Each row names the changed workflow or
 - Local payroll verification covered salary-revision approval and reversal against open runs, recalculation using the revised salary, and the required explanation when returning a tax declaration.
 - Daily and monthly report verification covered overnight shifts, the New York daylight-saving transition, scoped manager exports and an Excel download.
 
-## Local validation
+## Current revamp verification
+
+The November 21 run checked every listed route at 1440 px and 390 px on the local standalone production build. Detailed module changes, task-level browser checks and the limits of that coverage are in the [phase checkpoints](hrms-revamp-checkpoints.md). The [backend contracts](required-backend-additions.md) describe pending capabilities.
+
+## Earlier local validation
 
 The standalone production build passed against local PostgreSQL. The authenticated sweep opened 64 portal routes, including the legacy redirects. Browser workflows covered the other seven routes. All 63 regression scripts passed. The integrated payroll scenario submitted and approved a leave request, detected stale payroll inputs, recalculated and finalized the run, recorded simulated payment, downloaded a payslip, then verified the reversal in personal history.
 

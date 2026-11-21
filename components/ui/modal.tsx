@@ -12,6 +12,7 @@ export function Modal({
   description,
   children,
   size = "md",
+  placement = "center",
   initialFocus,
 }: {
   open: boolean;
@@ -19,6 +20,7 @@ export function Modal({
   title?: ReactNode;
   description?: ReactNode;
   children: ReactNode;
+  placement?: "center" | "drawer";
   size?: "sm" | "md" | "lg" | "xl";
   initialFocus?: RefObject<HTMLElement | null>;
 }) {
@@ -88,7 +90,7 @@ export function Modal({
   // viewport-fixed overlay inside the content box.
   return (
     <Portal>
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+    <div className={cn("fixed inset-0 z-50 flex", placement === "drawer" ? "justify-end" : "items-end justify-center p-4 sm:items-center")}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in motion-reduce:animate-none" onClick={onClose} aria-hidden="true" />
       <div
         ref={dialogRef}
@@ -98,7 +100,8 @@ export function Modal({
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descId : undefined}
         className={cn(
-          "card-surface relative flex max-h-[90vh] w-full animate-scale-in motion-reduce:animate-none flex-col overflow-hidden rounded-2xl bg-card-2 shadow-2xl",
+          "relative flex w-full flex-col overflow-hidden border border-edge bg-card shadow-2xl motion-reduce:animate-none",
+          placement === "drawer" ? "workspace-drawer h-dvh" : "max-h-[90vh] animate-scale-in rounded-2xl",
           size === "sm" && "max-w-sm",
           size === "md" && "max-w-lg",
            size === "lg" && "max-w-2xl",

@@ -3,7 +3,7 @@
 import { PunchPhoto } from "@/components/punch-evidence";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogIn, LogOut, MapPin, Camera, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { LogIn, LogOut, MapPin, Camera, RefreshCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
@@ -11,7 +11,6 @@ import { useToast } from "@/components/ui/toast";
 import { DEFAULT_WORKSPACE_REGION, type WorkspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime } from "@/lib/workspace-time";
 import { t, type Lang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 
 interface Record {
   id: string;

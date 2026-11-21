@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { getPayrollConfig, DEFAULT_PAYROLL_CONFIG, type PayrollConfig } from "@/lib/payroll";
 
@@ -74,11 +74,11 @@ export async function PUT(req: NextRequest) {
     earnedSalaryAggregation: current.earnedSalaryAggregation,
   };
 
-  const tenant = await prisma.tenant.update({
+  await prisma.tenant.update({
     where: { id: session.tenantId },
     data: {
       config: {
-        ...((await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }))?.config as Record<string, unknown> | null ?? {}),
+        ...((await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }))?.config as Record<string, unknown> | null),
         payroll: next,
       } as unknown as object,
     },

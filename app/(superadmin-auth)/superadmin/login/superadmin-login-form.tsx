@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
+import { useHydrated } from "@/components/use-hydrated";
 
 export function SuperAdminLoginForm() {
   const router = useRouter();
+  const ready = useHydrated();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -41,7 +43,7 @@ export function SuperAdminLoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
+    <form method="post" onSubmit={onSubmit} className="card-surface rounded-2xl p-6 sm:p-7">
       <div className="space-y-4">
         <Field label="Email address">
           <Input name="email" type="email" required autoComplete="email" placeholder="admin@peoplenexa.in" className="h-11" />
@@ -73,7 +75,7 @@ export function SuperAdminLoginForm() {
         </p>
       )}
 
-      <Button type="submit" size="lg" loading={loading} className="mt-6 w-full">
+      <Button type="submit" size="lg" loading={loading} disabled={!ready} className="mt-6 w-full">
         <ShieldCheck className="h-4 w-4" />
         Sign in to console
       </Button>

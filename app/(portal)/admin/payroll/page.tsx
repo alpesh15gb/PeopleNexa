@@ -3,7 +3,8 @@ import { DocumentExpensePagination } from "@/components/document-expense-paginat
 import { recordPageNumber, recordPagination } from "@/lib/document-expense-pagination";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/card";
-import { isMonthKey, monthKeyIST } from "@/lib/dates";
+import { isDateKey, monthKeyIST } from "@/lib/dates";
+import { IST_OFFSET_MS } from "@/lib/ist";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
 import { legacyMessComponentCodes } from "@/lib/payroll-recovery";
@@ -14,6 +15,7 @@ import { requireActiveSession } from "@/lib/session";
 import { supportsIndiaPayroll, workspaceRegion } from "@/lib/workspace-region";
 import { manualUploadId } from "@/lib/payroll-manual-source";
 import { payrollPreparationEnd } from "@/lib/payroll-prepare";
+import { FINANCIAL_HISTORY_RUN_STATUSES } from "@/lib/payroll-reporting";
 import { PayrollPanel } from "./payroll-panel";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ export default async function PayrollPage({ searchParams }: {
   }
 
   const currentMonth = monthKeyIST();
-  const month = params.period && isMonthKey(params.period) ? params.period : currentMonth;
+  const month = typeof params.period === "string" && isDateKey(`${params.period}-01`) ? params.period : currentMonth;
   const [locations, tenant] = await Promise.all([
     prisma.location.findMany({
       where: { tenantId: session.tenantId, ...(canManageSettings ? { isActive: true } : { id: assignedLocationId! }) },
@@ -84,10 +86,11 @@ export default async function PayrollPage({ searchParams }: {
     select: {
       id: true, grossEarnings: true, deductions: true, netSalary: true, status: true,
       adjustments: true, documentSnapshot: true, payrollConfigurationId: true, payrollPolicyRules: true, inputSnapshot: true,
+      pfEmployee: true, esicEmployee: true, professionalTax: true, tds: true,
       employee: {
         select: {
           id: true, employeeNumber: true, firstName: true, lastName: true,
-          accountNumber: true, ifscCode: true, locationId: true, branchId: true, branch: { select: { locationId: true } },
+          locationId: true, branchId: true, branch: { select: { locationId: true } },
           department: { select: { name: true } },
         },
       },
@@ -139,19 +142,54 @@ export default async function PayrollPage({ searchParams }: {
       <DocumentExpensePagination path="/admin/payroll" params={{ location: locationId, period: month, view: "missing-salaries" }} pagination={pagination} label="employees" />
     </div>;
   }
-  const rows = payslips.map(({ employee, id, grossEarnings, deductions, netSalary, status, adjustments, documentSnapshot }) => ({
-    employee: {
-      id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName,
-      department: employee.department, hasBankDetails: Boolean(employee.accountNumber && employee.ifscCode),
-    },
-    payslip: {
-      id, grossEarnings, deductions, netSalary, status,
-      adjustments: (adjustments ?? null) as { label: string; amount: number }[] | null,
-      document: documentSnapshotForResponse(documentSnapshot),
-      canRecalculate: payroll?.status === "draft" && status === "draft" && month >= currentMonth &&
-        (canManageSettings || (employee.branchId ? employee.branch?.locationId : employee.locationId) === assignedLocationId),
-    },
-  }));
+  const reference = new Date(`${month}-01T00:00:00Z`);
+  reference.setUTCMonth(reference.getUTCMonth() - 1);
+  const referenceMonth = reference.toISOString().slice(0, 7);
+  const monthStart = new Date(new Date(`${month}-01T00:00:00Z`).getTime() - IST_OFFSET_MS);
+  const monthEnd = new Date(payrollPreparationEnd(month).getTime() - IST_OFFSET_MS);
+  const cohort = staffScope ? { ...staffScope, salary: { gt: 0 } } : null;
+  const canRecalculateDraft = payroll?.status === "draft" && month >= currentMonth;
+  const adjustableEmployees = payslips
+    .filter(({ employee, status }) => canRecalculateDraft && status === "draft" &&
+      (employee.branchId ? employee.branch?.locationId : employee.locationId) === locationId)
+    .map(({ employee }) => employee.id);
+  const [pendingCorrections, pendingLeaves, missingBank, missingPan, adjustments, referencePayslips] = await Promise.all([
+    cohort ? prisma.punchCorrection.count({ where: { tenantId: session.tenantId, status: "pending", date: { gte: monthStart, lt: monthEnd }, employee: cohort } }) : 0,
+    cohort ? prisma.leaveRequest.count({ where: { tenantId: session.tenantId, fromDate: { lt: monthEnd }, toDate: { gte: monthStart }, employee: cohort, OR: [{ status: "pending" }, { status: "approved", cancellationRequestedBy: { not: null } }] } }) : 0,
+    cohort ? prisma.employee.count({ where: { ...cohort, OR: [{ accountNumber: null }, { accountNumber: "" }, { ifscCode: null }, { ifscCode: "" }] } }) : 0,
+    cohort && effectivePolicy?.appliedRules.payrollConfig.tds.enabled ? prisma.employee.count({
+      where: { ...cohort, AND: [...cohort.AND, { OR: [{ pan: null }, { pan: "" }] }, { NOT: { profile: { tdsAllowed: false } } }] },
+    }) : 0,
+    adjustableEmployees.length ? prisma.payrollAdjustment.findMany({
+      where: { tenantId: session.tenantId, month, employeeId: { in: adjustableEmployees } },
+      select: { id: true, employeeId: true, type: true, label: true, amount: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }) : [],
+    payroll && locationId ? prisma.payslip.findMany({
+      where: {
+        tenantId: session.tenantId, month: referenceMonth,
+        payrollRun: { locationId, month: referenceMonth, status: { in: [...FINANCIAL_HISTORY_RUN_STATUSES] } },
+      },
+      select: { employeeId: true, netSalary: true, employee: { select: { firstName: true, lastName: true, employeeNumber: true } } },
+      orderBy: [{ payrollRun: { createdAt: "desc" } }, { id: "desc" }],
+    }) : [],
+  ]);
+  const rows = payslips.map(({ employee, id, grossEarnings, deductions, netSalary, status, adjustments, documentSnapshot, inputSnapshot }) => {
+    const bank = (inputSnapshot as { bank?: { accountNumber?: string; ifscCode?: string } } | null)?.bank;
+    return {
+      employee: {
+        id: employee.id, employeeNumber: employee.employeeNumber, firstName: employee.firstName, lastName: employee.lastName,
+        department: employee.department, hasBankDetails: Boolean(bank?.accountNumber && bank.ifscCode),
+      },
+      payslip: {
+        id, grossEarnings, deductions, netSalary, status,
+        adjustments: Array.isArray(adjustments) ? adjustments as { label: string; amount: number }[] : null,
+        document: documentSnapshotForResponse(documentSnapshot),
+        canRecalculate: payroll?.status === "draft" && status === "draft" && month >= currentMonth &&
+          (canManageSettings || (employee.branchId ? employee.branch?.locationId : employee.locationId) === assignedLocationId),
+      },
+    };
+  });
 
   return (
     <PayrollPanel
@@ -171,6 +209,16 @@ export default async function PayrollPage({ searchParams }: {
       attendanceSource={attendanceSource}
       workbookUploadId={workbookUploadId}
       preparation={staffScope ? { eligible: staffCount - missingSalary, missingSalary } : null}
+      readiness={{ pendingCorrections, pendingLeaves, missingBank, missingPan }}
+      adjustments={adjustments}
+      adjustableEmployees={adjustableEmployees}
+      referenceMonth={referenceMonth}
+      referencePayslips={referencePayslips.map(({ employeeId, netSalary, employee }) => ({
+        employeeId, netSalary, name: `${employee.firstName} ${employee.lastName}`.trim(), employeeNumber: employee.employeeNumber,
+      }))}
+      statutory={payslips.reduce((sum, item) => ({
+        pf: sum.pf + item.pfEmployee, esi: sum.esi + item.esicEmployee, pt: sum.pt + item.professionalTax, tds: sum.tds + item.tds,
+      }), { pf: 0, esi: 0, pt: 0, tds: 0 })}
       actorId={session.sub}
       payroll={payroll}
       provenance={source ? { source: source.source ?? "recorded" } : null}

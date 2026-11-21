@@ -2,10 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { PageHeader, Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
-import { FileText, AlertTriangle } from "lucide-react";
+import { FileText, AlertTriangle, BookOpen, Package } from "lucide-react";
 import { expiryStatus } from "@/lib/document-expiry";
 import { formatDate } from "@/lib/dates";
 import { documentFilters, documentSummary } from "@/lib/document-records";
@@ -13,18 +13,45 @@ import { DocumentListFilters } from "@/components/document-list-filters";
 import { redirect } from "next/navigation";
 import { DocumentExpensePagination } from "@/components/document-expense-pagination";
 import { recordPageNumber, recordPagination, recordPageRedirect, type RecordSearchParams } from "@/lib/document-expense-pagination";
+import { getTenantAccess } from "@/lib/modules-server";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 export default async function EmployeeDocumentsPage({ searchParams }: { searchParams: Promise<RecordSearchParams> }) {
   const [session, lang, params] = await Promise.all([requireSession(), getLang(), searchParams]);
+  const { modules } = await getTenantAccess(session.tenantId);
+  const path = "/employee/documents";
+  const tabs = [
+    { id: "files", label: "My files" },
+    ...(modules.has("policies") ? [{ id: "policies", label: "Company policies" }] : []),
+    ...(modules.has("assets") ? [{ id: "assets", label: "Assigned assets" }] : []),
+  ];
+  const view = tabs.find((tab) => tab.id === params.view)?.id ?? "files";
+  const nav = <nav aria-label="Document center" className="flex flex-wrap gap-2 border-b border-edge pb-2">{tabs.map((tab) => <Link key={tab.id} href={tab.id === "files" ? path : `${path}?view=${tab.id}`} aria-current={view === tab.id ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-medium ${view === tab.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{tab.label}</Link>)}</nav>;
+  const heading = <PageHeader title="Document center" description="Open employee files shared by HR and access available workplace records." />;
+  if (view === "policies") {
+    const policies = await prisma.policy.findMany({ where: { tenantId: session.tenantId, active: true }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 6, select: { id: true, title: true, category: true, version: true } });
+    return <div className="space-y-5">{heading}{nav}
+      <Card><CardHeader className="flex-wrap"><CardTitle>Recently published policies</CardTitle>{policies.length > 0 && <Link href="/employee/policies" className="text-sm font-medium text-primary hover:underline">Browse all policies</Link>}</CardHeader><CardContent>
+        {policies.length ? <ul className="divide-y divide-edge">{policies.map((policy) => <li key={policy.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><div><p className="text-sm font-medium">{policy.title}</p><p className="text-xs capitalize text-muted-foreground">{policy.category} · Version {policy.version}</p></div><Link href={`/employee/policies?q=${encodeURIComponent(policy.title)}`} className="text-sm font-medium text-primary hover:underline">Read policy</Link></li>)}</ul> : <EmptyState icon={<BookOpen className="size-5" />} title="No published policies" description="Company policies will appear when HR publishes them." />}
+      </CardContent></Card>
+    </div>;
+  }
+  if (view === "assets") {
+    const assignments = await prisma.assetAssignment.findMany({ where: { employeeId: session.sub, returnedAt: null, asset: { tenantId: session.tenantId } }, select: { id: true, assignedAt: true, asset: { select: { name: true, tag: true, category: true } } }, orderBy: [{ assignedAt: "desc" }, { id: "desc" }] });
+    return <div className="space-y-5">{heading}{nav}
+      <Card><CardHeader><CardTitle>My issued equipment</CardTitle></CardHeader><CardContent>
+        {assignments.length ? <ul className="divide-y divide-edge">{assignments.map((assignment) => <li key={assignment.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><div><p className="text-sm font-medium">{assignment.asset.name}</p><p className="text-xs text-muted-foreground">{assignment.asset.tag} · {assignment.asset.category.replace(/_/g, " ")}</p></div><span className="text-xs text-muted-foreground">Assigned {formatDate(assignment.assignedAt)}</span></li>)}</ul> : <EmptyState icon={<Package className="size-5" />} title="No equipment assigned" description="Equipment recorded as issued to you will appear here." />}
+      </CardContent></Card>
+    </div>;
+  }
   const now = new Date();
   const baseWhere = { tenantId: session.tenantId, employeeId: session.sub };
   const filters = documentFilters(params, now);
   const filtered = Boolean(filters.query || filters.status);
   const where = { AND: [baseWhere, filters.where] };
   const [summary, filteredTotal] = await Promise.all([documentSummary(baseWhere, now), filtered ? prisma.document.count({ where }) : null]);
-  const path = "/employee/documents";
   const pagination = recordPagination(filteredTotal ?? summary.total, recordPageNumber(params.page) ?? 1);
   const redirectTo = recordPageRedirect(path, params, pagination);
   if (redirectTo) redirect(redirectTo);
@@ -42,7 +69,8 @@ export default async function EmployeeDocumentsPage({ searchParams }: { searchPa
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t(lang, "documents.title")} description={t(lang, "documents.description")} />
+      {heading}
+      {nav}
 
       {alerts.length > 0 && (
         <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-[13px] text-warning">
@@ -81,6 +109,7 @@ export default async function EmployeeDocumentsPage({ searchParams }: { searchPa
         </CardContent>
       </Card>
       <DocumentExpensePagination path={path} params={params} pagination={pagination} label="documents" />
+      <p className="text-sm text-muted-foreground">To submit a new file or request a correction, ask HR for the submission process. {modules.has("helpdesk") && <Link href="/employee/helpdesk?action=new" className="font-medium text-primary hover:underline">Contact HR</Link>}</p>
     </div>
   );
 }

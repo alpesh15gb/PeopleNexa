@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { MODULES, type PlanDef } from "@/lib/modules";
+import { type PlanDef } from "@/lib/modules";
 import { useToast } from "@/components/ui/toast";
 
 type TenantRow = {

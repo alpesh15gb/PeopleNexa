@@ -35,7 +35,7 @@ function safeCell(value: string | number): string | number { return typeof value
 function dateText(value: unknown): string { return value ? new Date(String(value)).toISOString().slice(0, 10) : ""; }
 function columnName(index: number): string { let name = ""; while (index > 0) { const remainder = (index - 1) % 26; name = String.fromCharCode(65 + remainder) + name; index = Math.floor((index - 1) / 26); } return name; }
 function sheetName(value: string, used: Set<string>): string {
-  const base = (value.replace(/[\\/*?:\[\]]/g, " ").trim() || "Unassigned").slice(0, 31);
+  const base = (value.replace(/[\\/*?:[\]]/g, " ").trim() || "Unassigned").slice(0, 31);
   let name = base; let suffix = 2;
   while (used.has(name)) { name = `${base.slice(0, 31 - String(suffix).length - 1)} ${suffix++}`; }
   used.add(name); return name;

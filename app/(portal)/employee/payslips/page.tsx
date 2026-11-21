@@ -7,6 +7,7 @@ import { PayslipsPanel } from "./payslips-panel";
 import { documentSnapshotForResponse } from "@/lib/payslip-document";
 import { personalPayslipStatus, personalPayslipWhere } from "@/lib/personal-payslips";
 import { workspaceRegion } from "@/lib/workspace-region";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export default async function EmployeePayslipsPage() {
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title={t(lang, "payslips.title")} description={t(lang, "payslips.desc")} />
+      <PageHeader title={t(lang, "payslips.title")} description={t(lang, "payslips.desc")} actions={<Link href="/employee/tax" className="rounded-lg border border-edge bg-card px-3 py-2 text-sm font-medium text-primary hover:bg-tint">Tax &amp; statutory</Link>} />
       <PayslipsPanel payslips={payslips} locale={workspaceRegion(tenant?.config).locale} lang={lang} />
     </div>
   );

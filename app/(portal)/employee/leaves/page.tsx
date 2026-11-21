@@ -10,7 +10,7 @@ import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { PageHeader } from "@/components/ui/card";
 import { workspaceRegion } from "@/lib/workspace-region";
-import { dateKeyInTimeZone } from "@/lib/workspace-time";
+import { dateKeyInTimeZone, offsetDateKey } from "@/lib/workspace-time";
 import { LeavesPanel } from "./leaves-panel";
 import { leaveCancellationHistory } from "@/lib/leave-request-history";
 import { leaveAwaitingReview } from "@/lib/leave-lifecycle";
@@ -76,6 +76,7 @@ export default async function EmployeeLeavesPage({ searchParams }: {
   const policyDate = configurationEffectiveAtISTDay(new Date(`${today}T00:00:00Z`));
   const locationId = employee?.branch?.locationId ?? employee?.locationId ?? null;
   const submittedId = typeof query.submitted === "string" && query.submitted.length <= 128 ? query.submitted : null;
+  const now = new Date();
   const [policyBalances, policyRecords, importedBalances, cancellationHistory, submittedRequest] = await Promise.all([
     prisma.leavePolicyBalance.findMany({
       where: {
@@ -114,7 +115,6 @@ export default async function EmployeeLeavesPage({ searchParams }: {
       where: {
         tenantId: session.tenantId,
         employeeId: session.sub,
-        periodEnd: { lte: new Date() },
       },
       orderBy: { periodEnd: "desc" },
     }),
@@ -125,12 +125,15 @@ export default async function EmployeeLeavesPage({ searchParams }: {
     }) : null,
   ]);
 
+  const relevantPolicyRecords = policyRecords.filter((record) => record.locationId === null || record.locationId === locationId);
+  const nextPolicyChange = relevantPolicyRecords.filter((record) => record.effectiveFrom > policyDate).sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime())[0];
+  const dayBeforePolicyChange = nextPolicyChange ? offsetDateKey(nextPolicyChange.effectiveFrom.toISOString().slice(0, 10), -1) : null;
   const balance = await Promise.all(types.map(async (t) => {
     const policy = resolveLeavePolicy(policyRecords, locationId, policyDate, t.code);
     const allocated = policy && policyBalances.find((item) =>
       item.leaveTypeId === t.id && item.policyPeriod.configurationId === policy.configurationId,
     );
-    const imported = importedBalances.find((item) => item.leaveTypeId === t.id);
+    const imported = importedBalances.find((item) => item.leaveTypeId === t.id && item.periodEnd <= now);
     const commitments = await prisma.leaveRequest.groupBy({
       by: ["status"],
       where: {
@@ -161,6 +164,10 @@ export default async function EmployeeLeavesPage({ searchParams }: {
       unlimitedEntitlement,
     }).available;
     const rules = allocated ? policy.rules : null;
+    const endOfAllocation = allocated?.policyPeriod.effectiveTo?.toISOString().slice(0, 10) ?? null;
+    const endOfPolicy = policy ? relevantPolicyRecords.find((record) => record.id === policy.configurationId)?.effectiveTo?.toISOString().slice(0, 10) ?? null : null;
+    const estimateUntil = [endOfAllocation, endOfPolicy, dayBeforePolicyChange].filter((date): date is string => date !== null).sort()[0] ?? null;
+    const plainLegacyBalance = !relevantPolicyRecords.length && !importedBalances.some((item) => item.leaveTypeId === t.id);
     return {
       id: t.id,
       name: t.name,
@@ -173,6 +180,7 @@ export default async function EmployeeLeavesPage({ searchParams }: {
       used,
       pending,
       remaining,
+      estimateWindow: allocated || plainLegacyBalance ? { from: today, to: estimateUntil } : null,
       policyNote: allocated
         ? "Current policy-period allocation"
         : imported

@@ -1041,7 +1041,7 @@ function Editor({
               ? updateMaritalStatus(current.profile ?? {}, String(value))
               : group === "profile" && (key === "spouseName" || key === "spouseContactNumber")
                 ? updateSpouseDetails(current.profile ?? {}, key, String(value))
-              : { ...(current[group] ?? {}), [key]: value },
+              : { ...current[group], [key]: value },
           }
         : current,
     );
@@ -1074,7 +1074,7 @@ function Editor({
     if (!master || saving) return;
     setSaving(true);
     try {
-      const profile = { ...(master.profile ?? {}) };
+      const profile = { ...master.profile };
       const changed = (key: keyof Master) => JSON.stringify(master[key]) !== JSON.stringify(originalMaster.current?.[key]);
       if (changed("profile")) for (const address of ["currentAddress", "permanentAddress"] as const) {
         const value = addressForSave(profile[address]);
@@ -2195,7 +2195,7 @@ function EmployeeMasterCreateContent({
       error?: string;
     }>
   >([]);
-  const [provisionResults, setProvisionResults] = useState<
+  const [, setProvisionResults] = useState<
     Array<{ locationCode: string; status: "sent" | "failed"; error?: string }>
   >([]);
   const toast = useToast();

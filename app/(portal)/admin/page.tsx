@@ -1,3 +1,4 @@
+import { PriorityApprovals } from "./approvals/priority-approvals";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Banknote, CalendarClock, Users, UserCheck, Clock4, ShieldAlert, CalendarCheck2, TimerOff, IdCard, ChevronLeft, ChevronRight, PartyPopper, Fingerprint, Building2 } from "lucide-react";
@@ -18,7 +19,7 @@ import { WeekChart } from "./week-chart";
 import { DepartmentBars } from "./department-bars";
 import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tally";
 import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
-import { dashboardLayout, defaultDashboardWidgets, resolveConfiguration, type DashboardWidgetKey, type DashboardWidgetSize } from "@/lib/configuration";
+import { dashboardLayout, payrollPolicyDraft, defaultDashboardWidgets, resolveConfiguration, type DashboardWidgetKey, type DashboardWidgetSize } from "@/lib/configuration";
 import { payrollScopeHref } from "@/lib/payroll-work-queue";
 import { pendingApprovalFilters } from "@/lib/approval-workspace";
 import { recordPageNumber, type RecordSearchParams } from "@/lib/document-expense-pagination";
@@ -115,6 +116,9 @@ export default async function AdminDashboardPage({
   const empScope = { tenantId: session.tenantId, status: "active", loginOnly: false, ...locationEmployeeScope, ...(branchId ? { branchId } : {}) };
   const currentMonth = todayKey.slice(0, 7);
   const attendancePageSize = 25;
+  const inboxParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (key !== "item" && typeof value === "string") inboxParams.set(key, value);
+  const dashboardPageHrefForInbox = inboxParams.size ? `/admin?${inboxParams}` : "/admin";
   const requestedPage = recordPageNumber(params.attendancePage) ?? 1;
   const [year, month] = currentMonth.split("-").map(Number);
   const currentMonthStart = dayRangeIST(`${currentMonth}-01`).start;
@@ -200,6 +204,23 @@ export default async function AdminDashboardPage({
   ]) : [[], []];
 
   const counts = tallyDailyAttendance(employees.map((employee) => employee.id), attendance, approvedLeaves.map((leave) => leave.employeeId), todayPunches.map((punch) => punch.employeeId));
+  const showPayrollSchedule = !isBranchManager && modules.has("payroll");
+  const [onboardingTasks, payrollPolicies] = await Promise.all([
+    !isBranchManager && modules.has("onboarding") ? prisma.onboardingTask.findMany({
+      where: { tenantId: session.tenantId, status: "pending", employee: empScope },
+      select: { id: true, name: true, dueBy: true, employee: { select: { id: true, firstName: true, lastName: true } } },
+      orderBy: [{ dueBy: { sort: "asc", nulls: "last" } }, { id: "asc" }], take: 3,
+    }) : [],
+    showPayrollSchedule ? prisma.configurationRecord.findMany({
+      where: { tenantId: session.tenantId, kind: "payroll_policy", active: true, OR: [{ locationId: dashboardLocationId }, { locationId: null }] },
+      select: { locationId: true, active: true, effectiveFrom: true, effectiveTo: true, payload: true },
+    }) : [],
+  ]);
+  const publishedPolicy = resolveConfiguration(payrollPolicies.filter(record => payrollPolicyDraft(record.payload)), dashboardLocationId, new Date(currentMonth + "-01T12:00:00Z"));
+  const schedule = payrollPolicyDraft(publishedPolicy?.payload)?.schedule;
+  const monthEndDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const scheduledDate = (day: number) => formatCalendarDate(currentMonth + "-" + String(Math.min(day, monthEndDay)).padStart(2, "0"), region.locale);
+  const scheduledPayDay = schedule?.payDateRule === "last_day" ? monthEndDay : schedule?.payDay;
   const payScope = { locationId: dashboardLocationId, period: currentMonth };
   const workflowLinks = [
     ...(canSeeAttendance ? [{
@@ -617,6 +638,23 @@ export default async function AdminDashboardPage({
         )}{session.role === "admin" && <Link href={layoutEditorHref} className="rounded-lg border border-edge px-3 py-2 text-xs font-medium hover:bg-tint">Customize dashboard</Link>}{canReview && <Link href="/admin/approvals" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:brightness-110">All approval queues</Link>}</div>
       </div>
 
+      {canReview && <PriorityApprovals session={session} modules={modules}
+        filters={{
+          leave: reviewFilters.leave && { ...reviewFilters.leave, employee: { AND: [reviewFilters.leave.employee ?? {}, branchId ? { branchId } : {}] } },
+          correction: reviewFilters.correction && { ...reviewFilters.correction, employee: { AND: [reviewFilters.correction.employee ?? {}, branchId ? { branchId } : {}] } },
+        }}
+        selectedKey={typeof params.item === "string" ? params.item : undefined}
+        backHref={dashboardPageHrefForInbox} limit={4} />}
+      {(onboardingTasks.length > 0 || showPayrollSchedule) && <div className="grid gap-4 md:grid-cols-2">
+        {onboardingTasks.length > 0 && <section className="rounded-xl border border-edge bg-card p-4"><h2 className="mb-2 font-semibold">Onboarding tasks due next</h2>
+          <ul className="divide-y divide-edge">{onboardingTasks.map(task => <li key={task.id}><Link className="block py-2 text-sm hover:underline" href={`/admin/onboarding?employee=${task.employee.id}`}>
+            <strong>{task.employee.firstName} {task.employee.lastName}</strong> · {task.name}<span className="block text-xs text-muted-foreground">{task.dueBy ? dateLabel(task.dueBy) : "No due date"}</span>
+          </Link></li>)}</ul></section>}
+        {showPayrollSchedule && <section className="rounded-xl border border-edge bg-card p-4"><h2 className="font-semibold">{dashboardLocationId ? "Payroll schedule" : "Company payroll schedule"}</h2>
+          <p className="mt-2 text-sm">{scheduledPayDay ? "Scheduled pay date · " + scheduledDate(scheduledPayDay) : "No pay date published for this scope."}</p>
+          {schedule?.attendanceCutoffDay && <p className="text-sm">Attendance cutoff · {scheduledDate(schedule.attendanceCutoffDay)}</p>}
+          <Link className="mt-3 inline-block text-sm font-medium text-primary hover:underline" href={payrollScopeHref("/admin/payroll", payScope)}>Check payroll inputs</Link></section>}
+      </div>}
       {session.role === "admin" && !branchId && canSeePeople && employees.every((employee) => employee.id === session.sub) && (
         <Card>
           <CardHeader>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition, type MouseEvent } from "react";
+import { useEffect, useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,24 @@ export function EmployeeMasterList({ employees, filters, status, page, pageCount
     event.preventDefault();
     const url = event.currentTarget.getAttribute("href");
     if (url) startNavigation(() => router.push(url, { scroll: false }));
+  }
+  const viewKey = "peoplenexa:directory:" + actorId;
+  const [compact, setCompact] = useState(false);
+  const [savedView, setSavedView] = useState("");
+  const [viewMessage, setViewMessage] = useState("");
+  useEffect(() => {
+    try {
+      setCompact(localStorage.getItem(viewKey + ":compact") === "true");
+      setSavedView(localStorage.getItem(viewKey + ":filters") ?? "");
+    } catch { /* Browser storage may be disabled. */ }
+  }, [viewKey]);
+  function saveView() {
+    const query = new URLSearchParams({ ...filters, status }).toString();
+    try {
+      localStorage.setItem(viewKey + ":filters", query);
+      setSavedView(query);
+      setViewMessage("Filters saved on this browser.");
+    } catch { setViewMessage("This browser could not save the filters."); }
   }
   const [selecting, setSelecting] = useState(false);
   const [selection, setSelection] = useState<string[]>([]);
@@ -58,6 +76,18 @@ export function EmployeeMasterList({ employees, filters, status, page, pageCount
       </nav>
       {canChangeStatus && !selecting && <Button size="sm" variant="ghost" disabled={!eligible.length} onClick={() => setSelecting(true)}>Bulk status change</Button>}
     </div>
+    <details className="my-2 text-xs">
+      <summary className="w-fit cursor-pointer rounded-md px-2 py-2 font-medium text-primary">Directory view</summary>
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-edge p-3">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={compact} onChange={(event) => {
+          setCompact(event.target.checked);
+          try { localStorage.setItem(viewKey + ":compact", String(event.target.checked)); } catch { /* Keep the current session preference. */ }
+        }} />Compact employee rows</label>
+        <Button type="button" size="sm" variant="outline" onClick={saveView}>Save current filters</Button>
+        {savedView && <Link href={"/admin/employee-master?" + savedView} onClick={navigate} className="text-primary underline">Open saved filters</Link>}
+        <span role="status">{viewMessage}</span>
+      </div>
+    </details>
     {showDevices && (counts.assignment_pending > 0 || status === "assignment_pending") && <Link prefetch={false} scroll={false} onClick={navigate} href={href(1, "assignment_pending")} aria-current={status === "assignment_pending" ? "page" : undefined} className={`mb-2 inline-block rounded-md px-2 py-1.5 text-xs ${status === "assignment_pending" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>Pending device assignments ({counts.assignment_pending})</Link>}
     {selecting && <div className="space-y-2 rounded-lg border border-edge bg-muted/30 p-2">
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" aria-label="Select eligible employees on this page" checked={eligible.length > 0 && eligible.every((employee) => selection.includes(employee.id))} disabled={!eligible.length || busy} onChange={(event) => setSelection(event.target.checked ? eligible.map((employee) => employee.id) : [])} /> Select this page</label>
@@ -73,7 +103,7 @@ export function EmployeeMasterList({ employees, filters, status, page, pageCount
         {selecting && <input type="checkbox" className="mr-2" aria-label={`Select ${item.firstName} ${item.lastName} (${item.employeeNumber})`} disabled={busy || !eligible.some((employee) => employee.id === item.id)} checked={selection.includes(item.id)} onChange={(event) => setSelection((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />}
         <Link prefetch={false} href={href(page, status, item.id)} className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">{item.firstName} {item.lastName}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">{[item.position, item.department?.name, item.branch?.name].filter(Boolean).join(" · ") || "Unassigned"}</p>
+          {!compact && <p className="mt-0.5 truncate text-xs text-muted-foreground">{[item.position, item.department?.name, item.branch?.name].filter(Boolean).join(" · ") || "Unassigned"}</p>}
           <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{item.employeeNumber}{item.assignmentPending ? " · Assignment pending" : ""}</p>
           <div className="mt-1"><Badge tone={item.status === "active" ? "success" : "neutral"}>{item.status === "active" ? "Active" : "Inactive"}</Badge></div>
         </Link>

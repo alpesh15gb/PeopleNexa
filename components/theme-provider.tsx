@@ -18,18 +18,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const system = window.matchMedia("(prefers-color-scheme: dark)");
     try { preference.current = themePreference(localStorage.getItem("theme")); } catch { /* Storage may be blocked. */ }
-    apply(resolveTheme(preference.current, system.matches));
-    const onSystem = () => apply(resolveTheme(preference.current, system.matches));
+    apply(resolveTheme(preference.current));
     const onStorage = (event: StorageEvent) => {
       if (event.key !== "theme" && event.key !== null) return;
       preference.current = themePreference(event.newValue);
-      apply(resolveTheme(preference.current, system.matches));
+      apply(resolveTheme(preference.current));
     };
-    system.addEventListener("change", onSystem);
     window.addEventListener("storage", onStorage);
-    return () => { system.removeEventListener("change", onSystem); window.removeEventListener("storage", onStorage); };
+    return () => { window.removeEventListener("storage", onStorage); };
   }, [apply]);
 
   const toggle = () => {

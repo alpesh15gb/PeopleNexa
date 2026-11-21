@@ -127,7 +127,7 @@ await finalizeManualAttendanceCredits(db, run);
 assert.equal((saved as unknown as { earnedDays: number }).earnedDays, 2);
 assert.equal((saved as unknown as { availableOn: Date }).availableOn.toISOString(), "2026-09-30T18:30:00.000Z");
 await assert.rejects(() => finalizeManualAttendanceCredits(db, { ...run, id: "run-b" }), /already credited/);
-saved = { ...(saved ?? {}), active: false };
+saved = Object.assign({}, saved, { active: false });
 await finalizeManualAttendanceCredits(db, { ...run, id: "run-b" });
 assert.equal((saved as unknown as { payrollRunId: string }).payrollRunId, "run-b");
 // Manual accrual replaces automatic accrual, stays unavailable in September,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { formatDateIST } from "@/lib/dates";
 import { managerLocationId } from "@/lib/location-scope";

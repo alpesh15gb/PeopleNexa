@@ -1,7 +1,7 @@
 import { configurationEffectiveAtISTDay } from "@/lib/configuration";
 import { NextResponse } from "next/server";
 import { refreshEarnedLeaveBalances } from "@/lib/leave-accrual-refresh";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
   calculateLeaveBalance,
@@ -91,8 +91,6 @@ export async function GET() {
   }
 
   const balance = types.map((t) => {
-    const employeeLocationId =
-      employee?.branch?.locationId ?? employee?.locationId;
     const allocated = selectLeaveAllocation(
       policyBalances,
       t.id,

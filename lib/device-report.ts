@@ -563,22 +563,6 @@ export function shiftHoursLabel(shift: DeviceShift | null): string {
 }
 
 /** First-IN / last-OUT instants from the punches snapshot (or raw-punch fallback). */
-function firstLastInstants(snapshot: unknown, fallback: SnapshotPunch[] | undefined): { first: Date | null; last: Date | null } {
-  let entries = parseSnapshotPunches(snapshot);
-  if (entries.length === 0 && fallback && fallback.length > 0) {
-    entries = fallback
-      .map((f) => {
-        const t = f.time instanceof Date ? f.time : new Date(f.time);
-        if (Number.isNaN(t.getTime())) return null;
-        return { time: t, type: f.type ?? "" };
-      })
-      .filter((e): e is ParsedPunch => e !== null)
-      .sort((a, b) => a.time.getTime() - b.time.getTime());
-  }
-  if (entries.length === 0) return { first: null, last: null };
-  if (entries.length === 1) return { first: entries[0].time, last: null };
-  return { first: entries[0].time, last: entries[entries.length - 1].time };
-}
 
 export interface DeviceStatusMatrixDay {
   day: number;

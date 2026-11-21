@@ -58,7 +58,7 @@
   --font-space-grotesk: var(--font-jakarta);
 
   --background: #F8FAFC;
-  --foreground: #1E293B;
+  --foreground: #0F172A;
   --card: #FFFFFF;
   --card-2: #F1F5F9;
   --muted: #E9EFF8;
@@ -72,12 +72,12 @@
   --success-action-foreground: #ffffff;
   --danger-action: #be123c;
   --danger-action-foreground: #ffffff;
-  --primary: #1d4ed8;
+  --primary: #4338CA;
   --primary-foreground: #FFFFFF;
   /* CTA accent: #C2410C (not #EA580C) so white text clears 4.5:1 AA. */
-  --accent: #C2410C;
+  --accent: #4338CA;
   --accent-foreground: #FFFFFF;
-  --accent-hover: #9A3412;
+  --accent-hover: #3730A3;
   --ring: #2563eb;
   --sidebar: #FFFFFF;
   --success: #047857;
@@ -96,8 +96,8 @@
   --rose-400: #be123c;
   --amber-300: #854d0e;
   --amber-400: #854d0e;
-  --sky-300: #1D4ED8;
-  --sky-400: #2563EB;
+  --sky-300: #075985;
+  --sky-400: #0369A1;
   --violet-200: #1E40AF;
   --violet-300: #1D4ED8;
 
@@ -545,4 +545,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-drawer { animation: workspace-drawer-in 160ms ease-out; }
+  @keyframes workspace-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 }

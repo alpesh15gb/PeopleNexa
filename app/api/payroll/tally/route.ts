@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { isMonthKey, monthKeyIST } from "@/lib/dates";
 import { financialExportPayslipFilter } from "@/lib/payroll-reporting";

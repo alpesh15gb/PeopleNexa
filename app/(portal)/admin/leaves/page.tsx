@@ -130,7 +130,10 @@ export default async function AdminLeavesPage({ searchParams }: { searchParams: 
         description={reviewOnly ? "Review leave applications and cancellation requests assigned to your scope." : "Approve requests, see who's away, and track leave balances."}
         actions={
           reviewOnly ? (
-            <Link href={branch ? `/admin/leaves?branch=${encodeURIComponent(branch.id)}` : "/admin/leaves"} className="text-sm font-medium text-primary hover:underline">View all leave requests</Link>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium text-primary">
+              <Link href="/admin/approvals" className="inline-flex min-h-10 items-center hover:underline">Approvals inbox</Link>
+              <Link href={branch ? `/admin/leaves?branch=${encodeURIComponent(branch.id)}` : "/admin/leaves"} className="inline-flex min-h-10 items-center hover:underline">View all leave requests</Link>
+            </div>
           ) : branch || isBranchManager ? (
             <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
               Branch: {branch?.name ?? ownBranchName}

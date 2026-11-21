@@ -40,7 +40,7 @@ type TenantConfig = { ebioserver?: Partial<EbioserverProfile> };
 
 export function getEbioserverConfig(tenant: Pick<Tenant, "config">): EbioserverProfile {
   const cfg = ((tenant.config ?? {}) as Record<string, unknown>) as TenantConfig;
-  return { ...DEFAULT_PROFILE, ...(cfg.ebioserver ?? {}) };
+  return { ...DEFAULT_PROFILE, ...cfg.ebioserver };
 }
 
 /** Decrypt the stored password (or return null). Callers must have EBIO_ENCRYPTION_KEY set. */
@@ -419,12 +419,6 @@ export function parseEmployeeDetails(result: string): Record<string, string> {
   return out;
 }
 
-function splitName(name: string): [string, string] {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return ["Imported", "Employee"];
-  if (parts.length === 1) return [parts[0], ""];
-  return [parts.slice(0, -1).join(" "), parts[parts.length - 1]];
-}
 
 /**
  * Pull the device employee-code master and create matching employees in this

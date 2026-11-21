@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { EbioDeviceList } from "@/components/devices/ebio-device-list";
 import { deviceHealthState, ebioDeviceHealthState, realtimeDeviceHealthState, type DeviceHealthState } from "@/lib/device-health";
+import { workspaceRegion } from "@/lib/workspace-region";
 import { getEbioserverConfig } from "@/lib/ebioserver";
 import { managerLocationId } from "@/lib/location-scope";
 import { getTenantAccess } from "@/lib/modules-server";
@@ -61,6 +62,11 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
   const matches = (row: { name: string; serialNumber: string; branchName?: string | null }) => `${row.name} ${row.serialNumber} ${row.branchName ?? ""}`.toLowerCase().includes(term.toLowerCase());
   const profile = tenant ? getEbioserverConfig(tenant) : null;
   const connectionConfigured = Boolean(profile?.enabled && profile.url && profile.passwordEnc);
+  const region = workspaceRegion(tenant?.config);
+  const pullTime = profile?.lastPulledAt ? new Date(profile.lastPulledAt) : null;
+  const pullLabel = pullTime && Number.isFinite(pullTime.getTime())
+    ? new Intl.DateTimeFormat(region.locale, { dateStyle: "medium", timeStyle: "short", timeZone: region.timeZone }).format(pullTime)
+    : null;
   const now = Date.now();
   const directRows = [];
   const ebioRows = [];
@@ -90,6 +96,12 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
     <nav aria-label="Device services" className="flex flex-wrap gap-x-5 border-b border-edge text-sm">
       {nav.map((item) => <Link key={item.key} href={deviceHref(item.key)} aria-current={service === item.key ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${service === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{item.label}</Link>)}
     </nav>
+    {isAdmin && service === "ebio" && <section aria-label="eBioserver ingestion" className="rounded-xl border border-edge bg-card p-4">
+      <h2 className="font-semibold">Punch import</h2>
+      <p className="mt-1 text-sm">{pullLabel ? `Last recorded pull · ${pullLabel} (${region.timeZone})` : "No pull has been recorded."}</p>
+      {profile?.lastError && <p className="mt-1 text-sm text-destructive">An import error is recorded. Review the connection details in settings.</p>}
+      <Link href="/admin/settings#device-connection" className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open connection settings</Link>
+    </section>}
     {service !== "overview" && <form action="/admin/devices" className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="service" value={service} />
       <Input aria-label="Search device inventory" name="q" defaultValue={term} key={term} maxLength={100} type="search" placeholder="Find a device by name or serial" className="w-full sm:w-72" />

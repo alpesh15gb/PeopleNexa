@@ -90,7 +90,10 @@ export default async function AdminRegularizationPage({ searchParams }: { search
         description={date ? `${formatCalendarDate(date, region.locale)}${branch ? ` · ${branch.name}` : ""} · ${region.timeZone}` : "Review employee corrections and verify held mobile punches."}
         actions={<Link href={attendanceHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Back to daily attendance</Link>}
       />
-      {reviewOnly ? <Link className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline" href={href("corrections")}>Open attendance review workspace</Link> :
+      {reviewOnly ? <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium text-primary">
+        <Link className="inline-flex min-h-10 items-center hover:underline" href="/admin/approvals">Approvals inbox</Link>
+        <Link className="inline-flex min-h-10 items-center hover:underline" href={href("corrections")}>Open attendance review workspace</Link>
+      </div> :
         <nav className="flex flex-wrap gap-x-5 border-b border-edge text-sm" aria-label="Attendance review views">
           {[
             { label: "Pending corrections", href: href("corrections"), active: view === "corrections" && !reviewed },

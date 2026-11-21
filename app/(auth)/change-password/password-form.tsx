@@ -3,8 +3,10 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Field, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useHydrated } from "@/components/use-hydrated";
 export function ChangePasswordForm() {
   const router = useRouter();
+  const ready = useHydrated();
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (busy) return;
@@ -18,12 +20,12 @@ export function ChangePasswordForm() {
       router.replace(data.next); router.refresh();
     } catch { setError("Could not connect. Please try again."); } finally { setBusy(false); }
   }
-  return <form onSubmit={submit} className="space-y-4">
+  return <form method="post" onSubmit={submit} className="space-y-4">
     <Field label="Current or temporary password"><Input name="current" type="password" autoComplete="current-password" required maxLength={72} /></Field>
     <Field label="New password" hint="Enter your new password (maximum 72 bytes)."><Input name="password" type="password" autoComplete="new-password" minLength={1} maxLength={72} required /></Field>
     <Field label="Confirm new password"><Input name="confirm" type="password" autoComplete="new-password" minLength={1} maxLength={72} required /></Field>
     {error && <p role="alert" className="text-sm text-rose-500">{error}</p>}
-    <Button type="submit" loading={busy}>Save password</Button>
+    <Button type="submit" disabled={!ready} loading={busy}>Save password</Button>
     <Button type="button" variant="outline" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.replace("/login"); router.refresh(); }}>Sign out</Button>
   </form>;
 }

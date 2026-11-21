@@ -5,7 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { useState } from "react";
 import { Save, ScanFace } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, Input, NumberInput } from "@/components/ui/input";
+import { Field, NumberInput } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 
 export function FaceSettingsPanel({

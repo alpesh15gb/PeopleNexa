@@ -10,6 +10,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/dates";
+import { useRouteAction } from "@/components/use-route-action";
 import { istDateKey } from "@/lib/ist";
 import Link from "next/link";
 
@@ -36,14 +37,14 @@ const STARTER_CHECKLIST = [
   "Set up work accounts and equipment",
   "Meet your manager and team",
   "Attend new-hire orientation",
-  "Review and acknowledge company policies",
+  "Read the company policies",
 ];
 
-export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; employees: Employee[]; today: string }) {
+export function OnboardingAdmin({ tasks, employees, today, initialEmployeeId }: { tasks: Task[]; employees: Employee[]; today: string; initialEmployeeId?: string }) {
   const router = useRouter();
   const toast = useToast();
-  const [addOpen, setAddOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [addOpen, setAddOpen] = useRouteAction("assign");
+  const [selectedId, setSelectedId] = useState(initialEmployeeId ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<Task | null>(null);
@@ -204,7 +205,7 @@ export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; em
         )}
       </div>
 
-      <Modal open={addOpen} onClose={() => !submitting && setAddOpen(false)} title="Assign onboarding tasks" size="md">
+      <Modal open={addOpen && employees.length > 0} onClose={() => !submitting && setAddOpen(false)} title="Assign onboarding tasks" size="md" placement="drawer">
         <form
           onSubmit={async (e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
@@ -215,8 +216,8 @@ export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; em
               .split("\n")
               .map((s) => s.trim())
               .filter(Boolean);
-             setSubmitting(true);
-             try {
+            setSubmitting(true);
+            try {
               const res = await fetch("/api/onboarding", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -231,14 +232,14 @@ export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; em
                 setFormError(data.error ?? "Could not assign the tasks.");
                 return;
               }
-               toast("success", `${data.created} tasks added${data.skipped ? ` · ${data.skipped} already existed` : ""}`);
+              toast("success", `${data.created} tasks added${data.skipped ? ` · ${data.skipped} already existed` : ""}`);
               setAddOpen(false);
-              setSelectedId("");
+              setSelectedId(initialEmployeeId ?? "");
               router.refresh();
-             } catch {
-               setFormError("Could not assign the tasks. Try again.");
-             } finally {
-               setSubmitting(false);
+            } catch {
+              setFormError("Could not assign the tasks. Try again.");
+            } finally {
+              setSubmitting(false);
             }
           }}
           className="space-y-4"
@@ -267,7 +268,7 @@ export function OnboardingAdmin({ tasks, employees, today }: { tasks: Task[]; em
           {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" disabled={submitting} onClick={() => setAddOpen(false)}>Cancel</Button>
-             <Button type="submit" loading={submitting} disabled={submitting}>Add tasks</Button>
+            <Button type="submit" loading={submitting} disabled={submitting}>Assign tasks</Button>
           </div>
         </form>
       </Modal>

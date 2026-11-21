@@ -33,6 +33,7 @@ export function CorrectionsPanel({
   today,
   earliestDate,
   initialDate,
+  recordedDay,
   openOnLoad,
   closeHref,
   returnToSource,
@@ -44,6 +45,7 @@ export function CorrectionsPanel({
   today: string;
   earliestDate: string | null;
   initialDate: string;
+  recordedDay: { punchInTime: Date | null; punchOutTime: Date | null } | null;
   openOnLoad: boolean;
   closeHref: string;
   returnToSource: boolean;
@@ -151,12 +153,16 @@ export function CorrectionsPanel({
         </div>
       )}
 
-      <Modal open={open} onClose={() => !loading && close()} title={t(lang, "corrections.request")} description={`Enter only the times that need changing, in ${region.timeZone}. For overnight work, select the shift’s start date below, then enter each punch’s actual date and time.`} size="md" initialFocus={dateField}>
+      <Modal open={open} onClose={() => !loading && close()} title={t(lang, "corrections.request")} description={`Enter only the times that need changing, in ${region.timeZone}. For overnight work, select the shift’s start date below, then enter each punch’s actual date and time.`} size="md" placement="drawer" initialFocus={dateField}>
         <form onSubmit={submit} className="space-y-4">
           {error && <p role="alert" className="rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
           <Field label={t(lang, "corrections.date")}>
             <Input ref={dateField} name="date" type="date" required value={date} onChange={(event) => setDate(event.target.value)} min={earliestDate ?? undefined} max={today} />
           </Field>
+          {initialDate && date === initialDate && <dl className="grid grid-cols-2 gap-3 rounded-lg bg-tint p-3 text-sm" aria-label="Currently recorded punches">
+            <div><dt className="text-xs text-muted-foreground">Recorded check-in</dt><dd>{formatWorkspaceTime(recordedDay?.punchInTime, region)}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Recorded check-out</dt><dd>{formatWorkspaceTime(recordedDay?.punchOutTime, region)}</dd></div>
+          </dl>}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t(lang, "corrections.inTime")}>
               <Input name="requestedIn" type="datetime-local" />

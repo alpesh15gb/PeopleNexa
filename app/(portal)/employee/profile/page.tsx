@@ -58,7 +58,10 @@ export default async function EmployeeProfilePage() {
 
   return (
     <div className="animate-fade-up space-y-6">
-      <PageHeader title={t(lang, "profile.title")} description="Review your employment, contact, and account details." />
+      <PageHeader title={t(lang, "profile.title")} description="Review your employment, contact, and account details." actions={!employee.loginOnly && <div className="flex flex-wrap gap-2">
+        {access.modules.has("onboarding") && <Link href="/employee/onboarding" className="rounded-lg border border-edge bg-card px-3 py-2 text-sm font-medium hover:bg-tint">My onboarding</Link>}
+        {access.modules.has("documents") && <Link href="/employee/documents" className="rounded-lg border border-edge bg-card px-3 py-2 text-sm font-medium hover:bg-tint">Document center</Link>}
+      </div>} />
       <Card>
         <CardContent className="p-6">
           <div className="flex flex-wrap items-center gap-5">
@@ -103,12 +106,13 @@ export default async function EmployeeProfilePage() {
         </CardContent>
       </Card>
 
-      {myAssets && <Card>
+      {myAssets && <Card id="my-assets" className="scroll-mt-24">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Package className="h-4 w-4 text-indigo-300" /> {t(lang, "profile.myAssets")}
           </CardTitle>
           <CardDescription>{t(lang, "profile.assetsDesc")}</CardDescription>
+          {access.modules.has("documents") && <Link href="/employee/documents?view=assets" className="text-sm font-medium text-primary hover:underline">Open equipment records</Link>}
         </CardHeader>
         <CardContent className="p-6">
           {myAssets.length === 0 ? (

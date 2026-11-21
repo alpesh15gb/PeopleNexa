@@ -26,7 +26,7 @@ const icons = {
   danger: <XCircle className="h-4 w-4 text-rose-400" />,
 };
 
-export function NotificationsList({ notifications, unread, unreadOnly, region, lang = "en" }: { notifications: Notif[]; unread: number; unreadOnly: boolean; region: WorkspaceRegion; lang?: Lang }) {
+export function NotificationsList({ notifications, unread, unreadOnly, attentionOnly, region, lang = "en" }: { notifications: Notif[]; unread: number; unreadOnly: boolean; attentionOnly: boolean; region: WorkspaceRegion; lang?: Lang }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, setPending] = useState<string | null>(null);
@@ -52,8 +52,8 @@ export function NotificationsList({ notifications, unread, unreadOnly, region, l
     return (
       <EmptyState
         icon={<Inbox className="h-5 w-5" />}
-        title={unreadOnly ? "No unread notifications" : t(lang, "notifications.none")}
-        description={unreadOnly ? "Open All activity to see previous updates." : t(lang, "notifications.noneDesc")}
+        title={attentionOnly ? "No warnings or alerts" : unreadOnly ? "No unread notifications" : t(lang, "notifications.none")}
+        description={attentionOnly || unreadOnly ? "Open All activity to see previous updates." : t(lang, "notifications.noneDesc")}
       />
     );
   }

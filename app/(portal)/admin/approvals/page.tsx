@@ -6,11 +6,14 @@ import { canOpenApprovals, pendingApprovalFilters } from "@/lib/approval-workspa
 import { getTenantAccess } from "@/lib/modules-server";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
+import { PriorityApprovals } from "./priority-approvals";
 
 export const dynamic = "force-dynamic";
 
-export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ view?: string | string[] }> }) {
-  const showAll = (await searchParams).view === "all";
+export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ view?: string | string[]; item?: string | string[] }> }) {
+  const query = await searchParams;
+  const showAll = query.view === "all";
+  const selectedKey = typeof query.item === "string" ? query.item : undefined;
   const session = await requireActiveSession().catch(() => null);
   if (!session) redirect("/login");
   if (!canOpenApprovals(session.role)) redirect("/employee");
@@ -52,6 +55,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
           ].map(({ href, label, selected }) => <Link key={href} href={href} aria-current={selected ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm font-medium hover:bg-tint ${selected ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{label}</Link>)}
         </nav>
       )}
+      {(!showAll || selectedKey) && <PriorityApprovals session={session} modules={modules} filters={filters} selectedKey={selectedKey} backHref={showAll ? "/admin/approvals?view=all" : "/admin/approvals"} />}
       {queues.length > 0 && !visible.length && <div className="rounded-xl border border-edge bg-card p-6"><h2 className="font-semibold">You’re caught up</h2><p className="mt-1 text-sm text-muted-foreground">New requests from your review queues will appear here.</p></div>}
       {visible.length > 0 && (
         <ul aria-label="Approval queues" className="grid gap-4 md:grid-cols-2">

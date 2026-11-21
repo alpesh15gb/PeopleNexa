@@ -240,7 +240,7 @@ export async function PATCH(
           where: { id },
           data: {
             ...payrollRunTransitionData(target, session.sub),
-            ...(evidence?.value ?? {}),
+            ...evidence?.value,
             ...(target === "cancelled" ? { note: cancellationReason } : {}),
           },
         });

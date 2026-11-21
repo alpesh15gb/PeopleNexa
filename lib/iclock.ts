@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { isUniqueWriteConflict, PENDING_DEVICE_ATTENDANCE, reconcileDeviceEvent } from "./device-attendance-ingest";
-import type { Device, Employee } from "@/generated/prisma/client";
+import type { Device } from "@/generated/prisma/client";
 
 export interface RawPunch {
   userId: string;

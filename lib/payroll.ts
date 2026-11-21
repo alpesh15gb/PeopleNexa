@@ -1403,7 +1403,7 @@ export async function generatePayslipForEmployee(
   skipped?: string;
 }> {
   // Skip employees who join on/after the month's exclusive end.
-  const { start: mStart, end: mEnd } = monthRange(month);
+  const { end: mEnd } = monthRange(month);
   if (employee.joiningDate) {
     const joinStart = istStartOfDay(new Date(employee.joiningDate));
     if (joinStart.getTime() >= mEnd.getTime()) {

@@ -34,6 +34,7 @@ interface BalanceItem {
   used: number;
   pending: number;
   remaining: number | null;
+  estimateWindow: { from: string; to: string | null } | null;
   policyNote: string;
   policy: {
     requiresApproval: boolean;
@@ -76,7 +77,6 @@ export function LeavesPanel({
   requests,
   lang = "en",
   locale,
-  today,
   view,
   range,
   requestFilter,
@@ -105,7 +105,7 @@ export function LeavesPanel({
   const [cancelReason, setCancelReason] = useState("");
   const [preview, setPreview] = useState<{
     input: string;
-    data: { days: number; requiresReason: boolean; requiresApproval: boolean; dayCounting: BalanceItem["policy"]["dayCounting"] };
+    data: { days: number; chargeableDays: Record<string, number> | null; requiresReason: boolean; requiresApproval: boolean; dayCounting: BalanceItem["policy"]["dayCounting"] };
   } | { input: string; error: string } | null>(null);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [formError, setFormError] = useState("");
@@ -139,6 +139,11 @@ export function LeavesPanel({
   const estimateError = currentPreview && "error" in currentPreview ? currentPreview.error : "";
   const estimating = needsEstimate && !currentPreview;
   const baseHref = leaveHref(view, range, requestFilter, page);
+  const available = selectedBalance?.remaining;
+  const estimateWindow = selectedBalance?.estimateWindow;
+  const canUseCurrentBalance = activeEstimate && estimateWindow && fromDate >= estimateWindow.from && (!estimateWindow.to || toDate <= estimateWindow.to) && activeEstimate.dayCounting === selectedBalance?.policy.dayCounting;
+  const adjustedDates = Object.entries(activeEstimate?.chargeableDays ?? {}).filter(([, fraction]) => fraction !== 1);
+  const dayNumber = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
 
   function openApplication(typeId?: string) {
     if (typeId) setSelectedTypeId(typeId);
@@ -477,7 +482,8 @@ export function LeavesPanel({
         open={open}
         onClose={() => !loading && closeApplication()}
         title={t(lang, "leaves.apply")}
-        size="sm"
+        size="md"
+        placement="drawer"
         initialFocus={leaveTypeField}
       >
         <form onSubmit={onSubmit} onChange={() => formError && setFormError("")} className="space-y-4">
@@ -498,7 +504,7 @@ export function LeavesPanel({
               ))}
             </Select>
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t(lang, "leaves.from")}>
               <Input
                 name="fromDate"
@@ -554,10 +560,28 @@ export function LeavesPanel({
             activeEstimate &&
             requestedDays > 0 &&
             !dateError && (
-              <p className="rounded-lg border border-edge bg-tint px-3 py-2 text-[12px] text-muted-foreground">
-                <span className="font-medium text-foreground">{requestedDays === 1 ? "1 day requested" : `${requestedDays} days requested`}</span> · {dayCountingLabels[activeEstimate.dayCounting]}.
-                {" "}{activeEstimate.requiresApproval ? "Sent for approval." : "Automatically approved when eligible."} Your balance is checked on submission.
-              </p>
+              <section aria-label="Leave estimate" className="space-y-3 rounded-lg border border-edge bg-tint p-3 text-sm" aria-live="polite">
+                <div>
+                  <h3 className="font-semibold">{dayNumber.format(requestedDays)} {requestedDays === 1 ? "day charged" : "days charged"}</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{dayCountingLabels[activeEstimate.dayCounting]} · {activeEstimate.requiresApproval ? "Requires approval" : "Automatically approved when eligible"}</p>
+                </div>
+                {adjustedDates.length > 0 && <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-medium text-primary">{adjustedDates.length} {adjustedDates.length === 1 ? "date charged differently" : "dates charged differently"}</summary>
+                  <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                    {adjustedDates.map(([date, fraction]) => <li key={date}><time dateTime={date}>{formatCalendarDate(date, locale)}</time> · {fraction === 0 ? "Excluded" : `${dayNumber.format(fraction)} day charged`}</li>)}
+                  </ul>
+                </details>}
+                <div className="border-t border-edge pt-3">
+                  <dl className="grid grid-cols-2 gap-3 text-xs">
+                    <div><dt className="text-muted-foreground">Available now</dt><dd className="mt-0.5 text-sm font-semibold">{available === null ? "Unlimited" : `${dayNumber.format(available ?? 0)} days`}</dd></div>
+                    {canUseCurrentBalance && available !== undefined && <div>
+                      <dt className="text-muted-foreground">Estimated after request</dt>
+                      <dd className="mt-0.5 text-sm font-semibold">{available === null ? "Unlimited" : `${dayNumber.format(available - requestedDays)} days`}</dd>
+                    </div>}
+                  </dl>
+                  <p className="mt-2 text-xs text-muted-foreground">{canUseCurrentBalance ? "Estimate uses your displayed balance. Your allocation is verified on submission." : "The balance for your selected dates is verified on submission."}</p>
+                </div>
+              </section>
             )}
           <Field label={activeEstimate?.requiresReason ? `${t(lang, "leaves.reason")} (required)` : t(lang, "leaves.reason")}>
             <Textarea

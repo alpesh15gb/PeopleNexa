@@ -88,6 +88,9 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
   }
 
   const latestState = statementState(latest.status);
+  const { net, deductions } = latest.totals;
+  const distributed = net + deductions;
+  const drawBreakdown = Number.isFinite(distributed) && distributed > 0 && net >= 0 && deductions >= 0;
   return (
     <>
       <section aria-labelledby="latest-payslip" className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -105,6 +108,18 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
             <Download aria-hidden="true" className="size-4" /> Download PDF
           </Button>}
         </div>
+      </section>
+      <section aria-labelledby="latest-breakdown" className="rounded-2xl border border-edge bg-card p-4 sm:p-5">
+        <h2 id="latest-breakdown" className="font-semibold">Pay breakdown</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{monthLabel(latest.month)} · {latest.status === "reversed" ? "Original statement amounts" : "Recorded statement amounts"}</p>
+        {drawBreakdown && <div aria-hidden="true" className="mt-4 flex h-3 overflow-hidden rounded-full bg-tint">
+          <span className="bg-primary" style={{ width: `${net / distributed * 100}%` }} />
+          <span className="bg-amber-500" style={{ width: `${deductions / distributed * 100}%` }} />
+        </div>}
+        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+          <div><dt className="text-muted-foreground">Net pay</dt><dd className="mt-1 font-semibold tabular-nums">{money(net)}</dd></div>
+          <div><dt className="text-muted-foreground">Deductions</dt><dd className="mt-1 font-semibold tabular-nums">{money(deductions)}</dd></div>
+        </dl>
       </section>
       {downloadError && !viewing && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
       <Card aria-labelledby="payslip-history">
@@ -145,7 +160,7 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
           </ul>
         </CardContent>
       </Card>
-      <Modal open={viewing !== null} onClose={() => { setViewing(null); setDownloadError(""); }} title={viewing ? monthLabel(viewing.month) + " payslip" : ""} size="md">
+      <Modal open={viewing !== null} onClose={() => { setViewing(null); setDownloadError(""); }} title={viewing ? monthLabel(viewing.month) + " payslip" : ""} placement="drawer" size="md">
         {viewing && (
           <div className="space-y-5">
             <div className="flex items-start gap-2 rounded-lg bg-tint px-3 py-2.5 text-sm">

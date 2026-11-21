@@ -378,6 +378,11 @@ export function Shell({
     ...(!loginOnly && moduleSet.has("expenses") ? [{ href: "/employee/expenses?action=new", label: "Submit an expense claim", description: "Personal expenses", icon: <Plus className="size-4" /> }] : []),
   ];
 
+  const mobileDestinations = (selfService
+    ? ["/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips"]
+    : [managementHome, "/admin/approvals", "/admin/attendance", "/admin/payroll"])
+    .filter((href, index, all) => all.indexOf(href) === index)
+    .flatMap((href) => nav.filter((item) => item.href === href));
   const current = nav.find((item) => {
     if (item.exact) return pathname === item.href;
     return (item.match ?? [item.href]).some((path) => pathname === path || pathname.startsWith(path + "/"));
@@ -586,7 +591,14 @@ export function Shell({
         )}
 
 
-        <main id="workspace-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9">{children}</main>
+        <main id="workspace-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-9">{children}</main>
+        <nav aria-label="Frequent destinations" className="fixed inset-x-0 bottom-0 z-20 flex border-t border-edge bg-card px-1 pb-[env(safe-area-inset-bottom)] md:hidden print:hidden">
+          {mobileDestinations.map((item) => <Link key={item.href} href={item.href} aria-current={current?.href === item.href ? "page" : undefined}
+            className="flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium text-muted-foreground aria-[current=page]:text-primary">
+            {item.icon}<span className="max-w-full truncate">{item.href === managementHome || item.href === "/employee" ? "Home" : item.label}</span>
+          </Link>)}
+          <button type="button" aria-label="More destinations" aria-expanded={open} onClick={() => setOpen(true)} className="flex min-h-14 flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium"><Menu aria-hidden className="size-4" />More</button>
+        </nav>
       </div>
     </div>
   );

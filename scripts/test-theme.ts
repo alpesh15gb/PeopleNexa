@@ -4,9 +4,9 @@ import { runInNewContext } from "node:vm";
 import { resolveTheme, themePreference, THEME_INIT_SCRIPT } from "../lib/theme";
 
 for (const systemDark of [false, true]) {
-  assert.equal(resolveTheme(null, systemDark), systemDark ? "dark" : "light");
-  assert.equal(resolveTheme("light", systemDark), "light");
-  assert.equal(resolveTheme("dark", systemDark), "dark");
+  assert.equal(resolveTheme(null), "light");
+  assert.equal(resolveTheme("light"), "light");
+  assert.equal(resolveTheme("dark"), "dark");
   for (const saved of [null, "light", "dark", "invalid"]) {
     for (const blocked of [false, true]) {
       let dark = false;
@@ -16,7 +16,7 @@ for (const systemDark of [false, true]) {
         matchMedia: () => ({ matches: systemDark }),
         document: { documentElement: { style, classList: { toggle: (_: string, value: boolean) => { dark = value; } } } },
       });
-      const expected = resolveTheme(blocked ? null : themePreference(saved), systemDark);
+      const expected = resolveTheme(blocked ? null : themePreference(saved));
       assert.equal(dark, expected === "dark");
       assert.equal(style.colorScheme, expected, "native controls receive the initial theme before hydration");
     }

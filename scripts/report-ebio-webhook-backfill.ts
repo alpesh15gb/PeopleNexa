@@ -102,7 +102,6 @@ async function main() {
   const matchedPunches = punches.filter((punch) => expectedDeviceByPunch.has(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`));
   const devicePunchMatches = matchedPunches.filter((punch) => punch.source === "device" || punch.source === "ebioserver");
   const ambiguousPunchMatches = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === null).length;
-  const alreadyAttributed = devicePunchMatches.filter((punch) => expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`) === punch.deviceId).length;
   const corrections = devicePunchMatches.flatMap((punch) => {
     const deviceId = expectedDeviceByPunch.get(`${punch.employeeId}\u0000${punch.punchTime.getTime()}`);
     return deviceId && deviceId !== punch.deviceId ? [{ punchId: punch.id, deviceId }] : [];

@@ -183,7 +183,7 @@ export function TaxDeclarationPanel({
           </div>
           <dl className="mt-3 space-y-2.5 text-[12.5px]">
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">Annual gross</dt>
+              <dt className="text-muted-foreground">Annualized monthly salary</dt>
               <dd className="font-mono">{formatMoney(annualGross)}</dd>
             </div>
             <div className="flex justify-between">
@@ -195,7 +195,7 @@ export function TaxDeclarationPanel({
           </dl>
           <p className="mt-3 rounded-xl border border-edge bg-tint px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
             Payroll calculates TDS using its configured tax regime and verified
-            amounts. Keep your investment proofs ready for HR review.
+            amounts. Send any supporting documents through your HR team's submission process.
           </p>
         </div>
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, MapPin, LocateFixed, X } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, LocateFixed } from "lucide-react";
 import { Circle, GoogleMap, Marker } from "@react-google-maps/api";
 import { GOOGLE_MAPS_API_KEY, useGoogleMapsLoader } from "@/components/maps/google-maps";
 import { Button } from "@/components/ui/button";
@@ -313,58 +313,9 @@ export function BranchesManager({
   const isNew = editing === "new";
 
   // ── Locations (city level above branches) ─────────────────────────────
-  const [locName, setLocName] = useState("");
-  const [locCode, setLocCode] = useState("");
-  const [locBusy, setLocBusy] = useState(false);
   const locationName = (id: string | null) => locations.find((l) => l.id === id)?.name ?? null;
 
-  async function addLocation() {
-    if (locBusy) return;
-    if (!locName.trim() || !locCode.trim()) {
-      toast("error", "Enter a location name and code (e.g. Hyderabad, HYD).");
-      return;
-    }
-    setLocBusy(true);
-    try {
-      const res = await fetch("/api/locations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: locName.trim(), code: locCode.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to add location");
-        return;
-      }
-      setLocName("");
-      setLocCode("");
-      toast("success", "Location added");
-      router.refresh();
-    } catch {
-      toast("error", "Something went wrong.");
-    } finally {
-      setLocBusy(false);
-    }
-  }
 
-  async function deleteLocation(id: string) {
-    if (locBusy) return;
-    setLocBusy(true);
-    try {
-      const res = await fetch(`/api/locations/${id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast("error", data.error ?? "Failed to delete location");
-        return;
-      }
-      toast("success", "Location removed");
-      router.refresh();
-    } catch {
-      toast("error", "Something went wrong.");
-    } finally {
-      setLocBusy(false);
-    }
-  }
 
   // Cards sorted by location, then name — the hierarchy reads top to bottom.
   const term = query.trim().toLowerCase();

@@ -22,7 +22,6 @@ export function PlansTable({
   customized?: string[];
 }) {
   const router = useRouter();
-  const toast = useToast();
   const [editing, setEditing] = useState<PlanDef | null>(null);
 
   let mrr = 0;
@@ -183,7 +182,6 @@ function EditPlanModal({
     }
   };
 
-  const numField = (v: string) => (v === "" ? "" : Number(v));
 
   return (
     <>

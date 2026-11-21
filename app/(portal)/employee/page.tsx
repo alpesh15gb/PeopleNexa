@@ -1,12 +1,14 @@
 import Link from "next/link";
-import { BadgePercent, Banknote, BookOpen, CalendarCheck2, CalendarClock, ClipboardCheck, Clock4, DoorOpen, FileText, LifeBuoy, Megaphone, Receipt, ScanFace, Target, UserRound } from "lucide-react";
+import { BadgePercent, Banknote, BookOpen, CalendarCheck2, CalendarClock, ClipboardCheck, Clock4, DoorOpen, FileText, LifeBuoy, Megaphone, Package, Receipt, ScanFace, Target, UserRound } from "lucide-react";
 import { EssInstall } from "@/components/ess-install";
 import { Card, CardContent, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
-import { dayRangeIST } from "@/lib/dates";
+import { dayRangeIST, isMonthKey } from "@/lib/dates";
 import { t } from "@/lib/i18n";
 import { getLang } from "@/lib/i18n-server";
 import { istDateKey } from "@/lib/ist";
 import { leaveAwaitingReview } from "@/lib/leave-lifecycle";
+import { holidaysForAttendanceDay } from "@/lib/attendance-tally";
+import { personalPayslipWhere } from "@/lib/personal-payslips";
 import { getTenantAccess } from "@/lib/modules-server";
 import { prisma } from "@/lib/prisma";
 import { attendanceDayForPunch, shiftForEmployeeDay, shiftWindow } from "@/lib/reconcile";
@@ -56,7 +58,7 @@ export default async function EmployeeDashboardPage() {
   const where = { tenantId: session.tenantId, employeeId: employee.id };
   const showSchedule = modules.has("shifts") || modules.has("rosters");
 
-  const [attendance, leave, expenseRequests, roster, onboardingTasks, selfReviews, exitRequests] = await Promise.all([
+  const [attendance, leave, expenseRequests, roster, onboardingTasks, selfReviews, exitRequests, holidays, latestPayslip, announcements] = await Promise.all([
     modules.has("attendance") ? (async () => {
       const workDay = await attendanceDayForPunch(employee, now, region.timeZone);
       const shift = await shiftForEmployeeDay(employee, workDay, region.timeZone);
@@ -104,7 +106,23 @@ export default async function EmployeeDashboardPage() {
     modules.has("onboarding") ? prisma.onboardingTask.count({ where: { ...where, status: "pending" } }) : 0,
     modules.has("performance") ? prisma.performanceReview.count({ where: { ...where, status: "draft" } }) : 0,
     modules.has("exit") ? prisma.exitRequest.count({ where: { ...where, status: "pending" } }) : null,
+    modules.has("holidays") ? prisma.holiday.findMany({
+      where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: { gte: todayRange.start, lt: dayRangeIST(offsetDateKey(today, 30)).end } }] },
+      select: { id: true, name: true, date: true, isRecurring: true, isHalfDay: true },
+    }) : null,
+    modules.has("payroll") ? prisma.payslip.findFirst({
+      where: personalPayslipWhere(session.tenantId, session.sub, false),
+      orderBy: [{ month: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, month: true },
+    }) : null,
+    modules.has("feed") ? prisma.orgPost.findMany({
+      where: { tenantId: session.tenantId, isAnnouncement: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 2, select: { id: true, body: true },
+    }) : null,
   ]);
+  const upcomingHolidays = holidays ? Array.from({ length: 31 }, (_, index) => offsetDateKey(today, index)).flatMap((day) =>
+    holidaysForAttendanceDay(holidays, day).map((item) => ({ ...item, day })),
+  ).slice(0, 4) : null;
 
   const tasks = [
     ...(onboardingTasks > 0 ? [{ href: "/employee/onboarding", label: `${onboardingTasks} onboarding ${onboardingTasks === 1 ? "task" : "tasks"} to complete`, icon: ClipboardCheck }] : []),
@@ -138,7 +156,8 @@ export default async function EmployeeDashboardPage() {
       ...(expenseRequests !== null ? [{ href: "/employee/expenses", label: "Expense claims", icon: Receipt }] : []),
     ] },
     { label: "Workplace resources", links: [
-      ...(modules.has("documents") ? [{ href: "/employee/documents", label: t(lang, "nav.documents"), icon: FileText }] : []),
+      ...(modules.has("documents") ? [{ href: "/employee/documents", label: "Document center", icon: FileText }] : []),
+      ...(modules.has("assets") ? [{ href: modules.has("documents") ? "/employee/documents?view=assets" : "/employee/profile#my-assets", label: "Assigned assets", icon: Package }] : []),
       ...(modules.has("policies") ? [{ href: "/employee/policies", label: t(lang, "nav.policies"), icon: BookOpen }] : []),
       ...(modules.has("feed") ? [{ href: "/employee/feed", label: "Company feed", icon: Megaphone }] : []),
       ...(modules.has("helpdesk") ? [{ href: "/employee/helpdesk", label: "Helpdesk", icon: LifeBuoy }] : []),
@@ -218,6 +237,22 @@ export default async function EmployeeDashboardPage() {
         <h2 id="home-services" className="text-base font-semibold">My services</h2>
         <EmployeeServiceDirectory groups={services} />
       </section>
+      {(upcomingHolidays || modules.has("payroll") || announcements) && <div className="grid gap-3 lg:grid-cols-3">
+        {upcomingHolidays && <Card><CardHeader><CardTitle>Upcoming holidays</CardTitle></CardHeader><CardContent className="pt-3">
+          {upcomingHolidays.length > 0 ? <ul className="divide-y divide-edge">{upcomingHolidays.map((holiday) => <li key={`${holiday.id}:${holiday.day}`} className="py-2 text-sm"><p className="font-medium">{holiday.name}{holiday.isHalfDay && " · Half day"}</p><time dateTime={holiday.day} className="text-xs text-muted-foreground">{formatCalendarDate(holiday.day, region.locale)}</time></li>)}</ul> : <p className="text-sm text-muted-foreground">No holidays are scheduled in the next 30 days.</p>}
+        </CardContent></Card>}
+        {modules.has("payroll") && <Card><CardHeader><CardTitle>Latest payslip</CardTitle></CardHeader><CardContent className="space-y-3 pt-3">
+          {latestPayslip ? <>
+            <p className="font-medium">{isMonthKey(latestPayslip.month) ? new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${latestPayslip.month}-01T00:00:00Z`)) : latestPayslip.month}</p>
+            <a href={`/api/payroll/payslips?${new URLSearchParams({ scope: "personal", id: latestPayslip.id, month: latestPayslip.month })}`} className="inline-flex rounded-lg border border-edge px-3 py-2 text-sm font-medium hover:bg-tint">Download PDF</a>
+            <Link href="/employee/payslips" className="block text-sm font-medium text-primary hover:underline">View payslip history</Link>
+          </> : <p className="text-sm text-muted-foreground">Published payslips will appear here.</p>}
+        </CardContent></Card>}
+        {announcements && <Card><CardHeader><CardTitle>Company announcements</CardTitle></CardHeader><CardContent className="space-y-3 pt-3">
+          {announcements.length > 0 ? <ul className="space-y-2">{announcements.map((post) => <li key={post.id} className="line-clamp-2 break-words text-sm">{post.body}</li>)}</ul> : <p className="text-sm text-muted-foreground">No announcements have been published.</p>}
+          <Link href="/employee/feed?view=announcements" className="text-sm font-medium text-primary hover:underline">Open announcements</Link>
+        </CardContent></Card>}
+      </div>}
       {leave && <EmployeeLeaveActivity recent={leave.recent} next={leave.next} today={today} locale={region.locale} lang={lang} />}
       <EssInstall />
     </div>

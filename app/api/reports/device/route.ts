@@ -503,8 +503,8 @@ function statusMatrixXlsx(output: DeviceStatusMatrixOutput, monthKey: string) {
     borderAll(ws, headerRow.number, cols);
     for (const block of output.blocks) {
       const startRow = ws.rowCount + 1;
-      const checkIn = ws.addRow([block.serial, block.code, block.name, block.appliedLeave, "CHECK IN", ...block.days.map((d) => d.inTime), "", "", "", "", ""]);
-      const checkOut = ws.addRow(["", "", "", "", "CHECK OUT", ...block.days.map((d) => d.outTime), "", "", "", "", ""]);
+      ws.addRow([block.serial, block.code, block.name, block.appliedLeave, "CHECK IN", ...block.days.map((d) => d.inTime), "", "", "", "", ""]);
+      ws.addRow(["", "", "", "", "CHECK OUT", ...block.days.map((d) => d.outTime), "", "", "", "", ""]);
       const attendance = ws.addRow(["", "", "", "", "ATT", ...block.days.map((d) => d.status), block.totals.present, block.totals.absent, block.totals.leave, block.totals.holiday, block.totals.weekOff]);
       ws.mergeCells(startRow, 1, startRow + 2, 1);
       ws.mergeCells(startRow, 2, startRow + 2, 2);

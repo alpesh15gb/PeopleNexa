@@ -2951,9 +2951,8 @@ function MessPlanDialogContent({
                       onChange={(event) =>
                         setSelected((current) => {
                           const next = new Set(current);
-                          event.target.checked
-                            ? next.add(employee.id)
-                            : next.delete(employee.id);
+                          if (event.target.checked) next.add(employee.id);
+                          else next.delete(employee.id);
                           return next;
                         })
                       }
@@ -3191,7 +3190,6 @@ function AdvancedSection({
   selectedLocationId,
   records,
   preview,
-  busy,
   errors,
   onChange,
 }: {

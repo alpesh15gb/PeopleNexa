@@ -20,12 +20,14 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   ]);
   const requestedPage = recordPageNumber(params.page) ?? 1;
   const unreadOnly = params.filter === "unread";
+  const attentionOnly = params.filter === "attention";
   const where = { tenantId: session.tenantId, employeeId: session.sub };
   const { notifications, unread, pagination } = await prisma.$transaction(async (tx) => {
     const unread = await tx.notification.count({ where: { ...where, isRead: false } });
-    const pagination = recordPagination(unreadOnly ? unread : await tx.notification.count({ where }), requestedPage);
+    const filtered = { ...where, ...(unreadOnly ? { isRead: false } : {}), ...(attentionOnly ? { type: { in: ["danger", "warning"] } } : {}) };
+    const pagination = recordPagination(unreadOnly ? unread : await tx.notification.count({ where: filtered }), requestedPage);
     const notifications = await tx.notification.findMany({
-      where: { ...where, ...(unreadOnly ? { isRead: false } : {}) },
+      where: filtered,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: pagination.offset,
       take: pagination.pageSize,
@@ -45,10 +47,11 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       <Card>
         <CardContent className="p-0 pt-0">
           <nav aria-label="Notification filters" className="flex flex-wrap gap-2 border-b border-edge px-4 py-3">
-            <Link href="/notifications" aria-current={!unreadOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${!unreadOnly ? "bg-tint font-semibold" : ""}`}>All activity</Link>
+            <Link href="/notifications" aria-current={!unreadOnly && !attentionOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${!unreadOnly && !attentionOnly ? "bg-tint font-semibold" : ""}`}>All activity</Link>
             <Link href="/notifications?filter=unread" aria-current={unreadOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${unreadOnly ? "bg-tint font-semibold" : ""}`}>Unread ({unread})</Link>
+            <Link href="/notifications?filter=attention" aria-current={attentionOnly ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm hover:bg-tint ${attentionOnly ? "bg-tint font-semibold" : ""}`}>Warnings and alerts</Link>
           </nav>
-          <NotificationsList notifications={notifications} unread={unread} unreadOnly={unreadOnly} region={workspaceRegion(tenant?.config)} lang={lang} />
+          <NotificationsList attentionOnly={attentionOnly} notifications={notifications} unread={unread} unreadOnly={unreadOnly} region={workspaceRegion(tenant?.config)} lang={lang} />
         </CardContent>
       </Card>
       <DocumentExpensePagination path="/notifications" params={params} pagination={pagination} label="notifications" />

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, requireActiveSession } from "@/lib/session";
+import { requireActiveSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { dayRangeIST } from "@/lib/dates";
 import { istDateKey } from "@/lib/ist";
