@@ -72,14 +72,14 @@ function recordedPunches(record?: { punches: unknown; punchInTime: Date | null; 
   return entries;
 }
 
-export function AttendanceTimeline({ day, today, shift, record, attempts, correctionHref, pendingHref, details, region }: {
+export function AttendanceTimeline({ day, today, shift, record, attempts, correctionHref, correctionOutcome, details, region }: {
   day: CalendarDay;
   today: string;
   shift?: string;
   record?: { punches: unknown; punchInTime: Date | null; punchOutTime: Date | null; lateMinutes: number };
   attempts: { punchTime: Date; inOutHint: string | null; authStatus: string }[];
   correctionHref?: string;
-  pendingHref?: string;
+  correctionOutcome?: { status: string; href: string };
   details: string[];
   region: WorkspaceRegion;
 }) {
@@ -101,7 +101,10 @@ export function AttendanceTimeline({ day, today, shift, record, attempts, correc
         <h3 id="punch-timeline-title" className="font-display text-lg font-semibold">Punch timeline</h3>
         <p className="mt-0.5 text-sm text-muted-foreground"><time dateTime={day.date}>{formatCalendarDate(day.date, region.locale)}</time>{day.date === today ? " · Today" : ""}{shift ? ` · ${shift}` : ""}</p>
       </div>
-      {pendingHref ? <Link href={pendingHref} className="inline-flex min-h-10 items-center rounded-md border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">View pending correction</Link> : correctionHref && <Link href={correctionHref} className="inline-flex min-h-10 items-center rounded-md border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">Request correction</Link>}
+      <div className="flex flex-wrap gap-2">
+        {correctionOutcome && <Link href={correctionOutcome.href} className="inline-flex min-h-10 items-center rounded-md border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">{correctionOutcome.status === "pending" ? "View pending correction" : correctionOutcome.status === "approved" ? "Correction approved" : "Correction declined"}</Link>}
+        {correctionHref && <Link href={correctionHref} className="inline-flex min-h-10 items-center rounded-md border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">Request correction</Link>}
+      </div>
     </div>
     <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><Badge>{day.status}</Badge>{Boolean(record?.lateMinutes) && <span>{record?.lateMinutes} min late</span>}{details.map((detail) => <span key={detail}>{detail}</span>)}</div>
     {entries.length > 0 ? <ol className="mt-4 space-y-3 text-sm" aria-label="Recorded punches">

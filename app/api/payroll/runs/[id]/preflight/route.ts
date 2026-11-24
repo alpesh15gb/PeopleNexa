@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { payrollOperationLocationId } from "@/lib/location-scope";
-import { payrollSourceReview } from "@/lib/payroll-source-review";
+import { payrollSourceIssues } from "@/lib/payroll-source-review";
+import { payrollRunPreflightDetails } from "@/lib/payroll-preflight";
+import { unreconciledPayAmounts, type PayrollIssue } from "@/lib/payroll-issue";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 
@@ -19,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         month: true, status: true,
         payslips: {
           select: {
-            employeeId: true, inputSnapshot: true,
+            employeeId: true, inputSnapshot: true, documentSnapshot: true, grossEarnings: true, deductions: true, netSalary: true,
             employee: { select: { id: true, shiftId: true, joiningDate: true, firstName: true, lastName: true } },
           },
         },
@@ -29,9 +31,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!["draft", "reviewed", "approved"].includes(run.status)) {
       return NextResponse.json({ error: "View the recorded payslips for finalized or closed payroll." }, { status: 409 });
     }
-    const issues = run.payslips.length
-      ? await payrollSourceReview(tx, session.tenantId, run.month, run.payslips)
-      : ["Generate at least one payslip before reviewing this run."];
-    return NextResponse.json({ issues, checkedEmployees: run.payslips.length }, { headers: { "Cache-Control": "private, no-store" } });
+    const sourceDetails: PayrollIssue[] = run.payslips.length
+      ? await payrollSourceIssues(tx, session.tenantId, run.month, run.payslips)
+      : [{ code: "no-payslips", message: "Generate at least one payslip before reviewing this run." }];
+    const financialDetails: PayrollIssue[] = run.payslips.filter(unreconciledPayAmounts).map(({ employeeId }) => ({
+      code: "pay-totals", employeeId, message: "Gross pay, deductions, and net pay need to reconcile before approval.",
+    }));
+    if (run.payslips.length) financialDetails.push(...payrollRunPreflightDetails(run.payslips));
+    return NextResponse.json({
+      issues: sourceDetails.map(({ message }) => message),
+      details: [...sourceDetails, ...financialDetails],
+      checkedEmployees: run.payslips.length,
+    }, { headers: { "Cache-Control": "private, no-store" } });
   }, { isolationLevel: "RepeatableRead", timeout: 20000 });
 }

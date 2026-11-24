@@ -25,6 +25,7 @@ interface PunchRow {
 
 interface Row {
   employeeId: string;
+  correctionHref: string | null;
   canEdit: boolean;
   punchReceived: boolean;
   employeeNumber: string;
@@ -174,6 +175,7 @@ export function AttendanceTable({ rows, date, branchId, query, status: statusFil
     const labels = row.record ? ["View punches", "Edit status"] : ["View punches", "Record status"];
     return (
       <div className="flex flex-wrap items-center gap-1.5">
+        {row.correctionHref && <Link href={row.correctionHref} prefetch={false} scroll={false} aria-label={`Review correction for ${row.name}`} className="inline-flex min-h-9 items-center rounded-lg border border-edge px-2.5 text-xs font-semibold text-primary hover:bg-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Review correction</Link>}
         {row.record && <Button size={mobile ? "sm" : "icon"} variant={mobile ? "outline" : "ghost"} title={labels[0]} aria-label={`${labels[0]} for ${row.name}`} onClick={() => openPunches(row)}>
           <ListChecks aria-hidden="true" className="h-4 w-4" />{mobile && labels[0]}
         </Button>}

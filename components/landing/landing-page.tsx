@@ -251,76 +251,34 @@ export function LandingPage({ plans }: { plans: PlanDef[] }) {
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden">
-        {/* Aurora background: blue mesh blobs + grid. Static under reduced motion. */}
-        <div className="pointer-events-none absolute inset-0 motion-reduce:animate-none" aria-hidden>
-          <div className="absolute inset-0 bg-grid" />
-          <div className="absolute -top-32 left-1/2 h-[520px] w-[min(820px,150vw)] -translate-x-1/2 rounded-full bg-primary/25 blur-[120px] motion-reduce:transform-none" />
-          <div className="absolute -left-24 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[100px]" />
-          <div className="absolute -right-24 top-64 h-72 w-72 rounded-full bg-[#60A5FA]/10 blur-[100px]" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(ellipse 60% 45% at 50% 0%, rgba(37,99,235,0.14), transparent 70%)",
-            }}
-          />
-        </div>
-
-        <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-20 sm:pt-28">
-          <div className="mx-auto max-w-3xl text-center">
-            <span className="inline-flex items-center gap-2 rounded-full border border-edge bg-tint px-3.5 py-1.5 text-[12px] font-medium text-muted-foreground">
-              <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-              Employee management · Attendance · Leave · Payroll
-            </span>
-            <h1 className="mt-6 font-display text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
-              Run your workforce on{" "}
-              <span className="text-gradient">one simple platform</span>
+        <div aria-hidden="true" className="pointer-events-none absolute -right-40 -top-48 size-[46rem] rounded-full border-[6rem] border-primary/7" />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 py-12 sm:px-8 sm:py-20 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-12">
+          <div>
+            <h1 className="max-w-xl font-display text-4xl font-semibold leading-[1.04] tracking-[-0.055em] sm:text-6xl">
+              Manage people, time, and pay in one workspace
             </h1>
-            <p className="mx-auto mt-5 max-w-xl text-[15.5px] leading-relaxed text-muted-foreground sm:text-lg">
-              Manage employee records, shifts, leave and payroll. Give your team one place to clock in, submit requests and access payslips.
+            <p className="mt-5 max-w-lg text-base leading-relaxed text-muted-foreground sm:text-lg">
+              Set up employee records, track attendance and leave, and run payroll. Your team can clock in, send requests, and find their payslips.
             </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link
-                href="/register"
-                className={cn("group inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-[15px] font-semibold transition-all duration-200", CTA_PRIMARY)}
-              >
-                Start free trial
-                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:transform-none" aria-hidden="true" />
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Link href="/register" className={cn("inline-flex min-h-11 items-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold", CTA_PRIMARY)}>
+                Create a workspace <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
-              <a
-                href="#pricing"
-                className={cn("inline-flex items-center gap-2 rounded-xl border bg-card px-6 py-3.5 text-[15px] font-semibold transition-colors duration-200", CTA_SECONDARY)}
-              >
-                See pricing
-              </a>
+              <Link href="/login" className={cn("inline-flex min-h-11 items-center rounded-lg border bg-card px-5 py-3 text-sm font-semibold", CTA_SECONDARY)}>
+                Sign in to your workspace
+              </Link>
             </div>
-            <p className="mt-4 text-[13px] text-muted-foreground">
-              Prefer a walkthrough?{" "}
-              <a
-                href="mailto:sales@peoplenexa.in?subject=PeopleNexa demo"
-                className="cursor-pointer font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Book a demo
-              </a>{" "}
-              — we’ll set up your workspace with you.
-            </p>
-            <p className="mt-4 text-[13px] text-muted-foreground">Free 30-day trial · No credit card · Hindi & regional languages</p>
+            <p className="mt-4 text-sm text-muted-foreground">30-day trial for new workspaces. No credit card required.</p>
+            <a href="#pricing" className="mt-5 inline-flex text-sm font-semibold text-primary hover:underline">Compare plans</a>
           </div>
 
-          {/* Product mockup — glass dashboard preview */}
-          <div className="relative mx-auto mt-14 max-w-4xl">
-            <div className="absolute inset-x-0 -top-6 h-40 rounded-full bg-primary/20 blur-3xl" aria-hidden />
-            <div className="card-surface relative rounded-2xl border-white/20 bg-white/70 p-5 shadow-2xl backdrop-blur-xl dark:bg-white/5 sm:p-7">
+          <div aria-label="Sample team overview" className="relative min-w-0 rounded-2xl bg-[#16392d] p-3 sm:p-5">
+            <div className="card-surface relative rounded-xl p-4 sm:p-5">
               <div className="flex items-center justify-between border-b border-edge pb-4">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-bold text-primary-foreground">PN</span>
-                  <span className="truncate text-[13px] font-semibold">Apex Integrations</span>
-                  <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-300">live</span>
-                </div>
-                <div className="hidden gap-1.5 sm:flex">
-                  <span className="rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Today</span>
-                  <span className="rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Rosters</span>
-                  <span className="rounded-md bg-tint px-2 py-1 text-[11px] text-muted-foreground">Payroll</span>
+                  <span className="truncate text-sm font-semibold">Team overview</span>
+                  <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-300">Sample data</span>
                 </div>
               </div>
               <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">

@@ -48,6 +48,10 @@ export async function TodayAttendance({ employee, region, lang, now, earliestCor
   const href = `/employee/attendance?view=corrections&month=${dayKey.slice(0, 7)}${keepReviewFilter ? "&focus=review" : ""}`;
   const showCorrection = !earliestCorrection || dayKey >= earliestCorrection;
   const today = dateKeyInTimeZone(now, region.timeZone);
+  const reviewFlag = record?.reviewStatus === "missed_punch" ? "Missing punch" : record?.reviewStatus === "needs_review" ? "This workday needs review" : null;
+  const correctionLink = correction
+    ? { href: `${href}#correction-${correction.id}`, label: "View pending correction" }
+    : showCorrection ? { href: `${href}&action=request&date=${dayKey}&from=today&fromMonth=${selectedMonth}`, label: "Request a correction" } : null;
 
   return (
     <section aria-label="Current attendance" className="space-y-4">
@@ -63,11 +67,11 @@ export async function TodayAttendance({ employee, region, lang, now, earliestCor
         pendingIn={pending.some((punch) => punch.inOutHint !== "out")}
         pendingOut={pending.some((punch) => punch.inOutHint === "out")}
       />
-      <Card>
+      {(punches.length > 0 || reviewFlag || correction) ? <Card>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display font-semibold">Punch status</h2>
-            {correction ? <Link href={`${href}#corrections-${dayKey}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">View pending correction</Link> : showCorrection && <Link href={`${href}&action=request&date=${dayKey}&from=today&fromMonth=${selectedMonth}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">Request a correction</Link>}
+            <h2 className="font-display font-semibold">{reviewFlag ?? (punches.length > 0 ? "Punch attempts" : "Correction pending")}</h2>
+            {correctionLink && <Link href={correctionLink.href} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">{correctionLink.label}</Link>}
           </div>
           {punches.length > 0 ? (
             <ul className="space-y-2 text-sm">{punches.map((punch) => (
@@ -76,11 +80,9 @@ export async function TodayAttendance({ employee, region, lang, now, earliestCor
                 <Badge tone={punch.authStatus === "pending" ? "warning" : "danger"}>{punch.authStatus === "pending" ? "Awaiting manager review" : "Declined"}</Badge>
               </li>
             ))}</ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">{record?.reviewStatus === "missed_punch" ? "A punch is missing. Request a correction to add it." : record?.reviewStatus === "needs_review" ? "This workday needs review. Check your times and request a correction if needed." : record?.punchInTime || record?.punchOutTime ? "Your recorded punches appear above." : "Your recorded punches will appear here after you clock in."}</p>
-          )}
+          ) : null}
         </CardContent>
-      </Card>
+      </Card> : correctionLink && <Link href={correctionLink.href} className="inline-flex min-h-10 items-center rounded-lg border border-edge bg-card px-3 text-sm font-medium text-primary hover:bg-tint">{correctionLink.label}</Link>}
     </section>
   );
 }

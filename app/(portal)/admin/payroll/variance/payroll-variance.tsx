@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { payrollScopeHref } from "@/lib/payroll-work-queue";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { FileWarning, Search } from "lucide-react";
 import { PayrollNavigation } from "@/components/payroll-navigation";
 import { Field, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/card";
 import { formatMoney } from "@/lib/utils";
 
 type Comparison = {
@@ -41,20 +42,8 @@ export function PayrollVariance({
   comparison,
   canManageSettings = false,
 }: Props) {
-  const router = useRouter();
   const [search, setSearch] = useState("");
   const [changedOnly, setChangedOnly] = useState(false);
-  function change(
-    next: Partial<{ reference: string; current: string; location: string }>,
-  ) {
-    const query = new URLSearchParams({
-      reference: next.reference ?? reference,
-      current: next.current ?? current,
-    });
-    const location = next.location ?? locationId;
-    if (location) query.set("location", location);
-    router.push(`/admin/payroll/variance?${query}`);
-  }
   const rows =
     comparison?.rows.filter(
       (row) =>
@@ -65,65 +54,38 @@ export function PayrollVariance({
           row.netDelta !== 0),
     ) ?? [];
   return (
-    <main className="mx-auto max-w-6xl space-y-5 py-6">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-widest text-primary">
-          Pay & people
-        </p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-          History & reports
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Compare completed payroll between two months to understand changes in
-          pay.
-        </p>
-      </header>
+    <div className="mx-auto max-w-6xl space-y-5">
+      <PageHeader title="History & reports" description="Compare completed payroll for two months in the same location." />
       <PayrollNavigation
         active="history"
         canManageSettings={canManageSettings}
         locationId={locationId}
         period={current}
       />
-      <section className="grid gap-4 rounded-2xl border border-edge bg-card p-5 sm:grid-cols-3">
-        <Field label="Location">
-          <Select
-            value={locationId ?? ""}
-            disabled={!canManageSettings}
-            onChange={(event) => change({ location: event.target.value })}
-          >
-            <option value="" disabled>
-              Select location
-            </option>
-            {locations.map((location) => (
-              <option key={location.id} value={location.id}>
-                {location.name}
-              </option>
-            ))}
-          </Select>
+      <form key={`${locationId}:${reference}:${current}`} action="/admin/payroll/variance"
+        className="flex flex-wrap items-end gap-3 rounded-xl border border-edge bg-card p-4">
+        {canManageSettings ? (
+          <Field label="Location" className="min-w-36 flex-1">
+            <Select name="location" defaultValue={locationId ?? ""} required>
+              <option value="" disabled>Select location</option>
+              {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+            </Select>
+          </Field>
+        ) : (
+          <div className="min-w-36 flex-1">
+            <p className="text-sm font-medium">Location</p>
+            <p className="mt-1 flex min-h-11 items-center break-words text-sm">{locations.find((location) => location.id === locationId)?.name ?? "No active location"}</p>
+          </div>
+        )}
+        <Field label="Compare from" className="min-w-36 flex-1">
+          <Input name="reference" type="month" defaultValue={reference} required />
         </Field>
-        <Field label="Compare from">
-          <Input
-            type="month"
-            value={reference}
-            onChange={(event) => {
-              if (event.target.value) change({ reference: event.target.value });
-            }}
-          />
+        <Field label="Compare to" className="min-w-36 flex-1">
+          <Input name="current" type="month" defaultValue={current} required />
         </Field>
-        <Field label="Compare to">
-          <Input
-            type="month"
-            value={current}
-            onChange={(event) => {
-              if (event.target.value) change({ current: event.target.value });
-            }}
-          />
-        </Field>
-        <p className="text-xs text-muted-foreground sm:col-span-3">
-          Includes finalized and paid payroll, including multiple runs in each
-          month.
-        </p>
-      </section>
+        <Button type="submit" disabled={!locations.length}>Compare payroll</Button>
+        <p className="w-full text-xs text-muted-foreground">Includes finalized and paid payroll across all eligible runs in each month.</p>
+      </form>
       {locationId && (referenceRun || currentRun) && <section aria-label="Recorded payroll periods" className="grid gap-3 sm:grid-cols-2">
         {([{ label: "Reference month", period: reference, run: referenceRun }, { label: "Comparison month", period: current, run: currentRun }]).map(({ label, period, run }) => (
           <div key={label} className="rounded-xl border border-edge bg-card p-4">
@@ -266,7 +228,7 @@ export function PayrollVariance({
           </section>
         </>
       )}
-    </main>
+    </div>
   );
 }
 function signed(value: number) {

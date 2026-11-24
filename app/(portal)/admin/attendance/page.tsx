@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ArrowUpRight, CalendarClock, ChevronLeft, ChevronRight, Clock3, ListChecks, MapPin, PartyPopper, Settings2, Timer, Watch } from "lucide-react";
 import { redirect } from "next/navigation";
-import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
 import { dayRangeIST, isDateKey } from "@/lib/dates";
@@ -21,6 +20,8 @@ import { EmptyState } from "@/components/ui/stat";
 import { holidaysForAttendanceDay, tallyDailyAttendance } from "@/lib/attendance-tally";
 import { authorizedPunchDayFilter } from "@/lib/attendance-presence";
 import { ATTENDANCE_REVIEW_FLAGS, attendanceDrilldownStatus, attendanceEmployeeScope, attendanceStatusFilter } from "@/lib/attendance-drilldown";
+import { ApprovalReview, approvalItemHref } from "../approvals/priority-approvals";
+import { ApprovalReceipt } from "../approvals/approval-receipt";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZES = [50, 100, 200, 500] as const;
@@ -28,12 +29,12 @@ const PAGE_SIZES = [50, 100, 200, 500] as const;
 export default async function AdminAttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string; size?: string; status?: string; view?: string }>;
+  searchParams: Promise<{ date?: string; branch?: string; q?: string; page?: string; size?: string; status?: string; view?: string; item?: string; result?: string }>;
 }) {
   const session = await requireActiveSession().catch(() => null);
   if (!session) redirect("/login");
   if (!["admin", "supervisor", "branch_manager", "location_manager"].includes(session.role)) redirect("/employee/attendance");
-  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam, size: sizeParam, status: statusParam, view } = await searchParams;
+  const { date: dateParam, branch: branchParam, q: queryParam, page: pageParam, size: sizeParam, status: statusParam, view, item, result } = await searchParams;
   // UI routes fall back to today for a malformed URL instead of rendering a
   // normalized-but-wrong day. APIs reject malformed dates with HTTP 400.
   const tenant = await prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } });
@@ -70,10 +71,20 @@ export default async function AdminAttendancePage({
     { module: "branches", adminOnly: true, href: "/admin/branches", title: "Worksites and geofences", description: "Set the location and radius used to verify mobile punches.", icon: MapPin },
     { module: "devices", adminOnly: false, href: "/admin/devices", title: "Attendance devices", description: "Manage connected devices and open their punch logs.", icon: Watch },
   ].filter((step) => setupAccess?.has(step.module) && (!step.adminOnly || session.role === "admin"));
-  const dailyHref = `/admin/attendance?date=${dateKey}`;
+  // Setup returns to the same validated daily filters.
+  const branchFilter = !isBranchManager && typeof branchParam === "string" && branchParam
+    ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true } })
+    : null;
+  const branchId = isBranchManager ? ownBranchId : branchFilter?.id ?? null;
+  const query = typeof queryParam === "string" ? queryParam.trim().slice(0, 100) : "";
+  const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
+  const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
+  const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
+  const dailyParams = new URLSearchParams({ date: dateKey, ...(branchId && { branch: branchId }), ...(query && { q: query }), ...(attendanceStatus && { status: attendanceStatus }), ...(pageSize !== 50 && { size: String(pageSize) }), ...(requestedPage > 1 && { page: String(requestedPage) }) });
+  const dailyHref = `/admin/attendance?${dailyParams}`;
   if (view === "setup" && setupLinks.length > 0) {
     return <div className="space-y-5">
-      <PageHeader title="Attendance setup" description="Set work schedules and choose how staff record attendance." actions={<Link href={dailyHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Back to daily attendance</Link>} />
+      <PageHeader title="Attendance setup" actions={<Link href={dailyHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Daily attendance</Link>} />
       <div className="grid gap-3 sm:grid-cols-2">{setupLinks.map(({ href, title, description, icon: Icon }) => (
         <Link key={href} href={href} className="group flex min-h-28 items-start gap-3 rounded-xl border border-edge bg-card p-4 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
@@ -83,18 +94,6 @@ export default async function AdminAttendancePage({
       ))}</div>
     </div>;
   }
-
-  // Branch filter must belong to this tenant; unknown ids are ignored.
-  const branchFilter = isBranchManager
-    ? null
-    : branchParam
-       ? await prisma.branch.findFirst({ where: { id: branchParam, tenantId: session.tenantId, ...(ownLocationId ? { locationId: ownLocationId } : {}) }, select: { id: true } })
-      : null;
-  const branchId = isBranchManager ? ownBranchId : (branchFilter?.id ?? null);
-  const query = typeof queryParam === "string" ? queryParam.trim().slice(0, 100) : "";
-  const requestedPage = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
-  const requestedSize = Number.parseInt(sizeParam ?? "50", 10);
-  const pageSize = PAGE_SIZES.includes(requestedSize as (typeof PAGE_SIZES)[number]) ? requestedSize : 50;
 
   const employeeScope = attendanceEmployeeScope({ tenantId: session.tenantId, locationId: ownLocationId, branchId });
   // An employee/day is unique; filtering employees by their exact day record keeps
@@ -106,6 +105,9 @@ export default async function AdminAttendancePage({
   const totalEmployees = await prisma.employee.count({ where: employeeWhere });
   const totalPages = Math.max(1, Math.ceil(totalEmployees / pageSize));
   const page = Math.min(requestedPage, totalPages);
+  const reviewParams = new URLSearchParams(dailyParams);
+  if (requestedPage !== page) reviewParams.set("page", String(page));
+  const reviewListHref = `/admin/attendance?${reviewParams}`;
 
   const [employees, tallyEmployees, holidayCandidates, branches, tallyRecords, tallyLeaves, tallyPunches] = await Promise.all([
     prisma.employee.findMany({
@@ -139,24 +141,30 @@ export default async function AdminAttendancePage({
   const employeeIds = employees.map((employee) => employee.id);
   const reviewer = await pendingApprovalFilters(session);
   const reviewScope = branchId ? { employee: { branchId } } : {};
-  const [records, leaves, rosters, openCorrections, heldPunches] = await Promise.all([
+  const reviewDate = { date: { gte: dayStart, lt: dayEnd } };
+  const reviewableCorrection = reviewer.correction ? { AND: [reviewer.correction, reviewDate, { employeeId: { in: employeeIds } }] } : undefined;
+  const [records, leaves, rosters, openCorrections, heldPunches, pendingCorrections] = await Promise.all([
     prisma.attendance.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: { gte: dayStart, lt: dayEnd } }, include: { branch: { select: { name: true } }, shift: { select: { name: true } } } }),
     prisma.leaveRequest.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, status: "approved", fromDate: { lt: dayEnd }, toDate: { gte: dayStart }, }, include: { employee: { select: { id: true } }, leaveType: true } }),
     prisma.rosterAssignment.findMany({ where: { tenantId: session.tenantId, employeeId: { in: employeeIds }, date: dayStart }, select: { employeeId: true, shift: { select: { name: true } } } }),
-    reviewer.correction ? prisma.punchCorrection.count({ where: { AND: [reviewer.correction, reviewScope, { date: { gte: dayStart, lt: dayEnd } }] } }) : 0,
+    reviewer.correction ? prisma.punchCorrection.count({ where: { AND: [reviewer.correction, reviewScope, reviewDate] } }) : 0,
     reviewer.heldPunch ? prisma.punch.count({ where: { AND: [reviewer.heldPunch, reviewScope, { punchTime: { gte: punchWindow.start, lt: punchWindow.end } }] } }) : 0,
+    reviewableCorrection ? prisma.punchCorrection.findMany({ where: reviewableCorrection, select: { id: true, employeeId: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], distinct: ["employeeId"] }) : [],
   ]);
   const received = new Set(tallyPunches.map((punch) => punch.employeeId));
   const rosterByEmp = new Map(rosters.map(({ employeeId, shift }) => [employeeId, shift.name]));
 
   const leaveByEmp = new Map(leaves.filter((leave) => countsAsLeaveDay(leave.leavePolicySnapshot, dateKey)).map((leave) => [leave.employee.id, leave]));
   const recordByEmp = new Map(records.map((r) => [r.employeeId, r]));
+  const correctionByEmp = new Map(pendingCorrections.map(({ employeeId, id }) => [employeeId, id]));
 
   const rows = employees.map((emp) => {
     const record = recordByEmp.get(emp.id);
     const leave = leaveByEmp.get(emp.id);
+    const correctionId = correctionByEmp.get(emp.id);
     return {
       employeeId: emp.id,
+      correctionHref: correctionId ? approvalItemHref(`correction.${correctionId}`, reviewListHref) : null,
       canEdit: emp.id !== session.sub && dateKey <= today && (!emp.joiningDate || istDateKey(emp.joiningDate) <= dateKey) && (!isLocationManager || Boolean(emp.branch)),
       employeeNumber: emp.employeeNumber,
       punchReceived: received.has(emp.id),
@@ -202,8 +210,9 @@ export default async function AdminAttendancePage({
   return (
     <div className="animate-fade-up space-y-5">
       <PageHeader title="Daily attendance" description={`${formatCalendarDate(dateKey, region.locale)} · ${scopeLabel ?? "Branch"} · ${region.timeZone}`}
-        actions={setupLinks.length > 0 ? <Link href={`${dailyHref}&view=setup`} className={cn(buttonClass, "hidden sm:inline-flex")}><Settings2 className="h-4 w-4" aria-hidden="true" /> Attendance setup</Link> : undefined}
+        actions={setupLinks.length > 0 ? <Link href={`${dailyHref}&view=setup`} className={buttonClass}><Settings2 className="h-4 w-4" aria-hidden="true" /> Setup</Link> : undefined}
       />
+      {typeof result === "string" && reviewer.correction && <ApprovalReceipt result={result} tenantId={session.tenantId} actorId={session.sub} backHref={reviewListHref} region={region} correctionScope={{ ...reviewDate, employee: { AND: [reviewer.correction.employee ?? {}, employeeScope] } }} />}
       <section aria-label="Attendance day and branch" className="flex flex-wrap items-end gap-x-4 gap-y-2 rounded-xl border border-edge bg-card p-3 sm:p-4">
         <div>
           <p className="mb-1 text-xs font-medium text-muted-foreground">Work date</p>
@@ -218,7 +227,6 @@ export default async function AdminAttendancePage({
           <p className="mb-1 text-xs font-medium text-muted-foreground">Branch</p>
           <BranchPicker branches={branches} value={branchId ?? ""} />
         </div>}
-        {setupLinks.length > 0 && <Link href={`${dailyHref}&view=setup`} className={cn(buttonClass, "ml-auto sm:hidden")}><Settings2 className="h-4 w-4" aria-hidden="true" /> Attendance setup</Link>}
       </section>
       {holidays.length > 0 && <div className="flex items-center gap-2 rounded-xl border border-edge bg-tint px-4 py-2.5 text-sm">
         <PartyPopper className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -235,6 +243,10 @@ export default async function AdminAttendancePage({
             </Link>
           ))}
         </div>
+        <nav className="flex flex-wrap gap-2" aria-label="Attendance review queues">
+          <Link href={`/admin/regularization?${queueParams}&view=corrections`} className={buttonClass}><ListChecks className="h-4 w-4" aria-hidden="true" /> Corrections <span className="tabular-nums text-muted-foreground" aria-label={`${openCorrections} pending`}>{openCorrections}</span></Link>
+          <Link href={`/admin/regularization?${queueParams}&view=punches`} className={buttonClass}><Clock3 className="h-4 w-4" aria-hidden="true" /> Held punches <span className="tabular-nums text-muted-foreground" aria-label={`${heldPunches} pending`}>{heldPunches}</span></Link>
+        </nav>
         <details className="rounded-lg border border-edge bg-card p-3 text-sm">
           <summary className="cursor-pointer font-medium">Recorded statuses</summary>
           <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -243,16 +255,12 @@ export default async function AdminAttendancePage({
         </details>
       </section>
 
-      <nav className="flex flex-wrap gap-2" aria-label="Attendance review queues">
-        <Link href={`/admin/regularization?${queueParams}&view=corrections`} className={buttonClass}><ListChecks className="h-4 w-4" aria-hidden="true" /> Review corrections <span className="tabular-nums text-muted-foreground">{openCorrections}</span></Link>
-        <Link href={`/admin/regularization?${queueParams}&view=punches`} className={buttonClass}><Clock3 className="h-4 w-4" aria-hidden="true" /> Review held punches <span className="tabular-nums text-muted-foreground">{heldPunches}</span></Link>
-      </nav>
-
       <Card>
         <CardContent className="p-0 sm:p-0">
           <AttendanceTable rows={rows} date={dateKey} branchId={branchId ?? ""} query={query} status={attendanceStatus ?? ""} page={page} pageSize={pageSize} totalEmployees={totalEmployees} totalPages={totalPages} region={region} />
         </CardContent>
       </Card>
+      {typeof item === "string" && <ApprovalReview selectedKey={item} backHref={reviewListHref} correction={reviewableCorrection} region={region} />}
     </div>
   );
 }

@@ -16,6 +16,9 @@ import { recordPageNumber, recordPagination, type RecordSearchParams } from "@/l
 import { canReviewLeaveRequest } from "@/lib/leave-lifecycle";
 import { leaveCancellationHistory } from "@/lib/leave-request-history";
 import { getTenantAccess } from "@/lib/modules-server";
+import { ApprovalReview, approvalItemHref } from "../approvals/priority-approvals";
+import { ApprovalReceipt } from "../approvals/approval-receipt";
+import { payrollReviewReturn } from "@/lib/payroll-review-links";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,7 @@ export default async function AdminLeavesPage({ searchParams }: { searchParams: 
   // Branch managers are locked to their own branch (ignore ?branch=); admin skips scoping entirely.
   const isBranchManager = session.role === "branch_manager";
   const isLocationManager = session.role === "location_manager";
+  const payrollReturn = session.role === "admin" || isLocationManager ? payrollReviewReturn(params) : null;
   const ownScope = isBranchManager
     ? await prisma.employee.findUnique({
         where: { id: session.sub },
@@ -122,14 +126,19 @@ export default async function AdminLeavesPage({ searchParams }: { searchParams: 
   ]);
   const awayToday = new Set(currentLeave.filter((request) => countsAsLeaveDay(request.leavePolicySnapshot, today)).map((request) => request.employeeId)).size;
   const cancellationHistory = view === "requests" ? await leaveCancellationHistory(session.tenantId, requests.filter((request) => request.status === "approved" || request.status === "cancelled").map((request) => request.id)) : new Map();
+  const listParams = { ...payrollReturn?.params, view, status: status !== "all" ? status : undefined, q: query || undefined, branch: branch?.id, review: reviewOnly ? "approvals" : undefined };
+  const reviewParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(listParams)) if (value) reviewParams.set(key, value);
+  if (pagination.page > 1) reviewParams.set("page", String(pagination.page));
+  const backHref = `/admin/leaves?${reviewParams}`;
+  const selectedKey = view === "requests" && typeof params.item === "string" ? params.item : "";
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title={reviewOnly ? "Pending leave reviews" : "Leave management"}
-        description={reviewOnly ? "Review leave applications and cancellation requests assigned to your scope." : "Approve requests, see who's away, and track leave balances."}
         actions={
-          reviewOnly ? (
+          payrollReturn ? <Link href={payrollReturn.href} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Back to payroll</Link> : reviewOnly ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium text-primary">
               <Link href="/admin/approvals" className="inline-flex min-h-10 items-center hover:underline">Approvals inbox</Link>
               <Link href={branch ? `/admin/leaves?branch=${encodeURIComponent(branch.id)}` : "/admin/leaves"} className="inline-flex min-h-10 items-center hover:underline">View all leave requests</Link>
@@ -145,12 +154,14 @@ export default async function AdminLeavesPage({ searchParams }: { searchParams: 
           ) : undefined
         }
       />
+      {view === "requests" && typeof params.result === "string" && <ApprovalReceipt result={params.result} tenantId={session.tenantId} actorId={session.sub} backHref={backHref} region={region} leaveScope={scope} />}
       <Card>
         <CardContent className="p-0">
           <LeavesAdmin
             requests={requests.map((request) => ({
               ...request,
               canReview: canReviewLeaveRequest(request, session.sub) && request.cancellationRequestedBy !== session.sub,
+              reviewHref: approvalItemHref(`leave.${request.id}`, backHref),
               cancellationDecision: cancellationHistory.get(request.id),
             }))}
             types={types}
@@ -174,7 +185,8 @@ export default async function AdminLeavesPage({ searchParams }: { searchParams: 
           />
         </CardContent>
       </Card>
-      {view === "requests" && <DocumentExpensePagination path="/admin/leaves" params={{ view, status: status !== "all" ? status : undefined, q: query || undefined, branch: branch?.id, review: reviewOnly ? "approvals" : undefined }} pagination={pagination} label="leave requests" />}
+      {view === "requests" && <DocumentExpensePagination path="/admin/leaves" params={listParams} pagination={pagination} label="leave requests" />}
+      {selectedKey && <ApprovalReview selectedKey={selectedKey} backHref={backHref} leave={{ AND: [reviewScope, where] }} overlapScope={scope.employee} region={region} />}
     </div>
   );
 }

@@ -9,7 +9,6 @@ import { getSession } from "@/lib/session";
 import { getLang } from "@/lib/i18n-server";
 import { prisma } from "@/lib/prisma";
 import { getTenantAccess } from "@/lib/modules-server";
-import { workspaceRegion } from "@/lib/workspace-region";
 import { Shell } from "@/components/shell";
 import { ToastProvider } from "@/components/ui/toast";
 
@@ -35,7 +34,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
 
   return (
     <ToastProvider>
-      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules} region={workspaceRegion(employee.tenant.config)} loginOnly={employee.loginOnly}>
+      <Shell role={employee.role} name={name} companyName={employee.tenant.name} lang={lang} enabledModules={enabledModules} loginOnly={employee.loginOnly}>
         {children}
       </Shell>
     </ToastProvider>

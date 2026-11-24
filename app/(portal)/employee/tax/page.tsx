@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/session";
-import { PageHeader, Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/card";
 import { fyFromMonth } from "@/lib/payroll";
 import { monthKeyIST } from "@/lib/dates";
 import { TaxDeclarationPanel } from "./tax-declaration-panel";
@@ -19,7 +19,7 @@ export default async function EmployeeTaxPage() {
   const fy = fyFromMonth(month);
   const firstYear = Number(fy.slice(0, 4));
   const [employee, declarations, tax, tenant, access, policies] = await Promise.all([
-    prisma.employee.findUnique({ where: { id: session.sub }, select: { salary: true, locationId: true, branchId: true, branch: { select: { locationId: true } } } }),
+    prisma.employee.findUnique({ where: { id: session.sub }, select: { locationId: true, branchId: true, branch: { select: { locationId: true } } } }),
     prisma.taxDeclaration.findMany({ where: { tenantId: session.tenantId, employeeId: session.sub }, orderBy: { fy: "desc" } }),
     prisma.payslip.aggregate({
       where: { ...personalPayslipWhere(session.tenantId, session.sub, false), month: { gte: `${firstYear}-04`, lt: `${firstYear + 1}-04` } },
@@ -41,8 +41,20 @@ export default async function EmployeeTaxPage() {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Tax & statutory"
-        description="Review recorded withholding, submit declared amounts, and track HR review."
+        description="Declare eligible expenses and investments and see tax deducted from your payslips."
         actions={<Link href="/employee/payslips" className="rounded-lg border border-edge bg-card px-3 py-2 text-sm font-medium text-primary hover:bg-tint">My payslips</Link>}
+      />
+      <TaxDeclarationPanel
+        key={fy}
+        currentFy={fy}
+        declarations={declarations.map((d) => ({
+          id: d.id,
+          fy: d.fy,
+          sections: (d.sections ?? {}) as Record<string, number>,
+          status: d.status,
+          note: d.note,
+          updatedAt: d.updatedAt.toISOString(),
+        }))}
       />
       <div className="grid gap-3 sm:grid-cols-2">
         <section className="rounded-xl border border-edge bg-card p-4">
@@ -56,23 +68,6 @@ export default async function EmployeeTaxPage() {
           {access.modules.has("documents") && <Link href="/employee/documents" className="mt-2 inline-block text-sm font-medium text-primary underline">Open shared documents</Link>}
         </section>
       </div>
-      <Card>
-        <CardContent className="p-6">
-          <h2 className="mb-4 font-semibold">Investment declaration</h2>
-          <TaxDeclarationPanel
-            currentFy={fy}
-            declarations={declarations.map((d) => ({
-              id: d.id,
-              fy: d.fy,
-              sections: (d.sections ?? {}) as Record<string, number>,
-              status: d.status,
-              note: d.note,
-              updatedAt: d.updatedAt.toISOString(),
-            }))}
-            monthlySalary={employee?.salary ?? 0}
-          />
-        </CardContent>
-      </Card>
     </div>
   );
 }

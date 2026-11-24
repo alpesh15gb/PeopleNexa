@@ -5,21 +5,20 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
-import { useToast } from "@/components/ui/toast";
 
 export type ApprovalAction =
   | { kind: "leave"; id: string; cancellation: boolean; cancellationRequestedAt?: string }
   | { kind: "correction"; id: string };
 
-export function ApprovalDrawer({ title, employee, backHref, action, children }: {
+export function ApprovalDrawer({ title, employee, backHref, resultHref, action, children }: {
   title: string;
   employee: string;
   backHref: string;
+  resultHref: string;
   action: ApprovalAction;
   children: ReactNode;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
@@ -50,8 +49,7 @@ export function ApprovalDrawer({ title, employee, backHref, action, children }: 
         setError(typeof result?.error === "string" ? result.error : "Could not save the decision. Try again.");
         return;
       }
-      toast("success", status === "approved" ? "Request approved." : "Request declined.");
-      router.replace(backHref, { scroll: false });
+      router.replace(resultHref);
       router.refresh();
     } catch {
       setError("Could not confirm the decision. Reload the inbox to check its status before retrying.");

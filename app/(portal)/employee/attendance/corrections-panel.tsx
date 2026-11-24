@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Wrench, Plus, Clock3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
 import { istDateKey } from "@/lib/ist";
-import { formatCalendarDate, formatWorkspaceTime, parseWorkspaceWallTime } from "@/lib/workspace-time";
+import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, parseWorkspaceWallTime } from "@/lib/workspace-time";
 import { DEFAULT_WORKSPACE_REGION, type WorkspaceRegion } from "@/lib/workspace-region";
 import { t, type Lang } from "@/lib/i18n";
 
@@ -103,7 +104,8 @@ export function CorrectionsPanel({
       if (!res.ok) throw new Error(data.error ?? "The request could not be confirmed. Check your correction history before trying again.");
       toast("success", t(lang, "corrections.submitted"));
       setOpen(false);
-      const listHref = `/employee/attendance?month=${date.slice(0, 7)}&view=corrections${keepReviewFilter ? "&focus=review" : ""}#corrections-${date}`;
+      const anchor = typeof data.correction?.id === "string" ? `correction-${encodeURIComponent(data.correction.id)}` : `corrections-${date}`;
+      const listHref = `/employee/attendance?month=${date.slice(0, 7)}&view=corrections${keepReviewFilter ? "&focus=review" : ""}#${anchor}`;
       router.replace(returnToSource && date === initialDate ? closeHref : listHref, { scroll: true });
       router.refresh();
     } catch (e) {
@@ -114,6 +116,11 @@ export function CorrectionsPanel({
   }
 
   const pending = corrections.filter((c) => c.status === "pending").length;
+  function punchLabel(time: Date | null, day: string, empty: string) {
+    if (!time) return empty;
+    const punchDay = dateKeyInTimeZone(time, region.timeZone);
+    return `${punchDay !== day ? `${formatCalendarDate(punchDay, region.locale)} · ` : ""}${formatWorkspaceTime(time, region)}`;
+  }
 
   return (
     <section aria-labelledby="attendance-corrections">
@@ -136,20 +143,25 @@ export function CorrectionsPanel({
         />
       ) : (
         <div className="mt-4 divide-y divide-[color:var(--border)]">
-          {corrections.map((c, index) => (
-            <div key={c.id} id={index === 0 || istDateKey(corrections[index - 1].date) !== istDateKey(c.date) ? `corrections-${istDateKey(c.date)}` : undefined} className="scroll-mt-24 space-y-2 py-4">
-              <div className="flex items-center justify-between gap-3">
-                <time dateTime={istDateKey(c.date)} className="font-medium">{formatCalendarDate(istDateKey(c.date), region.locale)}</time>
+          {corrections.map((c, index) => {
+            const day = istDateKey(c.date);
+            const dayHref = `/employee/attendance?view=entries&layout=calendar&month=${day.slice(0, 7)}&date=${day}#attendance-${day}`;
+            return <div key={c.id} id={index === 0 || istDateKey(corrections[index - 1].date) !== day ? `corrections-${day}` : undefined} className="scroll-mt-24 py-4">
+              <article id={`correction-${c.id}`} className="scroll-mt-24 space-y-2 rounded-lg px-2 target:bg-primary/5 target:ring-1 target:ring-primary/30">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <time dateTime={day} className="font-medium">{formatCalendarDate(day, region.locale)}</time>
                 <Badge tone={c.status === "pending" ? "warning" : c.status === "approved" ? "success" : "danger"}>{t(lang, `status.${c.status}`)}</Badge>
               </div>
               <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div><dt className="text-xs text-muted-foreground">Recorded</dt><dd>{formatWorkspaceTime(c.currentIn, region)} → {formatWorkspaceTime(c.currentOut, region)}</dd></div>
-                <div><dt className="text-xs text-muted-foreground">Requested</dt><dd>{formatWorkspaceTime(c.requestedIn, region)} → {formatWorkspaceTime(c.requestedOut, region)}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Check-in</dt><dd>{punchLabel(c.currentIn, day, "No recorded punch")} → {punchLabel(c.requestedIn, day, "No change requested")}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Check-out</dt><dd>{punchLabel(c.currentOut, day, "No recorded punch")} → {punchLabel(c.requestedOut, day, "No change requested")}</dd></div>
               </dl>
               <p className="break-words text-sm text-muted-foreground">{c.reason}</p>
               {c.reviewNote && <p className="break-words text-sm"><span className="font-medium">Reviewer note</span> · {c.reviewNote}</p>}
-            </div>
-          ))}
+              <Link href={dayHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">View attendance for this date</Link>
+              </article>
+            </div>;
+          })}
         </div>
       )}
 

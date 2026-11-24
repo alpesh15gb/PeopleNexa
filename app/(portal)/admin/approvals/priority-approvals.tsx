@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { workspaceRegion, type WorkspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, offsetDateKey } from "@/lib/workspace-time";
 import { ApprovalDrawer } from "./approval-drawer";
+import { ApprovalReceipt } from "./approval-receipt";
 
 const employeeName = { firstName: true, lastName: true } as const;
 const leaveSummary = {
@@ -28,10 +29,16 @@ function rangeLabel(from: Date, to: Date, locale: string) {
   return start === end ? start : `${start} – ${end}`;
 }
 
-function itemHref(key: string, backHref: string) {
+export function approvalItemHref(key: string, backHref: string) {
   const url = new URL(backHref, "https://inbox.local");
   url.searchParams.set("item", key);
   return `${url.pathname}${url.search}`;
+}
+
+export function approvalResultHref(key: string, backHref: string) {
+  const url = new URL(backHref, "https://inbox.local");
+  url.searchParams.set("result", key);
+  return `${url.pathname}${url.search}#review-result`;
 }
 
 async function LeaveOverlap({ request, scope, locale }: {
@@ -82,19 +89,24 @@ async function LeaveOverlap({ request, scope, locale }: {
   </section>;
 }
 
-function PunchChange({ label, previous, requested, region }: { label: string; previous: Date | null; requested: Date | null; region: WorkspaceRegion }) {
+function PunchChange({ label, previous, requested, current, region }: { label: string; previous: Date | null; requested: Date | null; current: Date | null; region: WorkspaceRegion }) {
   const describe = (value: Date) => `${formatCalendarDate(dateKeyInTimeZone(value, region.timeZone), region.locale)} at ${formatWorkspaceTime(value, region)}`;
   return <div className="rounded-lg bg-tint p-3">
     <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
-    <dd className="mt-1 text-sm"><span className="text-muted-foreground">{previous ? describe(previous) : "No recorded time"}</span><br />{requested ? `Requested ${describe(requested)}` : "No change requested"}</dd>
+    <dd className="mt-1 space-y-1 text-sm">
+      <div className="text-muted-foreground">Recorded at submission · {previous ? describe(previous) : "None"}</div>
+      {previous?.getTime() !== current?.getTime() && <div className="font-medium text-amber-800 dark:text-amber-300">Current attendance · {current ? describe(current) : "None"}</div>}
+      <div>{requested ? `Requested · ${describe(requested)}` : "No change requested"}</div>
+    </dd>
   </div>;
 }
 
-export async function PriorityApprovals({ session, modules, filters, selectedKey, backHref = "/admin/approvals", limit = 8 }: {
+export async function PriorityApprovals({ session, modules, filters, selectedKey, result, backHref = "/admin/approvals", limit = 8 }: {
   session: SessionPayload;
   modules: ReadonlySet<string>;
   filters?: PendingApprovalFilters;
   selectedKey?: string;
+  result?: string;
   backHref?: string;
   limit?: number;
 }) {
@@ -102,25 +114,10 @@ export async function PriorityApprovals({ session, modules, filters, selectedKey
   const leave = modules.has("leaves") ? scope.leave : undefined;
   const correction = modules.has("attendance") ? scope.correction : undefined;
   if (!leave && !correction && !selectedKey) return null;
-  const idMatch = /^(leave|correction)\.([a-zA-Z0-9_-]{1,100})$/.exec(selectedKey ?? "");
-  const leaveId = idMatch?.[1] === "leave" ? idMatch[2] : undefined;
-  const correctionId = idMatch?.[1] === "correction" ? idMatch[2] : undefined;
-
-  const [pending, cancellations, corrections, selectedLeave, selectedCorrection, tenant] = await Promise.all([
+  const [pending, cancellations, corrections, tenant] = await Promise.all([
     leave ? prisma.leaveRequest.findMany({ where: { AND: [leave, { status: "pending" }] }, orderBy: [{ appliedAt: "asc" }, { id: "asc" }], select: leaveSummary, take: limit }) : [],
     leave ? prisma.leaveRequest.findMany({ where: { AND: [leave, { status: "approved" }] }, orderBy: [{ cancellationRequestedAt: { sort: "asc", nulls: "last" } }, { appliedAt: "asc" }, { id: "asc" }], select: leaveSummary, take: limit }) : [],
     correction ? prisma.punchCorrection.findMany({ where: correction, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: correctionSummary, take: limit }) : [],
-    leave && leaveId ? prisma.leaveRequest.findFirst({
-      where: { AND: [leave, { id: leaveId }] },
-      select: {
-        ...leaveSummary, tenantId: true, employeeId: true, status: true, reason: true, cancellationReason: true, leavePolicySnapshot: true,
-        employee: { select: { ...employeeName, managerId: true, branchId: true } },
-      },
-    }) : null,
-    correction && correctionId ? prisma.punchCorrection.findFirst({
-      where: { AND: [correction, { id: correctionId }] },
-      select: { ...correctionSummary, currentIn: true, currentOut: true, requestedIn: true, requestedOut: true, reason: true },
-    }) : null,
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { config: true } }),
   ]);
   const region = workspaceRegion(tenant?.config);
@@ -130,12 +127,13 @@ export async function PriorityApprovals({ session, modules, filters, selectedKey
   ].sort((a, b) => a.addedAt.getTime() - b.addedAt.getTime() || a.key.localeCompare(b.key)).slice(0, limit);
 
   return <>
+    {result && <ApprovalReceipt result={result} tenantId={session.tenantId} actorId={session.sub} backHref={backHref} region={region} correctionScope={correction && { employee: correction.employee }} leaveScope={leave && { employee: leave.employee }} />}
     {rows.length > 0 && <section aria-label="Priority approvals" className="min-w-0">
-      <h2 className="mb-1 font-display text-lg font-semibold">Priority approvals</h2>
-      <p className="mb-3 text-sm text-muted-foreground">Oldest leave and punch correction requests first.</p>
+      <h2 className="mb-3 font-display text-lg font-semibold">Priority approvals</h2>
+
       <ul className="divide-y divide-edge rounded-xl border border-edge bg-card">
         {rows.map((row) => <li key={row.key}>
-          <Link href={itemHref(row.key, backHref)} scroll={false} className="flex min-w-0 items-center gap-3 rounded-lg px-4 py-3 hover:bg-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          <Link href={approvalItemHref(row.key, backHref)} prefetch={false} scroll={false} className="flex min-w-0 items-center gap-3 rounded-lg px-4 py-3 hover:bg-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
             <span className="min-w-0 flex-1">
               <span className="block break-words text-sm font-semibold">{row.name} <span className="font-normal text-muted-foreground">· {row.title}</span></span>
               <span className="block break-words text-xs text-muted-foreground">{row.details}</span>
@@ -145,22 +143,59 @@ export async function PriorityApprovals({ session, modules, filters, selectedKey
         </li>)}
       </ul>
     </section>}
-    {selectedLeave && <ApprovalDrawer key={selectedKey} title={selectedLeave.status === "approved" ? "Review leave cancellation" : "Review leave request"} employee={displayName(selectedLeave.employee)} backHref={backHref} action={{ kind: "leave", id: selectedLeave.id, cancellation: selectedLeave.status === "approved", cancellationRequestedAt: selectedLeave.cancellationRequestedAt?.toISOString() }}>
+    {selectedKey && <ApprovalReview selectedKey={selectedKey} backHref={backHref} leave={leave} correction={correction} region={region} />}
+  </>;
+}
+
+export async function ApprovalReview({ selectedKey, backHref, leave, correction, overlapScope = leave?.employee, region }: {
+  selectedKey: string;
+  backHref: string;
+  leave?: Prisma.LeaveRequestWhereInput;
+  correction?: Prisma.PunchCorrectionWhereInput;
+  overlapScope?: Prisma.LeaveRequestWhereInput["employee"];
+  region: WorkspaceRegion;
+}) {
+  const idMatch = /^(leave|correction)\.([a-zA-Z0-9_-]{1,100})$/.exec(selectedKey ?? "");
+  const leaveId = idMatch?.[1] === "leave" ? idMatch[2] : undefined;
+  const correctionId = idMatch?.[1] === "correction" ? idMatch[2] : undefined;
+
+  const [selectedLeave, selectedCorrection] = await Promise.all([
+    leave && leaveId ? prisma.leaveRequest.findFirst({
+      where: { AND: [leave, { id: leaveId }] },
+      select: {
+        ...leaveSummary, tenantId: true, employeeId: true, status: true, reason: true, cancellationReason: true, leavePolicySnapshot: true,
+        employee: { select: { ...employeeName, managerId: true, branchId: true } },
+      },
+    }) : null,
+    correction && correctionId ? prisma.punchCorrection.findFirst({
+      where: { AND: [correction, { id: correctionId }] },
+      select: { ...correctionSummary, tenantId: true, employeeId: true, currentIn: true, currentOut: true, requestedIn: true, requestedOut: true, reason: true },
+    }) : null,
+  ]);
+  const attendance = selectedCorrection ? await prisma.attendance.findUnique({
+    where: { employeeId_date: { employeeId: selectedCorrection.employeeId, date: selectedCorrection.date }, tenantId: selectedCorrection.tenantId },
+    select: { punchInTime: true, punchOutTime: true },
+  }) : null;
+  const resultHref = approvalResultHref(selectedKey, backHref);
+
+  return <>
+    {selectedLeave && <ApprovalDrawer key={selectedKey} title={selectedLeave.status === "approved" ? "Review leave cancellation" : "Review leave request"} employee={displayName(selectedLeave.employee)} backHref={backHref} resultHref={resultHref} action={{ kind: "leave", id: selectedLeave.id, cancellation: selectedLeave.status === "approved", cancellationRequestedAt: selectedLeave.cancellationRequestedAt?.toISOString() }}>
       <dl className="space-y-3 text-sm">
         <div><dt className="text-xs font-semibold text-muted-foreground">Leave</dt><dd>{selectedLeave.leaveType.name} · {selectedLeave.days} {selectedLeave.days === 1 ? "day" : "days"}</dd></div>
         <div><dt className="text-xs font-semibold text-muted-foreground">Dates</dt><dd>{rangeLabel(selectedLeave.fromDate, selectedLeave.toDate, region.locale)}</dd></div>
         <div><dt className="text-xs font-semibold text-muted-foreground">{selectedLeave.status === "approved" ? "Cancellation reason" : "Reason"}</dt><dd className="whitespace-pre-wrap break-words">{(selectedLeave.status === "approved" ? selectedLeave.cancellationReason : selectedLeave.reason) || "No reason provided"}</dd></div>
+        {selectedLeave.status === "approved" && selectedLeave.reason && <div><dt className="text-xs font-semibold text-muted-foreground">Original leave reason</dt><dd className="whitespace-pre-wrap break-words">{selectedLeave.reason}</dd></div>}
       </dl>
-      <LeaveOverlap request={selectedLeave} scope={leave?.employee} locale={region.locale} />
+      <LeaveOverlap request={selectedLeave} scope={overlapScope} locale={region.locale} />
     </ApprovalDrawer>}
-    {selectedCorrection && <ApprovalDrawer key={selectedKey} title="Review punch correction" employee={displayName(selectedCorrection.employee)} backHref={backHref} action={{ kind: "correction", id: selectedCorrection.id }}>
+    {selectedCorrection && <ApprovalDrawer key={selectedKey} title="Review punch correction" employee={displayName(selectedCorrection.employee)} backHref={backHref} resultHref={resultHref} action={{ kind: "correction", id: selectedCorrection.id }}>
       <p className="text-sm"><span className="font-semibold">Attendance date</span> {formatCalendarDate(istDateKey(selectedCorrection.date), region.locale)} <span className="text-muted-foreground">· {region.timeZone}</span></p>
       <dl className="grid gap-3 sm:grid-cols-2">
-        <PunchChange label="Check-in" previous={selectedCorrection.currentIn} requested={selectedCorrection.requestedIn} region={region} />
-        <PunchChange label="Check-out" previous={selectedCorrection.currentOut} requested={selectedCorrection.requestedOut} region={region} />
+        <PunchChange label="Check-in" previous={selectedCorrection.currentIn} requested={selectedCorrection.requestedIn} current={attendance?.punchInTime ?? null} region={region} />
+        <PunchChange label="Check-out" previous={selectedCorrection.currentOut} requested={selectedCorrection.requestedOut} current={attendance?.punchOutTime ?? null} region={region} />
       </dl>
       <p className="whitespace-pre-wrap break-words text-sm">{selectedCorrection.reason}</p>
     </ApprovalDrawer>}
-    {selectedKey && !selectedLeave && !selectedCorrection && <p role="status" className="rounded-lg border border-edge bg-card p-4 text-sm text-muted-foreground">This request is no longer available in your inbox. <Link href={backHref} className="font-medium text-primary underline">Back to approvals</Link></p>}
+    {selectedKey && !selectedLeave && !selectedCorrection && <p role="status" className="rounded-lg border border-edge bg-card p-4 text-sm text-muted-foreground">This request is no longer available for review. <Link href={backHref} className="font-medium text-primary underline">Return to the list</Link></p>}
   </>;
 }

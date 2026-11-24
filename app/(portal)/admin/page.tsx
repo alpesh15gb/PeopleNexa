@@ -12,7 +12,7 @@ import { workspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone, formatCalendarDate, formatWorkspaceTime, offsetDateKey, timeZoneDayRange } from "@/lib/workspace-time";
 import { EmptyState, StatCard } from "@/components/ui/stat";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusPill } from "@/components/ui/badge";
+import { Badge, StatusPill } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { WeekChart } from "./week-chart";
@@ -21,6 +21,7 @@ import { tallyDailyAttendance, type AttendanceTally } from "@/lib/attendance-tal
 import { authorizedPunchDayFilter, dailyPresentEmployeeCounts } from "@/lib/attendance-presence";
 import { dashboardLayout, payrollPolicyDraft, defaultDashboardWidgets, resolveConfiguration, type DashboardWidgetKey, type DashboardWidgetSize } from "@/lib/configuration";
 import { payrollScopeHref } from "@/lib/payroll-work-queue";
+import { getOnboardingHandoff } from "@/lib/onboarding-tasks";
 import { pendingApprovalFilters } from "@/lib/approval-workspace";
 import { recordPageNumber, type RecordSearchParams } from "@/lib/document-expense-pagination";
 
@@ -117,7 +118,7 @@ export default async function AdminDashboardPage({
   const currentMonth = todayKey.slice(0, 7);
   const attendancePageSize = 25;
   const inboxParams = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) if (key !== "item" && typeof value === "string") inboxParams.set(key, value);
+  for (const [key, value] of Object.entries(params)) if (key !== "item" && key !== "result" && typeof value === "string") inboxParams.set(key, value);
   const dashboardPageHrefForInbox = inboxParams.size ? `/admin?${inboxParams}` : "/admin";
   const requestedPage = recordPageNumber(params.attendancePage) ?? 1;
   const [year, month] = currentMonth.split("-").map(Number);
@@ -208,7 +209,7 @@ export default async function AdminDashboardPage({
   const [onboardingTasks, payrollPolicies] = await Promise.all([
     !isBranchManager && modules.has("onboarding") ? prisma.onboardingTask.findMany({
       where: { tenantId: session.tenantId, status: "pending", employee: empScope },
-      select: { id: true, name: true, dueBy: true, employee: { select: { id: true, firstName: true, lastName: true } } },
+      select: { id: true, name: true, dueBy: true, employee: { select: { id: true, firstName: true, lastName: true, password: true, mustChangePassword: true } } },
       orderBy: [{ dueBy: { sort: "asc", nulls: "last" } }, { id: "asc" }], take: 3,
     }) : [],
     showPayrollSchedule ? prisma.configurationRecord.findMany({
@@ -221,13 +222,18 @@ export default async function AdminDashboardPage({
   const monthEndDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const scheduledDate = (day: number) => formatCalendarDate(currentMonth + "-" + String(Math.min(day, monthEndDay)).padStart(2, "0"), region.locale);
   const scheduledPayDay = schedule?.payDateRule === "last_day" ? monthEndDay : schedule?.payDay;
+  const hasPublishedPayrollSchedule = Boolean(scheduledPayDay || schedule?.attendanceCutoffDay);
   const payScope = { locationId: dashboardLocationId, period: currentMonth };
   const workflowLinks = [
     ...(canSeeAttendance ? [{
       title: "Attendance", icon: CalendarClock,
       summary: `${counts.livePresent.toLocaleString(region.locale)} of ${counts.total.toLocaleString(region.locale)} active employees clocked in`,
-      primary: { href: `/admin/attendance?${attendanceScope}`, label: "View today’s records" },
-      secondary: { href: correctionReviewHref, label: `Review corrections (${correctionCount})` },
+      primary: correctionCount > 0
+        ? { href: correctionReviewHref, label: `Review corrections (${correctionCount})` }
+        : { href: `/admin/attendance?${attendanceScope}`, label: "View today’s records" },
+      secondary: correctionCount > 0
+        ? { href: `/admin/attendance?${attendanceScope}`, label: "View today’s records" }
+        : { href: correctionReviewHref, label: "Attendance review history" },
       setup: session.role === "admin" ? { href: `/admin/attendance?${new URLSearchParams({ view: "setup", ...branchScope })}`, label: "Attendance setup" } : null,
     }] : []),
     ...(canSeeLeaves ? [{
@@ -240,8 +246,8 @@ export default async function AdminDashboardPage({
     ...(!isBranchManager && modules.has("payroll") ? [{
       title: "Payroll", icon: Banknote,
       summary: `${new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${currentMonth}-01T00:00:00Z`))} · ${region.currency}`,
-      primary: { href: payrollScopeHref("/admin/payroll/queue", payScope), label: "Open payroll work queue" },
-      secondary: { href: payrollScopeHref("/admin/payroll", payScope), label: "View monthly payroll" },
+      primary: { href: payrollScopeHref("/admin/payroll", payScope), label: "Open monthly payroll" },
+      secondary: { href: payrollScopeHref("/admin/payroll/queue", payScope), label: "Open payroll work queue" },
       setup: session.role === "admin" ? { href: payrollScopeHref("/admin/payroll/configuration", payScope), label: "Payroll setup" } : null,
     }] : []),
   ];
@@ -615,28 +621,33 @@ export default async function AdminDashboardPage({
 
   return (
     <div className="animate-fade-up space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-edge bg-card p-5 sm:p-6">
-        <div>
-          <h1 className="font-display text-[28px] font-bold tracking-[-0.035em]">HR dashboard</h1>
-          <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-            {todayLabel} · {region.timeZone}
-            {branchFilter ? ` · ${branchFilter.name}` : " · All branches in your scope"}
-          </p>
+      <header className="relative overflow-hidden rounded-2xl bg-[#16392d] p-5 text-[#f2faf4] sm:p-8">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-28 size-72 rounded-full border-[36px] border-[#96d78c]/15 sm:right-4" />
+        <div className="relative flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-3 text-sm font-medium text-[#cce6d4]">{todayLabel} <span aria-hidden="true">·</span> {region.timeZone}</p>
+            <h1 className="font-display text-3xl font-semibold tracking-[-0.045em] sm:text-5xl">Team overview</h1>
+            <p className="mt-2 text-sm text-[#cce6d4]">{branchFilter?.name ?? "All branches in your scope"}</p>
+          </div>
+          {canReview && <Link href="/admin/approvals" className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#d4efb9] px-4 text-sm font-semibold text-[#173924] hover:bg-[#e5f8d3] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+            All approval queues <ArrowUpRight aria-hidden="true" className="size-4" />
+          </Link>}
         </div>
-        <div className="flex flex-wrap items-center gap-2">{isBranchManager ? (
-          <span className="rounded-xl border border-edge bg-tint px-3 py-1.5 text-[12px] font-medium text-muted-foreground">
-            Branch: {ownBranchName}
-          </span>
-        ) : (
-          <form key={branchId ?? "all"} action="/admin" aria-label="Dashboard branch" className="flex min-w-0 flex-wrap items-center gap-2">
-            <Select name="branch" aria-label="Filter by branch" defaultValue={branchId ?? ""} className="min-w-40 max-w-full">
-              <option value="">All branches</option>
-              {branches.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
-            </Select>
-            <Button type="submit" size="sm" variant="outline">Apply branch</Button>
+      </header>
+      {(!isBranchManager || session.role === "admin") && <div className="flex flex-wrap items-end justify-between gap-3">
+        {!isBranchManager && (
+          <form key={branchId ?? "all"} action="/admin" aria-label="Dashboard branch" className="flex min-w-0 flex-wrap items-end gap-2">
+            <label className="min-w-0 space-y-1"><span className="block text-xs font-medium text-muted-foreground">Branch scope</span>
+              <Select name="branch" aria-label="Filter by branch" defaultValue={branchId ?? ""} className="min-w-36 max-w-full">
+                <option value="">All branches</option>
+                {branches.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+              </Select>
+            </label>
+            <Button type="submit" variant="outline">Apply branch</Button>
           </form>
-        )}{session.role === "admin" && <Link href={layoutEditorHref} className="rounded-lg border border-edge px-3 py-2 text-xs font-medium hover:bg-tint">Customize dashboard</Link>}{canReview && <Link href="/admin/approvals" className="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:brightness-110">All approval queues</Link>}</div>
-      </div>
+        )}
+        {session.role === "admin" && <Link href={layoutEditorHref} className="inline-flex min-h-10 items-center rounded-lg px-2 text-sm font-medium text-primary hover:underline">Customize dashboard</Link>}
+      </div>}
 
       {canReview && <PriorityApprovals session={session} modules={modules}
         filters={{
@@ -644,13 +655,32 @@ export default async function AdminDashboardPage({
           correction: reviewFilters.correction && { ...reviewFilters.correction, employee: { AND: [reviewFilters.correction.employee ?? {}, branchId ? { branchId } : {}] } },
         }}
         selectedKey={typeof params.item === "string" ? params.item : undefined}
+        result={typeof params.result === "string" ? params.result : undefined}
         backHref={dashboardPageHrefForInbox} limit={4} />}
-      {(onboardingTasks.length > 0 || showPayrollSchedule) && <div className="grid gap-4 md:grid-cols-2">
-        {onboardingTasks.length > 0 && <section className="rounded-xl border border-edge bg-card p-4"><h2 className="mb-2 font-semibold">Onboarding tasks due next</h2>
-          <ul className="divide-y divide-edge">{onboardingTasks.map(task => <li key={task.id}><Link className="block py-2 text-sm hover:underline" href={`/admin/onboarding?employee=${task.employee.id}`}>
-            <strong>{task.employee.firstName} {task.employee.lastName}</strong> · {task.name}<span className="block text-xs text-muted-foreground">{task.dueBy ? dateLabel(task.dueBy) : "No due date"}</span>
-          </Link></li>)}</ul></section>}
-        {showPayrollSchedule && <section className="rounded-xl border border-edge bg-card p-4"><h2 className="font-semibold">{dashboardLocationId ? "Payroll schedule" : "Company payroll schedule"}</h2>
+      {(onboardingTasks.length > 0 || hasPublishedPayrollSchedule) && <div className={onboardingTasks.length > 0 && hasPublishedPayrollSchedule ? "grid gap-4 md:grid-cols-2" : "grid gap-4"}>
+        {onboardingTasks.length > 0 && (
+          <section className="rounded-xl border border-edge bg-card p-4">
+            <h2 className="mb-2 font-semibold">Onboarding tasks due next</h2>
+            <ul className="divide-y divide-edge">
+              {onboardingTasks.map(({ id, name, dueBy, employee }) => {
+                const handoff = getOnboardingHandoff({
+                  active: true, total: 1, done: 0,
+                  signIn: !employee.password ? "missing" : employee.mustChangePassword ? "temporary" : "ready",
+                });
+                return <li key={id}>
+                  <Link className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
+                    href={`/admin/onboarding?employee=${encodeURIComponent(employee.id)}`}>
+                    <span className="min-w-0"><strong>{employee.firstName} {employee.lastName}</strong>
+                      <span className="block break-words text-xs text-muted-foreground">{name}{dueBy ? ` · Due ${dateLabel(dueBy)}` : ""}</span>
+                    </span>
+                    <Badge tone={handoff.state === "setup" ? "warning" : "neutral"}>{handoff.label}</Badge>
+                  </Link>
+                </li>;
+              })}
+            </ul>
+          </section>
+        )}
+        {hasPublishedPayrollSchedule && <section className="rounded-xl border border-edge bg-card p-4"><h2 className="font-semibold">{dashboardLocationId ? "Payroll schedule" : "Company payroll schedule"}</h2>
           <p className="mt-2 text-sm">{scheduledPayDay ? "Scheduled pay date · " + scheduledDate(scheduledPayDay) : "No pay date published for this scope."}</p>
           {schedule?.attendanceCutoffDay && <p className="text-sm">Attendance cutoff · {scheduledDate(schedule.attendanceCutoffDay)}</p>}
           <Link className="mt-3 inline-block text-sm font-medium text-primary hover:underline" href={payrollScopeHref("/admin/payroll", payScope)}>Check payroll inputs</Link></section>}
@@ -673,23 +703,26 @@ export default async function AdminDashboardPage({
       {workflowLinks.length > 0 && (
         <section aria-labelledby="operations-heading" className="space-y-3">
           <h2 id="operations-heading" className="font-display text-lg font-semibold">HR operations</h2>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="divide-y divide-edge rounded-xl border border-edge bg-card">
           {workflowLinks.map(({ title, icon: Icon, summary, primary, secondary, setup }) => (
-            <Card key={title} className="min-w-0">
-              <CardHeader className="gap-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon aria-hidden="true" className="size-4" /></span>
-                  <div><CardTitle>{title}</CardTitle><CardDescription>{summary}</CardDescription></div>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-3">
+            <div key={title} className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Icon aria-hidden="true" className="size-5" /></span>
+                <div><h3 className="font-semibold">{title}</h3><p className="text-sm text-muted-foreground">{summary}</p></div>
+              </div>
+              <div className="flex max-w-full flex-wrap items-center gap-x-4 gap-y-1 sm:justify-end">
                 <Link href={primary.href} className="inline-flex min-h-9 items-center gap-1.5 text-sm font-semibold text-primary hover:underline">
                   {primary.label}<ArrowUpRight aria-hidden="true" className="size-3.5" />
                 </Link>
-                <Link href={secondary.href} className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground hover:underline">{secondary.label}</Link>
-                {setup && <Link href={setup.href} className="inline-flex min-h-9 items-center text-sm text-muted-foreground hover:text-foreground hover:underline">{setup.label}</Link>}
-              </CardContent>
-            </Card>
+                <details className="relative">
+                  <summary className="cursor-pointer px-1 py-2 text-sm text-muted-foreground">More <span className="sr-only">{title} links</span></summary>
+                  <div className="min-w-0 rounded-lg border border-edge bg-card p-1.5 sm:absolute sm:right-0 sm:z-10 sm:w-52">
+                    <Link href={secondary.href} className="block rounded px-2 py-2 text-sm hover:bg-tint">{secondary.label}</Link>
+                    {setup && <Link href={setup.href} className="block rounded px-2 py-2 text-sm hover:bg-tint">{setup.label}</Link>}
+                  </div>
+                </details>
+              </div>
+            </div>
           ))}
           </div>
         </section>

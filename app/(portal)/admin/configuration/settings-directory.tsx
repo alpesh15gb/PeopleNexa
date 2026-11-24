@@ -11,14 +11,7 @@ export type SettingsService = {
 export function SettingsDirectory({ services }: { services: SettingsService[] }) {
   return (
     <div className="space-y-4">
-      <nav aria-label="Settings services" className="flex flex-wrap gap-2 rounded-2xl border border-edge bg-card p-3">
-        {services.map((service) => (
-          <a key={service.id} href={`#${service.id}`} className="rounded-lg px-3 py-2 text-sm font-medium text-foreground hover:bg-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
-            {service.title}
-          </a>
-        ))}
-      </nav>
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4 min-[880px]:grid-cols-2">
         {services.map((service) => (
           <Card key={service.id} id={service.id} className="scroll-mt-24" aria-labelledby={`${service.id}-title`}>
             <CardHeader><CardTitle id={`${service.id}-title`}>{service.title}</CardTitle></CardHeader>

@@ -12,6 +12,9 @@ import { workspaceRegion } from "@/lib/workspace-region";
 import { formatCalendarDate, timeZoneDayRange } from "@/lib/workspace-time";
 import { recordPageNumber, recordPagination, type RecordSearchParams } from "@/lib/document-expense-pagination";
 import { RegularizationPanel } from "./regularization-panel";
+import { ApprovalReview, approvalItemHref } from "../approvals/priority-approvals";
+import { ApprovalReceipt } from "../approvals/approval-receipt";
+import { payrollReviewReturn } from "@/lib/payroll-review-links";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,7 @@ export default async function AdminRegularizationPage({ searchParams }: { search
   const [session, params] = await Promise.all([requireActiveSession(), searchParams]);
   if (!["admin", "supervisor", "branch_manager", "location_manager"].includes(session.role)) redirect("/employee/attendance");
   const { tenantId, role } = session;
+  const payrollReturn = ["admin", "location_manager"].includes(role) ? payrollReviewReturn(params) : null;
   const manager = role === "branch_manager" || role === "location_manager"
     ? await prisma.employee.findFirst({ where: { id: session.sub, tenantId }, select: { branchId: true, locationId: true } })
     : null;
@@ -39,7 +43,7 @@ export default async function AdminRegularizationPage({ searchParams }: { search
   const punchDay = date ? timeZoneDayRange(date, region.timeZone) : null;
 
   function href(section: string, status?: string, filterDate = date) {
-    const query = new URLSearchParams({ view: section });
+    const query = new URLSearchParams({ ...payrollReturn?.params, view: section });
     if (status) query.set("status", status);
     if (filterDate) query.set("date", filterDate);
     if (branch) query.set("branch", branch.id);
@@ -61,6 +65,12 @@ export default async function AdminRegularizationPage({ searchParams }: { search
   };
   const total = view === "corrections" ? await prisma.punchCorrection.count({ where: correctionWhere }) : await prisma.punch.count({ where: punchWhere });
   const pagination = recordPagination(total, recordPageNumber(params.page) ?? 1, 25);
+  const listParams = { ...payrollReturn?.params, view, status: reviewed ? "reviewed" : undefined, date: date || undefined, branch: branch?.id, review: reviewOnly ? "approvals" : undefined };
+  const reviewParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(listParams)) if (value) reviewParams.set(key, value);
+  if (pagination.page > 1) reviewParams.set("page", String(pagination.page));
+  const backHref = `/admin/regularization?${reviewParams}`;
+  const selectedKey = view === "corrections" && !reviewed && typeof params.item === "string" ? params.item : "";
   const corrections = view === "corrections" ? await prisma.punchCorrection.findMany({
     where: correctionWhere,
     include: { employee: employeeDetails },
@@ -87,9 +97,10 @@ export default async function AdminRegularizationPage({ searchParams }: { search
     <div className="space-y-5">
       <PageHeader
         title="Attendance review"
-        description={date ? `${formatCalendarDate(date, region.locale)}${branch ? ` · ${branch.name}` : ""} · ${region.timeZone}` : "Review employee corrections and verify held mobile punches."}
-        actions={<Link href={attendanceHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Back to daily attendance</Link>}
+        description={date ? `${formatCalendarDate(date, region.locale)}${branch ? ` · ${branch.name}` : ""} · ${region.timeZone}` : undefined}
+        actions={<Link href={payrollReturn?.href ?? attendanceHref} className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">{payrollReturn ? "Back to payroll" : "Back to daily attendance"}</Link>}
       />
+      {typeof params.result === "string" && <ApprovalReceipt result={params.result} tenantId={tenantId} actorId={session.sub} backHref={backHref} region={region} correctionScope={{ ...correctionWhere, status: { in: ["approved", "rejected"] } }} />}
       {reviewOnly ? <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium text-primary">
         <Link className="inline-flex min-h-10 items-center hover:underline" href="/admin/approvals">Approvals inbox</Link>
         <Link className="inline-flex min-h-10 items-center hover:underline" href={href("corrections")}>Open attendance review workspace</Link>
@@ -115,6 +126,7 @@ export default async function AdminRegularizationPage({ searchParams }: { search
             currentOut: correction.currentOut?.toISOString() ?? null, requestedIn: correction.requestedIn?.toISOString() ?? null,
             requestedOut: correction.requestedOut?.toISOString() ?? null, reason: correction.reason, status: correction.status,
             reviewNote: correction.reviewNote, createdAt: correction.createdAt.toISOString(), employee: correction.employee,
+            reviewHref: approvalItemHref(`correction.${correction.id}`, backHref),
           }))}
           faceReviews={faceReviews.map((punch) => ({
             ...punch, punchTime: punch.punchTime.toISOString(),
@@ -122,7 +134,8 @@ export default async function AdminRegularizationPage({ searchParams }: { search
           }))}
         />
       </CardContent></Card>
-      <DocumentExpensePagination path="/admin/regularization" params={{ view, status: reviewed ? "reviewed" : undefined, date: date || undefined, branch: branch?.id, review: reviewOnly ? "approvals" : undefined }} pagination={pagination} label={view === "corrections" ? "corrections" : "punches"} />
+      <DocumentExpensePagination path="/admin/regularization" params={listParams} pagination={pagination} label={view === "corrections" ? "corrections" : "punches"} />
+      {selectedKey && <ApprovalReview selectedKey={selectedKey} backHref={backHref} correction={correctionWhere} region={region} />}
     </div>
   );
 }

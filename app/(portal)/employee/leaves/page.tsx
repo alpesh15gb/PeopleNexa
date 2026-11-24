@@ -75,9 +75,10 @@ export default async function EmployeeLeavesPage({ searchParams }: {
 
   const policyDate = configurationEffectiveAtISTDay(new Date(`${today}T00:00:00Z`));
   const locationId = employee?.branch?.locationId ?? employee?.locationId ?? null;
-  const submittedId = typeof query.submitted === "string" && query.submitted.length <= 128 ? query.submitted : null;
+  const requestKey = query.submitted ?? query.request;
+  const highlightedId = typeof requestKey === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(requestKey) ? requestKey : null;
   const now = new Date();
-  const [policyBalances, policyRecords, importedBalances, cancellationHistory, submittedRequest] = await Promise.all([
+  const [policyBalances, policyRecords, importedBalances, cancellationHistory, highlightedRequest] = await Promise.all([
     prisma.leavePolicyBalance.findMany({
       where: {
         tenantId: session.tenantId,
@@ -119,9 +120,9 @@ export default async function EmployeeLeavesPage({ searchParams }: {
       orderBy: { periodEnd: "desc" },
     }),
     leaveCancellationHistory(session.tenantId, requests.filter((request) => request.status === "approved" || request.status === "cancelled").map((request) => request.id)),
-    submittedId && view === "requests" ? prisma.leaveRequest.findFirst({
-      where: { ...scope, id: submittedId },
-      select: { id: true, fromDate: true, toDate: true, status: true, days: true, leaveType: { select: { name: true, color: true } } },
+    highlightedId && view === "requests" ? prisma.leaveRequest.findFirst({
+      where: { ...scope, id: highlightedId },
+      select: { id: true, fromDate: true, toDate: true, status: true, days: true, reviewNote: true, cancellationRequestedBy: true, leaveType: { select: { name: true, color: true } } },
     }) : null,
   ]);
 
@@ -208,7 +209,6 @@ export default async function EmployeeLeavesPage({ searchParams }: {
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title={t(lang, "leaves.title")}
-        description={t(lang, "leaves.desc")}
       />
       {balanceRefreshPending && view === "summary" && <p role="status" className="text-sm text-muted-foreground">You are viewing the last saved balance. Refresh to check for newer accruals.</p>}
       <LeavesPanel
@@ -222,7 +222,8 @@ export default async function EmployeeLeavesPage({ searchParams }: {
         range={range}
         requestFilter={status}
         page={view === "requests" ? pagination.page : requestedPage}
-        submittedRequest={submittedRequest}
+        highlightedRequest={highlightedRequest}
+        justSubmitted={typeof query.submitted === "string" && query.submitted === highlightedRequest?.id}
         canApply={!!employee && employee.status === "active" && !employee.loginOnly && balance.length > 0}
         openOnLoad={query.action === "apply"}
       />

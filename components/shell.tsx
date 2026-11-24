@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -24,9 +24,10 @@ import {
   Receipt,
   LogOut,
   Menu,
+  LayoutGrid,
+  ArrowRight,
   X,
   ChevronDown,
-  Sun,
   Sparkles,
   FileText,
   ClipboardList,
@@ -47,8 +48,6 @@ import {
   Plus,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
-import type { WorkspaceRegion } from "@/lib/workspace-region";
-import { dateKeyInTimeZone, formatCalendarDate } from "@/lib/workspace-time";
 import { t, type Lang } from "@/lib/i18n";
 import { useToast } from "@/components/ui/toast";
 import { NotificationsBell } from "@/components/notifications-bell";
@@ -67,7 +66,7 @@ interface NavItem {
 }
 
 const adminNav: NavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, exact: true, section: "Overview" },
+  { href: "/admin", label: "Team overview", icon: <LayoutDashboard className="h-4 w-4" />, exact: true, section: "Overview" },
   { href: "/admin/approvals", label: "Approvals", icon: <ListChecks className="h-4 w-4" />, section: "Overview" },
   { href: "/admin/employee-master", label: "Employees", match: ["/admin/employee-master", "/admin/employees"], icon: <Users className="h-4 w-4" />, module: "employees", section: "People" },
   { href: "/admin/departments", label: "Departments", icon: <Building2 className="h-4 w-4" />, section: "People" },
@@ -143,161 +142,62 @@ function Brand() {
   );
 }
 
-/**
- * Server renders UTC midnight-boundary dates while the browser renders IST,
- * so rendering `new Date()` inline hydrates mismatched text (React #418).
- * Render an identical placeholder on both, then swap to the live date after
- * mount so the first client pass always matches the server HTML.
- */
-function TopbarDate({ region }: { region: WorkspaceRegion }) {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-  }, []);
-  if (!now) {
-    return (
-      <div
-        aria-hidden="true"
-        className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 backdrop-blur xl:flex"
-      >
-        <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
-        <span className="inline-block h-3 w-28 animate-pulse rounded bg-muted" />
-      </div>
-    );
-  }
-  const dateKey = dateKeyInTimeZone(now, region.timeZone);
-  return (
-    <div className="hidden items-center gap-2 rounded-xl border border-primary/10 bg-primary/[0.05] px-3 py-1.5 text-[12px] text-muted-foreground backdrop-blur xl:flex">
-      <Sun aria-hidden="true" className="h-3.5 w-3.5 text-amber-400/80" />
-      <span className="font-medium">Today</span>
-      <span aria-hidden="true" className="text-muted-foreground/50">•</span>
-      <time dateTime={dateKey}>{formatCalendarDate(dateKey, region.locale)}</time>
-    </div>
-  );
+function matchesPage(pathname: string, item: NavItem) {
+  if (item.exact) return pathname === item.href;
+  return (item.match ?? [item.href]).some((path) => pathname === path || pathname.startsWith(path + "/"));
 }
 
-function NavLinks({
-  items,
-  onNavigate,
-}: {
-  items: NavItem[];
-  onNavigate?: () => void;
+function Navigation({ primary, tools, path, onNavigate }: {
+  primary: NavItem[];
+  tools: NavItem[];
+  path: string;
+  onNavigate: () => void;
 }) {
-  const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("peoplenexa-nav-collapsed");
-      const saved = raw ? JSON.parse(raw) : null;
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) setCollapsed(saved);
-    } catch {
-      // Navigation remains expanded when storage is unavailable.
-    }
-    setPreferencesLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!preferencesLoaded) return;
-    try {
-      localStorage.setItem("peoplenexa-nav-collapsed", JSON.stringify(collapsed));
-    } catch {
-      // ignore storage errors
-    }
-  }, [collapsed, preferencesLoaded]);
-
+  const id = useId();
+  const [selection, setSelection] = useState<{ path: string; group: string | null }>();
   const groups = new Map<string, NavItem[]>();
-  for (const item of items) {
-    const label = item.section ?? "Other";
-    const entries = groups.get(label) ?? [];
+  for (const item of tools) {
+    const group = item.section ?? "Other";
+    const entries = groups.get(group) ?? [];
     entries.push(item);
-    groups.set(label, entries);
+    groups.set(group, entries);
   }
-  const sections = [...groups].map(([label, entries]) => ({ label, items: entries }));
+  const activeGroup = tools.find(item => matchesPage(path, item))?.section;
+  const expanded = selection?.path === path ? selection.group : activeGroup;
 
-  // Auto-expand the section containing the active route so keyboard/scroll users can reach it.
-  useEffect(() => {
-    const activeSection = sections.find((s) =>
-      s.items.some((item) =>
-        item.exact
-          ? pathname === item.href
-          : item.match
-            ? item.match.some((m) => pathname === m || pathname.startsWith(m + "/"))
-            : pathname.startsWith(item.href)
-      )
+  function renderItem(item: NavItem) {
+    const active = matchesPage(path, item);
+    return (
+      <Link key={item.href} href={item.href} onClick={onNavigate} aria-current={active ? "page" : undefined}
+        className={cn("flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "bg-primary/12 font-semibold text-primary" : "text-muted-foreground hover:bg-tint hover:text-foreground")}>
+        <span aria-hidden="true" className="shrink-0">{item.icon}</span>
+        <span className="min-w-0 break-words">{item.label}</span>
+      </Link>
     );
-    if (activeSection?.label && collapsed[activeSection.label]) {
-      setCollapsed((prev) => ({ ...prev, [activeSection.label]: false }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, preferencesLoaded]);
-
-  const isActive = (item: NavItem) =>
-    item.exact
-      ? pathname === item.href
-      : item.match
-        ? item.match.some((m) => pathname === m || pathname.startsWith(m + "/"))
-        : (pathname === item.href || pathname.startsWith(item.href + "/"));
+  }
 
   return (
-    <div>
-      <nav aria-label="Primary" className="space-y-3 pb-2">
-        {sections.map((section) => {
-          const isCollapsed = Boolean(collapsed[section.label]);
-          const hasActive = section.items.some(isActive);
-          return (
-            <div key={section.label}>
-              <button
-                type="button"
-                onClick={() => setCollapsed((prev) => ({ ...prev, [section.label]: !prev[section.label] }))}
-                aria-expanded={!isCollapsed}
-                className="mb-1 flex w-full cursor-pointer items-center justify-between rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70 transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              >
-                <span className="truncate">
-                  {section.label}
-                  {hasActive && <span className="sr-only"> — contains current page</span>}
-                </span>
-                <ChevronDown
-                  aria-hidden="true"
-                  className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", isCollapsed && "-rotate-90")}
-                />
-              </button>
-              {!isCollapsed && (
-                <div className="space-y-0.5">
-                  {section.items.map((item) => {
-                    const active = isActive(item);
-                    return (
-                      <div key={item.href}>
-                      <Link
-                        href={item.href}
-                        onClick={onNavigate}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "group relative flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2.5 text-[13px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 sm:min-h-0",
-                          active
-                            ? "bg-primary text-primary-foreground shadow-[0_5px_16px_-8px_rgba(37,99,235,0.7)]"
-                            : "text-muted-foreground hover:bg-primary/[0.06] hover:text-foreground"
-                        )}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className={cn(active ? "text-primary-foreground" : "text-muted-foreground group-hover:text-primary")}
-                        >
-                          {item.icon}
-                        </span>
-                        {item.label}
-                        {active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
-                      </Link>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+    <nav aria-label="Primary" className="space-y-5 pb-4">
+      <div className="space-y-0.5">{primary.map(renderItem)}</div>
+      {groups.size > 0 && <div className="border-t border-edge pt-3">
+        <p className="mb-1 px-3 text-xs font-semibold text-muted-foreground">More tools</p>
+        {[...groups].map(([group, items], index) => {
+          const groupId = `${id}-${index}`;
+          const isOpen = expanded === group;
+          return <div key={group}>
+            <button type="button" aria-expanded={isOpen} aria-controls={groupId}
+              onClick={() => setSelection({ path, group: isOpen ? null : group })}
+              className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-tint focus-visible:outline-2 focus-visible:outline-ring">
+              {group}<ChevronDown aria-hidden="true" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
+            </button>
+            <div id={groupId} hidden={!isOpen} className="mb-2 ml-3 space-y-0.5 border-l border-edge pl-1.5">
+              {items.map(renderItem)}
             </div>
-          );
+          </div>;
         })}
-      </nav>
-    </div>
+      </div>}
+    </nav>
   );
 }
 
@@ -307,7 +207,6 @@ export function Shell({
   companyName,
   lang = "en",
   enabledModules,
-  region,
   loginOnly = false,
   children,
 }: {
@@ -316,7 +215,6 @@ export function Shell({
   companyName: string;
   lang?: Lang;
   enabledModules?: string[];
-  region: WorkspaceRegion;
   loginOnly?: boolean;
   children: ReactNode;
 }) {
@@ -332,7 +230,7 @@ export function Shell({
   const isAdmin = role === "admin";
   const canManage = isAdmin || role === "branch_manager" || role === "location_manager" || role === "supervisor";
   const isNotifications = pathname === "/notifications";
-  const selfService = isNotifications || pathname === "/employee" || pathname.startsWith("/employee/");
+  const selfService = !canManage || pathname === "/employee" || pathname.startsWith("/employee/");
   const managementHome = role === "supervisor" ? "/admin/attendance" : "/admin";
   const branchRoutes = new Set(["/admin", "/admin/approvals", "/admin/attendance", "/admin/regularization", "/admin/employee-master", "/admin/leaves"]);
   const locationHidden = new Set(["/admin/org-chart", "/admin/tax", "/admin/ai", "/admin/webhooks", "/admin/device-health", "/admin/whatsapp", "/admin/configuration/company-settings", "/admin/audit"]);
@@ -349,7 +247,7 @@ export function Shell({
     return true;
   }).map((item) => role === "location_manager" && item.href === "/admin/policies" ? { ...item, href: "/employee/policies" } : item);
   const enabledNav = (items: NavItem[]) => items.filter((item) => !item.module || moduleSet.has(item.module));
-  const personalNav = enabledNav(employeeNav(lang));
+  const personalNav = enabledNav(employeeNav(lang)).filter(item => !loginOnly || !item.module);
   const teamNav = enabledNav(managementNav);
   const nav = canManage && !selfService ? teamNav : personalNav;
   const hasPayroll = teamNav.some((item) => item.href === "/admin/payroll");
@@ -376,21 +274,20 @@ export function Shell({
     ...(!loginOnly && moduleSet.has("attendance") ? [{ href: "/employee/attendance?view=today", label: "Clock in or out", description: "Today's attendance", icon: <Clock3 className="size-4" /> }] : []),
     ...(!loginOnly && moduleSet.has("attendance") ? [{ href: "/employee/attendance?view=corrections&action=request", label: "Request an attendance correction", description: "Personal attendance", icon: <CalendarClock className="size-4" /> }] : []),
     ...(!loginOnly && moduleSet.has("expenses") ? [{ href: "/employee/expenses?action=new", label: "Submit an expense claim", description: "Personal expenses", icon: <Plus className="size-4" /> }] : []),
+    ...(!loginOnly && moduleSet.has("helpdesk") ? [{ href: "/employee/helpdesk?action=new", label: "Ask for help", description: "Personal support", icon: <LifeBuoy className="size-4" /> }] : []),
   ];
 
-  const mobileDestinations = (selfService
+  const primaryPaths = selfService
+    ? ["/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips", "/employee/onboarding"]
+    : [managementHome, "/admin/approvals", "/admin/employee-master", "/admin/attendance", "/admin/leaves", "/admin/payroll"];
+  const primaryNav = [...new Set(primaryPaths)].flatMap(href => nav.filter(item => item.href === href));
+  const tools = nav.filter(item => !primaryPaths.includes(item.href));
+  const mobilePaths = selfService
     ? ["/employee", "/employee/attendance", "/employee/leaves", "/employee/payslips"]
-    : [managementHome, "/admin/approvals", "/admin/attendance", "/admin/payroll"])
-    .filter((href, index, all) => all.indexOf(href) === index)
-    .flatMap((href) => nav.filter((item) => item.href === href));
-  const current = nav.find((item) => {
-    if (item.exact) return pathname === item.href;
-    return (item.match ?? [item.href]).some((path) => pathname === path || pathname.startsWith(path + "/"));
-  });
-
-  const servicePages = current?.section && current.section !== "Overview" && current.href !== "/admin/payroll" && pathname !== "/employee"
-    ? nav.filter((item) => item.section === current.section)
-    : [];
+    : [managementHome, "/admin/approvals", "/admin/employee-master", "/admin/payroll"];
+  const mobileDestinations = primaryNav.filter(item => mobilePaths.includes(item.href));
+  const current = [...payrollDestinations, ...nav].find(item => matchesPage(pathname, item));
+  const isDockPage = mobileDestinations.some(item => matchesPage(pathname, item));
 
   const logout = async () => {
     try {
@@ -429,20 +326,7 @@ export function Shell({
             </nav>
           )}
         </div>
-        <NavLinks key={selfService ? "self" : "management"} items={nav} onNavigate={() => setOpen(false)} />
-      </div>
-      <div className="shrink-0 border-t border-edge/60 p-3">
-        <div className="card-surface rounded-xl border-primary/10 bg-card/70 p-3 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.4)] backdrop-blur-xl">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_100%)] text-[12px] font-bold text-white shadow-[0_4px_12px_-4px_rgba(37,99,235,0.6)]">
-              {initials(name.split(" ")[0], name.split(" ")[1])}
-            </div>
-            <div className="min-w-0 leading-tight">
-              <p className="truncate text-[13px] font-semibold">{name}</p>
-              <p className="truncate text-[11px] text-muted-foreground">{companyName}</p>
-            </div>
-          </div>
-        </div>
+        <Navigation key={selfService ? "self" : "management"} primary={primaryNav} tools={tools} path={pathname} onNavigate={() => setOpen(false)} />
       </div>
     </div>
   );
@@ -465,7 +349,7 @@ export function Shell({
     <div className="portal-workspace min-h-screen">
       <a href="#workspace-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground">Skip to page content</a>
       {/* Desktop sidebar — fixed full-height flex column so inner nav can scroll */}
-      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-64 flex-col border-r border-edge bg-[var(--workspace-sidebar)] lg:flex">
+      <aside aria-label="Workspace sidebar" className="fixed inset-y-0 left-0 z-30 hidden h-screen w-60 flex-col border-r border-edge bg-[var(--workspace-sidebar)] lg:flex">
         {sidebar}
       </aside>
 
@@ -493,33 +377,26 @@ export function Shell({
       )}
 
       {/* Main column */}
-      <div className="lg:pl-64">
+      <div className="lg:pl-60">
         {/* Topbar — title is <p> on purpose: each page already renders a single <h1> via PageHeader */}
-        <header className="sticky top-0 z-20 flex h-[68px] items-center gap-2 border-b border-edge bg-background/80 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 sm:gap-3 sm:px-7">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-2 border-b border-edge bg-card px-4 sm:gap-3 sm:px-7">
           <button
             onClick={() => setOpen(true)}
             aria-label="Open menu"
             aria-expanded={open}
             aria-controls={open ? "mobile-workspace-navigation" : undefined}
-            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 lg:hidden"
+            className="h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 hidden md:flex lg:hidden"
           >
             <Menu aria-hidden="true" className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            {current?.section && <p className="hidden truncate text-[11px] font-medium text-muted-foreground md:block">{current.section}</p>}
-            <p className="truncate font-display text-[16px] font-semibold tracking-tight">{isNotifications ? "Notifications" : current?.label ?? (selfService ? "My work" : "Workspace")}</p>
+            <p className="truncate text-xs font-medium text-muted-foreground">{selfService ? "My work" : "Team workspace"}</p>
+            <p className="truncate text-sm font-semibold">{isNotifications ? "Notifications" : current?.label ?? companyName}</p>
           </div>
 
           <WorkspaceLauncher actions={actions} pages={launcherPages} />
 
           <NotificationsBell />
-
-          <TopbarDate region={region} />
-
-          <ThemeToggle />
-          <div className="hidden sm:block">
-            <LanguageToggle lang={lang} />
-          </div>
 
           <div className="relative" onKeyDown={(event) => {
             if (menuOpen && event.key === "Escape") {
@@ -536,7 +413,7 @@ export function Shell({
               aria-expanded={menuOpen}
               className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-edge bg-tint py-1.5 pl-1.5 pr-2.5 transition-colors duration-200 hover:border-primary/25 hover:bg-primary/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[linear-gradient(135deg,#2563EB_0%,#3B82F6_100%)] text-[11px] font-bold text-white">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/12 text-[11px] font-bold text-primary">
                 {initials(name.split(" ")[0], name.split(" ")[1])}
               </span>
               <span className="hidden text-[13px] font-medium sm:block">{name.split(" ")[0]}</span>
@@ -550,15 +427,21 @@ export function Shell({
                     <p className="text-[13px] font-semibold">{name}</p>
                     <p className="text-[11px] text-muted-foreground">{companyName}</p>
                   </div>
-                  {!isAdmin && (
-                    <Link
+                  <div className="flex items-center justify-between gap-2 border-b border-edge px-3 py-1.5">
+                    <span className="text-xs font-medium text-muted-foreground">Preferences</span>
+                    <div className="flex"><LanguageToggle lang={lang} /><ThemeToggle /></div>
+                  </div>
+                  <Link
                       href="/employee/profile"
                       onClick={() => setMenuOpen(false)}
                       className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors duration-200 hover:bg-primary/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                     >
                       <Users className="h-4 w-4" /> {t(lang, "nav.myProfile")}
                     </Link>
-                  )}
+                  {canManage && <Link href={selfService ? managementHome : "/employee"} onClick={() => setMenuOpen(false)}
+                    className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium hover:bg-tint">
+                    <ArrowRight aria-hidden="true" className="size-4" />{selfService ? "Go to team workspace" : "Go to My work"}
+                  </Link>}
                   <button
                     onClick={logout}
                     className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-rose-300 transition-colors duration-200 hover:bg-rose-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
@@ -570,34 +453,16 @@ export function Shell({
             )}
           </div>
         </header>
-        {servicePages.length > 1 && (
-          <nav aria-label={`${current?.section} pages`} className="border-b border-edge bg-card px-4 sm:px-7 lg:hidden">
-            <label className="flex min-h-12 items-center gap-3 text-xs font-semibold text-muted-foreground sm:hidden">
-              {current?.section}
-              <select aria-label={`Open a page in ${current?.section}`} value={current?.href} onChange={(event) => router.push(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-edge bg-background p-2 text-sm text-foreground">
-                {servicePages.map((item) => <option key={item.href} value={item.href}>{item.label}</option>)}
-              </select>
-            </label>
-            <div className="hidden gap-5 overflow-x-auto sm:flex">
-            {servicePages.map((item) => (
-              <Link key={item.href} href={item.href} aria-current={item === current ? "page" : undefined}
-                className={cn("flex min-h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-1 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:text-sm",
-                  item === current ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
-                {item.label}
-              </Link>
-            ))}
-            </div>
-          </nav>
-        )}
-
-
-        <main id="workspace-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-7 lg:px-10 lg:py-9 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-9">{children}</main>
+        <main id="workspace-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:px-7 md:pb-9 lg:px-9 lg:pt-8">{children}</main>
         <nav aria-label="Frequent destinations" className="fixed inset-x-0 bottom-0 z-20 flex border-t border-edge bg-card px-1 pb-[env(safe-area-inset-bottom)] md:hidden print:hidden">
-          {mobileDestinations.map((item) => <Link key={item.href} href={item.href} aria-current={current?.href === item.href ? "page" : undefined}
-            className="flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] font-medium text-muted-foreground aria-[current=page]:text-primary">
+          {mobileDestinations.map(item => <Link key={item.href} href={item.href} aria-current={matchesPage(pathname, item) ? "page" : undefined}
+            className="flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=page]:bg-primary/8 aria-[current=page]:font-semibold aria-[current=page]:text-primary">
             {item.icon}<span className="max-w-full truncate">{item.href === managementHome || item.href === "/employee" ? "Home" : item.label}</span>
           </Link>)}
-          <button type="button" aria-label="More destinations" aria-expanded={open} onClick={() => setOpen(true)} className="flex min-h-14 flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium"><Menu aria-hidden className="size-4" />More</button>
+          <button type="button" aria-label="More destinations" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}
+            className={cn("flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", isDockPage ? "text-muted-foreground" : "bg-primary/8 font-semibold text-primary")}>
+            <LayoutGrid aria-hidden="true" className="size-4" />More
+          </button>
         </nav>
       </div>
     </div>

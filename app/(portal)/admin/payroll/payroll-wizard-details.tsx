@@ -16,34 +16,9 @@ export const PAYROLL_WIZARD_STEPS = [
 ] as const;
 
 export type PayrollWizardStage = typeof PAYROLL_WIZARD_STEPS[number]["id"];
-export type PayrollReadiness = { pendingCorrections: number; pendingLeaves: number; missingBank: number; missingPan: number };
 export type PayrollAdjustment = { id: string; employeeId: string; type: string; label: string; amount: number };
 export type PayrollVarianceEntry = { employeeId: string; employeeNumber: string; name: string; netSalary: number };
 export type PayrollStatutoryTotals = { pf: number; esi: number; pt: number; tds: number };
-
-export function ReadinessSummary({ readiness }: { readiness: PayrollReadiness }) {
-  const entries = [
-    { count: readiness.pendingCorrections, label: "Pending attendance corrections", kind: "Review" },
-    { count: readiness.pendingLeaves, label: "Pending leave or cancellation decisions", kind: "Blocker at review" },
-    { count: readiness.missingBank, label: "Employees missing bank details", kind: "Warning" },
-    { count: readiness.missingPan, label: "Employees missing PAN with TDS enabled", kind: "Warning" },
-  ];
-  return (
-    <section aria-labelledby="payroll-readiness-title" className="rounded-xl border border-edge bg-card p-4 sm:p-5">
-      <h3 id="payroll-readiness-title" className="font-semibold">Location readiness</h3>
-      <p className="mt-1 text-sm text-muted-foreground">Counts cover eligible employees in this location and month. Check the selected employees after creating the draft.</p>
-      <dl className="mt-3 divide-y divide-edge">
-        {entries.map(({ count, label, kind }) => (
-          <div key={label} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-            <dt>{label}</dt>
-            <dd className="flex items-center gap-2"><strong className="tabular-nums">{count}</strong>{count > 0 && <Badge tone={kind.startsWith("Blocker") ? "danger" : "warning"}>{kind}</Badge>}</dd>
-          </div>
-        ))}
-      </dl>
-      {readiness.missingBank > 0 && <p className="mt-2 text-xs text-muted-foreground">A bank file needs the bank details captured on the payslip. Other payment methods can still be recorded after settlement.</p>}
-    </section>
-  );
-}
 
 type Payee = PayrollVarianceEntry & { payslipId: string; editable: boolean; recorded: { label: string; amount: number }[] };
 

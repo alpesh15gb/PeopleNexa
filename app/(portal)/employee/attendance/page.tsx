@@ -66,7 +66,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
     showEntries ? prisma.attendance.findMany({ where: { ...scope, date: bounds }, include: { shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
     showEntries ? prisma.leaveRequest.findMany({ where: { ...scope, status: "approved", fromDate: { lt: bounds.lt }, toDate: { gte: bounds.gte } }, select: { fromDate: true, toDate: true, leavePolicySnapshot: true, leaveType: { select: { name: true } } } }) : [],
     showEntries ? prisma.holiday.findMany({ where: { tenantId: session.tenantId, OR: [{ isRecurring: true }, { date: bounds }] } }) : [],
-    view === "today" || employee.loginOnly ? [] : prisma.punchCorrection.findMany({ where: { ...scope, date: bounds }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
+    view === "today" || employee.loginOnly ? [] : prisma.punchCorrection.findMany({ where: { ...scope, date: bounds }, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }] }),
     showEntries ? prisma.rosterAssignment.findMany({ where: { ...scope, date: bounds }, select: { date: true, shift: { select: { name: true, sundayWeeklyOff: true, weeklyOffDays: true } } } }) : [],
     showEntries ? prisma.punch.findMany({
       where: { ...scope, authStatus: { in: ["pending", "declined"] }, punchTime: { gte: timeZoneDayRange(from, region.timeZone).start, lt: timeZoneDayRange(offsetDateKey(lastDay, 1), region.timeZone).end } },
@@ -85,10 +85,10 @@ export default async function EmployeeAttendancePage({ searchParams }: {
     outcome.attempts.push(punch);
     reviewByDay.set(date, outcome);
   }
-  const correctionByDay = new Map<string, string>();
+  const correctionByDay = new Map<string, { id: string; status: string }>();
   for (const correction of corrections) {
     const key = istDateKey(correction.date);
-    if (!correctionByDay.has(key) || correction.status === "pending") correctionByDay.set(key, correction.status);
+    if (!correctionByDay.has(key) || correction.status === "pending") correctionByDay.set(key, correction);
   }
   const recordByDay = new Map(records.map((record) => [istDateKey(record.date), record]));
   const shiftByDay = new Map(roster.map((entry) => [istDateKey(entry.date), entry.shift]));
@@ -97,7 +97,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
   const attentionFilter = query.focus === "review";
   const attentionOnly = view === "entries" && attentionFilter;
   const layout = query.layout === "list" || (query.layout !== "calendar" && attentionFilter) ? "list" : "calendar";
-  const reviewDays = days.filter((day) => reviewByDay.has(day) || correctionByDay.get(day) === "pending" || ["missed_punch", "needs_review"].includes(recordByDay.get(day)?.reviewStatus ?? ""));
+  const reviewDays = days.filter((day) => reviewByDay.has(day) || correctionByDay.get(day)?.status === "pending" || ["missed_punch", "needs_review"].includes(recordByDay.get(day)?.reviewStatus ?? ""));
   const visibleDays = attentionOnly ? reviewDays : days;
   const selected = visibleDays.includes(dateParam) ? dateParam : visibleDays[0];
   const monthLabel = new Intl.DateTimeFormat(region.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${from}T00:00:00Z`));
@@ -135,7 +135,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
 
   return (
     <div className="space-y-5">
-      <PageHeader title={t(lang, "attendance.title")} description={`Time entries and punch corrections · ${region.timeZone}`} />
+      <PageHeader title={t(lang, "attendance.title")} description={region.timeZone} />
       <nav className="flex flex-wrap gap-5 border-b border-edge text-sm" aria-label="My attendance views">
         {([ ["today", "Today"], ["entries", "Time entries"], ["corrections", "Correction requests"] ] as const).filter(([key]) => key === "entries" || !employee.loginOnly).map(([key, label]) => (
           <Link key={key} href={href(month, key)} aria-current={view === key ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
@@ -171,7 +171,7 @@ export default async function EmployeeAttendancePage({ searchParams }: {
           <div className="flex flex-wrap justify-between gap-2 border-b border-edge p-3 text-sm">
             <nav aria-label="Filter attendance entries" className="flex flex-wrap gap-2">
               <Link aria-current={!attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${!attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", false)}>All dates</Link>
-              <Link aria-current={attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", true, "list")}>Review and corrections ({reviewDays.length})</Link>
+              <Link aria-current={attentionOnly ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${attentionOnly ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", true, "list")}>Needs review ({reviewDays.length})</Link>
             </nav>
             <nav aria-label="Attendance layout" className="flex gap-2">
               {([ ["calendar", "Calendar"], ["list", "List"] ] as const).map(([key, label]) => <Link key={key} aria-current={layout === key ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 ${layout === key ? "bg-primary/10 text-primary" : "hover:bg-tint"}`} href={href(month, "entries", attentionOnly, key)}>{label}</Link>)}
@@ -182,11 +182,11 @@ export default async function EmployeeAttendancePage({ searchParams }: {
             <AttendanceTimeline day={chosen.calendarDay} today={today} shift={chosen.shift?.name} record={chosen.record} attempts={chosen.punchReview?.attempts ?? []} region={region} details={[
               chosen.holiday?.name, chosen.leave?.leaveType.name,
               chosen.record?.reviewStatus === "missed_punch" ? "Missing punch" : chosen.record?.reviewStatus === "needs_review" ? "Needs review" : undefined,
-            ].filter((detail): detail is string => Boolean(detail))} correctionHref={chosen.canCorrect ? `${href(month, "corrections")}&action=request&date=${chosen.calendarDay.date}&from=entries` : undefined} pendingHref={chosen.correction === "pending" ? `${href(month, "corrections")}#corrections-${chosen.calendarDay.date}` : undefined} />
+            ].filter((detail): detail is string => Boolean(detail))} correctionHref={chosen.canCorrect && chosen.correction?.status !== "pending" ? `${href(month, "corrections")}&action=request&date=${chosen.calendarDay.date}&from=entries` : undefined} correctionOutcome={chosen.correction && { status: chosen.correction.status, href: `${href(month, "corrections")}#correction-${chosen.correction.id}` }} />
           </> : visibleDays.length ? <Table>
             <caption className="sr-only">Daily attendance for {monthLabel}</caption>
             <THead><TR><TH>{t(lang, "attendance.date")}</TH><TH>{t(lang, "attendance.status")}</TH><TH>{t(lang, "attendance.in")}</TH><TH>{t(lang, "attendance.out")}</TH><TH className="hidden xl:table-cell">Shift</TH><TH>Correction</TH></TR></THead>
-            <TBody>{Array.from(entryByDate.entries()).map(([day, { record, shift, holiday, leave, beforeJoining, punchReview, canCorrect, correction: correctionStatus }]) => {
+            <TBody>{Array.from(entryByDate.entries()).map(([day, { record, shift, holiday, leave, beforeJoining, punchReview, canCorrect, correction }]) => {
               return <TR key={day} id={`attendance-${day}`} className="scroll-mt-24">
                 <TH scope="row" className="whitespace-nowrap py-3 text-sm font-medium normal-case tracking-normal text-foreground"><time dateTime={day}>{formatCalendarDate(day, region.locale)}</time>{day === today && <span className="ml-1 text-xs text-muted-foreground">Today</span>}</TH>
                 <TD className="whitespace-nowrap">
@@ -200,13 +200,13 @@ export default async function EmployeeAttendancePage({ searchParams }: {
                 <TD className="tabular-nums">{formatWorkspaceTime(record?.punchOutTime, region)}</TD>
                 <TD className="hidden text-muted-foreground xl:table-cell">{shift?.name ?? "—"}</TD>
                 <TD>
-                  {correctionStatus && <Link href={`${href(month, "corrections")}#corrections-${day}`} className="mr-3 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">{correctionStatus === "pending" ? "Pending review" : correctionStatus === "approved" ? "Approved" : "Declined"}</Link>}
-                  {canCorrect && correctionStatus !== "pending" && <Link href={`${href(month, "corrections")}&action=request&date=${day}&from=entries`} aria-label={`Request correction for ${formatCalendarDate(day, region.locale)}`} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Request</Link>}
-                  {!correctionStatus && !canCorrect && <span className="text-muted-foreground">—</span>}
+                  {correction && <Link href={`${href(month, "corrections")}#correction-${correction.id}`} className="mr-3 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">{correction.status === "pending" ? "Pending review" : correction.status === "approved" ? "Approved" : "Declined"}</Link>}
+                  {canCorrect && correction?.status !== "pending" && <Link href={`${href(month, "corrections")}&action=request&date=${day}&from=entries`} aria-label={`Request correction for ${formatCalendarDate(day, region.locale)}`} className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Request</Link>}
+                  {!correction && !canCorrect && <span className="text-muted-foreground">—</span>}
                 </TD>
               </TR>;
             })}</TBody>
-          </Table> : <p className="p-5 text-sm text-muted-foreground">No held punches, open corrections, or review flags for this month.</p>}
+          </Table> : <p className="p-5 text-sm text-muted-foreground">No dates need review this month.</p>}
         </Card>
       )}
     </div>

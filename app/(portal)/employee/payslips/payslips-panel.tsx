@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowUpRight, Banknote, Download, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
@@ -43,7 +43,7 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
     return Number.isNaN(date.getTime()) ? month : periodFormatter.format(date);
   };
   const money = (value: number) => formatter.format(value);
-  const latest = payslips[0];
+  const latest = payslips.find(({ status }) => status !== "reversed") ?? payslips[0];
   const years = [...new Set(payslips.map(({ month }) => month.slice(0, 4)))];
   const statuses = [...new Set(payslips.map((payslip) => payslip.status))];
   const visible = payslips.filter((item) => (year === "all" || item.month.startsWith(year + "-")) && (status === "all" || item.status === status));
@@ -93,38 +93,46 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
   const drawBreakdown = Number.isFinite(distributed) && distributed > 0 && net >= 0 && deductions >= 0;
   return (
     <>
-      <section aria-labelledby="latest-payslip" className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 id="latest-payslip" className="font-semibold">{monthLabel(latest.month)} payslip</h2>
-            <Badge tone={latestState.tone}>{latestState.label}</Badge>
+      <section aria-labelledby="latest-payslip" className="rounded-xl border border-edge bg-card">
+        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="latest-payslip" className="font-semibold">{monthLabel(latest.month)} payslip</h2>
+              <Badge tone={latestState.tone}>{latestState.label}</Badge>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">{latestState.explanation}</p>
           </div>
-          <p className="mt-3 font-display text-3xl font-semibold tabular-nums">{money(latest.totals.net)}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{latest.status === "reversed" ? "Original net pay" : t(lang, "payslips.netPay")} · {latestState.explanation}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {latest.status !== "reversed" && <Button onClick={() => download(latest)} loading={downloading === latest.id} disabled={downloading !== null}>
+              <Download aria-hidden="true" className="size-4" /> Download PDF
+            </Button>}
+            <Button variant={latest.status === "reversed" ? "primary" : "outline"} onClick={() => openDetails(latest)}>View details <ArrowUpRight aria-hidden="true" className="size-4" /></Button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => openDetails(latest)}>View details <ArrowUpRight aria-hidden="true" className="size-4" /></Button>
-          {latest.status !== "reversed" && <Button onClick={() => download(latest)} loading={downloading === latest.id} disabled={downloading !== null}>
-            <Download aria-hidden="true" className="size-4" /> Download PDF
-          </Button>}
-        </div>
+        <section aria-labelledby="latest-breakdown" className="border-t border-edge px-5 py-4 sm:px-6">
+          <h3 id="latest-breakdown" className="mb-3 text-sm font-semibold">Pay breakdown</h3>
+          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">{latest.status === "reversed" ? "Original net pay" : t(lang, "payslips.netPay")}</dt>
+              <dd className="mt-1 text-xl font-semibold tabular-nums">{money(net)}</dd>
+            </div>
+            <div><dt className="text-muted-foreground">Gross pay</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{money(latest.totals.gross)}</dd></div>
+            <div><dt className="text-muted-foreground">Deductions</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{money(deductions)}</dd></div>
+          </dl>
+          {drawBreakdown && <div aria-hidden="true" className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-tint">
+            <span className="bg-primary" style={{ width: `${net / distributed * 100}%` }} />
+            <span className="bg-amber-500" style={{ width: `${deductions / distributed * 100}%` }} />
+          </div>}
+          {drawBreakdown && <div aria-hidden="true" className="mt-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-primary" /> Net pay</span>
+            <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-amber-500" /> Deductions</span>
+          </div>}
+          {downloadError && !viewing && <p role="alert" className="mt-3 text-sm text-destructive">{downloadError}</p>}
+        </section>
       </section>
-      <section aria-labelledby="latest-breakdown" className="rounded-2xl border border-edge bg-card p-4 sm:p-5">
-        <h2 id="latest-breakdown" className="font-semibold">Pay breakdown</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{monthLabel(latest.month)} · {latest.status === "reversed" ? "Original statement amounts" : "Recorded statement amounts"}</p>
-        {drawBreakdown && <div aria-hidden="true" className="mt-4 flex h-3 overflow-hidden rounded-full bg-tint">
-          <span className="bg-primary" style={{ width: `${net / distributed * 100}%` }} />
-          <span className="bg-amber-500" style={{ width: `${deductions / distributed * 100}%` }} />
-        </div>}
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <div><dt className="text-muted-foreground">Net pay</dt><dd className="mt-1 font-semibold tabular-nums">{money(net)}</dd></div>
-          <div><dt className="text-muted-foreground">Deductions</dt><dd className="mt-1 font-semibold tabular-nums">{money(deductions)}</dd></div>
-        </dl>
-      </section>
-      {downloadError && !viewing && <p role="alert" className="text-sm text-destructive">{downloadError}</p>}
       <Card aria-labelledby="payslip-history">
         <CardHeader className="flex-wrap">
-          <CardTitle id="payslip-history">Payslip history</CardTitle>
+          <h2 id="payslip-history" className="font-semibold">Payslip history</h2>
           {years.length > 1 && <Field label="Year">
             <Select aria-label="Payslip year" value={year} onChange={(event) => setYear(event.target.value)}>
               <option value="all">All years</option>
@@ -139,7 +147,7 @@ export function PayslipsPanel({ payslips, locale, lang = "en" }: { payslips: Pay
           </Field>}
         </CardHeader>
         <CardContent className="pt-2">
-          {visible.length === 0 && <p role="status" className="py-4 text-sm text-muted-foreground">No payslips match the selected year and status.</p>}
+          {visible.length === 0 && <p role="status" className="py-4 text-sm text-muted-foreground">No payslips match these filters. <button type="button" className="font-medium text-primary underline" onClick={() => { setYear("all"); setStatus("all"); }}>Clear filters</button></p>}
           <ul className="divide-y divide-edge">
             {visible.map((payslip) => (
               <li key={payslip.id} className="grid min-w-0 gap-3 py-4 sm:grid-cols-[minmax(9rem,1.1fr)_minmax(0,1fr)_auto] sm:items-center">

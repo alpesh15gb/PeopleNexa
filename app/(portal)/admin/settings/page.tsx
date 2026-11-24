@@ -12,11 +12,19 @@ import { FaceSettingsPanel } from "./face-panel";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminSettingsPage() {
+const connections = [
+  { id: "device-connection", label: "eBioserver" },
+  { id: "face-verification", label: "Face verification" },
+  { id: "sms-notifications", label: "SMS notifications" },
+] as const;
+
+export default async function AdminSettingsPage({ searchParams }: { searchParams: Promise<{ section?: string }> }) {
   const session = await requireActiveSession();
   if (session.role !== "admin") redirect("/admin");
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { config: true } });
 
+  const { section } = await searchParams;
+  const active = connections.find(connection => connection.id === section)?.id ?? connections[0].id;
   const profile = getEbioserverConfig(tenant);
   const sms = getSmsConfig(tenant.config);
   const faceRaw = (tenant.config ?? {}) as { faceMatch?: Partial<{ enabled: boolean; matchThreshold: number; reviewThreshold: number }> };
@@ -37,12 +45,13 @@ export default async function AdminSettingsPage() {
         title="Workspace connections"
         description="Manage eBioserver, face verification and SMS delivery."
       />
-      <nav aria-label="Connection settings" className="flex flex-wrap gap-2 rounded-2xl border border-edge bg-card p-3">
-        {[{ id: "device-connection", label: "Device connection" }, { id: "face-verification", label: "Face verification" }, { id: "sms-notifications", label: "SMS notifications" }].map(({ id, label }) => (
-          <a key={id} href={`#${id}`} className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">{label}</a>
+      <nav aria-label="Connection settings" className="flex flex-wrap gap-1 border-b border-edge">
+        {connections.map(({ id, label }) => (
+          <Link key={id} href={id === connections[0].id ? "/admin/settings" : `/admin/settings?section=${id}`} aria-current={active === id ? "page" : undefined}
+            className={`inline-flex min-h-11 items-center border-b-2 px-3 text-sm font-medium hover:bg-tint focus-visible:outline-2 focus-visible:outline-ring ${active === id ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>{label}</Link>
         ))}
       </nav>
-      <section id="device-connection" aria-label="Device connection" className="scroll-mt-24">
+      {active === "device-connection" && <section id="device-connection" aria-label="Device connection" className="scroll-mt-24">
         <SettingsPanel
           initial={{
             url: profile.url,
@@ -55,12 +64,11 @@ export default async function AdminSettingsPage() {
             lastErrorAt: profile.lastErrorAt,
           }}
         />
-      </section>
-      <div className="grid items-start gap-4 xl:grid-cols-2">
-        <Card id="face-verification" className="scroll-mt-24">
+      </section>}
+      {active === "face-verification" && <Card id="face-verification" className="scroll-mt-24">
           <CardContent><FaceSettingsPanel initial={face} /></CardContent>
-        </Card>
-        <Card id="sms-notifications" className="scroll-mt-24">
+      </Card>}
+      {active === "sms-notifications" && <Card id="sms-notifications" className="scroll-mt-24">
           <CardContent><SmsPanel
             initial={{
               enabled: sms.enabled,
@@ -69,8 +77,7 @@ export default async function AdminSettingsPage() {
               sender: sms.sender,
             }}
           /></CardContent>
-        </Card>
-      </div>
+      </Card>}
     </div>
   );
 }

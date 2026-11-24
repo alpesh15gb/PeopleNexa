@@ -27,7 +27,7 @@ const editorSource = readFileSync(
   "utf8",
 );
 const directEditor = editorSource.slice(editorSource.indexOf("export function EmployeeMasterQuickEdit"));
-assert.match(directEditor, /<Editor[\s\S]*?mode="wizard"/);
+assert.match(directEditor, /<Editor[\s\S]*?mode=\{payrollBankEdit \? "sections" : "wizard"\}/);
 assert.match(editorSource, /mode="continuation"/);
 assert.match(
   editorSource,
@@ -49,7 +49,7 @@ const pageThreeNextHandler = editorSource.match(
 )?.[1] ?? "";
 assert.match(pageThreeNextHandler, /setActive\(nextAction\.step\)/);
 assert.doesNotMatch(pageThreeNextHandler, /fetch\(|save\(|onClose\(/);
-assert.match(directEditor, /mode="wizard"/);
+assert.match(directEditor, /mode=\{payrollBankEdit \? "sections" : "wizard"\}/);
 assert.match(editorSource, /mode="continuation"/);
 assert.match(editorSource, /Step \{stepIndex \+ 1\} of \{employeeMasterWizardSteps\.length\}/);
 assert.match(editorSource, /<Button type="submit" loading=\{saving\}>\{canSkip \? "Save master details" : "Save employee master"\}<\/Button>/,

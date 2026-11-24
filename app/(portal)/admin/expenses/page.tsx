@@ -4,8 +4,6 @@ import { requireActiveSession } from "@/lib/session";
 import { employeeLocationScope, managerLocationId } from "@/lib/location-scope";
 import { redirect } from "next/navigation";
 import { PageHeader, Card, CardContent } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat";
-import { Wallet, Hourglass, CheckCircle2, Banknote } from "lucide-react";
 import { ExpensesPanel } from "./expenses-panel";
 import { DocumentExpensePagination } from "@/components/document-expense-pagination";
 import { recordPageNumber, recordPagination, recordPageRedirect, type RecordSearchParams } from "@/lib/document-expense-pagination";
@@ -47,35 +45,33 @@ export default async function AdminExpensesPage({ searchParams }: { searchParams
   });
 
   const pending = byStatus.get("pending");
-  const approved = byStatus.get("approved");
   const settled = byStatus.get("settled");
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
-        title={reviewOnly ? "Pending expense claims" : "Expenses & Claims"}
+        title={reviewOnly ? "Pending expense claims" : "Team expenses"}
         description="Reimbursement claims from your team"
         actions={reviewOnly && <Link href={path} className="text-sm font-medium text-primary hover:underline">View all claims</Link>}
       />
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Pending" value={pending?._count._all ?? 0} sub={`${formatRegionalMoney(pending?._sum.amount ?? 0, region)} awaiting review`} icon={<Hourglass className="h-4.5 w-4.5" />} tone="amber" />
-        {!reviewOnly && <>
-        <StatCard label="Approved" value={approved?._count._all ?? 0} icon={<CheckCircle2 className="h-4.5 w-4.5" />} tone="sky" />
-        <StatCard label="Settled" value={settled?._count._all ?? 0} sub={`${formatRegionalMoney(settled?._sum.amount ?? 0, region)} marked settled`} icon={<Banknote className="h-4.5 w-4.5" />} tone="emerald" />
-        <StatCard label="Total claims" value={totalClaims} icon={<Wallet className="h-4.5 w-4.5" />} tone="indigo" />
-        </>}
-      </div>
-      {!reviewOnly && <nav aria-label="Claim statuses" className="flex flex-wrap gap-2 rounded-xl border border-edge bg-card p-3">
-        {[["", "All claims"], ["pending", "Pending review"], ["approved", "Approved for payroll"], ["settled", "Settled"], ["rejected", "Rejected"]].map(([value, label]) => (
-          <Link key={value} href={value ? `${path}?status=${value}` : path} aria-current={(statusFilter ?? "") === value ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm font-medium ${(statusFilter ?? "") === value ? "bg-primary/10 text-primary" : "hover:bg-tint"}`}>
-            {label}
-          </Link>
-        ))}
-      </nav>}
+      <section aria-label="Expense status" className="rounded-xl border border-edge bg-card">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 px-4 py-3 text-sm">
+          <p><strong className="tabular-nums">{formatRegionalMoney(pending?._sum.amount ?? 0, region)}</strong> <span className="text-muted-foreground">awaiting review</span></p>
+          {!reviewOnly && <p><strong className="tabular-nums">{formatRegionalMoney(settled?._sum.amount ?? 0, region)}</strong> <span className="text-muted-foreground">settled</span></p>}
+        </div>
+        {!reviewOnly && <nav aria-label="Claim statuses" className="flex flex-wrap gap-1 border-t border-edge px-3 py-2">
+          {[["", "All claims"], ["pending", "Pending review"], ["approved", "Approved"], ["settled", "Settled"], ["rejected", "Rejected"]].map(([value, label]) => (
+            <Link key={value} href={value ? `${path}?status=${value}` : path} aria-current={(statusFilter ?? "") === value ? "page" : undefined}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium hover:bg-tint aria-[current=page]:bg-primary/10 aria-[current=page]:text-primary">
+              {label}<span className="text-xs tabular-nums text-muted-foreground">{value ? byStatus.get(value)?._count._all ?? 0 : totalClaims}</span>
+            </Link>
+          ))}
+        </nav>}
+      </section>
       <Card>
         <CardContent className="p-0">
           <ExpensesPanel key={`${statusFilter}:${pagination.page}`}
-            emptyTitle={statusFilter ? "No claims in this status" : reviewOnly ? "No claims awaiting review" : undefined}
+            emptyTitle={reviewOnly ? "No claims awaiting review" : statusFilter ? "No claims in this status" : undefined}
             actorId={session.sub}
             canUsePayroll={access.modules.has("payroll") && supportsIndiaPayroll(region)}
             region={region}

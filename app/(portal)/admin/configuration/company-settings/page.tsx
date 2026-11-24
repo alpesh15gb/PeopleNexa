@@ -83,13 +83,14 @@ export default async function CompanySettingsPage({ searchParams }: { searchPara
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader title="Company settings" description="Manage workspace details and configure each HR service." />
-      <form action="/admin/configuration/company-settings" aria-label="Find a setting" className="flex flex-wrap items-center gap-2">
+      <form action="/admin/configuration/company-settings" aria-label="Find a setting" className="flex flex-wrap items-center gap-2 rounded-xl border border-edge bg-card p-4">
         <Input name="q" type="search" aria-label="Search company settings" placeholder="Search settings by name or service" maxLength={80} defaultValue={search} className="w-full sm:max-w-sm" />
         <Button type="submit" variant="outline">Find setting</Button>
         {search && <Link href="/admin/configuration/company-settings" className="text-sm text-primary hover:underline">Clear search</Link>}
       </form>
       {enabledServices.length ? <SettingsDirectory services={enabledServices} /> : <p role="status" className="rounded-xl border border-edge bg-card p-4 text-sm">No enabled settings match that search.</p>}
-      <WorkspaceRegionForm initial={region} hasAttendance={Boolean(punch || attendance || correction)} />
+      {(!query || enabledServices.some(service => service.links.some(link => link.href === "#regional-settings"))) &&
+        <WorkspaceRegionForm initial={region} hasAttendance={Boolean(punch || attendance || correction)} />}
     </div>
   );
 }

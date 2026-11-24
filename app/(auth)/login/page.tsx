@@ -20,6 +20,7 @@ export default async function LoginPage() {
         </p>
       </div>
       <LoginForm workspace={workspace} />
+      <p className="mt-4 text-center text-xs text-muted-foreground sm:hidden">For sign-in help, contact your workspace administrator.</p>
       {!workspace && <p className="mt-7 text-center text-[13px] text-muted-foreground">
         New to PeopleNexa?{" "}
         <Link

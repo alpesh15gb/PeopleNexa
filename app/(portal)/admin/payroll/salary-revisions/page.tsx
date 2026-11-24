@@ -67,7 +67,7 @@ export default async function SalaryRevisionsPage({ searchParams }: {
     <SettingsWorkspace
       eyebrow="Pay & people"
       title="Salary changes"
-      description="Plan salary changes and track their approval. Previously paid salaries stay unchanged."
+      description="Schedule salary changes and review requests awaiting approval."
     >
       <div className="mb-5">
         <PayrollNavigation

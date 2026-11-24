@@ -37,19 +37,21 @@ export function HelpdeskPanel() {
   const [busy, setBusy] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("open");
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<HelpdeskPage | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const [updating, setUpdating] = useState<string | null>(null);
+  const changingTicket = updating !== null || busy || confirmBusy;
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const params = new URLSearchParams({ filter, page: String(page), pageSize: "25" });
     const res = await fetch(`/api/helpdesk?${params}`, { signal });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Could not load tickets.");
+    if (signal?.aborted) return;
     setTickets(data.tickets);
     setEmployees(data.employees);
     setSummary(data.summary);
@@ -153,9 +155,9 @@ export function HelpdeskPanel() {
           {summary.urgent > 0 && <span className="text-rose-300">{summary.urgent} urgent</span>}
         </p>
         <div className="flex gap-2">
-          {["all", "open", "resolved"].map((f) => (
-            <button key={f} aria-pressed={filter === f} onClick={() => { setFilter(f); setPage(1); setOpenId(null); setReply(""); }} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium capitalize ${filter === f ? "bg-gradient-brand text-white" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
-              {f}
+          {([["open", "Open tickets"], ["resolved", "Resolved"], ["all", "All tickets"]] as const).map(([f, label]) => (
+            <button key={f} type="button" disabled={changingTicket} aria-pressed={filter === f} onClick={() => { setFilter(f); setPage(1); setOpenId(null); setReply(""); }} className={`rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60 capitalize ${filter === f ? "bg-primary text-primary-foreground" : "bg-tint text-muted-foreground hover:text-foreground"}`}>
+              {label}
             </button>
           ))}
         </div>
@@ -169,14 +171,14 @@ export function HelpdeskPanel() {
           {tickets.map((t) => (
             <div key={t.id} className="overflow-hidden rounded-2xl border border-edge bg-card">
               <button aria-expanded={openId === t.id} onClick={() => { setOpenId(openId === t.id ? null : t.id); setReply(""); }} className="flex w-full flex-wrap items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-tint/40">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-brand text-[11px] font-bold text-white">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-[11px] font-bold text-primary">
                   {t.requester.firstName[0]}{t.requester.lastName[0]}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-medium">{t.subject}</p>
                   <p className="text-[11.5px] text-muted-foreground">{t.requester.firstName} {t.requester.lastName} · {t.category}{t.assignee ? ` · → ${t.assignee.firstName}` : ""}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={prioTone[t.priority] ?? "neutral"} className="capitalize">{t.priority}</Badge>
                   <Badge tone={statusTone[t.status] ?? "neutral"} className="capitalize">{t.status.replace("_", " ")}</Badge>
                   <span className="text-[11.5px] text-muted-foreground">{t.messages.length} msg</span>
@@ -188,7 +190,7 @@ export function HelpdeskPanel() {
                   <p className="mb-3 text-[13px] text-muted-foreground">{t.description}</p>
                   <div className="space-y-2">
                     {t.messages.map((m) => (
-                      <div key={m.id} className={`rounded-xl px-3.5 py-2.5 text-[12.5px] ${m.sender.role === "admin" ? "ml-auto max-w-[85%] bg-indigo-500/15" : "max-w-[85%] bg-tint"}`}>
+                      <div key={m.id} className={`rounded-xl px-3.5 py-2.5 text-[12.5px] ${m.sender.role === "admin" ? "ml-auto max-w-[85%] bg-primary/12" : "max-w-[85%] bg-tint"}`}>
                         <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">{m.sender.firstName} {m.sender.lastName} · {formatDateTime(new Date(m.createdAt))}</p>
                         {m.body}
                       </div>
@@ -199,10 +201,16 @@ export function HelpdeskPanel() {
                       <option value="">Unassigned</option>
                       {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
                     </select>
-                    <Button size="sm" variant="outline" onClick={() => changeStatus(t.id, "in_progress")} disabled={updating !== null || t.status === "in_progress"}>{t.status === "closed" || t.status === "resolved" ? "Reopen" : "Start work"}</Button>
-                    <Button size="sm" variant={t.status === "resolved" ? "success" : "outline"} onClick={() => changeStatus(t.id, "resolved")} disabled={updating !== null || t.status === "resolved" || t.status === "closed"}>Resolve</Button>
-                    <Button size="sm" variant="ghost" onClick={() => changeStatus(t.id, "closed")} disabled={updating !== null || t.status === "closed"}>Close</Button>
-                    <Button size="icon" variant="ghost" aria-label={`Delete ticket ${t.subject}`} disabled={updating !== null} onClick={() => del(t.id)}><Trash2 className="h-4 w-4 text-rose-400" /></Button>
+                    {t.status !== "in_progress" && <Button size="sm" variant={t.status === "resolved" ? "outline" : "primary"} onClick={() => changeStatus(t.id, "in_progress")} disabled={updating !== null}>{t.status === "closed" || t.status === "resolved" ? "Reopen" : "Start work"}</Button>}
+                    {t.status !== "resolved" && t.status !== "closed" && <Button size="sm" variant={t.status === "in_progress" ? "primary" : "outline"} onClick={() => changeStatus(t.id, "resolved")} disabled={updating !== null}>Resolve</Button>}
+                    {t.status === "resolved" && <Button size="sm" onClick={() => changeStatus(t.id, "closed")} disabled={updating !== null}>Close ticket</Button>}
+                    <details>
+                      <summary className="cursor-pointer p-2 text-xs font-medium text-muted-foreground">More actions</summary>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {t.status !== "closed" && t.status !== "resolved" && <Button size="sm" variant="outline" onClick={() => changeStatus(t.id, "closed")} disabled={updating !== null}>Close ticket</Button>}
+                        <Button size="sm" variant="ghost" aria-label={`Delete ticket ${t.subject}`} disabled={updating !== null} onClick={() => del(t.id)}><Trash2 aria-hidden="true" className="size-4 text-destructive" />Delete</Button>
+                      </div>
+                    </details>
                   </div>
                   {t.status !== "closed" && <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
                     <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply to employee…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
@@ -214,7 +222,7 @@ export function HelpdeskPanel() {
           ))}
         </div>
       )}
-      <HelpdeskPagination pagination={pagination} onPage={(next) => { setPage(next); setOpenId(null); setReply(""); }} />
+      <HelpdeskPagination pagination={pagination} disabled={changingTicket} onPage={(next) => { setPage(next); setOpenId(null); setReply(""); }} />
 
       <ConfirmDialog
         open={confirmTarget !== null}

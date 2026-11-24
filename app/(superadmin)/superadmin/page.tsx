@@ -38,7 +38,14 @@ export default async function SuperadminOverviewPage({ searchParams }: { searchP
     : await workspaceDirectorySection({ params, plans, now, activeWhere, expiringWhere });
   return (
     <div className="space-y-6">
-      <PageHeader title="Platform administration" description="Manage customer workspaces, subscriptions and plan defaults." />
+      <PageHeader title={plansView ? "Plans & pricing" : "Customer workspaces"}
+        description={plansView ? "Set the default pricing, seat limits, and included services for each plan." : "Manage workspace access and subscription renewals."} />
+      <nav aria-label="Platform sections" className="flex flex-wrap gap-2 border-b border-edge pb-3">
+        {[{ href: "/superadmin", label: "Workspaces", selected: !plansView }, { href: "/superadmin?view=plans", label: "Plans & pricing", selected: plansView }].map(({ href, label, selected }) => (
+          <Link key={href} href={href} aria-current={selected ? "page" : undefined} className={`rounded-lg px-3 py-2.5 text-sm font-semibold hover:bg-tint ${selected ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{label}</Link>
+        ))}
+      </nav>
+      {!plansView && (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Workspaces" value={total} icon={<Building2 className="size-4" />} tone="indigo" />
         <StatCard label="Active access" value={active} icon={<CheckCircle2 className="size-4" />} tone="emerald" />
@@ -47,11 +54,7 @@ export default async function SuperadminOverviewPage({ searchParams }: { searchP
           <StatCard className="h-full hover:bg-tint" label="Needs renewal" value={renewal} icon={<Timer className="size-4" />} tone="amber" />
         </Link>
       </div>
-      <nav aria-label="Platform sections" className="flex flex-wrap gap-2 border-b border-edge pb-3">
-        {[{ href: "/superadmin", label: "Workspaces", selected: !plansView }, { href: "/superadmin?view=plans", label: "Plans & pricing", selected: plansView }].map(({ href, label, selected }) => (
-          <Link key={href} href={href} aria-current={selected ? "page" : undefined} className={`rounded-lg px-3 py-2.5 text-sm font-semibold hover:bg-tint ${selected ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{label}</Link>
-        ))}
-      </nav>
+      )}
       {section}
     </div>
   );
@@ -67,7 +70,6 @@ async function planPricingSection(plans: Plans) {
   const usage = Object.fromEntries(seatRows.map((row) => [row.plan, { count: row._count._all, seats: row._sum.seats ?? 0 }]));
   return (
     <section aria-label="Plans and pricing" className="space-y-3">
-      <p className="text-sm text-muted-foreground">Edit list pricing, seat limits and included modules for each plan.</p>
       <PlansTable plans={plans} usage={usage} customized={overrides.map((row) => row.planKey)} />
     </section>
   );

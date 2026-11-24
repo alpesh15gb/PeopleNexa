@@ -65,7 +65,7 @@ export default async function AdminReportsPage({
   const type = KNOWN_TYPES.has(requestedType) ? requestedType : "";
   const isPeopleReport = type === "inactive-employees" || type === "workforce-movement";
   if (!type || (isPeopleReport ? !canReadPeople : !canReadAttendance)) {
-    return <ReportLibrary attendance={canReadAttendance} people={canReadPeople && !forcedBranchId} payroll={canReadPayroll} />;
+    return <ReportLibrary query={typeof params.q === "string" ? params.q.trim().slice(0, 80) : ""} attendance={canReadAttendance} people={canReadPeople && !forcedBranchId} payroll={canReadPayroll} />;
   }
   const region = workspaceRegion(tenant?.config);
   const today = dateKeyInTimeZone(new Date(), region.timeZone);

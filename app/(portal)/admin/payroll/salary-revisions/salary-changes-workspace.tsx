@@ -151,7 +151,7 @@ export function SalaryRevisions({
   ).length;
   return (
     <div className="space-y-5">
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-5">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-edge bg-card p-4">
         <div>
           <h2 className="text-lg font-semibold">Plan a salary change</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -164,27 +164,6 @@ export function SalaryRevisions({
           New salary change
         </Button>
         {!employees.length && <p className="w-full text-sm text-muted-foreground">Set a monthly salary for at least one active employee before creating a salary change.</p>}
-      </section>
-      <section
-        aria-label="Salary change summary"
-        className="grid grid-cols-3 gap-3"
-      >
-        {[
-          ["Awaiting approval", awaiting],
-          ["Approved changes", scheduled],
-          [
-            "Drafts",
-            revisions.filter((item) => item.status === "draft").length,
-          ],
-        ].map(([label, count]) => (
-          <div
-            key={label}
-            className="rounded-xl border border-edge bg-card p-4"
-          >
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="mt-2 text-2xl font-semibold">{count}</p>
-          </div>
-        ))}
       </section>
       <section className="overflow-hidden rounded-2xl border border-edge bg-card">
         <div className="flex flex-wrap gap-3 border-b border-edge p-4">
@@ -209,8 +188,8 @@ export function SalaryRevisions({
           >
             <option value="">All changes</option>
             <option value="draft">Draft</option>
-            <option value="submitted">Awaiting approval</option>
-            <option value="approved">Approved</option>
+            <option value="submitted">Awaiting approval ({awaiting})</option>
+            <option value="approved">Approved ({scheduled})</option>
             <option value="applied">Applied</option>
             <option value="cancelled">Cancelled</option>
           </Select>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { LifeBuoy, Plus, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
 import { useToast } from "@/components/ui/toast";
@@ -23,7 +24,7 @@ type Ticket = {
   messages: Msg[];
 };
 
-const tone: Record<string, "warning" | "info" | "success"> = { open: "warning", in_progress: "info", resolved: "success", closed: "neutral" as never };
+const tone: Record<string, "warning" | "info" | "success" | "neutral"> = { open: "warning", in_progress: "info", resolved: "success", closed: "neutral" };
 
 export default function EmployeeHelpdeskPage() {
   const toast = useToast();
@@ -124,26 +125,26 @@ export default function EmployeeHelpdeskPage() {
         <Button onClick={() => { setFormError(""); setCreating(true); }}><Plus aria-hidden="true" className="h-4 w-4" /> New ticket</Button>
       </div>
 
-      {creating && (
-        <form onSubmit={create} className="space-y-4 rounded-2xl border border-edge bg-card p-5">
+      <Modal open={creating} onClose={() => { if (!busy) setCreating(false); }} title="New support ticket" placement="drawer">
+        <form onSubmit={create} className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block sm:col-span-2">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Subject</span>
-              <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required maxLength={200} placeholder="Brief summary of the issue" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+              <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required maxLength={200} placeholder="Brief summary of the issue" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring" />
             </label>
             <label className="block sm:col-span-2">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Describe the issue</span>
-              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required maxLength={10000} rows={3} placeholder="What happened? When? What did you expect?" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required maxLength={10000} rows={3} placeholder="What happened? When? What did you expect?" className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring" />
             </label>
             <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Category</span>
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50">
+              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring">
                 {["general", "payroll", "attendance", "device", "it", "other"].map((c) => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
               </select>
             </label>
             <label className="block">
               <span className="mb-1 block text-[12px] font-medium text-muted-foreground">Priority</span>
-              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50">
+              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring">
                 {["low", "medium", "high", "urgent"].map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
               </select>
             </label>
@@ -154,7 +155,7 @@ export default function EmployeeHelpdeskPage() {
             <Button type="submit" loading={busy}>Raise ticket</Button>
           </div>
         </form>
-      )}
+      </Modal>
 
       <div role="group" aria-label="Filter tickets" className="flex flex-wrap gap-2">
         {[["all", "All tickets"], ["open", `Open${summary ? ` (${summary.open})` : ""}`], ["resolved", `Resolved${summary ? ` (${summary.resolved})` : ""}`]].map(([value, label]) => (
@@ -189,7 +190,7 @@ export default function EmployeeHelpdeskPage() {
                   </div>
                   {t.status !== "closed" && (
                     <form onSubmit={(e) => sendReply(e, t.id)} className="mt-3 flex items-center gap-2">
-                      <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-indigo-400/50" />
+                      <input aria-label="Reply" maxLength={10000} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply…" className="min-w-0 flex-1 rounded-xl border border-edge bg-card px-3 py-2.5 text-[13px] outline-none focus:border-ring focus:ring-1 focus:ring-ring" />
                       <Button type="submit" size="sm" loading={busy} disabled={!reply.trim()} aria-label="Send reply"><Send aria-hidden="true" className="h-3.5 w-3.5" /></Button>
                     </form>
                   )}

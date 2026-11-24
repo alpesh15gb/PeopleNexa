@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, Search } from "lucide-react";
+import { ArrowUpRight, Plus, Search } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 
 export type WorkspaceDestination = {
@@ -87,12 +87,12 @@ export function WorkspaceLauncher({ actions, pages }: { actions: WorkspaceDestin
   return (
     <>
       {actions.length > 0 && <button type="button" aria-label="Quick actions" title="Quick actions" aria-haspopup="dialog"
-        className="hidden size-10 shrink-0 items-center justify-center rounded-lg border border-edge text-lg hover:bg-tint sm:flex"
-        onClick={() => { setActionsOnly(true); setQuery(""); setOpen(true); }}>+</button>}
+        className="hidden size-11 shrink-0 items-center justify-center rounded-lg border border-edge text-lg hover:bg-tint sm:flex"
+        onClick={() => { setActionsOnly(true); setQuery(""); setOpen(true); }}><Plus aria-hidden="true" className="size-4" /></button>}
       <button type="button" aria-label="Find a page or action" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setActionsOnly(false); setQuery(""); setOpen(true); }}
-        className="flex h-10 shrink-0 items-center gap-2 rounded-lg border border-edge bg-card px-3 text-sm text-muted-foreground hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-edge bg-card px-3 text-sm text-muted-foreground hover:border-primary/35 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Search aria-hidden="true" className="size-4" />
-        <span className="hidden lg:inline">Find a page or action</span>
+        <span className="hidden lg:inline">Search workspace</span>
         <kbd className="ml-2 hidden rounded border border-edge bg-tint px-1.5 py-0.5 text-[10px] xl:inline">Ctrl K</kbd>
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title={actionsOnly ? "Quick actions" : "Find a page or action"} initialFocus={input} size="lg">

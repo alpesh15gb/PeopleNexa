@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Save, ShieldCheck } from "lucide-react";
+import { Save } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
@@ -21,11 +21,9 @@ interface Declaration {
 export function TaxDeclarationPanel({
   currentFy,
   declarations,
-  monthlySalary,
 }: {
   currentFy: string;
   declarations: Declaration[];
-  monthlySalary: number;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -50,7 +48,6 @@ export function TaxDeclarationPanel({
     sections.hra +
     sections.lta +
     sections.other;
-  const annualGross = monthlySalary * 12;
 
   const set = (key: keyof typeof sections, v: string) => {
     setSections((s) => ({ ...s, [key]: Math.max(0, Number(v) || 0) }));
@@ -83,156 +80,72 @@ export function TaxDeclarationPanel({
     }
   }
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <form className="lg:col-span-2" onSubmit={submit}>
-        <div className="mb-4 flex items-center gap-2">
-          <Badge tone="info" className="font-mono">
-            {currentFy}
-          </Badge>
-          {existing && (
-            <Badge
-              tone={
-                existing.status === "verified"
-                  ? "success"
-                  : existing.status === "rejected"
-                    ? "danger"
-                    : "warning"
-              }
-            >
-              {existing.status}
-            </Badge>
-          )}
-        </div>
+  const statusLabel = verified ? "Verified" : existing?.status === "rejected" ? "Returned for correction" : existing ? "Awaiting HR review" : "Ready to start";
+  const statusTone = verified ? "success" : existing?.status === "rejected" ? "danger" : existing ? "warning" : "neutral";
 
-        {verified && <p className="mb-4 rounded-lg border border-edge bg-tint p-3 text-sm">Your declaration is verified. Ask HR to return it if you need to make a correction.</p>}
-        {existing?.status === "rejected" && <p className="mb-4 rounded-lg border border-warning/40 bg-tint p-3 text-sm"><strong className="block">Returned for correction</strong>{existing.note || "Review the amounts and resubmit when ready."}</p>}
+  return (
+    <section aria-labelledby="current-declaration" className="overflow-hidden rounded-xl border border-edge bg-card">
+      <div className="border-b border-edge p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="current-declaration" className="font-semibold">Investment declaration</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Financial year {currentFy}</p>
+          </div>
+          <Badge tone={statusTone}>{statusLabel}</Badge>
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {verified ? "Ask HR to return the verified declaration if you need to change it."
+            : existing?.status === "rejected" ? existing.note || "Review the amounts before resubmitting."
+              : existing ? "HR will review these amounts. You can update them while you wait."
+                : "Enter the amounts you want HR to review. Share supporting documents through your HR team's submission process."}
+        </p>
+      </div>
+      <form method="post" onSubmit={submit} className="space-y-4 p-4 sm:p-5">
         <fieldset disabled={saving || verified} className="grid gap-4 sm:grid-cols-2">
-          <legend className="sr-only">Declared amounts</legend>
-          <Field
-            label="80C — investments and contributions"
-            hint="PF, PPF, ELSS, LIC and tuition payments"
-          >
-            <Input
-              type="number"
-              min={0}
-              value={sections["80c"]}
-              onChange={(e) => set("80c", e.target.value)}
-            />
+          <legend className="sr-only">Declared amounts in rupees</legend>
+          <Field label="80C investments and contributions" hint="PF, PPF, ELSS, LIC and tuition payments">
+            <Input type="number" min={0} step="0.01" value={sections["80c"]} onChange={(event) => set("80c", event.target.value)} />
           </Field>
-          <Field label="80D — health insurance premiums">
-            <Input
-              type="number"
-              min={0}
-              value={sections["80d"]}
-              onChange={(e) => set("80d", e.target.value)}
-            />
+          <Field label="80D health insurance premiums">
+            <Input type="number" min={0} step="0.01" value={sections["80d"]} onChange={(event) => set("80d", event.target.value)} />
           </Field>
-          <Field label="HRA — rent paid (if not covered by allowance)">
-            <Input
-              type="number"
-              min={0}
-              value={sections.hra}
-              onChange={(e) => set("hra", e.target.value)}
-            />
+          <Field label="HRA rent paid">
+            <Input type="number" min={0} step="0.01" value={sections.hra} onChange={(event) => set("hra", event.target.value)} />
           </Field>
-          <Field label="LTA — leave travel allowance">
-            <Input
-              type="number"
-              min={0}
-              value={sections.lta}
-              onChange={(e) => set("lta", e.target.value)}
-            />
+          <Field label="LTA travel allowance">
+            <Input type="number" min={0} step="0.01" value={sections.lta} onChange={(event) => set("lta", event.target.value)} />
           </Field>
-          <Field
-            label="Other deductions (80G, 80E, NPS 80CCD…)"
-            className="sm:col-span-2"
-          >
-            <Input
-              type="number"
-              min={0}
-              value={sections.other}
-              onChange={(e) => set("other", e.target.value)}
-            />
+          <Field label="Other deductions" hint="For example, 80G, 80E or NPS under 80CCD">
+            <Input type="number" min={0} step="0.01" value={sections.other} onChange={(event) => set("other", event.target.value)} />
           </Field>
         </fieldset>
 
-        <div className="mt-4 flex items-center justify-between rounded-xl border border-edge bg-tint px-4 py-3">
-          <span className="text-[13px] font-medium">Total declared</span>
-          <span className="font-display text-lg font-bold text-indigo-300">
-            {formatMoney(total)}
-          </span>
+        {error && <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-edge pt-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Total declared</p>
+            <p className="text-xl font-semibold tabular-nums">{formatMoney(total)}</p>
+          </div>
+          {!verified && <Button type="submit" loading={saving}>
+            <Save aria-hidden="true" className="size-4" />
+            {existing?.status === "rejected" ? "Resubmit declaration" : existing ? "Update declaration" : "Submit declaration"}
+          </Button>}
         </div>
-
-        {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
-        {!verified && <Button type="submit" loading={saving} className="mt-4">
-          <Save className="h-4 w-4" />{" "}
-          {existing ? "Update declaration" : "Submit declaration"}
-        </Button>}
-        <p className="mt-2 text-[12px] text-muted-foreground">
-          HR reviews your declaration before payroll uses verified
-          amounts under the applicable tax settings.
-        </p>
       </form>
-
-      <div className="space-y-4">
-        <div className="card-surface rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-[13px] font-semibold">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" /> Declaration
-            summary
-          </div>
-          <dl className="mt-3 space-y-2.5 text-[12.5px]">
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Annualized monthly salary</dt>
-              <dd className="font-mono">{formatMoney(annualGross)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Declared investments</dt>
-              <dd className="font-mono text-emerald-300">
-                {formatMoney(total)}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-3 rounded-xl border border-edge bg-tint px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-            Payroll calculates TDS using its configured tax regime and verified
-            amounts. Send any supporting documents through your HR team's submission process.
-          </p>
-        </div>
-
-        <div className="card-surface rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-[13px] font-semibold">
-            <BadgeCheck className="h-4 w-4 text-brand" /> Previous years
-          </div>
-          {historical.length === 0 ? (
-            <p className="mt-3 text-[12.5px] text-muted-foreground">
-              No declarations from previous years.
-            </p>
-          ) : (
-            <div className="mt-3 divide-y divide-[color:var(--border)]">
-              {historical.map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center justify-between py-2"
-                >
-                  <span className="font-mono text-[12.5px]">{d.fy}</span>
-                  <Badge
-                    tone={
-                      d.status === "verified"
-                        ? "success"
-                        : d.status === "rejected"
-                          ? "danger"
-                          : "warning"
-                    }
-                    className="capitalize"
-                  >
-                    {d.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+      {historical.length > 0 && <details className="border-t border-edge p-4 sm:p-5">
+        <summary className="cursor-pointer text-sm font-medium">Previous years ({historical.length})</summary>
+        <ul className="mt-3 divide-y divide-edge">
+          {historical.map(({ id, fy, sections, status }) => (
+            <li key={id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <span className="font-medium">{fy}</span>
+              {typeof sections.total === "number" && <span className="tabular-nums">{formatMoney(sections.total)}</span>}
+              <Badge tone={status === "verified" ? "success" : status === "rejected" ? "danger" : "warning"}>
+                {status === "verified" ? "Verified" : status === "rejected" ? "Returned" : "Awaiting HR review"}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      </details>}
+    </section>
   );
 }

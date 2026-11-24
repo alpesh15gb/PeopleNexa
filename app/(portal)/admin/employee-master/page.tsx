@@ -4,11 +4,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireActiveSession } from "@/lib/session";
-import { dayRangeIST, formatDateIST, toDateKey, isMonthKey } from "@/lib/dates";
+import { dayRangeIST, formatDateIST, toDateKey } from "@/lib/dates";
 import { maskAadhaar, maskPan } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
-import { EmployeeMasterCreate, EmployeeMasterQuickEdit } from "./employee-master-quick-edit";
+import { EmployeeMasterCreate, EmployeeMasterQuickEdit, PayrollEmployeeFieldEditor } from "./employee-master-quick-edit";
 import { EmployeeDeviceAccess } from "./employee-device-access";
 import { EmployeeTransfer } from "./employee-transfer";
 import { EmployeeStatusAction } from "./employee-status-action";
@@ -22,12 +22,13 @@ import { ylrWorkbookImportEnabled } from "@/lib/employee-legacy-import";
 import { getTenantAccess } from "@/lib/modules-server";
 import { formatRegionalMoney, workspaceRegion } from "@/lib/workspace-region";
 import { dateKeyInTimeZone } from "@/lib/workspace-time";
+import { payrollReviewReturn } from "@/lib/payroll-review-links";
 import { leaveAwaitingReview } from "@/lib/leave-lifecycle";
 
 export const dynamic = "force-dynamic";
 
 type Field = { label: string; value: unknown };
-type DirectoryParams = Partial<Record<"employee" | "section" | "payLocation" | "payPage" | "payPeriod" | "q" | "page" | "status" | "department" | "branch", string | string[]>>;
+type DirectoryParams = Partial<Record<"employee" | "section" | "from" | "payLocation" | "payPage" | "payPeriod" | "payRun" | "payStage" | "payView" | "payField" | "q" | "page" | "status" | "department" | "branch", string | string[]>>;
 
 function maskedNumber(value: string | null | undefined) {
   return value ? `•••• ${value.trim().slice(-4)}` : "—";
@@ -108,22 +109,33 @@ export default async function EmployeeMasterPage({
   const filters = Object.fromEntries(Object.entries({ q: query, department, branch }).filter(([, value]) => value));
   if (requestedEmployee) {
     const directory = new URLSearchParams({ ...filters, status, page: String(page) });
-    const payPeriod = filterValue(params.payPeriod);
-    const payLocation = filterValue(params.payLocation);
-    const payrollReturn = (isAdmin || isLocationManager) && isMonthKey(payPeriod) && payLocation
-      ? new URLSearchParams({ period: payPeriod, location: payLocation, view: "missing-salaries", page: filterValue(params.payPage) || "1" })
+    const payrollReturn = (isAdmin || isLocationManager) && access.modules.has("payroll")
+      ? payrollReviewReturn({
+          ...params,
+          payStage: params.payStage ?? "inputs",
+          payView: params.payView ?? (params.payPage ? "missing-salaries" : undefined),
+        })
       : null;
+    const requestedField = params.payField;
+    const payrollField = payrollReturn && (requestedField === "bank" || requestedField === "pan" || (isAdmin && requestedField === "salary"))
+      ? requestedField : undefined;
     const detailParams = new URLSearchParams(directory);
     detailParams.set("employee", requestedEmployee);
+    const onboardingReturn = params.from === "onboarding" && (isAdmin || isLocationManager) && access.modules.has("onboarding");
+    if (onboardingReturn) detailParams.set("from", "onboarding");
     if (payrollReturn) {
-      detailParams.set("payPeriod", payPeriod);
-      detailParams.set("payLocation", payLocation);
-      detailParams.set("payPage", filterValue(params.payPage) || "1");
+      for (const [key, value] of Object.entries(payrollReturn.params)) detailParams.set(key, value);
+      if (payrollField) detailParams.set("payField", payrollField);
     }
+    const back = payrollReturn
+      ? { href: payrollReturn.href, label: payrollReturn.params.payView === "missing-salaries" ? "Back to payroll salary checks" : "Back to payroll" }
+      : onboardingReturn
+        ? { href: `/admin/onboarding?employee=${encodeURIComponent(requestedEmployee)}`, label: "Back to onboarding checklist" }
+        : { href: `/admin/employee-master?${directory}`, label: "Back to employee directory" };
     return <div id="employee-record" className="space-y-5">
-      <Link href={payrollReturn ? `/admin/payroll?${payrollReturn}` : `/admin/employee-master?${directory}`} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">← {payrollReturn ? "Back to payroll salary checks" : "Back to employee directory"}</Link>
+      <Link href={back.href} className="inline-flex min-h-10 items-center font-medium text-primary hover:underline">← {back.label}</Link>
       <Suspense key={`${requestedEmployee}:${filterValue(params.section)}`} fallback={<p role="status">Loading employee details…</p>}>
-        <EmployeeMasterDetails selectedId={requestedEmployee} where={scope} tenantId={session.tenantId} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} modules={access.modules} requestedSection={filterValue(params.section)} detailQuery={detailParams.toString()} managerLocation={locationId ?? null} />
+        <EmployeeMasterDetails selectedId={requestedEmployee} where={scope} tenantId={session.tenantId} isAdmin={isAdmin} isLocationManager={isLocationManager} isBranchManager={isBranchManager} showDevices={showDevices} modules={access.modules} requestedSection={filterValue(params.section)} payrollField={payrollField} detailQuery={detailParams.toString()} managerLocation={locationId ?? null} />
       </Suspense>
     </div>;
   }
@@ -203,8 +215,8 @@ export default async function EmployeeMasterPage({
   );
 }
 
-async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isLocationManager, isBranchManager, showDevices, modules, requestedSection, detailQuery, managerLocation }: {
-  selectedId: string; where: Prisma.EmployeeWhereInput; tenantId: string; isAdmin: boolean; isLocationManager: boolean; isBranchManager: boolean; showDevices: boolean; modules: ReadonlySet<string>; requestedSection: string; detailQuery: string; managerLocation: string | null;
+async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isLocationManager, isBranchManager, showDevices, modules, requestedSection, detailQuery, managerLocation, payrollField }: {
+  selectedId: string; where: Prisma.EmployeeWhereInput; tenantId: string; isAdmin: boolean; isLocationManager: boolean; isBranchManager: boolean; showDevices: boolean; modules: ReadonlySet<string>; requestedSection: string; detailQuery: string; managerLocation: string | null; payrollField?: "bank" | "pan" | "salary";
 }) {
   const sections = [
     { id: "overview", label: "Overview" }, { id: "job", label: isAdmin || isLocationManager ? "Job and compensation" : "Job" },
@@ -261,6 +273,7 @@ async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isL
     { label: "Work history", fields: sourceFields(source, "WRK_") },
   ].filter((group) => group.fields.length > 0);
   const canManageEmployee = isAdmin || !["admin", "branch_manager", "location_manager"].includes(employee.role);
+  const canPrepareSignIn = isAdmin && employee.role === "employee" && employee.status === "active" && !employee.loginOnly && Boolean(employee.branchId && employee.employeeNumber);
   const scheduledTransfer = employee.transfers[0];
   const destinationBranch = scheduledTransfer ? await prisma.branch.findFirst({ where: { id: scheduledTransfer.destinationBranchId, tenantId: employee.tenantId }, select: { name: true } }) : null;
   return <div className="space-y-6">
@@ -273,10 +286,22 @@ async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isL
                     <p className="mt-1 text-sm text-muted-foreground">{[employee.position ?? "No designation", employee.department?.name, employee.branch ? employee.branch.location?.name : employee.location?.name, employee.branch?.name].filter(Boolean).join(" · ")}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-md bg-tint px-2.5 py-1 font-mono">Employee: {employee.employeeNumber}</span>{showDevices && employee.deviceCode && <span className="rounded-md bg-tint px-2.5 py-1 font-mono">Device: {employee.deviceCode}</span>}<span className="rounded-md bg-tint px-2.5 py-1">Joined: {formatDateIST(employee.joiningDate)}</span></div>
                   </div>
-                  <div className="flex flex-wrap gap-2">{canManageEmployee && <EmployeeMasterQuickEdit canEditEmail canEditMaster canEditPan={isAdmin || isLocationManager} branches={[]} departments={[]} shifts={[]} managers={[]} positions={[]} subdepartments={[]} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture }} />}
-                    {isAdmin && employee.role === "employee" && employee.status === "active" && employee.branchId && <EmployeeSignIn employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} />}
-                    {canManageEmployee && showDevices && employee.deviceCode && (isAdmin || isLocationManager) && <EmployeeDeviceAccess employeeId={employee.id} />}{canManageEmployee && (isAdmin || isLocationManager) && <><EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} showDeviceNotice={showDevices && Boolean(employee.deviceCode)} />{(employee.status === "active" || scheduledTransfer) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={[]} departments={[]} shifts={[]} managers={[]} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: destinationBranch?.name ?? "selected branch" } : null} />}</>}</div>
+                  {canManageEmployee && (payrollField === "salary" || payrollField === "pan"
+                    ? <PayrollEmployeeFieldEditor employeeId={employee.id} revision={employee.updatedAt.toISOString()} field={payrollField} salary={payrollField === "salary" ? employee.salary : null} currency={region.currency} />
+                    : <EmployeeMasterQuickEdit canEditEmail canEditMaster payrollBankEdit={payrollField === "bank"} canEditPan={isAdmin || isLocationManager} branches={[]} departments={[]} shifts={[]} managers={[]} positions={[]} subdepartments={[]} subdepartmentsByDepartment={{}} employee={{ id: employee.id, firstName: employee.firstName, lastName: employee.lastName, email: employee.email, phone: employee.phone, position: employee.position, status: employee.status, joiningDate: employee.joiningDate ? toDateKey(employee.joiningDate) : "", profilePicture: employee.profilePicture }} />)}
                 </div>
+                {(canPrepareSignIn || canManageEmployee && (isAdmin || isLocationManager)) && (
+                  <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-edge pt-4" aria-label="Employment actions" role="group">
+                    {canPrepareSignIn && <EmployeeSignIn employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} hasLogin={Boolean(employee.password)} />}
+                    {canManageEmployee && showDevices && employee.deviceCode && (isAdmin || isLocationManager) && <EmployeeDeviceAccess employeeId={employee.id} />}
+                    {canManageEmployee && (isAdmin || isLocationManager) && (
+                      <>
+                        <EmployeeStatusAction employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} status={employee.status} showDeviceNotice={showDevices && Boolean(employee.deviceCode)} />
+                        {(employee.status === "active" || scheduledTransfer) && <EmployeeTransfer employeeId={employee.id} employeeName={`${employee.firstName} ${employee.lastName}`} branches={[]} departments={[]} shifts={[]} managers={[]} scheduled={scheduledTransfer ? { id: scheduledTransfer.id, effectiveDate: scheduledTransfer.effectiveDate.toISOString(), destinationBranchName: destinationBranch?.name ?? "selected branch" } : null} />}
+                      </>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -290,6 +315,22 @@ async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isL
             </nav>
 
             {active.id === "overview" && <section className="grid gap-4 lg:grid-cols-2" aria-label="Employee overview">
+              {modules.has("onboarding") && !isBranchManager && (taskCount > 0 || employee.status === "active" && !employee.loginOnly) && (
+                <Card className="lg:col-span-2">
+                  <CardContent className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-semibold">Employee onboarding</h2>
+                      <p className="text-sm text-muted-foreground">
+                        {taskCount ? `${done} of ${taskCount} checklist tasks complete` : "Give this employee a checklist for their first days."}
+                      </p>
+                    </div>
+                    <Link href={`/admin/onboarding?employee=${encodeURIComponent(employee.id)}${taskCount ? "" : "&action=assign"}`}
+                      className="inline-flex min-h-11 items-center rounded-xl border border-edge px-4 text-sm font-medium text-primary hover:bg-tint">
+                      {taskCount ? "Open checklist" : "Assign checklist"}
+                    </Link>
+                  </CardContent>
+                </Card>
+              )}
               <Card><CardHeader><CardTitle>Reporting and work</CardTitle></CardHeader><CardContent><DetailGrid fields={[
                 { label: "Department", value: employee.department?.name }, { label: "Branch", value: employee.branch?.name },
                 { label: "Location", value: employee.branch ? employee.branch.location?.name : employee.location?.name },
@@ -304,11 +345,6 @@ async function EmployeeMasterDetails({ selectedId, where, tenantId, isAdmin, isL
                 { label: "Current address", value: employee.profile?.currentAddress }, { label: "Permanent address", value: employee.profile?.permanentAddress },
                 { label: "Emergency contact", value: employee.profile?.emergencyContactName }, { label: "Emergency phone", value: employee.profile?.emergencyContactNumber },
               ]} /></CardContent></Card>
-              {modules.has("onboarding") && !isBranchManager && <Card><CardHeader><CardTitle>Onboarding checklist</CardTitle></CardHeader><CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">{taskCount ? `${done} of ${taskCount} tasks complete` : "No checklist assigned."}</p>
-                {employee.status === "active" && <Link href={`/admin/onboarding?employee=${encodeURIComponent(employee.id)}${taskCount ? "" : "&action=assign"}`} className="text-sm font-medium text-primary hover:underline">{taskCount ? "Review checklist" : "Assign checklist"}</Link>}
-                {employee.status !== "active" && taskCount > 0 && <Link href={`/admin/onboarding?employee=${encodeURIComponent(employee.id)}`} className="text-sm font-medium text-primary hover:underline">Open checklist history</Link>}
-              </CardContent></Card>}
             </section>}
 
             {active.id === "job" && <section className="grid gap-4 lg:grid-cols-2" aria-label="Employment and work history">

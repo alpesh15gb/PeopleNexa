@@ -4,8 +4,6 @@ import { Fragment, useDeferredValue, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Check,
-  X,
   Plus,
   Pencil,
   Trash2,
@@ -36,6 +34,7 @@ interface Request {
   cancellationReason?: string | null;
   cancellationDecision?: LeaveCancellationDecision;
   canReview: boolean;
+  reviewHref: string;
   leavePolicySnapshot?: unknown;
   id: string;
   days: number;
@@ -50,11 +49,11 @@ interface Request {
   employee: { firstName: string; lastName: string; employeeNumber: string };
 }
 
-function LeaveReviewAction({ request, onReview }: { request: Request; onReview: (request: Request) => void }) {
+function LeaveReviewAction({ request }: { request: Request }) {
   if (request.status !== "pending" && !request.cancellationRequestedBy) return null;
   if (!request.canReview) return <span className="text-xs text-muted-foreground">Independent reviewer required</span>;
   const label = request.cancellationRequestedBy ? "Review cancellation" : "Review request";
-  return <Button size="sm" variant="outline" aria-label={`${label} for ${request.employee.firstName} ${request.employee.lastName}`} onClick={() => onReview(request)}>{label}</Button>;
+  return <Link href={request.reviewHref} prefetch={false} scroll={false} aria-label={`${label} for ${request.employee.firstName} ${request.employee.lastName}`} className="inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">{label}</Link>;
 }
 
 function LeaveRequestStatus({ request }: { request: Request }) {
@@ -134,10 +133,6 @@ export function LeavesAdmin({
   const searchParams = useSearchParams();
   const toast = useToast();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [reviewRequest, setReviewRequest] = useState<Request | null>(null);
-  const [reviewNote, setReviewNote] = useState("");
-  const [reviewError, setReviewError] = useState("");
   const [typeModal, setTypeModal] = useState<Type | "new" | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingType, setDeletingType] = useState<Type | null>(null);
@@ -272,47 +267,8 @@ export function LeavesAdmin({
     }
   }
 
-  function startReview(request: Request) {
-    setReviewRequest(request);
-    setReviewNote("");
-    setReviewError("");
-  }
-
   function requestDates(request: Request) {
     return `${formatCalendarDate(istDateKey(request.fromDate), locale)} – ${formatCalendarDate(istDateKey(request.toDate), locale)}`;
-  }
-
-  async function review(approve: boolean) {
-    if (!reviewRequest || busy) return;
-    const { id, cancellationRequestedBy, cancellationRequestedAt } = reviewRequest;
-    setReviewError("");
-    setBusy(id);
-    try {
-      const status = cancellationRequestedBy
-        ? approve ? "cancellation_approved" : "cancellation_rejected"
-        : approve ? "approved" : "rejected";
-      const res = await fetch(`/api/leaves/requests/${id}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, note: reviewNote.trim(), expectedCancellationRequestedAt: cancellationRequestedAt?.toISOString() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setReviewError(data.error ?? "Could not save the decision.");
-        if (res.status === 409) router.refresh();
-        return;
-      }
-      toast(
-        "success",
-        status === "cancellation_approved" ? "Cancellation approved. Leave balance restored." : status === "cancellation_rejected" ? "Cancellation declined. Leave remains approved." : status === "approved" ? "Leave approved" : "Leave rejected",
-      );
-      setReviewRequest(null);
-      router.refresh();
-    } catch {
-      setReviewError("Could not send your decision. Try again.");
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function saveType(e: React.FormEvent<HTMLFormElement>) {
@@ -630,7 +586,7 @@ export function LeavesAdmin({
                   {r.reviewNote && <p className="mt-2 break-words text-xs text-muted-foreground">Review note · {r.reviewNote}</p>}
                   {!r.cancellationRequestedBy && r.cancellationDecision?.note && <p className="mt-2 break-words text-xs text-muted-foreground">Cancellation review note · {r.cancellationDecision.note}</p>}
                 </div>
-                <LeaveReviewAction request={r} onReview={startReview} />
+                <LeaveReviewAction request={r} />
                 {r.source === "admin_on_behalf" && (
                   <p className="text-xs text-muted-foreground">
                     Recorded on behalf
@@ -722,7 +678,7 @@ export function LeavesAdmin({
                         <LeaveRequestStatus request={r} />
                       </TD>
                       <TD>
-                        <LeaveReviewAction request={r} onReview={startReview} />
+                        <LeaveReviewAction request={r} />
                         {r.source === "admin_on_behalf" && (
                           <p className="mt-1 text-[10.5px] text-muted-foreground">
                             Recorded on behalf
@@ -1071,35 +1027,6 @@ export function LeavesAdmin({
             )}
           </div>
         </div>
-      </Modal>
-
-      <Modal
-        open={reviewRequest !== null}
-        onClose={() => !busy && setReviewRequest(null)}
-        title={reviewRequest?.cancellationRequestedBy ? "Review leave cancellation" : "Review leave request"}
-      >
-        {reviewRequest && <div className="space-y-4">
-          <div className="rounded-xl border border-edge bg-tint p-4">
-            <p className="font-semibold">{reviewRequest.employee.firstName} {reviewRequest.employee.lastName}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{reviewRequest.leaveType.name} · {reviewRequest.days} {reviewRequest.days === 1 ? "day" : "days"} · {requestDates(reviewRequest)}</p>
-            {reviewRequest.reason && <p className="mt-2 break-words text-sm">Leave reason · {reviewRequest.reason}</p>}
-            {reviewRequest.cancellationReason && <p className="mt-2 break-words text-sm">Cancellation reason · {reviewRequest.cancellationReason}</p>}
-          </div>
-          {reviewRequest.cancellationRequestedBy && <p className="text-sm text-muted-foreground">Approving restores the employee’s balance. Review any affected draft payroll before closing it. Declining keeps the approved leave in effect.</p>}
-          <Field label="Decision note (optional)">
-            <Textarea value={reviewNote} maxLength={2000} disabled={!!busy} onChange={(event) => setReviewNote(event.target.value)} placeholder="Visible to the employee" />
-          </Field>
-          {reviewError && <p role="alert" className="text-sm text-rose-600 dark:text-rose-300">{reviewError}</p>}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="ghost" disabled={!!busy} onClick={() => setReviewRequest(null)}>Close</Button>
-            <Button type="button" variant="outline" disabled={!!busy} onClick={() => review(false)}>
-              <X aria-hidden="true" className="h-4 w-4" />{reviewRequest.cancellationRequestedBy ? "Decline cancellation" : "Reject leave"}
-            </Button>
-            <Button type="button" variant="success" disabled={!!busy} onClick={() => review(true)}>
-              <Check aria-hidden="true" className="h-4 w-4" />{reviewRequest.cancellationRequestedBy ? "Approve cancellation" : "Approve leave"}
-            </Button>
-          </div>
-        </div>}
       </Modal>
 
       <Modal

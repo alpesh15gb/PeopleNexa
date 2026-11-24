@@ -57,28 +57,27 @@
   --font-inter: var(--font-jakarta);
   --font-space-grotesk: var(--font-jakarta);
 
-  --background: #F8FAFC;
-  --foreground: #0F172A;
+  --background: #F5F7F5;
+  --foreground: #15271F;
   --card: #FFFFFF;
-  --card-2: #F1F5F9;
-  --muted: #E9EFF8;
-  --muted-foreground: #475569;
-  --border: #E2E8F0;
-  --border-strong: #CBD5E1;
-  --tint: rgba(37, 99, 235, 0.04);
-  --tint-strong: rgba(37, 99, 235, 0.08);
-  --input: #7c8da6;
+  --card-2: #F0F4F1;
+  --muted: #E7EFEB;
+  --muted-foreground: #4F6459;
+  --border: #DCE6DF;
+  --border-strong: #BFCEC4;
+  --tint: rgba(17, 91, 67, 0.055);
+  --tint-strong: rgba(17, 91, 67, 0.10);
+  --input: #70877A;
   --success-action: #047857;
   --success-action-foreground: #ffffff;
   --danger-action: #be123c;
   --danger-action-foreground: #ffffff;
-  --primary: #4338CA;
+  --primary: #155E46;
   --primary-foreground: #FFFFFF;
-  /* CTA accent: #C2410C (not #EA580C) so white text clears 4.5:1 AA. */
-  --accent: #4338CA;
+  --accent: #155E46;
   --accent-foreground: #FFFFFF;
-  --accent-hover: #3730A3;
-  --ring: #2563eb;
+  --accent-hover: #114A39;
+  --ring: #08795A;
   --sidebar: #FFFFFF;
   --success: #047857;
   --warning: #854d0e;
@@ -110,12 +109,12 @@
 }
 
 .portal-workspace {
-  --workspace-sidebar: #f1f5fb;
-  background: #f8fafc;
+  --workspace-sidebar: #f0f4f1;
+  background: var(--background);
 }
 
 .dark .portal-workspace {
-  --workspace-sidebar: #101825;
+  --workspace-sidebar: #12241C;
   background: var(--background);
 }
 
@@ -123,29 +122,28 @@
 .dark {
   color-scheme: dark;
 
-  --background: #0d1118;
-  --foreground: #f4f6fb;
-  --card: #141a24;
-  --card-2: #1a2230;
-  --muted: #202a39;
-  --muted-foreground: #b0bac9;
+  --background: #101C17;
+  --foreground: #EFF6F1;
+  --card: #172720;
+  --card-2: #203229;
+  --muted: #273C31;
+  --muted-foreground: #B4C8BC;
   --border: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.16);
   --tint: rgba(255, 255, 255, 0.045);
   --tint-strong: rgba(255, 255, 255, 0.075);
-  --input: #65748c;
+  --input: #708B7C;
   --success-action: #6ee7b7;
   --success-action-foreground: #052e24;
   --danger-action: #fda4af;
   --danger-action-foreground: #4c0519;
-  --primary: #60A5FA;
-  --primary-foreground: #0B1220;
-  /* Dark CTA: lighter orange keeps 4.5:1 with dark text on dark surfaces. */
-  --accent: #FB923C;
-  --accent-foreground: #431407;
-  --accent-hover: #FDBA74;
-  --ring: #93c5fd;
-  --sidebar: #101721;
+  --primary: #8CD5B6;
+  --primary-foreground: #102B20;
+  --accent: #CAE991;
+  --accent-foreground: #233518;
+  --accent-hover: #D9F2AE;
+  --ring: #8CD5B6;
+  --sidebar: #14241C;
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #fb7185;
@@ -279,7 +277,7 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 }
 
 .bg-gradient-brand {
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, #1d4ed8 0%, #08795A 100%);
 }
 
 /* Reports follow the UI theme on screen, and stay ink-friendly when printed. */
@@ -353,9 +351,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 }
 
 .card-surface {
-  background: linear-gradient(180deg, var(--card-sheen), transparent 46%), var(--card);
+  background: var(--card);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03), 0 10px 28px -24px rgba(16, 24, 40, 0.28);
+  box-shadow: 0 1px 2px rgba(16, 36, 24, 0.045);
 }
 
 /* Centered configuration canvas shared by company and payroll workspaces. */
@@ -550,4 +548,10 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 @media (prefers-reduced-motion: no-preference) {
   .workspace-drawer { animation: workspace-drawer-in 160ms ease-out; }
   @keyframes workspace-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .portal-workspace .animate-fade-up { animation: none; }
 }

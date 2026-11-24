@@ -2,6 +2,7 @@
 
 import { PunchPhoto, PunchLocation } from "@/components/punch-evidence";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, X, Clock3, FileQuestion } from "lucide-react";
 import { GoogleMap, Marker } from "@react-google-maps/api";
@@ -9,7 +10,6 @@ import { GOOGLE_MAPS_API_KEY, useGoogleMapsLoader } from "@/components/maps/goog
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/stat";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { istDateKey } from "@/lib/ist";
 import type { WorkspaceRegion } from "@/lib/workspace-region";
@@ -25,6 +25,7 @@ type Correction = {
   reason: string;
   status: string;
   reviewNote: string | null;
+  reviewHref: string;
   createdAt: string;
   employee: { id: string; firstName: string; lastName: string; employeeNumber: string };
 };
@@ -79,9 +80,7 @@ export function RegularizationPanel({
   const router = useRouter();
   const toast = useToast();
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string | null>(null);
   const [faceBusy, setFaceBusy] = useState<string | null>(null);
-  const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
   const { isLoaded: faceMapsLoaded, loadError: faceMapsError } = useGoogleMapsLoader();
   const showFaceMaps = FACE_MAPS_API_KEY.length > 0 && faceMapsLoaded && !faceMapsError;
   const faceMapsPending = FACE_MAPS_API_KEY.length > 0 && !faceMapsLoaded && !faceMapsError;
@@ -92,26 +91,6 @@ export function RegularizationPanel({
     const punchDay = dateKeyInTimeZone(instant, region.timeZone);
     const time = formatWorkspaceTime(instant, region);
     return day && punchDay !== day ? `${formatCalendarDate(punchDay, region.locale)} ${time}` : time;
-  }
-
-  async function review(id: string, status: "approved" | "rejected") {
-    setBusy(id);
-    setErrors((current) => ({ ...current, [id]: "" }));
-    try {
-      const res = await fetch(`/api/attendance/corrections/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, reviewNote: reviewNote[id] || null }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Failed to review");
-      toast("success", status === "approved" ? "Correction approved — attendance updated." : "Correction rejected.");
-      router.refresh();
-    } catch (e) {
-      setErrors((current) => ({ ...current, [id]: e instanceof Error && e.name !== "TypeError" ? e.message : "This decision couldn’t be confirmed. Refresh the queue before trying again." }));
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function reviewFace(id: string, decision: "accept" | "reject") {
@@ -139,7 +118,6 @@ export function RegularizationPanel({
       <EmptyState
         icon={<FileQuestion className="h-5 w-5" />}
         title={view === "punches" ? "No held punches" : reviewed ? "No reviewed corrections" : "No pending corrections"}
-        description={view === "punches" ? "Mobile punches awaiting verification will appear here." : reviewed ? "Approved and rejected correction requests will appear here." : "There are no employee correction requests awaiting your review."}
       />
     );
   }
@@ -148,12 +126,6 @@ export function RegularizationPanel({
     <div>
       {faceReviews.length > 0 && (
         <div className="border-b border-edge">
-          <div className="px-5 pt-4">
-            <p className="text-[13px] font-semibold">Held mobile punches</p>
-            <p className="text-[12px] text-muted-foreground">
-              {faceReviews.length} punch{faceReviews.length === 1 ? "" : "es"} need{faceReviews.length === 1 ? "s" : ""} verification
-            </p>
-          </div>
           <div className="divide-y divide-[color:var(--border)]">
             {faceReviews.map((r) => {
               const score =
@@ -226,7 +198,7 @@ export function RegularizationPanel({
                         size="sm"
                         variant="success"
                         loading={faceBusy === r.id}
-                        disabled={faceBusy !== null || busy !== null}
+                        disabled={faceBusy !== null}
                         onClick={() => reviewFace(r.id, "accept")}
                       >
                         <Check className="h-3.5 w-3.5" /> Accept
@@ -235,7 +207,7 @@ export function RegularizationPanel({
                         size="sm"
                         variant="danger"
                         loading={faceBusy === r.id}
-                        disabled={faceBusy !== null || busy !== null}
+                        disabled={faceBusy !== null}
                         onClick={() => reviewFace(r.id, "reject")}
                       >
                         <X className="h-3.5 w-3.5" /> Reject
@@ -277,33 +249,10 @@ export function RegularizationPanel({
                 </div>
               </div>
 
-              <p className="mt-2 rounded-lg bg-tint px-3 py-2 text-[12.5px] leading-relaxed text-muted-foreground">
-                “{c.reason}”
-              </p>
-              {c.reviewNote && (
-                <p className="mt-1.5 text-[12px] text-muted-foreground/70">Note: {c.reviewNote}</p>
-              )}
-
-              {errors[c.id] && <p role="alert" className="mt-2 text-sm text-destructive">{errors[c.id]}</p>}
-              {pending && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Input
-                    placeholder="Review note (optional)"
-                    aria-label={`Review note for ${c.employee.firstName} ${c.employee.lastName}`}
-                    maxLength={2000}
-                    value={reviewNote[c.id] ?? ""}
-                    onChange={(e) => setReviewNote((v) => ({ ...v, [c.id]: e.target.value }))}
-                    className="h-10 w-full sm:w-56"
-                  />
-                  <Button size="sm" variant="success" loading={busy === c.id} disabled={busy !== null} onClick={() => review(c.id, "approved")}>
-                    <Check className="h-3.5 w-3.5" /> Approve
-                  </Button>
-                  <Button size="sm" variant="danger" loading={busy === c.id} disabled={busy !== null} onClick={() => review(c.id, "rejected")}>
-                    <X className="h-3.5 w-3.5" /> Reject
-                  </Button>
-                </div>
-              )}
+              {!pending && <p className="mt-2 break-words text-sm text-muted-foreground">{c.reason}</p>}
+              {c.reviewNote && <p className="mt-1.5 break-words text-xs text-muted-foreground">Review note · {c.reviewNote}</p>}
             </div>
+            {pending && <Link href={c.reviewHref} prefetch={false} scroll={false} aria-label={`Review correction for ${c.employee.firstName} ${c.employee.lastName}`} className="inline-flex min-h-10 shrink-0 items-center self-start rounded-lg border border-edge px-3 text-sm font-medium text-primary hover:bg-tint">Review correction</Link>}
           </div>
         );
       })}

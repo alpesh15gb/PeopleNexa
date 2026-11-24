@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, BarChart3, CalendarClock, CalendarDays, FileSpreadsheet, Fingerprint, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/card";
 
 const attendanceReports = [
@@ -11,7 +13,7 @@ const attendanceReports = [
   { href: "/admin/reports/punch-details", title: "Punch logs", description: "Inspect the original records behind attendance.", icon: Fingerprint },
 ];
 
-export function ReportLibrary({ attendance, people, payroll }: { attendance: boolean; people: boolean; payroll: boolean }) {
+export function ReportLibrary({ attendance, people, payroll, query }: { attendance: boolean; people: boolean; payroll: boolean; query: string }) {
   const groups = [
     { title: "Attendance", reports: attendance ? attendanceReports : [] },
     { title: "People", reports: people ? [
@@ -22,15 +24,27 @@ export function ReportLibrary({ attendance, people, payroll }: { attendance: boo
       { href: "/admin/payroll/variance", title: "Payroll history", description: "Review payroll runs and compare period totals.", icon: FileSpreadsheet },
     ] : [] },
   ];
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleGroups = groups.map(({ title, reports }) => ({
+    title,
+    reports: reports.filter(report => terms.every(term => `${title} ${report.title} ${report.description}`.toLowerCase().includes(term))),
+  })).filter(group => group.reports.length > 0);
   return (
     <div className="space-y-8">
-      <PageHeader title="Report library" description="Open a report for attendance, people, or payroll." />
-      {groups.filter(({ reports }) => reports.length > 0).map(({ title, reports }) => (
+      <PageHeader title="Report library" />
+      {groups.some(group => group.reports.length > 0) && <form action="/admin/reports" className="flex flex-wrap items-end gap-2 rounded-xl border border-edge bg-card p-4">
+        <label className="w-full sm:max-w-sm"><span className="mb-1 block text-xs font-semibold">Find a report</span>
+          <Input key={query} name="q" type="search" defaultValue={query} maxLength={80} placeholder="Daily attendance, work hours, payroll…" />
+        </label>
+        <Button type="submit">Search</Button>
+        {query && <Link href="/admin/reports" className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-primary hover:underline">Clear</Link>}
+      </form>}
+      {visibleGroups.map(({ title, reports }) => (
         <section key={title} className="space-y-3">
           <h2 className="font-display text-lg font-semibold">{title}</h2>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="divide-y divide-edge rounded-xl border border-edge bg-card">
             {reports.map(({ href, title, description, icon: Icon }) => (
-              <Link key={href} href={href} className="group flex items-start gap-3 rounded-xl border border-edge bg-card p-4 outline-none hover:border-primary/40 hover:bg-tint focus-visible:ring-2 focus-visible:ring-ring">
+              <Link key={href} href={href} className="group flex items-start gap-3 rounded-lg px-4 py-3 outline-none hover:bg-tint focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 <span className="rounded-lg bg-primary/10 p-2 text-primary"><Icon aria-hidden="true" className="size-5" /></span>
                 <span className="min-w-0 flex-1"><span className="block font-medium">{title}</span><span className="mt-1 block text-sm text-muted-foreground">{description}</span></span>
                 <ArrowUpRight aria-hidden="true" className="size-4 text-muted-foreground group-hover:text-primary" />
@@ -39,7 +53,7 @@ export function ReportLibrary({ attendance, people, payroll }: { attendance: boo
           </div>
         </section>
       ))}
-      {groups.every(({ reports }) => reports.length === 0) && <p className="rounded-xl border border-edge bg-card p-5 text-sm text-muted-foreground">No reports are available for the modules enabled in this workspace.</p>}
+      {visibleGroups.length === 0 && <p className="rounded-xl border border-edge bg-card p-5 text-sm text-muted-foreground">{query ? "No available reports match your search." : "No reports are available for the modules enabled in this workspace."}</p>}
     </div>
   );
 }

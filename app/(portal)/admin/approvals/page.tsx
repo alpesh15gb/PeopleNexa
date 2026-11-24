@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, CalendarDays, Clock3, DoorOpen, Receipt, ShieldCheck } from "lucide-react";
-import { Card, CardContent, PageHeader } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/card";
 import { canOpenApprovals, pendingApprovalFilters } from "@/lib/approval-workspace";
 import { getTenantAccess } from "@/lib/modules-server";
 import { prisma } from "@/lib/prisma";
@@ -10,10 +10,11 @@ import { PriorityApprovals } from "./priority-approvals";
 
 export const dynamic = "force-dynamic";
 
-export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ view?: string | string[]; item?: string | string[] }> }) {
+export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ view?: string | string[]; item?: string | string[]; result?: string | string[] }> }) {
   const query = await searchParams;
   const showAll = query.view === "all";
   const selectedKey = typeof query.item === "string" ? query.item : undefined;
+  const result = typeof query.result === "string" ? query.result : undefined;
   const session = await requireActiveSession().catch(() => null);
   if (!session) redirect("/login");
   if (!canOpenApprovals(session.role)) redirect("/employee");
@@ -31,58 +32,35 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   ]);
 
   const queues = [
-    { title: "Leave requests", description: "Leave applications and cancellations", href: "/admin/leaves?review=approvals&status=pending", count: leave, icon: CalendarDays },
-    { title: "Attendance corrections", description: "Requests to correct punch times", href: "/admin/regularization?review=approvals", count: correction, icon: Clock3 },
-    { title: "Held punches", description: "Mobile clock attempts awaiting verification", href: "/admin/regularization?view=punches", count: heldPunch, icon: ShieldCheck },
-    { title: "Expense claims", description: "Reimbursement requests", href: "/admin/expenses?review=approvals", count: expense, icon: Receipt },
-    { title: "Exit requests", description: "Resignations awaiting a decision", href: "/admin/exits?review=approvals", count: exit, icon: DoorOpen },
+    { title: "Leave requests", href: "/admin/leaves?review=approvals&status=pending", count: leave, icon: CalendarDays },
+    { title: "Attendance corrections", href: "/admin/regularization?review=approvals", count: correction, icon: Clock3 },
+    { title: "Held punches", href: "/admin/regularization?view=punches", count: heldPunch, icon: ShieldCheck },
+    { title: "Expense claims", href: "/admin/expenses?review=approvals", count: expense, icon: Receipt },
+    { title: "Exit requests", href: "/admin/exits?review=approvals", count: exit, icon: DoorOpen },
   ].flatMap((queue) => queue.count === null ? [] : [{ ...queue, count: queue.count }]).sort((a, b) => Number(b.count > 0) - Number(a.count > 0));
   const total = queues.reduce((sum, queue) => sum + queue.count, 0);
-  const pendingQueues = queues.filter(({ count }) => count > 0);
-  const visible = showAll ? queues : pendingQueues;
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title="Approvals"
-        description={queues.length ? `${total.toLocaleString()} ${total === 1 ? "item" : "items"} awaiting your review.` : "Your workspace has no enabled review queues for your role or assignment."}
+        description={total > 0 ? `${total.toLocaleString()} ${total === 1 ? "item" : "items"} awaiting review` : undefined}
       />
-      {queues.length > 0 && (
-        <nav aria-label="Approval views" className="flex gap-2 border-b border-edge pb-3">
-          {[
-            { label: `Needs review (${total})`, href: "/admin/approvals", selected: !showAll },
-            { label: `All queues (${queues.length})`, href: "/admin/approvals?view=all", selected: showAll },
-          ].map(({ href, label, selected }) => <Link key={href} href={href} aria-current={selected ? "page" : undefined} className={`rounded-lg px-3 py-2 text-sm font-medium hover:bg-tint ${selected ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}>{label}</Link>)}
-        </nav>
-      )}
-      {(!showAll || selectedKey) && <PriorityApprovals session={session} modules={modules} filters={filters} selectedKey={selectedKey} backHref={showAll ? "/admin/approvals?view=all" : "/admin/approvals"} />}
-      {queues.length > 0 && !visible.length && <div className="rounded-xl border border-edge bg-card p-6"><h2 className="font-semibold">You’re caught up</h2><p className="mt-1 text-sm text-muted-foreground">New requests from your review queues will appear here.</p></div>}
-      {visible.length > 0 && (
-        <ul aria-label="Approval queues" className="grid gap-4 md:grid-cols-2">
-          {visible.map(({ title, description, href, count, icon: Icon }) => (
-            <li key={href}>
-              <Card className="h-full overflow-hidden">
-                <CardContent className="flex h-full flex-col gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                      <Icon aria-hidden="true" className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
-                      <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
-                    </div>
-                    <span className="shrink-0 text-2xl font-semibold tabular-nums text-foreground" aria-label={`${count} pending`}>{count.toLocaleString()}</span>
-                  </div>
-                  <Link href={href} className="mt-auto inline-flex min-h-10 w-fit items-center gap-2 rounded-md text-sm font-semibold text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">
-                    {`Review ${title.toLowerCase()}`}
-                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                  </Link>
-                </CardContent>
-              </Card>
-            </li>
-          ))}
+      {(total > 0 || selectedKey || result) && <PriorityApprovals session={session} modules={modules} filters={filters} selectedKey={selectedKey} result={result} backHref={showAll ? "/admin/approvals?view=all" : "/admin/approvals"} />}
+      {total === 0 && <p className="rounded-xl border border-edge bg-card p-5 text-sm text-muted-foreground">{queues.length ? "No requests awaiting your review." : "Your role has no enabled review queues."}</p>}
+      {queues.length > 0 && <section aria-labelledby="approval-queues">
+        <h2 id="approval-queues" className="mb-3 font-display text-lg font-semibold">Review queues</h2>
+        <ul className="grid gap-2 md:grid-cols-2">
+          {queues.map(({ title, href, count, icon: Icon }) => <li key={href}>
+            <Link href={href} className="flex min-h-12 items-center gap-3 rounded-lg border border-edge bg-card px-4 py-2 text-sm hover:bg-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+              <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 font-medium">{title}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">{count.toLocaleString()} pending</span>
+              <ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+            </Link>
+          </li>)}
         </ul>
-      )}
+      </section>}
     </div>
   );
 }

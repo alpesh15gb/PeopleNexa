@@ -953,6 +953,7 @@ function Editor({
   canIssueEssLogin = false,
   lookups = emptyLookups,
   mode = "sections",
+  payrollBankEdit = false,
 }: {
   id: string;
   initial: EmployeeForm;
@@ -962,13 +963,14 @@ function Editor({
   canIssueEssLogin?: boolean;
   lookups?: EmployeeMasterLookups;
   mode?: "sections" | "wizard" | "continuation";
+  payrollBankEdit?: boolean;
 }) {
   const toast = useToast();
   const router = useRouter();
   const [master, setMaster] = useState<Master | null>(null);
   const [core, setCore] = useState<Row>({ ...initial });
   const [loadedLookups, setLoadedLookups] = useState<EmployeeMasterLookups>(lookups);
-  const [active, setActive] = useState<EmployeeMasterWizardStep | (typeof sections)[number][0]>("official");
+  const [active, setActive] = useState<EmployeeMasterWizardStep | (typeof sections)[number][0]>(payrollBankEdit ? "banking" : "official");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1210,9 +1212,9 @@ function Editor({
       <Modal
         open
         onClose={onClose}
-        size="xl"
-        title={canSkip ? "Add master details" : "Employee master editor"}
-        description={canSkip ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in guided steps."}
+        size={payrollBankEdit ? "lg" : "xl"}
+        title={payrollBankEdit ? "Payroll bank details" : canSkip ? "Add master details" : "Employee master editor"}
+        description={payrollBankEdit ? "Enter the account number and IFSC. Mark the account used for payroll as primary." : canSkip ? "Add the employee details now, or skip and complete them later." : "Update core information and structured HR records in guided steps."}
       >
         {canIssueEssLogin && <div className="mb-4"><EssLoginAccess key={id} employeeId={id} /></div>}
         {loading ? (
@@ -1229,7 +1231,7 @@ function Editor({
             ref={formRef}
             onSubmit={submit}
             noValidate={wizard}
-            className="grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]"
+            className={payrollBankEdit ? "space-y-5" : "grid min-h-[62vh] gap-6 lg:grid-cols-[12rem_minmax(0,1fr)]"}
           >
             {wizard ? (
               <div className="space-y-3 border-b border-edge pb-4 lg:border-b-0 lg:border-r lg:pr-4">
@@ -1245,7 +1247,7 @@ function Editor({
                   <div className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${((stepIndex + 1) / employeeMasterWizardSteps.length) * 100}%` }} />
                 </div>
               </div>
-            ) : (
+            ) : !payrollBankEdit && (
               <nav
                 aria-label="Employee master sections"
                 className="flex gap-1 overflow-x-auto border-b border-edge pb-3 lg:block lg:space-y-1 lg:overflow-visible lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4"
@@ -2019,12 +2021,76 @@ function Collection({
   );
 }
 
+export function PayrollEmployeeFieldEditor({ employeeId, revision, field, salary, currency }: {
+  employeeId: string;
+  revision: string;
+  field: "salary" | "pan";
+  salary: number | null;
+  currency: string;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [value, setValue] = useState("");
+  const editingSalary = field === "salary";
+  const title = editingSalary ? "Set salary" : "Edit PAN";
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/employees/${encodeURIComponent(employeeId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expectedUpdatedAt: revision,
+          [field]: editingSalary ? Number(value) : value.trim().toUpperCase(),
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error ?? "Could not save the employee record.");
+      toast("success", editingSalary ? "Salary saved" : "PAN saved");
+      setOpen(false);
+      router.refresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not save. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <Button size="sm" onClick={() => { setValue(editingSalary && salary ? String(salary) : ""); setError(""); setOpen(true); }}>{title}</Button>
+    <Modal open={open} onClose={() => { if (!busy) setOpen(false); }} title={title} placement="drawer">
+      <form method="post" onSubmit={save} className="space-y-4">
+        {editingSalary
+          ? <Field label={`Monthly gross salary (${currency})`}>
+              <Input type="number" min="0.01" max="100000000" step="0.01" required value={value} onChange={event => setValue(event.target.value)} />
+            </Field>
+          : <Field label="PAN" hint="Enter the full PAN as shown on the employee’s document.">
+              <Input type="text" autoComplete="off" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" maxLength={10} required value={value} onChange={event => setValue(event.target.value.toUpperCase())} />
+            </Field>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button>
+          <Button type="submit" loading={busy}>{editingSalary ? "Save salary" : "Save PAN"}</Button>
+        </div>
+      </form>
+    </Modal>
+  </>;
+}
+
 export function EmployeeMasterQuickEdit({
   employee,
   canEditEmail,
   canEditMaster,
   canEditPan = true,
   canIssueEssLogin = false,
+  payrollBankEdit = false,
   ...lookups
 }: {
   employee: EmployeeForm & { id: string };
@@ -2032,6 +2098,7 @@ export function EmployeeMasterQuickEdit({
   canEditMaster: boolean;
   canEditPan?: boolean;
   canIssueEssLogin?: boolean;
+  payrollBankEdit?: boolean;
 } & EmployeeMasterLookups) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2080,7 +2147,7 @@ export function EmployeeMasterQuickEdit({
     return (
       <>
         <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          <Pencil className="h-3.5 w-3.5" /> Edit employee
+          <Pencil className="h-3.5 w-3.5" /> {payrollBankEdit ? "Edit payroll bank details" : "Edit employee"}
         </Button>
         {open && (
           <Editor
@@ -2090,7 +2157,8 @@ export function EmployeeMasterQuickEdit({
             canEditPan={canEditPan}
             canIssueEssLogin={canIssueEssLogin}
             lookups={lookups}
-            mode="wizard"
+            mode={payrollBankEdit ? "sections" : "wizard"}
+            payrollBankEdit={payrollBankEdit}
             onClose={() => setOpen(false)}
           />
         )}

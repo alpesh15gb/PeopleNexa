@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BadgePercent, Banknote, BookOpen, CalendarCheck2, CalendarClock, ClipboardCheck, Clock4, DoorOpen, FileText, LifeBuoy, Megaphone, Package, Receipt, ScanFace, Target, UserRound } from "lucide-react";
+import { ArrowRight, BadgePercent, Banknote, BookOpen, CalendarCheck2, CalendarClock, ClipboardCheck, Clock4, DoorOpen, FileText, LifeBuoy, Megaphone, Package, Receipt, ScanFace, Target, UserRound } from "lucide-react";
 import { EssInstall } from "@/components/ess-install";
 import { Card, CardContent, CardHeader, CardTitle, PageHeader } from "@/components/ui/card";
 import { dayRangeIST, isMonthKey } from "@/lib/dates";
@@ -129,7 +129,6 @@ export default async function EmployeeDashboardPage() {
     ...(selfReviews > 0 ? [{ href: "/employee/performance", label: `${selfReviews} self-${selfReviews === 1 ? "review" : "reviews"} to complete`, icon: Target }] : []),
   ];
   const shortcuts = [
-    ...(attendance ? [{ href: "/employee/attendance?view=today", label: "Today's attendance", icon: CalendarClock }] : []),
     ...(leave?.canApply ? [{ href: "/employee/leaves?action=apply", label: t(lang, "leaves.apply"), icon: CalendarCheck2 }] : []),
     ...(expenseRequests !== null ? [{ href: "/employee/expenses?action=new", label: "New expense claim", icon: Receipt }] : []),
     ...(modules.has("helpdesk") ? [{ href: "/employee/helpdesk?action=new", label: "Raise a support ticket", icon: LifeBuoy }] : []),
@@ -171,14 +170,27 @@ export default async function EmployeeDashboardPage() {
   ];
   const shiftsByDay = new Map(roster.map(({ date, shift }) => [istDateKey(date), shift]));
   const schedule = scheduleDays.map((date) => ({ date, shift: (date === attendance?.date ? attendance.shift : null) ?? shiftsByDay.get(date) ?? employee.shift }));
-  const hasPrimaryActions = Boolean(attendance || shortcuts.length || tasks.length);
+  const nextTask = tasks[0];
+  const otherTasks = tasks.slice(1);
+  const activeRequests = requests.filter(request => request.count > 0);
+  const hasPrimaryActions = Boolean(attendance || shortcuts.length);
 
   return (
     <div className="animate-fade-up space-y-6">
       <PageHeader
         title={t(lang, "dashboard.welcome", { name: employee.firstName })}
-        description={[employee.position, employee.department?.name, formatCalendarDate(today, region.locale)].filter(Boolean).join(" · ")}
+        description={[employee.position, employee.department?.name, attendance ? null : formatCalendarDate(today, region.locale)].filter(Boolean).join(" · ")}
       />
+      {nextTask && <section aria-label="Needs your attention" className="relative overflow-hidden rounded-xl bg-[#16392d] px-5 py-5 text-[#f2faf4] sm:px-7">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-7 -top-16 size-48 rounded-full border-[26px] border-[#96d78c]/15" />
+        <div className="relative flex flex-wrap items-center justify-between gap-3">
+          <div><p className="text-xs font-medium text-[#cce6d4]">Needs your attention</p><h2 className="mt-1 text-lg font-semibold">{nextTask.label}</h2></div>
+          <Link href={nextTask.href} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#d4efb9] px-4 text-sm font-semibold text-[#173924] hover:bg-[#e5f8d3]">
+            {nextTask.href === "/employee/onboarding" ? "Continue onboarding" : "Open self-review"} <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        </div>
+      </section>}
+      {otherTasks.length > 0 && <EmployeeHomeLinks actions={otherTasks} label="Other outstanding tasks" />}
       {(hasPrimaryActions || showSchedule) && (
         <div className={hasPrimaryActions && showSchedule ? "grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]" : "grid gap-4"}>
           {hasPrimaryActions && <div className="min-w-0 space-y-4">
@@ -199,16 +211,12 @@ export default async function EmployeeDashboardPage() {
               <h2 id="home-shortcuts" className="text-base font-semibold">Quick actions</h2>
               <EmployeeHomeLinks actions={shortcuts} label="Quick employee actions" />
             </section>}
-            {tasks.length > 0 && <section className="space-y-2" aria-labelledby="home-tasks">
-              <h2 id="home-tasks" className="text-base font-semibold">Needs your attention</h2>
-              <EmployeeHomeLinks actions={tasks} label="Outstanding employee tasks" />
-            </section>}
           </div>}
           {showSchedule && <EmployeeWorkSchedule days={schedule} lang={lang} locale={region.locale} branchName={modules.has("branches") ? employee.branch?.name : undefined} />}
         </div>
       )}
 
-      {(attendance || requests.length > 0) && (
+      {(attendance || activeRequests.length > 0) && (
         <div className={attendance && requests.length > 0 ? "grid gap-4 lg:grid-cols-2" : "grid gap-4"}>
           {attendance && (
             <Card aria-labelledby="employee-attendance-summary">
@@ -230,13 +238,9 @@ export default async function EmployeeDashboardPage() {
               </CardContent>
             </Card>
           )}
-          <EmployeeHomeRequests requests={requests} />
+          <EmployeeHomeRequests requests={activeRequests} />
         </div>
       )}
-      <section className="space-y-2" aria-labelledby="home-services">
-        <h2 id="home-services" className="text-base font-semibold">My services</h2>
-        <EmployeeServiceDirectory groups={services} />
-      </section>
       {(upcomingHolidays || modules.has("payroll") || announcements) && <div className="grid gap-3 lg:grid-cols-3">
         {upcomingHolidays && <Card><CardHeader><CardTitle>Upcoming holidays</CardTitle></CardHeader><CardContent className="pt-3">
           {upcomingHolidays.length > 0 ? <ul className="divide-y divide-edge">{upcomingHolidays.map((holiday) => <li key={`${holiday.id}:${holiday.day}`} className="py-2 text-sm"><p className="font-medium">{holiday.name}{holiday.isHalfDay && " · Half day"}</p><time dateTime={holiday.day} className="text-xs text-muted-foreground">{formatCalendarDate(holiday.day, region.locale)}</time></li>)}</ul> : <p className="text-sm text-muted-foreground">No holidays are scheduled in the next 30 days.</p>}
@@ -254,6 +258,10 @@ export default async function EmployeeDashboardPage() {
         </CardContent></Card>}
       </div>}
       {leave && <EmployeeLeaveActivity recent={leave.recent} next={leave.next} today={today} locale={region.locale} lang={lang} />}
+      <details className="rounded-xl border border-edge bg-card p-4">
+        <summary className="cursor-pointer py-1 font-semibold"><h2 className="inline">My services</h2></summary>
+        <div className="pt-3"><EmployeeServiceDirectory groups={services} /></div>
+      </details>
       <EssInstall />
     </div>
   );

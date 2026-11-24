@@ -93,14 +93,19 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
       {isAdmin && access.modules.has("platform") && <Link href={service === "overview" ? "/admin/device-health" : `/admin/device-health?service=${service}`} className={actionLink}><MonitorCheck aria-hidden="true" className="h-4 w-4" /> Device health</Link>}
       {access.modules.has("reports") && <Link href="/admin/reports/punch-details" className={actionLink}><BarChart3 aria-hidden="true" className="h-4 w-4" /> Punch details</Link>}
     </>} />
-    <nav aria-label="Device services" className="flex flex-wrap gap-x-5 border-b border-edge text-sm">
+    {service !== "overview" && <nav aria-label="Device services" className="flex flex-wrap gap-x-5 border-b border-edge text-sm">
       {nav.map((item) => <Link key={item.key} href={deviceHref(item.key)} aria-current={service === item.key ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${service === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{item.label}</Link>)}
-    </nav>
-    {isAdmin && service === "ebio" && <section aria-label="eBioserver ingestion" className="rounded-xl border border-edge bg-card p-4">
-      <h2 className="font-semibold">Punch import</h2>
-      <p className="mt-1 text-sm">{pullLabel ? `Last recorded pull · ${pullLabel} (${region.timeZone})` : "No pull has been recorded."}</p>
-      {profile?.lastError && <p className="mt-1 text-sm text-destructive">An import error is recorded. Review the connection details in settings.</p>}
-      <Link href="/admin/settings#device-connection" className="mt-2 inline-block text-sm font-medium text-primary hover:underline">Open connection settings</Link>
+    </nav>}
+    {service === "ebio" && <section aria-label="eBioserver ingestion" className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-edge bg-card p-4">
+      <div>
+        <h2 className="font-semibold">eBioserver connection</h2>
+        {isAdmin ? <>
+          <p className="mt-1 text-sm">{connectionConfigured ? "Connection settings saved" : "Connection setup needed"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{pullLabel ? `Last recorded pull · ${pullLabel} (${region.timeZone})` : "No pull has been recorded."}</p>
+          {profile?.lastError && <p className="mt-1 text-sm text-destructive">An import error is recorded. Open settings for details.</p>}
+        </> : <p className="mt-1 text-sm text-muted-foreground">A workspace administrator manages this connection. This list covers your assigned location.</p>}
+      </div>
+      {isAdmin && <Link href="/admin/settings#device-connection" className={actionLink}>{connectionConfigured ? "Connection settings" : "Set up connection"}<ArrowRight aria-hidden="true" className="size-4" /></Link>}
     </section>}
     {service !== "overview" && <form action="/admin/devices" className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="service" value={service} />
@@ -125,7 +130,7 @@ export default async function AdminDevicesPage({ searchParams }: { searchParams:
       <p role="status" className="text-sm text-muted-foreground">No devices match your search in this service.</p>}
     {service === "direct" && <DevicesPanel rows={directRows.filter(matches)} branches={branches} requireBranch={Boolean(ownLocationId)} />}
     {service === "ebio" && <>
-      <Card><CardContent className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-display font-semibold">eBioserver connection</h2><p className="mt-1 text-sm text-muted-foreground">{isAdmin ? connectionConfigured ? "Connection settings saved. Discovered devices appear after a successful sync." : "Configure the workspace connection to discover and sync devices." : "A workspace administrator manages the connection. The list shows devices assigned to your location."}</p></div>{isAdmin && <Link href="/admin/settings#device-connection" className={actionLink}>Connection settings <ArrowRight aria-hidden="true" className="h-4 w-4" /></Link>}</CardContent></Card>
+
       {ebioRows.some(matches) ? <EbioDeviceList rows={ebioRows.filter(matches)} /> : <Card><EmptyState title={term ? "No eBioserver devices match your search" : "No eBioserver devices in this scope"} description={isAdmin ? "Check connection settings and sync devices to populate this list." : "Devices appear when they are discovered and assigned to your location."} /></Card>}
     </>}
     {service === "realtime" && isAdmin && <RealtimePanel rows={realtimeRows.filter(matches)} webhookPath={tenant ? `/api/realtime/webhook/${tenant.code}/record` : null} />}

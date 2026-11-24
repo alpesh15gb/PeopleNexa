@@ -5,7 +5,7 @@ import { getLang } from "@/lib/i18n-server";
 import { PageHeader, Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/stat";
-import { FileText, AlertTriangle, BookOpen, Package } from "lucide-react";
+import { ArrowLeft, FileText, AlertTriangle, BookOpen, Package } from "lucide-react";
 import { expiryStatus } from "@/lib/document-expiry";
 import { formatDate } from "@/lib/dates";
 import { documentFilters, documentSummary } from "@/lib/document-records";
@@ -28,8 +28,17 @@ export default async function EmployeeDocumentsPage({ searchParams }: { searchPa
     ...(modules.has("assets") ? [{ id: "assets", label: "Assigned assets" }] : []),
   ];
   const view = tabs.find((tab) => tab.id === params.view)?.id ?? "files";
-  const nav = <nav aria-label="Document center" className="flex flex-wrap gap-2 border-b border-edge pb-2">{tabs.map((tab) => <Link key={tab.id} href={tab.id === "files" ? path : `${path}?view=${tab.id}`} aria-current={view === tab.id ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-medium ${view === tab.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{tab.label}</Link>)}</nav>;
-  const heading = <PageHeader title="Document center" description="Open employee files shared by HR and access available workplace records." />;
+  const fromOnboarding = params.from === "onboarding" && modules.has("onboarding");
+  const context: Record<string, string> = fromOnboarding ? { from: "onboarding" } : {};
+  const nav = <nav aria-label="Document center" className="flex flex-wrap gap-2 border-b border-edge pb-2">{tabs.map((tab) => {
+    const query = new URLSearchParams(context);
+    if (tab.id !== "files") query.set("view", tab.id);
+    return <Link key={tab.id} href={query.size ? `${path}?${query}` : path} aria-current={view === tab.id ? "page" : undefined} className={`inline-flex min-h-10 items-center rounded-lg px-3 text-sm font-medium ${view === tab.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-tint"}`}>{tab.label}</Link>;
+  })}</nav>;
+  const heading = <>
+    {fromOnboarding && <Link href="/employee/onboarding" className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary hover:underline"><ArrowLeft className="size-4" aria-hidden="true" /> Back to my checklist</Link>}
+    <PageHeader title="Document center" description="Open employee files shared by HR and access available workplace records." />
+  </>;
   if (view === "policies") {
     const policies = await prisma.policy.findMany({ where: { tenantId: session.tenantId, active: true }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 6, select: { id: true, title: true, category: true, version: true } });
     return <div className="space-y-5">{heading}{nav}
@@ -78,7 +87,7 @@ export default async function EmployeeDocumentsPage({ searchParams }: { searchPa
           {alerts.join(" · ")}
         </div>
       )}
-      {(summary.total > 0 || filtered) && <DocumentListFilters path={path} query={filters.query} status={filters.status} />}
+      {(summary.total > 0 || filtered) && <DocumentListFilters path={path} query={filters.query} status={filters.status} context={context} />}
 
       <Card>
         <CardContent className="p-0">

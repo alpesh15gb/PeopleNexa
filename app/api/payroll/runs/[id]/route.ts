@@ -1,4 +1,5 @@
-import { payrollSourceReview } from "@/lib/payroll-source-review";
+import { payrollSourceIssues } from "@/lib/payroll-source-review";
+import { unreconciledPayAmounts } from "@/lib/payroll-issue";
 import { finalizeManualAttendanceCredits } from "@/lib/payroll-attendance-credit";
 import { ManualPayrollError } from "@/lib/payroll-manual-source";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,7 +12,7 @@ import {
   payrollRunTransitionData,
   type PayrollRunStatus,
 } from "@/lib/payroll-runs";
-import { payrollRunPreflight } from "@/lib/payroll-preflight";
+import { payrollRunPreflight, payrollRunPreflightDetails } from "@/lib/payroll-preflight";
 import { payrollOperationLocationId } from "@/lib/location-scope";
 import { canApprovePayrollRun } from "@/lib/payroll-work-queue";
 import { isTransactionWriteConflict } from "@/lib/transaction-conflict";
@@ -95,16 +96,18 @@ export async function PATCH(
             { status: 409 },
           );
         if (["reviewed", "approved", "finalized"].includes(target)) {
-          const errors = await payrollSourceReview(tx, session.tenantId, run.month, run.payslips);
-          if (errors.length) return NextResponse.json({ error: errors.slice(0, 10).join(" "), preflight: errors }, { status: 409 });
+          const preflightDetails = await payrollSourceIssues(tx, session.tenantId, run.month, run.payslips);
+          const errors = preflightDetails.map(({ message }) => message);
+          if (errors.length) return NextResponse.json({ error: errors.slice(0, 10).join(" "), preflight: errors, preflightDetails }, { status: 409 });
         }
-        if (["approved", "finalized", "paid"].includes(target) && run.payslips.some((p) =>
-          ![p.grossEarnings, p.deductions, p.netSalary].every(Number.isFinite) ||
-          p.netSalary < 0 || p.deductions < 0 || p.deductions > p.grossEarnings ||
-          Math.abs(p.grossEarnings - p.deductions - p.netSalary) > 0.005))
+        const invalidAmounts = run.payslips.filter(unreconciledPayAmounts);
+        if (["approved", "finalized", "paid"].includes(target) && invalidAmounts.length)
           return NextResponse.json(
             {
               error: "Resolve invalid or unreconciled payroll amounts before approval, finalization or payment.",
+              preflightDetails: invalidAmounts.map(({ employeeId }) => ({
+                code: "pay-totals", employeeId, message: "Gross pay, deductions, and net pay need to reconcile before approval.",
+              })),
             },
             { status: 409 },
           );
@@ -112,7 +115,7 @@ export async function PATCH(
           const errors = payrollRunPreflight(run.payslips);
           if (errors.length)
             return NextResponse.json(
-              { error: errors.join(" "), preflight: errors },
+              { error: errors.join(" "), preflight: errors, preflightDetails: payrollRunPreflightDetails(run.payslips) },
               { status: 409 },
             );
         }

@@ -46,11 +46,11 @@ export function PayrollNavigation({
   return (
     <nav
       aria-label="Payroll workspace"
-      className="flex flex-wrap gap-1 rounded-xl border border-edge bg-card p-1.5"
+      className="flex flex-wrap gap-1 border-b border-edge pb-1"
     >
-      <label className="flex w-full items-center gap-3 px-2 text-sm sm:hidden">
-        Payroll page
-        <select className="min-w-0 flex-1 rounded-lg border border-edge bg-background px-2 py-2" value={active} onChange={event => {
+      <label className="flex min-h-11 w-full items-center gap-3 pb-2 text-sm font-medium sm:hidden">
+        Payroll section
+        <select className="min-h-11 min-w-0 flex-1 rounded-lg border border-input bg-card px-3 text-foreground" value={active} onChange={event => {
           const selected = links.find(link => link.key === event.target.value);
           if (selected) router.push(payrollScopeHref(selected.href, { locationId, period }));
         }}>

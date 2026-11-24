@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -81,7 +80,8 @@ export function LeavesPanel({
   range,
   requestFilter,
   page,
-  submittedRequest,
+  highlightedRequest,
+  justSubmitted,
   canApply,
   openOnLoad,
 }: {
@@ -94,7 +94,8 @@ export function LeavesPanel({
   range: "upcoming" | "past" | "all";
   requestFilter: string;
   page: number;
-  submittedRequest: Pick<Req, "id" | "fromDate" | "toDate" | "status" | "days" | "leaveType"> | null;
+  highlightedRequest: Pick<Req, "id" | "fromDate" | "toDate" | "status" | "days" | "leaveType" | "reviewNote" | "cancellationRequestedBy"> | null;
+  justSubmitted: boolean;
   canApply: boolean;
   openOnLoad: boolean;
 }) {
@@ -112,13 +113,15 @@ export function LeavesPanel({
   const [cancelError, setCancelError] = useState("");
   const [open, setOpen] = useState(openOnLoad && canApply);
   const [loading, setLoading] = useState(false);
-  const [selectedTypeId, setSelectedTypeId] = useState(balance[0]?.id ?? "");
+  const defaultTypeId = (balance.find((item) => item.remaining === null || item.remaining > 0) ?? balance[0])?.id ?? "";
+  const [selectedTypeId, setSelectedTypeId] = useState(defaultTypeId);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [halfDay, setHalfDay] = useState(false);
   const leaveTypeField = useRef<HTMLSelectElement>(null);
   const nextLeave = view === "summary" ? requests : [];
   const visibleRequests = requests;
+  const highlightedVisible = !!highlightedRequest && visibleRequests.some((request) => request.id === highlightedRequest.id);
   function leaveHref(targetView: "summary" | "requests", nextRange = range, status = requestFilter, pageNumber = 1, submittedId?: string) {
     const params = new URLSearchParams();
     if (targetView === "requests") params.set("view", "requests");
@@ -146,7 +149,7 @@ export function LeavesPanel({
   const dayNumber = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
 
   function openApplication(typeId?: string) {
-    if (typeId) setSelectedTypeId(typeId);
+    setSelectedTypeId(typeId ?? defaultTypeId);
     setFormError("");
     setOpen(true);
   }
@@ -211,11 +214,12 @@ export function LeavesPanel({
       setFromDate("");
       setToDate("");
       setHalfDay(false);
-      const submittedHref = view === "requests"
+      const historyHref = view === "requests"
         ? leaveHref("requests", range, requestFilter, page, data.request.id)
         : leaveHref("requests", "all", "all", 1, data.request.id);
-      if (openOnLoad) router.replace(submittedHref, { scroll: false });
-      else router.push(submittedHref, { scroll: false });
+      const submittedHref = `${historyHref}#leave-request-${encodeURIComponent(data.request.id)}`;
+      if (openOnLoad) router.replace(submittedHref);
+      else router.push(submittedHref);
       router.refresh();
     } catch {
       setFormError("Could not send your request. Try again.");
@@ -259,10 +263,10 @@ export function LeavesPanel({
           <Link href={leaveHref("summary", range, requestFilter, page)} aria-current={view === "summary" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "summary" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Summary</Link>
           <Link href={leaveHref("requests", range, requestFilter, page)} aria-current={view === "requests" ? "page" : undefined} className={`border-b-2 px-1 py-3 font-medium ${view === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>Requests</Link>
         </nav>
-        <Button className="mb-2" onClick={() => openApplication()} disabled={!canApply}>
+        {canApply && <Button className="mb-2" onClick={() => openApplication()}>
           <CalendarPlus aria-hidden="true" className="h-4 w-4" />{" "}
           {t(lang, "leaves.apply")}
-        </Button>
+        </Button>}
       </div>
       {!canApply && balance.length > 0 && <p className="text-sm text-muted-foreground">Leave requests are available to staff accounts.</p>}
       {view === "summary" && <>
@@ -356,43 +360,45 @@ export function LeavesPanel({
       )}
       </section>
 
-      <Card>
+      {nextLeave.length > 0 && <Card>
         <CardHeader className="flex-wrap items-center">
           <CardTitle>Current and upcoming leave</CardTitle>
           <Link href="/employee/leaves?view=requests&range=upcoming" className="text-sm font-medium text-primary underline-offset-4 hover:underline">View requests</Link>
         </CardHeader>
         <CardContent className="pt-3">
-          {nextLeave.length ? <ul className="divide-y divide-edge">
+          <ul className="divide-y divide-edge">
             {nextLeave.map((request) => <li key={request.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-              <div><p className="font-medium">{request.leaveType.name}</p><p className="text-sm text-muted-foreground">{dateLabel(request.fromDate)} – {dateLabel(request.toDate)}</p></div>
-              <StatusPill status={request.status} lang={lang} />
+              <div><Link href={`/employee/leaves?view=requests&range=upcoming&request=${encodeURIComponent(request.id)}#leave-request-${request.id}`} className="font-medium text-primary hover:underline">{request.leaveType.name}</Link><p className="text-sm text-muted-foreground">{dateLabel(request.fromDate)}{istDateKey(request.toDate) !== istDateKey(request.fromDate) && ` – ${dateLabel(request.toDate)}`}</p></div>
+              {request.cancellationRequestedBy ? <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Cancellation awaiting review</span> : <StatusPill status={request.status} lang={lang} />}
             </li>)}
-          </ul> : <p className="py-3 text-sm text-muted-foreground">You have no current or upcoming approved or pending leave.</p>}
+          </ul>
         </CardContent>
-      </Card>
+      </Card>}
       </>}
 
-      {submittedRequest && <section aria-labelledby="submitted-leave-title" className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
+      {highlightedRequest && !highlightedVisible && <section id={`leave-request-${highlightedRequest.id}`} aria-labelledby="selected-leave-title" className="flex scroll-mt-24 flex-wrap items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 p-4">
         <div className="min-w-0 flex-1">
-          <h2 id="submitted-leave-title" className="text-sm font-semibold">Submitted request</h2>
+          <h2 id="selected-leave-title" className="text-sm font-semibold">{justSubmitted ? "Submitted request" : "Selected request"}</h2>
           <p className="mt-1 break-words text-sm text-muted-foreground">
-            {submittedRequest.leaveType.name} · {dateLabel(submittedRequest.fromDate)}{istDateKey(submittedRequest.toDate) !== istDateKey(submittedRequest.fromDate) && ` – ${dateLabel(submittedRequest.toDate)}`}
+            {highlightedRequest.leaveType.name} · {dateLabel(highlightedRequest.fromDate)}{istDateKey(highlightedRequest.toDate) !== istDateKey(highlightedRequest.fromDate) && ` – ${dateLabel(highlightedRequest.toDate)}`}
           </p>
         </div>
-        <StatusPill status={submittedRequest.status} lang={lang} />
+        {highlightedRequest.cancellationRequestedBy ? <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Cancellation awaiting review</span> : <StatusPill status={highlightedRequest.status} lang={lang} />}
         <Link href={baseHref} replace scroll={false} className="rounded-lg px-3 py-2 text-sm text-primary hover:bg-tint">Dismiss</Link>
+        {highlightedRequest.reviewNote && <p className="w-full break-words text-xs text-muted-foreground">Review note · {highlightedRequest.reviewNote}</p>}
       </section>}
       {view === "requests" && <Card>
-        <CardHeader className="flex-wrap items-end">
-          <div>
-            <CardTitle>{t(lang, "leaves.myRequests")}</CardTitle>
-            <CardDescription>
-              Follow the status of your own applications.
-            </CardDescription>
-          </div>
+        <CardHeader className="flex-wrap items-center gap-3">
+          <nav aria-label="Leave request dates" className="flex flex-wrap gap-2">
+            {([ ["upcoming", "Upcoming"], ["past", "Past"], ["all", "All dates"] ] as const).map(([key, label]) => (
+              <Link key={key} href={leaveHref("requests", key)} aria-current={range === key ? "page" : undefined} className={`rounded-lg border border-edge px-3 py-2 text-sm ${range === key ? "bg-primary/10 font-semibold text-primary" : "hover:bg-tint"}`}>
+                {label}
+              </Link>
+            ))}
+          </nav>
           <Select
             aria-label="Filter my leave requests"
-            className="w-auto min-w-36"
+            className="w-full max-w-full sm:w-56"
             value={requestFilter}
             onChange={(event) => router.push(leaveHref("requests", range, event.target.value), { scroll: false })}
           >
@@ -406,13 +412,6 @@ export function LeavesPanel({
           </Select>
         </CardHeader>
         <CardContent className="pt-4">
-          <nav aria-label="Leave request dates" className="mb-3 flex flex-wrap gap-2">
-            {([ ["upcoming", "Current and upcoming"], ["past", "Past"], ["all", "All dates"] ] as const).map(([key, label]) => (
-              <Link key={key} href={leaveHref("requests", key)} aria-current={range === key ? "page" : undefined} className={`rounded-lg border border-edge px-3 py-2 text-sm ${range === key ? "bg-primary/10 font-semibold text-primary" : "hover:bg-tint"}`}>
-                {label}
-              </Link>
-            ))}
-          </nav>
           {visibleRequests.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">
               {range !== "all" || requestFilter !== "all" ? "No requests match the selected dates and status." : t(lang, "common.noLeaveRequests")}
@@ -422,7 +421,8 @@ export function LeavesPanel({
               {visibleRequests.map((r) => (
                 <div
                   key={r.id}
-                  className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center"
+                  id={`leave-request-${r.id}`}
+                  className={`grid scroll-mt-24 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center ${highlightedRequest?.id === r.id ? "rounded-lg bg-primary/5 px-3 ring-1 ring-primary/25" : ""}`}
                 >
                   <span
                     className="mt-1.5 h-2.5 w-2.5 rounded-full sm:mt-0"
@@ -497,9 +497,7 @@ export function LeavesPanel({
             >
               {balance.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.name} (
-                  {b.remaining === null ? "unlimited" : `${b.remaining} currently available`}
-                  )
+                  {b.name}
                 </option>
               ))}
             </Select>

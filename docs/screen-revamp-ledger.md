@@ -103,7 +103,18 @@ The ledger lists all 71 App Router pages. Each row names the changed workflow or
 - Local payroll verification covered salary-revision approval and reversal against open runs, recalculation using the revised salary, and the required explanation when returning a tax declaration.
 - Daily and monthly report verification covered overnight shifts, the New York daylight-saving transition, scoped manager exports and an Excel download.
 
-## Current revamp verification
+## November 24 workflow redesign
+
+The portal prioritizes frequent role-scoped destinations and groups other tools by purpose. The phone layout uses one navigation dock. HR and employee home surface actionable work earlier, and the public homepage offers a direct choice between creating a workspace and signing in.
+
+* **Onboarding and people records.** HR can assign tasks, manage sign-in and follow saved progress for the selected employee. First password setup leads employees to an assigned checklist when tasks are pending. Employees can open the relevant documents and return to the same checklist. Formal verification and signing use the existing HR process.
+* **Attendance, leave and approvals.** The dashboard and review queues use a shared drawer. A decision retains the originating branch, date or search filters. Employees return to their day after requesting a punch correction and can find a newly filed leave request in history.
+* **Payroll and tax.** Operators explicitly open a payroll location and month. The four-stage workflow presents the next available action after showing the stage’s information. The payslip summary offers a direct PDF download, and tax declarations show review status and HR feedback in place.
+* **Other workflows.** Reports are searchable. Workspace connections have separate views. Device connection status and its settings link appear together. Team expenses use one status strip with filtered counts. Employee support opens in a drawer, and the admin queue opens on tickets requiring work. Platform plan settings focus on plan pricing and feature limits.
+
+Typecheck, lint, the production build and all 63 regression scripts passed. Browser checks against the local standalone build rendered all 71 routes at desktop and phone widths and captured 142 route screenshots. Additional tests completed onboarding with real synthetic credentials, a dashboard approval, all four payroll stages with simulated payment, a tax declaration, and a support ticket through closure. Attendance and leave fixtures covered submission, persistence, payroll locks and role restrictions. The walkthroughs used synthetic local data.
+
+## November 21 revamp verification
 
 The November 21 run checked every listed route at 1440 px and 390 px on the local standalone production build. Detailed module changes, task-level browser checks and the limits of that coverage are in the [phase checkpoints](hrms-revamp-checkpoints.md). The [backend contracts](required-backend-additions.md) describe pending capabilities.
 
